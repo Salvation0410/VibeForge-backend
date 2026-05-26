@@ -10,7 +10,6 @@ import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.exception.ErrorCode;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -152,7 +151,7 @@ public class AiCodeGeneratorFacade {
         StringBuilder codeBuilder = new StringBuilder();
         return codeFlux.doOnNext(chunk ->{
             //实时收集代码片段
-           codeBuilder.append(chunk);
+            codeBuilder.append(chunk);
         }).doOnComplete(()->{
             try {
                 // 保存代码
