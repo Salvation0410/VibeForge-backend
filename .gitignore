@@ -1,6 +1,8 @@
 HELP.md
 application-local.yml
 target/
+tmp/
+test/
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/

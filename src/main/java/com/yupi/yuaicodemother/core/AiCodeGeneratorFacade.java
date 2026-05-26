@@ -3,6 +3,8 @@ package com.yupi.yuaicodemother.core;
 import com.yupi.yuaicodemother.ai.AiCodeGeneratorService;
 import com.yupi.yuaicodemother.ai.model.HtmlCodeResult;
 import com.yupi.yuaicodemother.ai.model.MultiFileCodeResult;
+import com.yupi.yuaicodemother.core.paser.CodeParserExecutor;
+import com.yupi.yuaicodemother.core.saver.CodeFileSaverExecutor;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.exception.ErrorCode;
@@ -38,34 +40,75 @@ public class AiCodeGeneratorFacade {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "生成类型为空");
         }
         return switch (codeGenTypeEnum) {
-            case HTML -> generateAndSaveHtmlCode(userMessage);
-            case MULTI_FILE -> generateAndSaveMultiFileCode(userMessage);
+            case HTML -> {
+                HtmlCodeResult result = aiCodeGeneratorService.generateHtmlCode(userMessage);
+                // yield作用：跳转到指定代码块，返回指定结果
+                yield CodeFileSaverExecutor.executeSaver(result, CodeGenTypeEnum.HTML);
+            }
+            case MULTI_FILE -> {
+                MultiFileCodeResult result = aiCodeGeneratorService.generateMultiFileCode(userMessage);
+                yield CodeFileSaverExecutor.executeSaver(result, CodeGenTypeEnum.MULTI_FILE);
+            }
             default -> {
                 String errorMessage = "不支持的生成类型：" + codeGenTypeEnum.getValue();
                 throw new BusinessException(ErrorCode.SYSTEM_ERROR, errorMessage);
             }
         };
     }
+
     /**
-     * 统一入口：根据类型生成并保存代码 （sse流式输出）
+     * 统一入口：根据类型生成并保存代码（流式）
      *
      * @param userMessage     用户提示词
      * @param codeGenTypeEnum 生成类型
-     * @return 保存的目录
      */
     public Flux<String> generateAndSaveCodeStream(String userMessage, CodeGenTypeEnum codeGenTypeEnum) {
         if (codeGenTypeEnum == null) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "生成类型为空");
         }
         return switch (codeGenTypeEnum) {
-            case HTML -> generateAndSaveHtmlCodeStream(userMessage);
-            case MULTI_FILE -> generateAndSaveMultiFileCodeStream(userMessage);
+            case HTML -> {
+                Flux<String> codeStream = aiCodeGeneratorService.generateHtmlCodeStream(userMessage);
+                yield processCodeStream(codeStream, CodeGenTypeEnum.HTML);
+            }
+            case MULTI_FILE -> {
+                Flux<String> codeStream = aiCodeGeneratorService.generateMultiFileCodeStream(userMessage);
+                yield processCodeStream(codeStream, CodeGenTypeEnum.MULTI_FILE);
+            }
             default -> {
                 String errorMessage = "不支持的生成类型：" + codeGenTypeEnum.getValue();
                 throw new BusinessException(ErrorCode.SYSTEM_ERROR, errorMessage);
             }
         };
     }
+
+
+    /**
+     * 通用流式代码处理方法
+     *
+     * @param codeStream  代码流
+     * @param codeGenType 代码生成类型
+     * @return 流式响应
+     */
+    private Flux<String> processCodeStream(Flux<String> codeStream, CodeGenTypeEnum codeGenType) {
+        //字符串拼接器 用于当流式返回所有的代码之后 再保存代码
+        StringBuilder codeBuilder = new StringBuilder();
+        return codeStream.doOnNext(chunk ->{
+            //实时收集代码片段
+            codeBuilder.append(chunk);
+        }).doOnComplete(()->{
+            try {
+                // 流式输出完毕 拼接代码
+                String completeCode = codeBuilder.toString();
+                //解析代码 获取解析结果
+                Object parseResult = CodeParserExecutor.executeParser(completeCode, codeGenType);
+                //保存代码 也是使用解析器
+                File savedDir = CodeFileSaverExecutor.executeSaver(parseResult, codeGenType);
+                log.info("保存成功，路径为：" + savedDir.getAbsolutePath());
+            } catch (Exception e) {}
+        });
+    }
+
 
     /**
      * 生成 HTML 模式的代码并保存（流式）
