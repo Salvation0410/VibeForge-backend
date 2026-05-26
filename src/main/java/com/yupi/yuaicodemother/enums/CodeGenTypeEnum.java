@@ -9,7 +9,6 @@ import lombok.Getter;
  * @description 生成类型枚举类
  * @date 2026/5/26
  */
-
 @Getter
 public enum CodeGenTypeEnum {
 
@@ -27,7 +26,7 @@ public enum CodeGenTypeEnum {
     /**
      * 根据 value 获取枚举
      *
-     * @param value 枚举值的value
+     * @param value 枚举值的 value
      * @return 枚举值
      */
     public static CodeGenTypeEnum getEnumByValue(String value) {
