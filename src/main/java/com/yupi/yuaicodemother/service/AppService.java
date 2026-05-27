@@ -50,4 +50,12 @@ public interface AppService extends IService<App> {
      * @return 流式生成的代码
      */
     public Flux<String> chatToGenCode(Long appId, String message, SysUser loginUser);
+
+    /**
+     *
+     * @param appId 应用id
+     * @param loginUser 登录用户
+     * @return 可返回的部署地址
+     */
+    public String deployApp(Long appId, SysUser loginUser);
 }
