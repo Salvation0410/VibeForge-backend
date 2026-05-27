@@ -1,14 +1,21 @@
 package com.yupi.yuaicodemother.controller;
 
+import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.util.StrUtil;
 import com.mybatisflex.core.paginate.Page;
 import com.yupi.yuaicodemother.annotation.AuthCheck;
 import com.yupi.yuaicodemother.common.BaseResponse;
 import com.yupi.yuaicodemother.common.ResultUtils;
 import com.yupi.yuaicodemother.constant.UserConstant;
-import com.yupi.yuaicodemother.model.dto.AppAddRequest;
-import com.yupi.yuaicodemother.model.dto.AppAdminUpdateRequest;
-import com.yupi.yuaicodemother.model.dto.AppQueryRequest;
-import com.yupi.yuaicodemother.model.dto.AppUserUpdateRequest;
+import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
+import com.yupi.yuaicodemother.exception.ErrorCode;
+import com.yupi.yuaicodemother.exception.ThrowUtils;
+import com.yupi.yuaicodemother.model.dto.app.AppAddRequest;
+import com.yupi.yuaicodemother.model.dto.app.AppAdminUpdateRequest;
+import com.yupi.yuaicodemother.model.dto.app.AppQueryRequest;
+import com.yupi.yuaicodemother.model.dto.app.AppUserUpdateRequest;
+import com.yupi.yuaicodemother.model.entity.App;
+import com.yupi.yuaicodemother.model.entity.SysUser;
 import com.yupi.yuaicodemother.model.vo.AppVO;
 import com.yupi.yuaicodemother.model.vo.SysUserVO;
 import com.yupi.yuaicodemother.service.AppService;
@@ -35,20 +42,36 @@ public class AppController {
     private AppService appService;
 
     @Autowired
-    private SysUserService sysUserService;
+    private SysUserService userService;
 
     /**
      * 用户创建应用。
      *
-     * @param request 创建参数
-     * @param httpServletRequest 请求对象
+     * @param appAddRequest 创建参数
+     * @param request 请求对象
      * @return 新应用 id
      */
     @AuthCheck
     @PostMapping
-    public BaseResponse<Long> create(@RequestBody AppAddRequest request, HttpServletRequest httpServletRequest) {
-        // 创建时自动绑定当前登录用户，前端无需额外传 userId。
-        return ResultUtils.success(appService.createApp(request, getLoginUserId(httpServletRequest)));
+    public BaseResponse<Long> create(@RequestBody AppAddRequest appAddRequest, HttpServletRequest request) {
+        ThrowUtils.throwIf(appAddRequest == null, ErrorCode.PARAMS_ERROR);
+        // 参数校验
+        String initPrompt = appAddRequest.getInitPrompt();
+        ThrowUtils.throwIf(StrUtil.isBlank(initPrompt), ErrorCode.PARAMS_ERROR, "初始化 prompt 不能为空");
+        // 获取当前登录用户
+        SysUserVO loginUser = userService.getLoginUserVo(request);
+        // 构造入库对象
+        App app = new App();
+        BeanUtil.copyProperties(appAddRequest, app);
+        app.setUserId(loginUser.getId());
+        // 应用名称暂时为 initPrompt 前 12 位
+        app.setAppName(initPrompt.substring(0, Math.min(initPrompt.length(), 12)));
+        // 暂时设置为多文件生成
+        app.setCodeGenType(CodeGenTypeEnum.MULTI_FILE.getValue());
+        // 插入数据库
+        boolean result = appService.save(app);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        return ResultUtils.success(app.getId());
     }
 
     /**
@@ -176,7 +199,7 @@ public class AppController {
      */
     private Long getLoginUserId(HttpServletRequest httpServletRequest) {
         // 统一复用用户服务的 session 解析逻辑，避免控制器分散处理登录态。
-        SysUserVO loginUserVO = sysUserService.getLoginUserVo(httpServletRequest);
+        SysUserVO loginUserVO = userService.getLoginUserVo(httpServletRequest);
         return loginUserVO.getId();
     }
 }

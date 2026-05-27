@@ -7,7 +7,7 @@ import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
- * 应用视图对象
+ * 应用视图对象 脱敏对象
  */
 @Data
 public class AppVO implements Serializable {

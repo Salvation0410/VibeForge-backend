@@ -1,4 +1,4 @@
-package com.yupi.yuaicodemother.model.dto;
+package com.yupi.yuaicodemother.model.dto.app;
 
 import lombok.Data;
 
@@ -18,6 +18,9 @@ public class AppAddRequest implements Serializable {
 
     private String cover;
 
+    /*
+    * 应用初始化的prompt
+    * */
     private String initPrompt;
 
     private String codeGenType;

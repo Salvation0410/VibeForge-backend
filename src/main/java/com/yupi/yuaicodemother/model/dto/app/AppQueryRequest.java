@@ -1,4 +1,4 @@
-package com.yupi.yuaicodemother.model.dto;
+package com.yupi.yuaicodemother.model.dto.app;
 
 import com.yupi.yuaicodemother.common.PageRequest;
 import lombok.Data;

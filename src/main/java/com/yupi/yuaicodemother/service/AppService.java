@@ -2,10 +2,10 @@ package com.yupi.yuaicodemother.service;
 
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.service.IService;
-import com.yupi.yuaicodemother.model.dto.AppAddRequest;
-import com.yupi.yuaicodemother.model.dto.AppAdminUpdateRequest;
-import com.yupi.yuaicodemother.model.dto.AppQueryRequest;
-import com.yupi.yuaicodemother.model.dto.AppUserUpdateRequest;
+import com.yupi.yuaicodemother.model.dto.app.AppAddRequest;
+import com.yupi.yuaicodemother.model.dto.app.AppAdminUpdateRequest;
+import com.yupi.yuaicodemother.model.dto.app.AppQueryRequest;
+import com.yupi.yuaicodemother.model.dto.app.AppUserUpdateRequest;
 import com.yupi.yuaicodemother.model.entity.App;
 import com.yupi.yuaicodemother.model.vo.AppVO;
 
