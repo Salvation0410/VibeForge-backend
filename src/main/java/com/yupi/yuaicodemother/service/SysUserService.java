@@ -1,11 +1,17 @@
 package com.yupi.yuaicodemother.service;
 
+import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.core.service.IService;
 import com.yupi.yuaicodemother.model.dto.SysUserLoginRequest;
 import com.yupi.yuaicodemother.model.dto.SysUserRegisterRequest;
+import com.yupi.yuaicodemother.model.dto.app.AppQueryRequest;
+import com.yupi.yuaicodemother.model.entity.App;
 import com.yupi.yuaicodemother.model.entity.SysUser;
+import com.yupi.yuaicodemother.model.vo.AppVO;
 import com.yupi.yuaicodemother.model.vo.SysUserVO;
 import jakarta.servlet.http.HttpServletRequest;
+
+import java.util.List;
 
 /**
  * 用户服务层。
@@ -30,6 +36,14 @@ public interface SysUserService extends IService<SysUser> {
     SysUserVO login(SysUserLoginRequest request, HttpServletRequest httpServletRequest);
 
     /**
+     * 获取当前已登录用户的完整信息。
+     *
+     * @param httpServletRequest 请求对象，用于读取 session
+     * @return 已登录用户完整信息
+     */
+    SysUser getLoginUser(HttpServletRequest httpServletRequest);
+
+    /**
      * 获取当前已登录用户的脱敏信息。
      *
      * @param httpServletRequest 请求对象，用于读取 session
@@ -44,4 +58,7 @@ public interface SysUserService extends IService<SysUser> {
      * @return 脱敏后的用户信息
      */
     SysUserVO getSysUserVO(SysUser sysUser);
+
+
+
 }

@@ -92,6 +92,17 @@ public class SysUserController {
     }
 
     /**
+     * 获取当前登录用户完整信息。
+     *
+     * @param httpServletRequest 请求对象
+     * @return 当前登录用户完整信息
+     */
+    @GetMapping("/login/detail")
+    public BaseResponse<SysUser> getLoginUserDetail(HttpServletRequest httpServletRequest) {
+        return ResultUtils.success(sysUserService.getLoginUser(httpServletRequest));
+    }
+
+    /**
      * 用户退出登录。
      *
      * @param httpServletRequest 请求对象

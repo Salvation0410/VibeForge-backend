@@ -12,6 +12,7 @@ import com.yupi.yuaicodemother.exception.ErrorCode;
 import com.yupi.yuaicodemother.mapper.SysUserMapper;
 import com.yupi.yuaicodemother.model.dto.SysUserLoginRequest;
 import com.yupi.yuaicodemother.model.dto.SysUserRegisterRequest;
+import com.yupi.yuaicodemother.model.dto.app.AppQueryRequest;
 import com.yupi.yuaicodemother.model.entity.SysUser;
 import com.yupi.yuaicodemother.model.vo.SysUserVO;
 import com.yupi.yuaicodemother.service.SysUserService;
@@ -130,16 +131,27 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
     }
 
     @Override
-    public SysUserVO getLoginUserVo(HttpServletRequest httpServletRequest) {
+    public SysUser getLoginUser(HttpServletRequest httpServletRequest) {
         // 从 session 中获取登录态
         Object loginObj = httpServletRequest.getSession().getAttribute(SysUserConstant.USER_LOGIN_STATE);
         if (loginObj == null) {
             throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR, "未登录");
         }
-        if (!(loginObj instanceof SysUser)) {
+        if (!(loginObj instanceof SysUser loginUser)) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "登录态异常");
         }
-        return getSysUserVO((SysUser) loginObj);
+
+        Long userId = loginUser.getId();
+        SysUser currentUser = this.getById(userId);
+        if (currentUser == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "当前用户不存在");
+        }
+        return currentUser;
+    }
+
+    @Override
+    public SysUserVO getLoginUserVo(HttpServletRequest httpServletRequest) {
+        return getSysUserVO(getLoginUser(httpServletRequest));
     }
 
     /**
@@ -155,4 +167,6 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         BeanUtil.copyProperties(sysUser, vo);
         return vo;
     }
+
+
 }
