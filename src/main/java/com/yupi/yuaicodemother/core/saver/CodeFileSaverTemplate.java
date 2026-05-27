@@ -25,10 +25,10 @@ public abstract class CodeFileSaverTemplate<T> {
     * 模板方法：保存代码的标准流程
     *
     * */
-    public final File saveCode(T result){
+    public final File saveCode(T result, Long appId){
         validateInput(result);
         //构建唯一目录
-        String baseDirPath = buildUniqueDir();
+        String baseDirPath = buildUniqueDir(appId);
         //保存文件(具体实现给子类)
         saveFiles(result, baseDirPath);
         //返回文件
@@ -66,11 +66,15 @@ public abstract class CodeFileSaverTemplate<T> {
     /**
      * 构建唯一目录路径：tmp/code_output/bizType_雪花ID
      *
+     * @param appId 应用ID
      * @return 唯一目录路径
      */
-    private String buildUniqueDir() {
+    private String buildUniqueDir(Long appId) {
+        if (appId == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "应用 ID 不能为空");
+        }
         String codeType = getCodeType().getValue();
-        String uniqueDirName = StrUtil.format("{}_{}", codeType, IdUtil.getSnowflakeNextIdStr());
+        String uniqueDirName = StrUtil.format("{}_{}", codeType, appId);
         String dirPath = FILE_SAVE_ROOT_DIR + File.separator + uniqueDirName;
         FileUtil.mkdir(dirPath);
         return dirPath;

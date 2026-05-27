@@ -8,7 +8,9 @@ import com.yupi.yuaicodemother.model.dto.app.AppAdminUpdateRequest;
 import com.yupi.yuaicodemother.model.dto.app.AppQueryRequest;
 import com.yupi.yuaicodemother.model.dto.app.AppUserUpdateRequest;
 import com.yupi.yuaicodemother.model.entity.App;
+import com.yupi.yuaicodemother.model.entity.SysUser;
 import com.yupi.yuaicodemother.model.vo.AppVO;
+import reactor.core.publisher.Flux;
 
 import java.util.List;
 
@@ -39,4 +41,13 @@ public interface AppService extends IService<App> {
      * @return
      */
     public List<AppVO> getAppVOList(List<App> appList);
+
+    /**
+     *
+     * @param appId 应用id
+     * @param message 用户消息
+     * @param loginUser 登录用户
+     * @return 流式生成的代码
+     */
+    public Flux<String> chatToGenCode(Long appId, String message, SysUser loginUser);
 }
