@@ -49,6 +49,11 @@ public class SysUserRegisterRequest implements Serializable {
     private String userProfile;
 
     /**
+     * 澶村儚鍦板潃
+     */
+    private String avatarUrl;
+
+    /**
      * 角色身份，可选，默认普通用户
      */
     private String userRole;
