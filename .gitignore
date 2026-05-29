@@ -3,6 +3,7 @@ application-local.yml
 target/
 tmp/
 test/
+doc/
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/

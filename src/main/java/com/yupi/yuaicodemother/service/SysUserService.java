@@ -1,9 +1,9 @@
 package com.yupi.yuaicodemother.service;
 
 import com.mybatisflex.core.service.IService;
-import com.yupi.yuaicodemother.model.dto.SysUserLoginRequest;
-import com.yupi.yuaicodemother.model.dto.SysUserRegisterRequest;
-import com.yupi.yuaicodemother.model.dto.SysUserUpdateRequest;
+import com.yupi.yuaicodemother.model.dto.user.SysUserLoginRequest;
+import com.yupi.yuaicodemother.model.dto.user.SysUserRegisterRequest;
+import com.yupi.yuaicodemother.model.dto.user.SysUserUpdateRequest;
 import com.yupi.yuaicodemother.model.entity.SysUser;
 import com.yupi.yuaicodemother.model.vo.SysUserVO;
 import jakarta.servlet.http.HttpServletRequest;

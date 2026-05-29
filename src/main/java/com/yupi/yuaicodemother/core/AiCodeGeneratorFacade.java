@@ -118,6 +118,8 @@ public class AiCodeGeneratorFacade {
      * @param userMessage 用户提示词
      * @return 保存的目录
      */
+
+    @Deprecated
     private Flux<String> generateAndSaveHtmlCodeStream(String userMessage) {
         //调用AI 返回流式生成对象
         Flux<String> result = aiCodeGeneratorService.generateHtmlCodeStream(userMessage);
@@ -147,6 +149,7 @@ public class AiCodeGeneratorFacade {
      * @param userMessage 用户提示词
      * @return 保存的目录
      */
+    @Deprecated
     private Flux<String> generateAndSaveMultiFileCodeStream(String userMessage) {
         //调AI 返回流式对象
         Flux<String> codeFlux = aiCodeGeneratorService.generateMultiFileCodeStream(userMessage);
@@ -177,6 +180,7 @@ public class AiCodeGeneratorFacade {
      * @param userMessage 用户提示词
      * @return 保存的目录
      */
+    @Deprecated
     private File generateAndSaveHtmlCode(String userMessage) {
         HtmlCodeResult result = aiCodeGeneratorService.generateHtmlCode(userMessage);
         return CodeFileSaver.saveHtmlCodeResult(result);
@@ -188,6 +192,7 @@ public class AiCodeGeneratorFacade {
      * @param userMessage 用户提示词
      * @return 保存的目录
      */
+    @Deprecated
     private File generateAndSaveMultiFileCode(String userMessage) {
         MultiFileCodeResult result = aiCodeGeneratorService.generateMultiFileCode(userMessage);
         return CodeFileSaver.saveMultiFileCodeResult(result);

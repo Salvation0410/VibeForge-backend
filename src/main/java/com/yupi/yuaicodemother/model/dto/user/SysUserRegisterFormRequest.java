@@ -1,4 +1,4 @@
-package com.yupi.yuaicodemother.model.dto;
+package com.yupi.yuaicodemother.model.dto.user;
 
 import lombok.Data;
 
@@ -6,10 +6,10 @@ import java.io.Serial;
 import java.io.Serializable;
 
 /**
- * 用户更新请求
+ * 用户注册表单请求
  */
 @Data
-public class SysUserUpdateRequest implements Serializable {
+public class SysUserRegisterFormRequest implements Serializable {
 
     @Serial
     private static final long serialVersionUID = 1L;
@@ -18,6 +18,10 @@ public class SysUserUpdateRequest implements Serializable {
 
     private String email;
 
+    private String password;
+
+    private String confirmPassword;
+
     private String nickname;
 
     private String avatarUrl;
@@ -25,6 +29,4 @@ public class SysUserUpdateRequest implements Serializable {
     private String userProfile;
 
     private String userRole;
-
-    private Integer status;
 }
