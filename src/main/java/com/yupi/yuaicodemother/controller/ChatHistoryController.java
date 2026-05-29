@@ -9,22 +9,24 @@ import com.yupi.yuaicodemother.constant.UserConstant;
 import com.yupi.yuaicodemother.exception.ErrorCode;
 import com.yupi.yuaicodemother.exception.ThrowUtils;
 import com.yupi.yuaicodemother.model.dto.chathistory.ChatHistoryQueryRequest;
+import com.yupi.yuaicodemother.model.entity.ChatHistory;
 import com.yupi.yuaicodemother.model.entity.SysUser;
+import com.yupi.yuaicodemother.service.ChatHistoryExportService;
+import com.yupi.yuaicodemother.service.ChatHistoryService;
 import com.yupi.yuaicodemother.service.SysUserService;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.beans.factory.annotation.Autowired;
-import com.yupi.yuaicodemother.model.entity.ChatHistory;
-import com.yupi.yuaicodemother.service.ChatHistoryService;
 
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
-import java.util.List;
 
 /**
- * 对话历史 控制层。
- *
- * @author song
+ * 对话历史控制层
  */
 @RestController
 @RequestMapping("/chatHistory")
@@ -33,35 +35,25 @@ public class ChatHistoryController {
 
     private final ChatHistoryService chatHistoryService;
 
+    private final ChatHistoryExportService chatHistoryExportService;
+
     private final SysUserService userService;
 
     /**
      * 分页查询某个应用的对话历史（游标查询）
-     *
-     * @param appId          应用ID
-     * @param pageSize       页面大小
-     * @param lastCreateTime 最后一条记录的创建时间
-     * @param request        请求
-     * @return 对话历史分页
      */
     @GetMapping("/app/{appId}")
     public BaseResponse<Page<ChatHistory>> listAppChatHistory(@PathVariable Long appId,
                                                               @RequestParam(defaultValue = "10") int pageSize,
                                                               @RequestParam(required = false) LocalDateTime lastCreateTime,
                                                               HttpServletRequest request) {
-        //获取当前登录用户
         SysUser loginUser = userService.getLoginUser(request);
-
         Page<ChatHistory> result = chatHistoryService.listAppChatHistoryByPage(appId, pageSize, lastCreateTime, loginUser);
         return ResultUtils.success(result);
     }
 
-
     /**
      * 管理员分页查询所有对话历史
-     *
-     * @param chatHistoryQueryRequest 查询请求
-     * @return 对话历史分页
      */
     @PostMapping("/admin/list/page/vo")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
@@ -69,11 +61,28 @@ public class ChatHistoryController {
         ThrowUtils.throwIf(chatHistoryQueryRequest == null, ErrorCode.PARAMS_ERROR);
         long pageNum = chatHistoryQueryRequest.getPageNum();
         long pageSize = chatHistoryQueryRequest.getPageSize();
-        // 查询数据
         QueryWrapper queryWrapper = chatHistoryService.getQueryWrapper(chatHistoryQueryRequest);
         Page<ChatHistory> result = chatHistoryService.page(Page.of(pageNum, pageSize), queryWrapper);
         return ResultUtils.success(result);
     }
 
+    /**
+     * 导出指定应用的 Markdown 对话记录
+     */
+    @GetMapping("/app/{appId}/export/markdown")
+    public void exportAppChatHistoryAsMarkdown(@PathVariable Long appId,
+                                               HttpServletRequest request,
+                                               HttpServletResponse response) throws IOException {
+        SysUser loginUser = userService.getLoginUser(request);
+        String markdown = chatHistoryExportService.exportAppChatHistoryAsMarkdown(appId, loginUser);
+        String fileName = chatHistoryExportService.buildMarkdownFileName(appId);
+        String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8).replace("+", "%20");
 
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setContentType("text/markdown; charset=UTF-8");
+        response.setHeader(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + encodedFileName);
+        response.getWriter().write(markdown);
+        response.getWriter().flush();
+    }
 }
+
