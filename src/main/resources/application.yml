@@ -1,4 +1,5 @@
 spring:
+  # mysql
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/yu_ai_code_mother
@@ -6,12 +7,28 @@ spring:
     password: 123456
   application:
     name: yu-ai-code-mother-backend
+  # redis
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password:
+      ttl: 3600
+    # session 配置
+    session:
+      store-type: redis
+      # session 30 天过期
+      timeout: 2592000
   profiles:
     active: local
 server:
   port: 8123
   servlet:
     context-path: /api
+      # cookie 30 天过期
+    session:
+      cookie:
+        max-age: 2592000
 # springdoc-openapi
 springdoc:
   group-configs:

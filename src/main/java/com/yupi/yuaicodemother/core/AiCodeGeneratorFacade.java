@@ -1,6 +1,7 @@
 package com.yupi.yuaicodemother.core;
 
 import com.yupi.yuaicodemother.ai.AiCodeGeneratorService;
+import com.yupi.yuaicodemother.ai.AiCodeGeneratorServiceFactory;
 import com.yupi.yuaicodemother.ai.model.HtmlCodeResult;
 import com.yupi.yuaicodemother.ai.model.MultiFileCodeResult;
 import com.yupi.yuaicodemother.core.paser.CodeParserExecutor;
@@ -25,7 +26,7 @@ import java.io.File;
 @Slf4j
 public class AiCodeGeneratorFacade {
     @Resource
-    private AiCodeGeneratorService aiCodeGeneratorService;
+    private AiCodeGeneratorServiceFactory aiCodeGeneratorServiceFactory;
 
     /**
      * 统一入口：根据类型生成并保存代码
@@ -34,10 +35,14 @@ public class AiCodeGeneratorFacade {
      * @param codeGenTypeEnum 生成类型
      * @return 保存的目录
      */
+
+    @Deprecated
     public File generateAndSaveCode(String userMessage, CodeGenTypeEnum codeGenTypeEnum,Long appId) {
         if (codeGenTypeEnum == null) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "生成类型为空");
         }
+        //根据AppId获取相应的App AI Service服务实例
+        AiCodeGeneratorService aiCodeGeneratorService = aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(appId);
         return switch (codeGenTypeEnum) {
             case HTML -> {
                 HtmlCodeResult result = aiCodeGeneratorService.generateHtmlCode(userMessage);
@@ -67,6 +72,8 @@ public class AiCodeGeneratorFacade {
         if (codeGenTypeEnum == null) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "生成类型为空");
         }
+        //根据AppId获取相应的App AI Service服务实例
+        AiCodeGeneratorService aiCodeGeneratorService = aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(appId);
         return switch (codeGenTypeEnum) {
             case HTML -> {
                 Flux<String> codeStream = aiCodeGeneratorService.generateHtmlCodeStream(userMessage);
@@ -121,6 +128,9 @@ public class AiCodeGeneratorFacade {
 
     @Deprecated
     private Flux<String> generateAndSaveHtmlCodeStream(String userMessage) {
+
+        //根据AppId获取相应的App AI Service服务实例
+        AiCodeGeneratorService aiCodeGeneratorService = aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(0);
         //调用AI 返回流式生成对象
         Flux<String> result = aiCodeGeneratorService.generateHtmlCodeStream(userMessage);
         //字符串拼接器 用于当流式返回所有的代码之后 再保存代码
@@ -150,7 +160,10 @@ public class AiCodeGeneratorFacade {
      * @return 保存的目录
      */
     @Deprecated
-    private Flux<String> generateAndSaveMultiFileCodeStream(String userMessage) {
+    private Flux<String> generateAndSaveMultiFileCodeStream(String userMessage)
+    {
+        //根据AppId获取相应的App AI Service服务实例
+        AiCodeGeneratorService aiCodeGeneratorService = aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(0);
         //调AI 返回流式对象
         Flux<String> codeFlux = aiCodeGeneratorService.generateMultiFileCodeStream(userMessage);
         // 拼接字符串
@@ -182,6 +195,8 @@ public class AiCodeGeneratorFacade {
      */
     @Deprecated
     private File generateAndSaveHtmlCode(String userMessage) {
+        //根据AppId获取相应的App AI Service服务实例
+        AiCodeGeneratorService aiCodeGeneratorService = aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(0);
         HtmlCodeResult result = aiCodeGeneratorService.generateHtmlCode(userMessage);
         return CodeFileSaver.saveHtmlCodeResult(result);
     }
@@ -194,6 +209,8 @@ public class AiCodeGeneratorFacade {
      */
     @Deprecated
     private File generateAndSaveMultiFileCode(String userMessage) {
+        //根据AppId获取相应的App AI Service服务实例
+        AiCodeGeneratorService aiCodeGeneratorService = aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(0);
         MultiFileCodeResult result = aiCodeGeneratorService.generateMultiFileCode(userMessage);
         return CodeFileSaver.saveMultiFileCodeResult(result);
     }
