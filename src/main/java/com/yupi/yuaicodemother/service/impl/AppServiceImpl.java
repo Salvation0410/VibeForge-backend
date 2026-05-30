@@ -5,21 +5,18 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
-import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.yupi.yuaicodemother.constant.AppConstant;
 import com.yupi.yuaicodemother.core.AiCodeGeneratorFacade;
+import com.yupi.yuaicodemother.core.handler.StreamHandlerExecutor;
 import com.yupi.yuaicodemother.enums.ChatHistoryMessageTypeEnum;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.exception.ErrorCode;
 import com.yupi.yuaicodemother.exception.ThrowUtils;
 import com.yupi.yuaicodemother.mapper.AppMapper;
-import com.yupi.yuaicodemother.model.dto.app.AppAddRequest;
-import com.yupi.yuaicodemother.model.dto.app.AppAdminUpdateRequest;
 import com.yupi.yuaicodemother.model.dto.app.AppQueryRequest;
-import com.yupi.yuaicodemother.model.dto.app.AppUserUpdateRequest;
 import com.yupi.yuaicodemother.model.entity.App;
 import com.yupi.yuaicodemother.model.entity.SysUser;
 import com.yupi.yuaicodemother.model.vo.AppVO;
@@ -27,6 +24,7 @@ import com.yupi.yuaicodemother.model.vo.SysUserVO;
 import com.yupi.yuaicodemother.service.AppService;
 import com.yupi.yuaicodemother.service.ChatHistoryService;
 import com.yupi.yuaicodemother.service.SysUserService;
+import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -55,83 +53,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     private final AiCodeGeneratorFacade aiCodeGeneratorFacade;
 
     private final ChatHistoryService chatHistoryService;
-    /**
-     * 将应用实体转换为视图对象。
-     *
-     * @param app 应用实体
-     * @return 应用视图对象
-     */
-    @Override
-    public AppVO getAppVO(App app) {
-        if (app == null) {
-            return null;
-        }
-        AppVO appVO = new AppVO();
-        BeanUtil.copyProperties(app, appVO);
-        // 关联查询用户信息
-        Long userId = app.getUserId();
-        if (userId != null) {
-            SysUser user = userService.getById(userId);
-            SysUserVO userVO = userService.getSysUserVO(user);
-            appVO.setUser(userVO);
-        }
-        return appVO;
-    }
-    /**
-     * 构造查询条件
-     * @param appQueryRequest
-     * @return
-     */
-    @Override
-    public QueryWrapper getQueryWrapper(AppQueryRequest appQueryRequest) {
-        if (appQueryRequest == null) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "请求参数为空");
-        }
-        Long id = appQueryRequest.getId();
-        String appName = appQueryRequest.getAppName();
-        String cover = appQueryRequest.getCover();
-        String initPrompt = appQueryRequest.getInitPrompt();
-        String codeGenType = appQueryRequest.getCodeGenType();
-        String deployKey = appQueryRequest.getDeployKey();
-        Integer priority = appQueryRequest.getPriority();
-        Long userId = appQueryRequest.getUserId();
-        String sortField = appQueryRequest.getSortField();
-        String sortOrder = appQueryRequest.getSortOrder();
-        return QueryWrapper.create()
-                .eq("id", id)
-                .like("appName", appName)
-                .like("cover", cover)
-                .like("initPrompt", initPrompt)
-                .eq("codeGenType", codeGenType)
-                .eq("deployKey", deployKey)
-                .eq("priority", priority)
-                .eq("userId", userId)
-                .orderBy(sortField, "ascend".equals(sortOrder));
-    }
+    @Resource
+    private StreamHandlerExecutor streamHandlerExecutor;
 
-    /**
-     * 批量获取应用视图对象列表。
-     * @param appList 应用列表
-     * @return
-     */
-    @Override
-    public List<AppVO> getAppVOList(List<App> appList) {
-        if (CollUtil.isEmpty(appList)) {
-            return new ArrayList<>();
-        }
-        // 批量获取用户信息，避免 N+1 查询问题
-        Set<Long> userIds = appList.stream()
-                .map(App::getUserId)
-                .collect(Collectors.toSet());
-        Map<Long, SysUserVO> userVOMap = userService.listByIds(userIds).stream()
-                .collect(Collectors.toMap(SysUser::getId, userService::getSysUserVO));
-        return appList.stream().map(app -> {
-            AppVO appVO = getAppVO(app);
-            SysUserVO userVO = userVOMap.get(app.getUserId());
-            appVO.setUser(userVO);
-            return appVO;
-        }).collect(Collectors.toList());
-    }
 
     /**
      *
@@ -160,29 +84,10 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         }
         //5.通过校验后，添加用户信息到历史对话
         chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
-
         // 6. 调用 AI 生成代码
-        Flux<String> contentFlux = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId);
-        // 7. 收集Ai响应结果并在完成后添加到历史对话中
-        StringBuilder aiResponseBuilder = new StringBuilder();
-        return contentFlux
-                .map(chunk -> {
-                    // 收集AI响应内容
-                    aiResponseBuilder.append(chunk);
-                    return chunk;
-                })
-                .doOnComplete(() -> {
-                    // 流式响应完成后，添加AI消息到对话历史
-                    String aiResponse = aiResponseBuilder.toString();
-                    if (StrUtil.isNotBlank(aiResponse)) {
-                        chatHistoryService.addChatMessage(appId, aiResponse, ChatHistoryMessageTypeEnum.AI.getValue(), loginUser.getId());
-                    }
-                })
-                .doOnError(error -> {
-                    // 如果AI回复失败，也要记录错误消息
-                    String errorMessage = "AI回复失败: " + error.getMessage();
-                    chatHistoryService.addChatMessage(appId, errorMessage, ChatHistoryMessageTypeEnum.AI.getValue(), loginUser.getId());
-                });
+        Flux<String> contentStream = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId);
+        // 7. 收集Ai响应结果并在完成后添加到历史对话中 //version 2 使用执行器调用方法
+        return streamHandlerExecutor.doExecute(contentStream, chatHistoryService, appId, loginUser, codeGenTypeEnum);
     }
 
 
@@ -265,6 +170,84 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         }
         // 删除应用
         return super.removeById(id);
+    }
+
+    /**
+     * 将应用实体转换为视图对象。
+     *
+     * @param app 应用实体
+     * @return 应用视图对象
+     */
+    @Override
+    public AppVO getAppVO(App app) {
+        if (app == null) {
+            return null;
+        }
+        AppVO appVO = new AppVO();
+        BeanUtil.copyProperties(app, appVO);
+        // 关联查询用户信息
+        Long userId = app.getUserId();
+        if (userId != null) {
+            SysUser user = userService.getById(userId);
+            SysUserVO userVO = userService.getSysUserVO(user);
+            appVO.setUser(userVO);
+        }
+        return appVO;
+    }
+    /**
+     * 构造查询条件
+     * @param appQueryRequest
+     * @return
+     */
+    @Override
+    public QueryWrapper getQueryWrapper(AppQueryRequest appQueryRequest) {
+        if (appQueryRequest == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "请求参数为空");
+        }
+        Long id = appQueryRequest.getId();
+        String appName = appQueryRequest.getAppName();
+        String cover = appQueryRequest.getCover();
+        String initPrompt = appQueryRequest.getInitPrompt();
+        String codeGenType = appQueryRequest.getCodeGenType();
+        String deployKey = appQueryRequest.getDeployKey();
+        Integer priority = appQueryRequest.getPriority();
+        Long userId = appQueryRequest.getUserId();
+        String sortField = appQueryRequest.getSortField();
+        String sortOrder = appQueryRequest.getSortOrder();
+        return QueryWrapper.create()
+                .eq("id", id)
+                .like("appName", appName)
+                .like("cover", cover)
+                .like("initPrompt", initPrompt)
+                .eq("codeGenType", codeGenType)
+                .eq("deployKey", deployKey)
+                .eq("priority", priority)
+                .eq("userId", userId)
+                .orderBy(sortField, "ascend".equals(sortOrder));
+    }
+
+    /**
+     * 批量获取应用视图对象列表。
+     * @param appList 应用列表
+     * @return
+     */
+    @Override
+    public List<AppVO> getAppVOList(List<App> appList) {
+        if (CollUtil.isEmpty(appList)) {
+            return new ArrayList<>();
+        }
+        // 批量获取用户信息，避免 N+1 查询问题
+        Set<Long> userIds = appList.stream()
+                .map(App::getUserId)
+                .collect(Collectors.toSet());
+        Map<Long, SysUserVO> userVOMap = userService.listByIds(userIds).stream()
+                .collect(Collectors.toMap(SysUser::getId, userService::getSysUserVO));
+        return appList.stream().map(app -> {
+            AppVO appVO = getAppVO(app);
+            SysUserVO userVO = userVOMap.get(app.getUserId());
+            appVO.setUser(userVO);
+            return appVO;
+        }).collect(Collectors.toList());
     }
 
 
