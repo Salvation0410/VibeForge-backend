@@ -65,4 +65,12 @@ public interface AppService extends IService<App> {
      * @param appUrl
      */
     public void generateAppScreenshotAsync(Long appId, String appUrl);
+
+    /**
+     * 创建应用
+     * @param appAddRequest
+     * @param loginUser
+     * @return
+     */
+    Long createApp(AppAddRequest appAddRequest, SysUser loginUser);
 }
