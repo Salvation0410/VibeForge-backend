@@ -24,6 +24,7 @@ import com.yupi.yuaicodemother.model.vo.AppVO;
 import com.yupi.yuaicodemother.model.vo.SysUserVO;
 import com.yupi.yuaicodemother.service.AppService;
 import com.yupi.yuaicodemother.service.ChatHistoryService;
+import com.yupi.yuaicodemother.service.ScreenshotService;
 import com.yupi.yuaicodemother.service.SysUserService;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
@@ -56,6 +57,16 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     @Resource
     private VueProjectBuilder vueProjectBuilder;
 
+    @Resource
+    private ScreenshotService screenshotService;
+
+    /**
+     * 用户聊天生成应用
+     * @param appId 应用id
+     * @param message 用户消息
+     * @param loginUser 登录用户
+     * @return
+     */
     @Override
     public Flux<String> chatToGenCode(Long appId, String message, SysUser loginUser) {
         ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用 ID 不能为空");
@@ -79,7 +90,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
                 ChatHistoryMessageTypeEnum.USER.getValue(),
                 loginUser.getId()
         );
-
+        //返回的流式对象
         Flux<String> contentStream = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId);
         return streamHandlerExecutor.doExecute(contentStream, chatHistoryService, appId, loginUser, codeGenTypeEnum);
     }
@@ -121,10 +132,40 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         updateApp.setDeployedTime(LocalDateTime.now());
         boolean updateResult = this.updateById(updateApp);
         ThrowUtils.throwIf(!updateResult, ErrorCode.OPERATION_ERROR, "更新应用部署信息失败");
-
-        return String.format("%s/%s/", AppConstant.CODE_DEPLOY_HOST, deployKey);
+        //构建应用访问url
+        String appDeployUrl = String.format("%s/%s/", AppConstant.CODE_DEPLOY_HOST, deployKey);
+        //异步生成截图并更新应用封面
+        generateAppScreenshotAsync(appId, appDeployUrl);
+        return appDeployUrl;
     }
 
+    /**
+     * 异步生成应用截图并更新封面
+     *
+     * @param appId  应用ID
+     * @param appUrl 应用访问URL
+     */
+    @Override
+    public void generateAppScreenshotAsync(Long appId, String appUrl) {
+        // 使用虚拟线程异步执行
+        Thread.startVirtualThread(() -> {
+            // 调用截图服务生成截图并上传
+            String screenshotUrl = screenshotService.generateAndUploadScreenshot(appUrl);
+            // 更新应用封面字段
+            App updateApp = new App();
+            updateApp.setId(appId);
+            updateApp.setCover(screenshotUrl);
+            boolean updated = this.updateById(updateApp);
+            ThrowUtils.throwIf(!updated, ErrorCode.OPERATION_ERROR, "更新应用封面字段失败");
+        });
+    }
+
+    /**
+     * 获取源代码目录
+     * @param appId
+     * @param codeGenType
+     * @return
+     */
     private File resolveSourceRootDir(Long appId, String codeGenType) {
         if (StrUtil.isNotBlank(codeGenType)) {
             File sourceDir = new File(AppConstant.CODE_OUTPUT_ROOT_DIR, codeGenType + "_" + appId);
@@ -145,6 +186,11 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         return new File(AppConstant.CODE_OUTPUT_ROOT_DIR, codeGenType + "_" + appId);
     }
 
+    /**
+     * 获取部署源代码目录
+     * @param sourceRootDir
+     * @return
+     */
     private File resolveDeploySourceDir(File sourceRootDir) {
         if (!vueProjectBuilder.isVueProject(sourceRootDir)) {
             return sourceRootDir;
@@ -197,6 +243,11 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         return appVO;
     }
 
+    /**
+     * 构建查询条件
+     * @param appQueryRequest
+     * @return
+     */
     @Override
     public QueryWrapper getQueryWrapper(AppQueryRequest appQueryRequest) {
         if (appQueryRequest == null) {
@@ -224,6 +275,11 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
                 .orderBy(sortField, "ascend".equals(sortOrder));
     }
 
+    /**
+     * 获取应用列表
+     * @param appList 应用列表
+     * @return
+     */
     @Override
     public List<AppVO> getAppVOList(List<App> appList) {
         if (CollUtil.isEmpty(appList)) {

@@ -40,3 +40,8 @@ knife4j:
   enable: true
   setting:
     language: zh_cn
+
+logging:
+  level:
+    org.openqa.selenium.devtools.CdpVersionFinder: ERROR
+    org.openqa.selenium.chromium.ChromiumDriver: ERROR

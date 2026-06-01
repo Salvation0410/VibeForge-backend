@@ -58,4 +58,11 @@ public interface AppService extends IService<App> {
      * @return 可返回的部署地址
      */
     public String deployApp(Long appId, SysUser loginUser);
+
+    /**
+     *  异步调用网页截图
+     * @param appId
+     * @param appUrl
+     */
+    public void generateAppScreenshotAsync(Long appId, String appUrl);
 }
