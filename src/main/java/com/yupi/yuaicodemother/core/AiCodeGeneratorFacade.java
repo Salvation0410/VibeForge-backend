@@ -161,7 +161,9 @@ public class AiCodeGeneratorFacade {
                 //保存代码 也是使用解析器
                 File savedDir = CodeFileSaverExecutor.executeSaver(parseResult, codeGenType,appId);
                 log.info("保存成功，路径为：" + savedDir.getAbsolutePath());
-            } catch (Exception e) {}
+            } catch (Exception e) {
+                log.error("代码流解析或保存失败, codeGenType={}, appId={}", codeGenType, appId, e);
+            }
         });
     }
 

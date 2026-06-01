@@ -1,14 +1,15 @@
 package com.yupi.yuaicodemother.core.builder;
 
-import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.io.IoUtil;
 import cn.hutool.core.util.RuntimeUtil;
-import org.springframework.stereotype.Component;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 @Component
@@ -16,12 +17,26 @@ public class VueProjectBuilder {
 
     private static final Logger log = LoggerFactory.getLogger(VueProjectBuilder.class);
 
+    private final ConcurrentHashMap<String, CompletableFuture<Boolean>> buildTaskMap = new ConcurrentHashMap<>();
+
     public void buildProjectAsync(String projectPath) {
+        String normalizedProjectPath = normalizeProjectPath(projectPath);
+        CompletableFuture<Boolean> buildFuture = new CompletableFuture<>();
+        CompletableFuture<Boolean> existingFuture = buildTaskMap.putIfAbsent(normalizedProjectPath, buildFuture);
+        if (existingFuture != null) {
+            log.info("Vue 项目已存在进行中的构建任务，跳过重复异步构建: {}", normalizedProjectPath);
+            return;
+        }
+
         Thread.ofVirtual().name("vue-builder-" + System.currentTimeMillis()).start(() -> {
             try {
-                buildProject(projectPath);
+                boolean buildResult = doBuildProject(normalizedProjectPath);
+                buildFuture.complete(buildResult);
             } catch (Exception e) {
+                buildFuture.completeExceptionally(e);
                 log.error("异步构建 Vue 项目时发生异常: {}", e.getMessage(), e);
+            } finally {
+                buildTaskMap.remove(normalizedProjectPath, buildFuture);
             }
         });
     }
@@ -43,17 +58,47 @@ public class VueProjectBuilder {
     }
 
     public boolean ensureProjectBuilt(String projectPath) {
-        File projectDir = new File(projectPath);
+        String normalizedProjectPath = normalizeProjectPath(projectPath);
+        File projectDir = new File(normalizedProjectPath);
         if (!isVueProject(projectDir)) {
             return false;
         }
         if (hasReadyDist(projectDir)) {
             return true;
         }
-        return buildProject(projectPath);
+
+        CompletableFuture<Boolean> existingFuture = buildTaskMap.get(normalizedProjectPath);
+        if (existingFuture != null) {
+            log.info("等待进行中的 Vue 构建任务完成: {}", normalizedProjectPath);
+            return waitForBuild(existingFuture, normalizedProjectPath);
+        }
+
+        return buildProject(normalizedProjectPath);
     }
 
     public boolean buildProject(String projectPath) {
+        String normalizedProjectPath = normalizeProjectPath(projectPath);
+        CompletableFuture<Boolean> buildFuture = new CompletableFuture<>();
+        CompletableFuture<Boolean> existingFuture = buildTaskMap.putIfAbsent(normalizedProjectPath, buildFuture);
+        if (existingFuture != null) {
+            log.info("检测到 Vue 项目正在构建，复用当前构建结果: {}", normalizedProjectPath);
+            return waitForBuild(existingFuture, normalizedProjectPath);
+        }
+
+        try {
+            boolean buildResult = doBuildProject(normalizedProjectPath);
+            buildFuture.complete(buildResult);
+            return buildResult;
+        } catch (Exception e) {
+            buildFuture.completeExceptionally(e);
+            log.error("同步构建 Vue 项目时发生异常: {}", e.getMessage(), e);
+            return false;
+        } finally {
+            buildTaskMap.remove(normalizedProjectPath, buildFuture);
+        }
+    }
+
+    private boolean doBuildProject(String projectPath) {
         File projectDir = new File(projectPath);
         if (!projectDir.isDirectory()) {
             log.error("项目目录不存在: {}", projectPath);
@@ -84,6 +129,15 @@ public class VueProjectBuilder {
         }
         log.info("Vue 项目构建成功，dist 目录: {}", distDir.getAbsolutePath());
         return true;
+    }
+
+    private boolean waitForBuild(CompletableFuture<Boolean> buildFuture, String projectPath) {
+        try {
+            return buildFuture.get(360, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            log.error("等待 Vue 项目构建结果失败: {}", projectPath, e);
+            return false;
+        }
     }
 
     private boolean executeNpmInstall(File projectDir) {
@@ -145,6 +199,14 @@ public class VueProjectBuilder {
         } catch (Exception e) {
             log.error("执行命令失败: {}, 错误信息: {}", command, e.getMessage(), e);
             return false;
+        }
+    }
+
+    private String normalizeProjectPath(String projectPath) {
+        try {
+            return new File(projectPath).getCanonicalPath();
+        } catch (Exception e) {
+            return new File(projectPath).getAbsolutePath();
         }
     }
 }
