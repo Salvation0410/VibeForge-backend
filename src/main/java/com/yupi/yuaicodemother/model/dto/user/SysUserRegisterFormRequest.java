@@ -29,4 +29,6 @@ public class SysUserRegisterFormRequest implements Serializable {
     private String userProfile;
 
     private String userRole;
+
+    private String emailCode;
 }

@@ -29,12 +29,12 @@ public class SysUserRegisterRequest implements Serializable {
     private String email;
 
     /**
-     * 密码明文，后端入库前应加密为 passwordHash
+     * 密码明文，后端入库前加密为 passwordHash
      */
     private String password;
 
     /**
-     * 确认密码，用于前端二次校验
+     * 确认密码，用于二次校验
      */
     private String confirmPassword;
 
@@ -49,7 +49,7 @@ public class SysUserRegisterRequest implements Serializable {
     private String userProfile;
 
     /**
-     * 澶村儚鍦板潃
+     * 头像地址，可选
      */
     private String avatarUrl;
 
@@ -57,4 +57,9 @@ public class SysUserRegisterRequest implements Serializable {
      * 角色身份，可选，默认普通用户
      */
     private String userRole;
+
+    /**
+     * 邮箱注册验证码，邮箱注册时必填
+     */
+    private String emailCode;
 }

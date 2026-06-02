@@ -4,6 +4,14 @@ target/
 tmp/
 test/
 doc/
+scripts/
+sql/
+.codex_tmp/
+.understand-anything/
+logs/
+*.log
+backend-start.out.log
+backend-start.err.log
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/

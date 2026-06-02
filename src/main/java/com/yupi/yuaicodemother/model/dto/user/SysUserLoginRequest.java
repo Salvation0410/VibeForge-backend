@@ -6,7 +6,7 @@ import java.io.Serial;
 import java.io.Serializable;
 
 /**
- * 用户登录请求参数。
+ * 用户登录请求参数
  *
  * 支持：
  * 1. 账号 + 密码登录
@@ -32,4 +32,9 @@ public class SysUserLoginRequest implements Serializable {
      * 登录密码
      */
     private String password;
+
+    /**
+     * 登录图形验证码
+     */
+    private String captchaCode;
 }

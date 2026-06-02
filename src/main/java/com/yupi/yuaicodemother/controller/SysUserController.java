@@ -11,7 +11,9 @@ import com.yupi.yuaicodemother.model.dto.user.SysUserLoginRequest;
 import com.yupi.yuaicodemother.model.dto.user.SysUserRegisterFormRequest;
 import com.yupi.yuaicodemother.model.dto.user.SysUserRegisterRequest;
 import com.yupi.yuaicodemother.model.dto.user.SysUserUpdateRequest;
+import com.yupi.yuaicodemother.model.dto.user.UserEmailCodeSendRequest;
 import com.yupi.yuaicodemother.model.entity.SysUser;
+import com.yupi.yuaicodemother.model.vo.LoginCaptchaVO;
 import com.yupi.yuaicodemother.model.vo.LoginUserVO;
 import com.yupi.yuaicodemother.model.vo.SysUserVO;
 import com.yupi.yuaicodemother.service.SysUserService;
@@ -26,8 +28,8 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -49,10 +51,8 @@ public class SysUserController {
      * @param request 注册参数
      * @return 创建结果
      */
-
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     @Deprecated
-    //@PostMapping(value = "/admin", consumes = MediaType.APPLICATION_JSON_VALUE)
     public BaseResponse<SysUser> adminCreate(@RequestBody SysUserRegisterRequest request) {
         return ResultUtils.success(sysUserService.adminCreate(request));
     }
@@ -72,14 +72,29 @@ public class SysUserController {
     }
 
     /**
+     * 发送邮箱注册验证码
+     *
+     * @param request 发送请求
+     * @param httpServletRequest 请求对象
+     * @return 是否发送成功
+     */
+    @PostMapping(value = "/register/email/code", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public BaseResponse<Boolean> sendRegisterEmailCode(@RequestBody UserEmailCodeSendRequest request,
+                                                       HttpServletRequest httpServletRequest) {
+        return ResultUtils.success(sysUserService.sendRegisterEmailCode(request, httpServletRequest));
+    }
+
+    /**
      * 用户注册
      *
      * @param request 注册参数
+     * @param httpServletRequest 请求对象
      * @return 注册结果
      */
     @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
-    public BaseResponse<SysUser> register(@RequestBody SysUserRegisterRequest request) {
-        return ResultUtils.success(sysUserService.register(request));
+    public BaseResponse<SysUser> register(@RequestBody SysUserRegisterRequest request,
+                                          HttpServletRequest httpServletRequest) {
+        return ResultUtils.success(sysUserService.register(request, httpServletRequest));
     }
 
     /**
@@ -87,13 +102,25 @@ public class SysUserController {
      *
      * @param request 注册参数
      * @param avatarFile 头像文件
+     * @param httpServletRequest 请求对象
      * @return 注册结果
      */
-    //@PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Deprecated
     public BaseResponse<SysUser> registerWithAvatar(@ModelAttribute SysUserRegisterFormRequest request,
-                                                    @RequestParam(value = "avatarFile", required = false) MultipartFile avatarFile) {
-        return ResultUtils.success(sysUserService.register(toRegisterRequest(request), avatarFile));
+                                                    @RequestParam(value = "avatarFile", required = false) MultipartFile avatarFile,
+                                                    HttpServletRequest httpServletRequest) {
+        return ResultUtils.success(sysUserService.register(toRegisterRequest(request), avatarFile, httpServletRequest));
+    }
+
+    /**
+     * 获取登录图形验证码
+     *
+     * @param httpServletRequest 请求对象
+     * @return 图形验证码
+     */
+    @GetMapping("/login/captcha")
+    public BaseResponse<LoginCaptchaVO> getLoginCaptcha(HttpServletRequest httpServletRequest) {
+        return ResultUtils.success(sysUserService.getLoginCaptcha(httpServletRequest));
     }
 
     /**
@@ -213,7 +240,6 @@ public class SysUserController {
      */
     @Deprecated
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
-    //@PutMapping(value = "/{id}", consumes = MediaType.APPLICATION_JSON_VALUE)
     public BaseResponse<Boolean> update(@PathVariable Long id, @RequestBody SysUserUpdateRequest request) {
         return ResultUtils.success(sysUserService.updateUserByAdmin(id, request));
     }
@@ -246,6 +272,12 @@ public class SysUserController {
         return ResultUtils.success(sysUserService.removeById(id));
     }
 
+    /**
+     * 表单参数转换为注册请求
+     *
+     * @param formRequest 表单参数
+     * @return 注册请求
+     */
     private SysUserRegisterRequest toRegisterRequest(SysUserRegisterFormRequest formRequest) {
         SysUserRegisterRequest request = new SysUserRegisterRequest();
         request.setAccount(formRequest.getAccount());
@@ -256,6 +288,7 @@ public class SysUserController {
         request.setAvatarUrl(formRequest.getAvatarUrl());
         request.setUserProfile(formRequest.getUserProfile());
         request.setUserRole(formRequest.getUserRole());
+        request.setEmailCode(formRequest.getEmailCode());
         return request;
     }
 }
