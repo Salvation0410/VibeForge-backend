@@ -24,10 +24,7 @@ import com.yupi.yuaicodemother.model.entity.App;
 import com.yupi.yuaicodemother.model.entity.SysUser;
 import com.yupi.yuaicodemother.model.vo.AppVO;
 import com.yupi.yuaicodemother.model.vo.SysUserVO;
-import com.yupi.yuaicodemother.service.AppService;
-import com.yupi.yuaicodemother.service.ChatHistoryService;
-import com.yupi.yuaicodemother.service.ScreenshotService;
-import com.yupi.yuaicodemother.service.SysUserService;
+import com.yupi.yuaicodemother.service.*;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -65,6 +62,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     @Resource
     private ScreenshotService screenshotService;
 
+    @Resource
+    private ChatHistoryOriginalService chatHistoryOriginalService;
+
     /**
      * 用户聊天生成应用
      * @param appId 应用id
@@ -88,16 +88,23 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         if (codeGenTypeEnum == null) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "不支持的代码生成类型");
         }
-
+        //添加用户消息到对话历史
         chatHistoryService.addChatMessage(
                 appId,
                 message,
                 ChatHistoryMessageTypeEnum.USER.getValue(),
                 loginUser.getId()
         );
+        chatHistoryOriginalService.addOriginalChatMessage(
+                appId,
+                message,
+                ChatHistoryMessageTypeEnum.USER.getValue(),
+                loginUser.getId()
+        );
+
         //返回的流式对象
         Flux<String> contentStream = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId);
-        return streamHandlerExecutor.doExecute(contentStream, chatHistoryService, appId, loginUser, codeGenTypeEnum);
+        return streamHandlerExecutor.doExecute(contentStream, chatHistoryService,chatHistoryOriginalService, appId, loginUser, codeGenTypeEnum);
     }
 
     @Override
@@ -253,6 +260,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         }
         try {
             chatHistoryService.deleteByAppId(appId);
+            chatHistoryOriginalService.deleteByAppId(appId);
         } catch (Exception e) {
             log.error("删除应用关联对话历史失败: {}", e.getMessage(), e);
         }
