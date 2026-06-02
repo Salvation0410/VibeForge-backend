@@ -31,7 +31,7 @@ public class ToolManager {
     private BaseTool[] tools;
 
     /**
-     * 初始化工具映射
+     * 初始化工具映射 Bean加载成功后执行初始化
      */
     @PostConstruct
     public void initTools() {
