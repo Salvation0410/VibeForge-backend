@@ -7,6 +7,7 @@ import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.ToolMemoryId;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -22,6 +23,7 @@ import java.nio.file.StandardOpenOption;
  * @date 2026/5/30
  */
 @Slf4j
+@Component
 public class FileWriteTool extends BaseTool {
 
     // @P 注解：对参数的说明 @ToolMemoryId 注解：指定工具内存 ID，用于存储工具调用结果
