@@ -156,6 +156,8 @@ public class AiCodeGeneratorFacade {
             try {
                 // 流式输出完毕 拼接代码
                 String completeCode = codeBuilder.toString();
+                log.info("AI complete code output before parsing, codeGenType={}, appId={}, content:\n{}",
+                        codeGenType, appId, completeCode);
                 //解析代码 获取解析结果
                 Object parseResult = CodeParserExecutor.executeParser(completeCode, codeGenType);
                 //保存代码 也是使用解析器
