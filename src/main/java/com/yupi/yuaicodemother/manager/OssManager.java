@@ -21,7 +21,7 @@ import java.io.InputStream;
 import java.util.Set;
 
 /**
- * OSS 管理器
+ * OSS file upload manager.
  */
 @Component
 @RequiredArgsConstructor
@@ -32,23 +32,36 @@ public class OssManager {
     private final OssProperties ossProperties;
 
     /**
-     * 上传头像
-     *
-     * @param avatarFile 头像文件
-     * @return 头像地址
+     * Uploads a user avatar and returns the public URL.
      */
     public String uploadAvatar(MultipartFile avatarFile) {
-        validateAvatarFile(avatarFile);
+        validateImageFile(avatarFile, ossProperties.getMaxAvatarSize(), "头像");
         validateOssConfig();
+        String objectKey = buildImageObjectKey(
+                StrUtil.blankToDefault(ossProperties.getAvatarDir(), "user-avatar"),
+                avatarFile.getOriginalFilename()
+        );
+        return uploadImageFile(avatarFile, objectKey, "头像");
+    }
 
-        String objectKey = buildAvatarObjectKey(avatarFile.getOriginalFilename());
+    /**
+     * Uploads a community post image and returns the public URL.
+     */
+    public String uploadCommunityImage(MultipartFile imageFile) {
+        validateImageFile(imageFile, ossProperties.getMaxAvatarSize(), "社区图片");
+        validateOssConfig();
+        String objectKey = buildImageObjectKey("community-image", imageFile.getOriginalFilename());
+        return uploadImageFile(imageFile, objectKey, "社区图片");
+    }
+
+    private String uploadImageFile(MultipartFile imageFile, String objectKey, String bizName) {
         String endpoint = normalizeEndpoint(ossProperties.getEndpoint());
 
         ObjectMetadata metadata = new ObjectMetadata();
-        metadata.setContentLength(avatarFile.getSize());
-        metadata.setContentType(StrUtil.blankToDefault(avatarFile.getContentType(), "application/octet-stream"));
+        metadata.setContentLength(imageFile.getSize());
+        metadata.setContentType(StrUtil.blankToDefault(imageFile.getContentType(), "application/octet-stream"));
 
-        try (InputStream inputStream = avatarFile.getInputStream()) {
+        try (InputStream inputStream = imageFile.getInputStream()) {
             OSS ossClient = new OSSClientBuilder().build(
                     endpoint,
                     ossProperties.getAccessKeyId(),
@@ -67,21 +80,23 @@ public class OssManager {
             }
             return buildFileUrl(objectKey);
         } catch (IOException e) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "头像文件读取失败");
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, bizName + "文件读取失败");
         } catch (Exception e) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "头像上传失败");
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, bizName + "上传失败");
         }
     }
 
-    private void validateAvatarFile(MultipartFile avatarFile) {
-        ThrowUtils.throwIf(avatarFile == null || avatarFile.isEmpty(), ErrorCode.PARAMS_ERROR, "头像文件不能为空");
-        ThrowUtils.throwIf(avatarFile.getSize() > ossProperties.getMaxAvatarSize(), ErrorCode.PARAMS_ERROR, "头像文件大小不能超过 5MB");
+    private void validateImageFile(MultipartFile imageFile, long maxSize, String bizName) {
+        ThrowUtils.throwIf(imageFile == null || imageFile.isEmpty(), ErrorCode.PARAMS_ERROR, bizName + "文件不能为空");
+        ThrowUtils.throwIf(imageFile.getSize() > maxSize, ErrorCode.PARAMS_ERROR, bizName + "文件大小不能超过 5MB");
 
-        String contentType = avatarFile.getContentType();
-        ThrowUtils.throwIf(StrUtil.isBlank(contentType) || !contentType.startsWith("image/"), ErrorCode.PARAMS_ERROR, "仅支持上传图片文件");
+        String contentType = imageFile.getContentType();
+        ThrowUtils.throwIf(StrUtil.isBlank(contentType) || !contentType.startsWith("image/"),
+                ErrorCode.PARAMS_ERROR, "仅支持上传图片文件");
 
-        String extension = FileUtil.extName(avatarFile.getOriginalFilename());
-        ThrowUtils.throwIf(StrUtil.isBlank(extension) || !ALLOWED_IMAGE_EXTENSIONS.contains(extension.toLowerCase()), ErrorCode.PARAMS_ERROR, "头像文件格式不支持");
+        String extension = FileUtil.extName(imageFile.getOriginalFilename());
+        ThrowUtils.throwIf(StrUtil.isBlank(extension) || !ALLOWED_IMAGE_EXTENSIONS.contains(extension.toLowerCase()),
+                ErrorCode.PARAMS_ERROR, bizName + "文件格式不支持");
     }
 
     private void validateOssConfig() {
@@ -93,15 +108,14 @@ public class OssManager {
         ), ErrorCode.SYSTEM_ERROR, "OSS 配置不完整");
     }
 
-    private String buildAvatarObjectKey(String originalFilename) {
+    private String buildImageObjectKey(String dir, String originalFilename) {
         String extension = FileUtil.extName(originalFilename);
         if (StrUtil.isBlank(extension)) {
             extension = "png";
         }
-        String avatarDir = StrUtil.blankToDefault(ossProperties.getAvatarDir(), "user-avatar");
-        avatarDir = StrUtil.removeSuffix(avatarDir, "/");
+        String normalizedDir = StrUtil.removeSuffix(dir, "/");
         String datePath = DateUtil.today().replace("-", "/");
-        return StrUtil.format("{}/{}/{}.{}", avatarDir, datePath, IdUtil.fastSimpleUUID(), extension.toLowerCase());
+        return StrUtil.format("{}/{}/{}.{}", normalizedDir, datePath, IdUtil.fastSimpleUUID(), extension.toLowerCase());
     }
 
     private String buildFileUrl(String objectKey) {

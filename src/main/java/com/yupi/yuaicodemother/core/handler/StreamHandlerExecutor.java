@@ -22,6 +22,9 @@ public class StreamHandlerExecutor {
     @Resource
     private JsonMessageStreamHandler jsonMessageStreamHandler;
 
+    @Resource
+    private SimpleTextStreamHandler simpleTextStreamHandler;
+
     /**
      * 创建流处理器并处理聊天历史记录
      *
@@ -40,7 +43,7 @@ public class StreamHandlerExecutor {
             case VUE_PROJECT -> // 使用注入的组件实例
                     jsonMessageStreamHandler.handle(originFlux, chatHistoryService,chatHistoryOriginalService,appId, loginUser);
             case HTML, MULTI_FILE -> // 简单文本处理器不需要依赖注入
-                    new SimpleTextStreamHandler().handle(originFlux, chatHistoryService, appId, loginUser);
+                    simpleTextStreamHandler.handle(originFlux, chatHistoryService, appId, loginUser);
         };
     }
 }

@@ -109,3 +109,96 @@ create table chat_history_original
     INDEX idx_createTime (createTime),             -- 提升基于时间的查询性能
     INDEX idx_appId_createTime (appId, createTime) -- 游标查询核心索引
 ) comment '对话历史' collate = utf8mb4_unicode_ci;
+-- 社区模块数据表
+CREATE TABLE IF NOT EXISTS community_tag
+(
+    id          BIGINT                             NOT NULL COMMENT '标签ID' PRIMARY KEY,
+    name        VARCHAR(64)                        NOT NULL COMMENT '标签名称',
+    description VARCHAR(255)                       NULL COMMENT '标签描述',
+    sortOrder   INT      DEFAULT 0                 NOT NULL COMMENT '排序值',
+    status      TINYINT  DEFAULT 1                 NOT NULL COMMENT '状态：0-停用 1-启用',
+    createTime  DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL COMMENT '创建时间',
+    updateTime  DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    isDelete    TINYINT  DEFAULT 0                 NOT NULL COMMENT '逻辑删除',
+    UNIQUE KEY uk_community_tag_name (name),
+    INDEX idx_community_tag_status_sort (status, sortOrder)
+) COMMENT '社区标签' COLLATE = utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS community_post
+(
+    id           BIGINT                              NOT NULL COMMENT '帖子ID' PRIMARY KEY,
+    title        VARCHAR(100)                        NOT NULL COMMENT '帖子标题',
+    content      MEDIUMTEXT                          NOT NULL COMMENT '帖子正文',
+    tagId        BIGINT                              NOT NULL COMMENT '标签ID',
+    userId       BIGINT                              NOT NULL COMMENT '发布用户ID',
+    status       VARCHAR(32) DEFAULT 'PENDING'       NOT NULL COMMENT '审核状态：PENDING/APPROVED/REJECTED',
+    likeCount    INT         DEFAULT 0               NOT NULL COMMENT '点赞数',
+    commentCount INT         DEFAULT 0               NOT NULL COMMENT '评论数',
+    imageCount   INT         DEFAULT 0               NOT NULL COMMENT '图片数量',
+    isPinned     TINYINT     DEFAULT 0               NOT NULL COMMENT '是否置顶：0-否 1-是',
+    pinnedTime   DATETIME                            NULL COMMENT '置顶时间',
+    reviewerId   BIGINT                              NULL COMMENT '审核人用户ID',
+    reviewTime   DATETIME                            NULL COMMENT '审核时间',
+    rejectReason VARCHAR(512)                        NULL COMMENT '拒绝原因',
+    createTime   DATETIME    DEFAULT CURRENT_TIMESTAMP NOT NULL COMMENT '创建时间',
+    updateTime   DATETIME    DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    isDelete     TINYINT     DEFAULT 0               NOT NULL COMMENT '逻辑删除',
+    INDEX idx_community_post_status_tag_time (status, tagId, createTime, id),
+    INDEX idx_community_post_status_hot (status, likeCount, createTime, id),
+    INDEX idx_community_post_pinned (status, isPinned, pinnedTime),
+    INDEX idx_community_post_user (userId)
+) COMMENT '社区帖子' COLLATE = utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS community_post_image
+(
+    id         BIGINT                             NOT NULL COMMENT '图片ID' PRIMARY KEY,
+    postId     BIGINT                             NOT NULL COMMENT '帖子ID',
+    imageUrl   VARCHAR(512)                       NOT NULL COMMENT '图片地址',
+    sortOrder  INT      DEFAULT 0                 NOT NULL COMMENT '排序值',
+    createTime DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL COMMENT '创建时间',
+    isDelete   TINYINT  DEFAULT 0                 NOT NULL COMMENT '逻辑删除',
+    INDEX idx_community_post_image_post (postId, sortOrder)
+) COMMENT '社区帖子图片' COLLATE = utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS community_post_like
+(
+    id         BIGINT                             NOT NULL COMMENT '点赞ID' PRIMARY KEY,
+    postId     BIGINT                             NOT NULL COMMENT '帖子ID',
+    userId     BIGINT                             NOT NULL COMMENT '用户ID',
+    createTime DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL COMMENT '创建时间',
+    isDelete   TINYINT  DEFAULT 0                 NOT NULL COMMENT '逻辑删除',
+    UNIQUE KEY uk_community_post_like_user (postId, userId),
+    INDEX idx_community_post_like_user (userId)
+) COMMENT '社区帖子点赞' COLLATE = utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS community_comment
+(
+    id         BIGINT                              NOT NULL COMMENT '评论ID' PRIMARY KEY,
+    postId     BIGINT                              NOT NULL COMMENT '帖子ID',
+    userId     BIGINT                              NOT NULL COMMENT '评论用户ID',
+    parentId   BIGINT    DEFAULT 0                 NOT NULL COMMENT '父评论ID',
+    rootId     BIGINT    DEFAULT 0                 NOT NULL COMMENT '根评论ID',
+    depth      INT       DEFAULT 0                 NOT NULL COMMENT '评论层级',
+    path       VARCHAR(1024)                       NOT NULL COMMENT '评论路径',
+    content    VARCHAR(2000)                       NOT NULL COMMENT '评论内容',
+    likeCount  INT       DEFAULT 0                 NOT NULL COMMENT '点赞数',
+    replyCount INT       DEFAULT 0                 NOT NULL COMMENT '直接回复数',
+    createTime DATETIME  DEFAULT CURRENT_TIMESTAMP NOT NULL COMMENT '创建时间',
+    updateTime DATETIME  DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    isDelete   TINYINT   DEFAULT 0                 NOT NULL COMMENT '逻辑删除',
+    INDEX idx_community_comment_parent_time (postId, parentId, createTime, id),
+    INDEX idx_community_comment_parent_hot (postId, parentId, likeCount, createTime, id),
+    INDEX idx_community_comment_root (rootId),
+    INDEX idx_community_comment_user (userId)
+) COMMENT '社区评论' COLLATE = utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS community_comment_like
+(
+    id         BIGINT                             NOT NULL COMMENT '点赞ID' PRIMARY KEY,
+    commentId  BIGINT                             NOT NULL COMMENT '评论ID',
+    userId     BIGINT                             NOT NULL COMMENT '用户ID',
+    createTime DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL COMMENT '创建时间',
+    isDelete   TINYINT  DEFAULT 0                 NOT NULL COMMENT '逻辑删除',
+    UNIQUE KEY uk_community_comment_like_user (commentId, userId),
+    INDEX idx_community_comment_like_user (userId)
+) COMMENT '社区评论点赞' COLLATE = utf8mb4_unicode_ci;
