@@ -178,6 +178,18 @@ public class AppController {
 
 
     /**
+     *  他人查看主页信息
+     * @param userId
+     * @param appQueryRequest
+     * @return
+     */
+    @GetMapping("/user/{userId}/page")
+    public BaseResponse<Page<AppVO>> listPublicAppVOByUser(@PathVariable Long userId,
+                                                           AppQueryRequest appQueryRequest) {
+        return ResultUtils.success(appService.listPublicAppVOByUser(appQueryRequest, userId));
+    }
+
+    /**
      * 分页获取精选应用列表
      *
      * @param appQueryRequest 查询请求

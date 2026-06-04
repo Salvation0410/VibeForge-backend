@@ -43,6 +43,11 @@ public interface AppService extends IService<App> {
     public List<AppVO> getAppVOList(List<App> appList);
 
     /**
+     * Lists deployed public apps created by the target user.
+     */
+    Page<AppVO> listPublicAppVOByUser(AppQueryRequest appQueryRequest, Long userId);
+
+    /**
      *
      * @param appId 应用id
      * @param message 用户消息
