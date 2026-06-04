@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.yupi.yuaicodemother.mapper.CommunityPostLikeMapper">
+    <select id="selectOneIncludingDeleted" resultType="com.yupi.yuaicodemother.model.entity.CommunityPostLike">
+        SELECT id, postId, userId, createTime, isDelete
+        FROM community_post_like
+        WHERE postId = #{postId}
+          AND userId = #{userId}
+        LIMIT 1
+    </select>
+
+    <update id="restoreLikeById">
+        UPDATE community_post_like
+        SET isDelete = 0
+        WHERE id = #{id}
+    </update>
+</mapper>
