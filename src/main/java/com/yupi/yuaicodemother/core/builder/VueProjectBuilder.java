@@ -7,7 +7,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -16,6 +21,10 @@ import java.util.concurrent.TimeUnit;
 public class VueProjectBuilder {
 
     private static final Logger log = LoggerFactory.getLogger(VueProjectBuilder.class);
+
+    private static final Pattern THOUSANDS_SEPARATED_PROPERTY_NUMBER = Pattern.compile(
+            "(:\\s*)([0-9]{1,3}(?:,[0-9]{3})+(?:\\.[0-9]+)?)(\\s*[,}\\]])"
+    );
 
     private final ConcurrentHashMap<String, CompletableFuture<Boolean>> buildTaskMap = new ConcurrentHashMap<>();
 
@@ -112,6 +121,7 @@ public class VueProjectBuilder {
         }
 
         log.info("开始构建 Vue 项目: {}", projectPath);
+        normalizeGeneratedSourceFiles(projectDir);
         if (!executeNpmInstall(projectDir)) {
             log.error("npm install 执行失败");
             return false;
@@ -150,6 +160,49 @@ public class VueProjectBuilder {
         log.info("执行 npm run build...");
         String command = String.format("%s run build", buildCommand("npm"));
         return executeCommand(projectDir, command, 180);
+    }
+
+    private void normalizeGeneratedSourceFiles(File projectDir) {
+        File srcDir = new File(projectDir, "src");
+        if (!srcDir.isDirectory()) {
+            return;
+        }
+
+        try (var paths = Files.walk(srcDir.toPath())) {
+            paths.filter(Files::isRegularFile)
+                    .filter(this::isGeneratedSourceFile)
+                    .forEach(this::normalizeThousandsSeparatedPropertyNumbers);
+        } catch (IOException e) {
+            log.warn("Normalize generated source files failed: {}", srcDir.getAbsolutePath(), e);
+        }
+    }
+
+    private boolean isGeneratedSourceFile(Path path) {
+        String fileName = path.getFileName().toString().toLowerCase();
+        return fileName.endsWith(".vue")
+                || fileName.endsWith(".js")
+                || fileName.endsWith(".mjs")
+                || fileName.endsWith(".ts")
+                || fileName.endsWith(".jsx")
+                || fileName.endsWith(".tsx");
+    }
+
+    private void normalizeThousandsSeparatedPropertyNumbers(Path path) {
+        try {
+            String content = Files.readString(path, StandardCharsets.UTF_8);
+            Matcher matcher = THOUSANDS_SEPARATED_PROPERTY_NUMBER.matcher(content);
+            String normalized = matcher.replaceAll(matchResult ->
+                    matchResult.group(1)
+                            + matchResult.group(2).replace(",", "")
+                            + matchResult.group(3)
+            );
+            if (!normalized.equals(content)) {
+                Files.writeString(path, normalized, StandardCharsets.UTF_8);
+                log.info("Normalized thousands-separated numeric literals in generated source: {}", path.toAbsolutePath());
+            }
+        } catch (IOException e) {
+            log.warn("Normalize generated source file failed: {}", path.toAbsolutePath(), e);
+        }
     }
 
     private boolean isWindows() {

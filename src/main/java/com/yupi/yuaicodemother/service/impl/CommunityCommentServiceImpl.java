@@ -41,6 +41,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 @RequiredArgsConstructor
@@ -69,42 +70,49 @@ public class CommunityCommentServiceImpl extends ServiceImpl<CommunityCommentMap
         ThrowUtils.throwIf(!CommunityPostStatusEnum.APPROVED.getValue().equals(post.getStatus()),
                 ErrorCode.NO_AUTH_ERROR, "只能评论已审核通过的帖子");
 
-        CommunityComment parent = null;
-        Long parentId = Optional.ofNullable(request.getParentId()).orElse(0L);
-        if (parentId > 0) {
-            parent = this.getById(parentId);
-            ThrowUtils.throwIf(parent == null || !parent.getPostId().equals(request.getPostId()),
+        CommunityComment repliedComment = null;
+        CommunityComment rootComment = null;
+        Long requestParentId = Optional.ofNullable(request.getParentId()).orElse(0L);
+        if (requestParentId > 0) {
+            repliedComment = this.getById(requestParentId);
+            ThrowUtils.throwIf(repliedComment == null || !repliedComment.getPostId().equals(request.getPostId()),
                     ErrorCode.PARAMS_ERROR, "父评论不存在");
+            // 前端只展示两级评论。回复二级评论时，仍挂到根评论下，replyUserId 记录实际被回复的人。
+            Long rootId = Optional.ofNullable(repliedComment.getRootId()).orElse(0L);
+            rootComment = rootId > 0 && !rootId.equals(repliedComment.getId()) ? this.getById(rootId) : repliedComment;
+            ThrowUtils.throwIf(rootComment == null || !rootComment.getPostId().equals(request.getPostId()),
+                    ErrorCode.PARAMS_ERROR, "根评论不存在");
         }
 
         CommunityComment comment = new CommunityComment();
         comment.setPostId(request.getPostId());
         comment.setUserId(loginUser.getId());
-        comment.setParentId(parentId);
+        comment.setParentId(rootComment == null ? 0L : rootComment.getId());
+        comment.setReplyUserId(repliedComment == null ? null : repliedComment.getUserId());
         comment.setContent(request.getContent());
         comment.setLikeCount(0);
         comment.setReplyCount(0);
-        // 先保存以拿到雪花 ID，再回写 rootId/path，支持无限层级按需查询。
-        if (parent == null) {
+        // 先保存拿到雪花 ID，再回写 rootId/path，保证历史路径查询和后台删除仍然可用。
+        if (rootComment == null) {
             comment.setRootId(0L);
             comment.setDepth(0);
             comment.setPath("");
         } else {
-            comment.setRootId(parent.getRootId() == null || parent.getRootId() <= 0 ? parent.getId() : parent.getRootId());
-            comment.setDepth(Optional.ofNullable(parent.getDepth()).orElse(0) + 1);
-            comment.setPath(parent.getPath());
+            comment.setRootId(rootComment.getId());
+            comment.setDepth(1);
+            comment.setPath(rootComment.getPath());
         }
         boolean saved = this.save(comment);
         ThrowUtils.throwIf(!saved, ErrorCode.OPERATION_ERROR, "评论失败");
 
         CommunityComment updateComment = new CommunityComment();
         updateComment.setId(comment.getId());
-        if (parent == null) {
+        if (rootComment == null) {
             updateComment.setRootId(comment.getId());
             updateComment.setPath("/" + comment.getId() + "/");
         } else {
-            updateComment.setPath(parent.getPath() + comment.getId() + "/");
-            incrementReplyCount(parent);
+            updateComment.setPath(rootComment.getPath() + comment.getId() + "/");
+            incrementReplyCount(rootComment);
         }
         this.updateById(updateComment);
         incrementPostCommentCount(post);
@@ -174,7 +182,10 @@ public class CommunityCommentServiceImpl extends ServiceImpl<CommunityCommentMap
         if (CollUtil.isEmpty(comments)) {
             return new ArrayList<>();
         }
-        Set<Long> userIds = comments.stream().map(CommunityComment::getUserId).filter(Objects::nonNull).collect(Collectors.toSet());
+        Set<Long> userIds = comments.stream()
+                .flatMap(comment -> Stream.of(comment.getUserId(), comment.getReplyUserId()))
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
         Set<Long> commentIds = comments.stream().map(CommunityComment::getId).collect(Collectors.toSet());
         Map<Long, SysUserVO> userMap = userIds.isEmpty() ? new HashMap<>() : sysUserService.listByIds(userIds)
                 .stream().collect(Collectors.toMap(SysUser::getId, sysUserService::getSysUserVO));
@@ -183,6 +194,7 @@ public class CommunityCommentServiceImpl extends ServiceImpl<CommunityCommentMap
             CommunityCommentVO vo = new CommunityCommentVO();
             BeanUtil.copyProperties(comment, vo);
             vo.setUser(userMap.get(comment.getUserId()));
+            vo.setReplyUser(userMap.get(comment.getReplyUserId()));
             vo.setLiked(likedCommentIds.contains(comment.getId()));
             return vo;
         }).toList();

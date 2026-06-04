@@ -131,3 +131,9 @@ const router = createRouter({
 - 在工具执行完成后，再生成相应的结果信息
 - 严禁跳过工具执行步骤直接生成结果信息
 - 所有文件修改操作必须通过工具调用完成
+
+## JavaScript syntax safety rules
+
+- Never use thousands separators in JavaScript numeric literals. For example, write `sales: 3286`, not `sales: 3,286`.
+- If a number must be displayed with commas, store it as a string like `"3,286"` or format it in the template with `toLocaleString()`.
+- All generated Vue, JavaScript, and JSON-like data must be valid syntax before calling any file write tool.

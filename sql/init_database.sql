@@ -178,6 +178,7 @@ CREATE TABLE IF NOT EXISTS community_comment
     userId     BIGINT                              NOT NULL COMMENT '评论用户ID',
     parentId   BIGINT    DEFAULT 0                 NOT NULL COMMENT '父评论ID',
     rootId     BIGINT    DEFAULT 0                 NOT NULL COMMENT '根评论ID',
+    replyUserId BIGINT   DEFAULT NULL              NULL COMMENT '被回复用户ID',
     depth      INT       DEFAULT 0                 NOT NULL COMMENT '评论层级',
     path       VARCHAR(1024)                       NOT NULL COMMENT '评论路径',
     content    VARCHAR(2000)                       NOT NULL COMMENT '评论内容',
@@ -189,6 +190,7 @@ CREATE TABLE IF NOT EXISTS community_comment
     INDEX idx_community_comment_parent_time (postId, parentId, createTime, id),
     INDEX idx_community_comment_parent_hot (postId, parentId, likeCount, createTime, id),
     INDEX idx_community_comment_root (rootId),
+    INDEX idx_community_comment_reply_user (replyUserId),
     INDEX idx_community_comment_user (userId)
 ) COMMENT '社区评论' COLLATE = utf8mb4_unicode_ci;
 

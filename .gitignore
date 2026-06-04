@@ -4,6 +4,7 @@ target/
 tmp/
 /test/
 doc/
+test/
 scripts/
 sql/
 .codex_tmp/

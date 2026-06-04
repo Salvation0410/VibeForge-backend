@@ -22,6 +22,8 @@ public class CommunityCommentVO implements Serializable {
 
     private Long rootId;
 
+    private Long replyUserId;
+
     private Integer depth;
 
     private String path;
@@ -35,6 +37,8 @@ public class CommunityCommentVO implements Serializable {
     private LocalDateTime createTime;
 
     private SysUserVO user;
+
+    private SysUserVO replyUser;
 
     private Boolean liked;
 }

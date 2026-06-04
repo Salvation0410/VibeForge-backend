@@ -120,4 +120,6 @@ public interface SysUserService extends IService<SysUser> {
      * @return 是否成功
      */
     boolean updateUserByAdmin(Long id, SysUserUpdateRequest request, MultipartFile avatarFile);
+
+    boolean updateCurrentUser(SysUserUpdateRequest request, MultipartFile avatarFile, HttpServletRequest httpServletRequest);
 }

@@ -280,6 +280,40 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
      * @param httpServletRequest 请求对象
      * @return 用户实体
      */
+    @Override
+    public boolean updateCurrentUser(SysUserUpdateRequest request, MultipartFile avatarFile, HttpServletRequest httpServletRequest) {
+        ThrowUtils.throwIf(request == null, ErrorCode.PARAMS_ERROR, "更新参数不能为空");
+
+        SysUser currentUser = getLoginUser(httpServletRequest);
+        validateSelfUpdateRequest(request);
+        validateUniqueAccountAndEmail(null, normalizeEmail(request.getEmail()), currentUser.getId());
+
+        SysUser updateUser = new SysUser();
+        updateUser.setId(currentUser.getId());
+        if (request.getEmail() != null) {
+            updateUser.setEmail(normalizeEmail(request.getEmail()));
+        }
+        if (request.getNickname() != null) {
+            updateUser.setNickname(request.getNickname());
+        }
+        if (request.getUserProfile() != null) {
+            updateUser.setUserProfile(request.getUserProfile());
+        }
+
+        String avatarUrl = request.getAvatarUrl();
+        if (avatarFile != null && !avatarFile.isEmpty()) {
+            avatarUrl = ossManager.uploadAvatar(avatarFile);
+        }
+        if (avatarUrl != null) {
+            updateUser.setAvatarUrl(avatarUrl);
+        }
+
+        updateUser.setUpdateTime(LocalDateTime.now());
+        boolean result = this.updateById(updateUser);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "用户更新失败");
+        return true;
+    }
+
     private SysUser createUser(SysUserRegisterRequest request, MultipartFile avatarFile, boolean allowAssignRole,
                                HttpServletRequest httpServletRequest) {
         if (request == null) {
@@ -410,6 +444,17 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
      * @param email 邮箱
      * @param excludeId 需要排除的用户 id
      */
+    private void validateSelfUpdateRequest(SysUserUpdateRequest request) {
+        if (request.getEmail() != null) {
+            if (StrUtil.isBlank(request.getEmail())) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "邮箱不能为空字符串");
+            }
+            if (!Validator.isEmail(request.getEmail())) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "邮箱格式错误");
+            }
+        }
+    }
+
     private void validateUniqueAccountAndEmail(String account, String email, Long excludeId) {
         if (StrUtil.isNotBlank(account)) {
             QueryWrapper accountQuery = QueryWrapper.create().where("account = ?", account);

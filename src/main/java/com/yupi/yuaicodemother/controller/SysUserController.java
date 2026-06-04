@@ -162,6 +162,13 @@ public class SysUserController {
         return ResultUtils.success(sysUserService.getLoginUser(httpServletRequest));
     }
 
+    @PutMapping(value = "/profile", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public BaseResponse<Boolean> updateCurrentUserProfile(@ModelAttribute SysUserUpdateRequest request,
+                                                          @RequestParam(value = "avatarFile", required = false) MultipartFile avatarFile,
+                                                          HttpServletRequest httpServletRequest) {
+        return ResultUtils.success(sysUserService.updateCurrentUser(request, avatarFile, httpServletRequest));
+    }
+
     /**
      * 用户退出登录
      *

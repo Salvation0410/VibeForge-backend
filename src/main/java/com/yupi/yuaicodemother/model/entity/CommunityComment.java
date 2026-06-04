@@ -39,6 +39,9 @@ public class CommunityComment implements Serializable {
     @Column("rootId")
     private Long rootId;
 
+    @Column("replyUserId")
+    private Long replyUserId;
+
     private Integer depth;
 
     private String path;
