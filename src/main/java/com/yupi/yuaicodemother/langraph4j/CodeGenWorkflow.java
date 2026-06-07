@@ -1,5 +1,6 @@
 package com.yupi.yuaicodemother.langraph4j;
 
+import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.exception.ErrorCode;
 import com.yupi.yuaicodemother.langraph4j.node.*;
@@ -16,6 +17,7 @@ import java.util.Map;
 
 import static org.bsc.langgraph4j.StateGraph.END;
 import static org.bsc.langgraph4j.StateGraph.START;
+import static org.bsc.langgraph4j.action.AsyncEdgeAction.edge_async;
 
 /**
  * 实际包含真实业务的工作流
@@ -41,6 +43,15 @@ public class CodeGenWorkflow {
                     .addEdge("image_collector", "prompt_enhancer")
                     .addEdge("prompt_enhancer", "router")
                     .addEdge("router", "code_generator")
+                    // 使用条件边：根据代码生成类型决定是否需要构建
+                    .addConditionalEdges("code_generator",
+                            edge_async(this::routeBuildOrSkip),
+                            Map.of(
+                                    "build", "project_builder",  // 需要构建的情况
+                                    "skip_build", END             // 跳过构建直接结束
+                            ))
+                    .addEdge("project_builder", END)
+
                     .addEdge("code_generator", "project_builder")
                     .addEdge("project_builder", END)
 
@@ -49,6 +60,22 @@ public class CodeGenWorkflow {
         } catch (GraphStateException e) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "工作流创建失败");
         }
+    }
+
+    /**
+     * 路由：根据代码生成类型决定是否需要构建
+     * @param state
+     */
+    private String routeBuildOrSkip(MessagesState<String> state) {
+        //根据状态拿到工作流上下文
+        WorkflowContext context = WorkflowContext.getContext(state);
+        CodeGenTypeEnum generationType = context.getGenerationType();
+        // HTML 和 MULTI_FILE 类型不需要构建，直接结束
+        if (generationType == CodeGenTypeEnum.HTML || generationType == CodeGenTypeEnum.MULTI_FILE) {
+            return "skip_build";
+        }
+        // VUE_PROJECT 需要构建
+        return "build";
     }
 
     /**
