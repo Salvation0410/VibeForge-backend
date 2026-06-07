@@ -5,7 +5,6 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
-import com.yupi.yuaicodemother.ai.AiCodeGenTypeRoutingService;
 import com.yupi.yuaicodemother.annotation.AuthCheck;
 import com.yupi.yuaicodemother.common.BaseResponse;
 import com.yupi.yuaicodemother.common.DeleteRequest;
@@ -54,10 +53,6 @@ public class AppController {
 
     @Resource
     private ProjectDownloadService projectDownloadService;
-
-    @Resource
-    private AiCodeGenTypeRoutingService aiCodeGenTypeRoutingService;
-
 
     /**
      * 用户创建应用。

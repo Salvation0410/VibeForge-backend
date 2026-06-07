@@ -1,44 +1,46 @@
 package com.yupi.yuaicodemother.ai;
 
-import dev.langchain4j.model.openai.OpenAiChatModel;
+import com.yupi.yuaicodemother.utils.SpringContextUtil;
+import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
-import org.springframework.beans.factory.annotation.Value;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Scope;
 
 /**
- * AI 代码生成类型路由服务工厂
+ * AI code generation type routing service factory.
  */
 @Configuration
+@Slf4j
 public class AiCodeGenTypeRoutingServiceFactory {
 
-    @Value("${langchain4j.open-ai.chat-model.base-url}")
-    private String baseUrl;
+    private static final String ROUTING_CHAT_MODEL_PROTOTYPE = "routingChatModelPrototype";
 
-    @Value("${langchain4j.open-ai.chat-model.api-key}")
-    private String apiKey;
-
-    @Value("${langchain4j.open-ai.chat-model.model-name}")
-    private String modelName;
-
-    @Value("${langchain4j.open-ai.chat-model.max-tokens}")
-    private Integer maxTokens;
 
     /**
-     * 为路由场景单独构建 ChatModel，避免复用全局 json_object 响应格式配置。
+     * 创建 AI服务
+     * @return
      */
-    @Bean
-    public AiCodeGenTypeRoutingService aiCodeGenTypeRoutingService() {
-        OpenAiChatModel routingChatModel = OpenAiChatModel.builder()
-                .baseUrl(baseUrl)
-                .apiKey(apiKey)
-                .modelName(modelName)
-                .maxTokens(maxTokens)
-                .logRequests(true)
-                .logResponses(true)
-                .build();
+    public AiCodeGenTypeRoutingService createAiCodeGenTypeRoutingService() {
+        ChatModel routingChatModel = SpringContextUtil.getBean(ROUTING_CHAT_MODEL_PROTOTYPE, ChatModel.class);
+        log.info("Create routing AI service, thread: {}, chatModel: {}@{}",
+                Thread.currentThread().getName(),
+                routingChatModel.getClass().getName(),
+                System.identityHashCode(routingChatModel));
+
         return AiServices.builder(AiCodeGenTypeRoutingService.class)
                 .chatModel(routingChatModel)
                 .build();
+    }
+
+    /**
+     * 兼容老逻辑 默认提供一个Bean
+     * @return
+     */
+    @Bean
+    //@Scope("prototype")
+    public AiCodeGenTypeRoutingService aiCodeGenTypeRoutingService() {
+        return createAiCodeGenTypeRoutingService();
     }
 }
