@@ -8,6 +8,7 @@ import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.exception.ErrorCode;
 import com.yupi.yuaicodemother.guardrail.PromptSafetyInputGuardrail;
+import com.yupi.yuaicodemother.guardrail.RetryOutputGuardrail;
 import com.yupi.yuaicodemother.service.ChatHistoryOriginalService;
 import com.yupi.yuaicodemother.service.ChatHistoryService;
 import com.yupi.yuaicodemother.utils.SpringContextUtil;
@@ -119,6 +120,8 @@ public class AiCodeGeneratorServiceFactory {
                                 toolExecutionRequest, "Error: there is no tool called " + toolExecutionRequest.name()
                         ))
                         .inputGuardrails(new PromptSafetyInputGuardrail())
+                        //为了使用流式输出 这里不使用输出护轨
+                        //.outputGuardrails(new RetryOutputGuardrail())
                         .build();
             }
             case HTML, MULTI_FILE -> {
@@ -133,6 +136,7 @@ public class AiCodeGeneratorServiceFactory {
                         .streamingChatModel(openAiStreamingChatModel)
                         .chatMemory(chatMemory)
                         .inputGuardrails(new PromptSafetyInputGuardrail())
+                        //.outputGuardrails(new RetryOutputGuardrail())
                         .build();
             }
             default -> throw new BusinessException(ErrorCode.SYSTEM_ERROR, "不支持的代码生成类型: " + codeGenType.getValue());
