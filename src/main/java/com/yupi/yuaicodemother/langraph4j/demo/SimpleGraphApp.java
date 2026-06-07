@@ -1,4 +1,4 @@
-package com.yupi.yuaicodemother.langrapg4j.demo;
+package com.yupi.yuaicodemother.langraph4j.demo;
 
 import org.bsc.langgraph4j.StateGraph;
 import org.bsc.langgraph4j.GraphStateException;
@@ -6,7 +6,6 @@ import static org.bsc.langgraph4j.action.AsyncNodeAction.node_async;
 import static org.bsc.langgraph4j.StateGraph.START;
 import static org.bsc.langgraph4j.StateGraph.END;
 
-import java.util.List;
 import java.util.Map;
 
 public class SimpleGraphApp {

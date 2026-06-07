@@ -16,6 +16,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Set;
@@ -52,6 +53,43 @@ public class OssManager {
         validateOssConfig();
         String objectKey = buildImageObjectKey("community-image", imageFile.getOriginalFilename());
         return uploadImageFile(imageFile, objectKey, "社区图片");
+    }
+
+    /**
+     * Uploads a local file and returns the public URL.
+     */
+    public String uploadFile(String objectKey, File file) {
+        ThrowUtils.throwIf(StrUtil.isBlank(objectKey), ErrorCode.PARAMS_ERROR, "OSS objectKey cannot be blank");
+        ThrowUtils.throwIf(file == null || !file.exists() || !file.isFile(), ErrorCode.PARAMS_ERROR, "File does not exist");
+        validateOssConfig();
+
+        String normalizedObjectKey = normalizeObjectKey(objectKey);
+        String endpoint = normalizeEndpoint(ossProperties.getEndpoint());
+        ObjectMetadata metadata = new ObjectMetadata();
+        metadata.setContentLength(file.length());
+        metadata.setContentType(StrUtil.blankToDefault(FileUtil.getMimeType(file.getName()), "application/octet-stream"));
+
+        try (InputStream inputStream = FileUtil.getInputStream(file)) {
+            OSS ossClient = new OSSClientBuilder().build(
+                    endpoint,
+                    ossProperties.getAccessKeyId(),
+                    ossProperties.getAccessKeySecret()
+            );
+            try {
+                PutObjectRequest putObjectRequest = new PutObjectRequest(
+                        ossProperties.getBucketName(),
+                        normalizedObjectKey,
+                        inputStream,
+                        metadata
+                );
+                ossClient.putObject(putObjectRequest);
+            } finally {
+                ossClient.shutdown();
+            }
+            return buildFileUrl(normalizedObjectKey);
+        } catch (Exception e) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "File upload to OSS failed");
+        }
     }
 
     private String uploadImageFile(MultipartFile imageFile, String objectKey, String bizName) {
@@ -125,6 +163,10 @@ public class OssManager {
         }
         String endpoint = normalizeEndpoint(ossProperties.getEndpoint());
         return StrUtil.format("{}/{}/{}", endpoint, ossProperties.getBucketName(), objectKey);
+    }
+
+    private String normalizeObjectKey(String objectKey) {
+        return StrUtil.removePrefix(objectKey, "/");
     }
 
     private String normalizeEndpoint(String endpoint) {
