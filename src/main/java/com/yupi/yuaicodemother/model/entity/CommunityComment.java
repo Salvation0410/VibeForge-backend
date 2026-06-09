@@ -48,11 +48,22 @@ public class CommunityComment implements Serializable {
 
     private String content;
 
+    private String status;
+
     @Column("likeCount")
     private Integer likeCount;
 
     @Column("replyCount")
     private Integer replyCount;
+
+    @Column("reviewerId")
+    private Long reviewerId;
+
+    @Column("reviewTime")
+    private LocalDateTime reviewTime;
+
+    @Column("rejectReason")
+    private String rejectReason;
 
     @Column("createTime")
     private LocalDateTime createTime;

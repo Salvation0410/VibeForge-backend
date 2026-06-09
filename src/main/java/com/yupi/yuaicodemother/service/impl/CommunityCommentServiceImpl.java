@@ -8,6 +8,7 @@ import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.yupi.yuaicodemother.common.CursorPage;
 import com.yupi.yuaicodemother.common.PageRequest;
+import com.yupi.yuaicodemother.enums.CommunityCommentStatusEnum;
 import com.yupi.yuaicodemother.enums.CommunityPostStatusEnum;
 import com.yupi.yuaicodemother.enums.CommunitySortTypeEnum;
 import com.yupi.yuaicodemother.exception.ErrorCode;
@@ -16,6 +17,7 @@ import com.yupi.yuaicodemother.mapper.CommunityCommentMapper;
 import com.yupi.yuaicodemother.model.dto.community.CommunityCommentAddRequest;
 import com.yupi.yuaicodemother.model.dto.community.CommunityCommentAdminQueryRequest;
 import com.yupi.yuaicodemother.model.dto.community.CommunityCommentQueryRequest;
+import com.yupi.yuaicodemother.model.dto.community.CommunityCommentReviewRequest;
 import com.yupi.yuaicodemother.model.entity.CommunityComment;
 import com.yupi.yuaicodemother.model.entity.CommunityCommentLike;
 import com.yupi.yuaicodemother.model.entity.CommunityPost;
@@ -32,6 +34,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -90,6 +93,7 @@ public class CommunityCommentServiceImpl extends ServiceImpl<CommunityCommentMap
         comment.setParentId(rootComment == null ? 0L : rootComment.getId());
         comment.setReplyUserId(repliedComment == null ? null : repliedComment.getUserId());
         comment.setContent(request.getContent());
+        comment.setStatus(CommunityCommentStatusEnum.APPROVED.getValue());
         comment.setLikeCount(0);
         comment.setReplyCount(0);
         // 先保存拿到雪花 ID，再回写 rootId/path，保证历史路径查询和后台删除仍然可用。
@@ -148,6 +152,8 @@ public class CommunityCommentServiceImpl extends ServiceImpl<CommunityCommentMap
         ThrowUtils.throwIf(loginUser == null, ErrorCode.NOT_LOGIN_ERROR);
         CommunityComment comment = this.getById(commentId);
         ThrowUtils.throwIf(comment == null, ErrorCode.NOT_FOUND_ERROR, "评论不存在");
+        ThrowUtils.throwIf(!CommunityCommentStatusEnum.APPROVED.getValue().equals(normalizeCommentStatus(comment.getStatus())),
+                ErrorCode.NO_AUTH_ERROR, "只能点赞已通过的评论");
 
         QueryWrapper likeQuery = QueryWrapper.create()
                 .eq("commentId", commentId)
@@ -243,11 +249,65 @@ public class CommunityCommentServiceImpl extends ServiceImpl<CommunityCommentMap
         return true;
     }
 
+    @Override
+    @Transactional
+    public Boolean reviewComment(CommunityCommentReviewRequest request, SysUser adminUser) {
+        ThrowUtils.throwIf(request == null || request.getCommentId() == null,
+                ErrorCode.PARAMS_ERROR, "Invalid review request");
+        ThrowUtils.throwIf(adminUser == null, ErrorCode.NOT_LOGIN_ERROR);
+        CommunityCommentStatusEnum statusEnum = CommunityCommentStatusEnum.getEnumByValue(request.getStatus());
+        ThrowUtils.throwIf(statusEnum == null, ErrorCode.PARAMS_ERROR, "Status must be APPROVED or REJECTED");
+        ThrowUtils.throwIf(CommunityCommentStatusEnum.REJECTED.equals(statusEnum)
+                        && StrUtil.isBlank(request.getRejectReason()),
+                ErrorCode.PARAMS_ERROR, "Reject reason is required");
+
+        CommunityComment comment = this.getById(request.getCommentId());
+        ThrowUtils.throwIf(comment == null, ErrorCode.NOT_FOUND_ERROR, "Comment not found");
+
+        List<CommunityComment> subtreeComments = listCommentSubtree(comment);
+        String nextStatus = statusEnum.getValue();
+        List<CommunityComment> changedComments = subtreeComments.stream()
+                .filter(item -> !nextStatus.equals(normalizeCommentStatus(item.getStatus())))
+                .toList();
+        if (changedComments.isEmpty()) {
+            return true;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        String rejectReason = CommunityCommentStatusEnum.REJECTED.equals(statusEnum)
+                ? request.getRejectReason().trim()
+                : null;
+        List<CommunityComment> updateComments = changedComments.stream()
+                .map(item -> {
+                    CommunityComment updateComment = new CommunityComment();
+                    updateComment.setId(item.getId());
+                    updateComment.setStatus(nextStatus);
+                    updateComment.setReviewerId(adminUser.getId());
+                    updateComment.setReviewTime(now);
+                    updateComment.setRejectReason(rejectReason);
+                    return updateComment;
+                })
+                .toList();
+        boolean updated = updateComments.stream().allMatch(this::updateById);
+        ThrowUtils.throwIf(!updated, ErrorCode.OPERATION_ERROR, "Review comment failed");
+
+        int visibleDelta = CommunityCommentStatusEnum.APPROVED.equals(statusEnum)
+                ? changedComments.size()
+                : -changedComments.size();
+        adjustPostCommentCount(comment.getPostId(), visibleDelta);
+        int parentReplyDelta = changedComments.stream().anyMatch(item -> item.getId().equals(comment.getId()))
+                ? (CommunityCommentStatusEnum.APPROVED.equals(statusEnum) ? 1 : -1)
+                : 0;
+        adjustParentReplyCount(comment.getParentId(), parentReplyDelta);
+        return true;
+    }
+
     private QueryWrapper buildCommentQuery(CommunityCommentQueryRequest request, CommunitySortTypeEnum sortType) {
         Long parentId = Optional.ofNullable(request.getParentId()).orElse(0L);
         QueryWrapper queryWrapper = QueryWrapper.create()
                 .eq("postId", request.getPostId())
-                .eq("parentId", parentId);
+                .eq("parentId", parentId)
+                .eq("status", CommunityCommentStatusEnum.APPROVED.getValue());
         CommunityCursorUtils.CursorPayload cursor = CommunityCursorUtils.decodeCursor(request.getCursor());
         // 评论游标和排序字段保持一致，避免同赞数或同时间评论翻页重复。
         if (cursor.getLastId() != null && cursor.getLastCreateTime() != null) {
@@ -321,6 +381,11 @@ public class CommunityCommentServiceImpl extends ServiceImpl<CommunityCommentMap
         if (request.getUserId() != null && request.getUserId() > 0) {
             queryWrapper.eq("userId", request.getUserId());
         }
+        if (StrUtil.isNotBlank(request.getStatus())) {
+            CommunityCommentStatusEnum statusEnum = CommunityCommentStatusEnum.getEnumByValue(request.getStatus());
+            ThrowUtils.throwIf(statusEnum == null, ErrorCode.PARAMS_ERROR, "Unsupported comment status");
+            queryWrapper.eq("status", statusEnum.getValue());
+        }
         if (StrUtil.isNotBlank(request.getKeyword())) {
             queryWrapper.like("content", request.getKeyword().trim());
         }
@@ -376,5 +441,47 @@ public class CommunityCommentServiceImpl extends ServiceImpl<CommunityCommentMap
         updatePost.setId(postId);
         updatePost.setCommentCount(Math.max(0, Optional.ofNullable(post.getCommentCount()).orElse(0) - deletedCount));
         communityPostService.updateById(updatePost);
+    }
+
+    private List<CommunityComment> listCommentSubtree(CommunityComment comment) {
+        String commentPath = Optional.ofNullable(comment.getPath()).orElse("");
+        if (StrUtil.isBlank(commentPath)) {
+            return List.of(comment);
+        }
+        QueryWrapper subtreeQuery = QueryWrapper.create().and("path like ?", commentPath + "%");
+        List<CommunityComment> subtreeComments = this.list((QueryWrapper) subtreeQuery);
+        return subtreeComments.isEmpty() ? List.of(comment) : subtreeComments;
+    }
+
+    private String normalizeCommentStatus(String status) {
+        return StrUtil.isBlank(status) ? CommunityCommentStatusEnum.APPROVED.getValue() : status;
+    }
+
+    private void adjustPostCommentCount(Long postId, int delta) {
+        if (postId == null || postId <= 0 || delta == 0) {
+            return;
+        }
+        CommunityPost post = communityPostService.getById(postId);
+        if (post == null) {
+            return;
+        }
+        CommunityPost updatePost = new CommunityPost();
+        updatePost.setId(postId);
+        updatePost.setCommentCount(Math.max(0, Optional.ofNullable(post.getCommentCount()).orElse(0) + delta));
+        communityPostService.updateById(updatePost);
+    }
+
+    private void adjustParentReplyCount(Long parentId, int delta) {
+        if (parentId == null || parentId <= 0 || delta == 0) {
+            return;
+        }
+        CommunityComment parent = this.getById(parentId);
+        if (parent == null) {
+            return;
+        }
+        CommunityComment updateParent = new CommunityComment();
+        updateParent.setId(parentId);
+        updateParent.setReplyCount(Math.max(0, Optional.ofNullable(parent.getReplyCount()).orElse(0) + delta));
+        this.updateById(updateParent);
     }
 }

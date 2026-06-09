@@ -30,9 +30,17 @@ public class CommunityCommentVO implements Serializable {
 
     private String content;
 
+    private String status;
+
     private Integer likeCount;
 
     private Integer replyCount;
+
+    private Long reviewerId;
+
+    private LocalDateTime reviewTime;
+
+    private String rejectReason;
 
     private LocalDateTime createTime;
 

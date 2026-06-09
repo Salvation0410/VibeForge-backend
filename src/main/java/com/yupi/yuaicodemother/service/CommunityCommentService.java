@@ -6,6 +6,7 @@ import com.yupi.yuaicodemother.common.CursorPage;
 import com.yupi.yuaicodemother.model.dto.community.CommunityCommentAddRequest;
 import com.yupi.yuaicodemother.model.dto.community.CommunityCommentAdminQueryRequest;
 import com.yupi.yuaicodemother.model.dto.community.CommunityCommentQueryRequest;
+import com.yupi.yuaicodemother.model.dto.community.CommunityCommentReviewRequest;
 import com.yupi.yuaicodemother.model.entity.CommunityComment;
 import com.yupi.yuaicodemother.model.entity.SysUser;
 import com.yupi.yuaicodemother.model.vo.CommunityCommentVO;
@@ -49,4 +50,9 @@ public interface CommunityCommentService extends IService<CommunityComment> {
      * Soft deletes a comment subtree and repairs denormalized counters.
      */
     Boolean adminDeleteComment(Long commentId);
+
+    /**
+     * Reviews a comment subtree and repairs public counters for visible comments.
+     */
+    Boolean reviewComment(CommunityCommentReviewRequest request, SysUser adminUser);
 }

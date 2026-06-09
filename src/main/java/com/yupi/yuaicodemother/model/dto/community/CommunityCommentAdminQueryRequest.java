@@ -21,5 +21,7 @@ public class CommunityCommentAdminQueryRequest extends PageRequest {
 
     private Long userId;
 
+    private String status;
+
     private String keyword;
 }

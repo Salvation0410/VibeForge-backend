@@ -11,6 +11,7 @@ import com.mybatisflex.core.paginate.Page;
 import com.yupi.yuaicodemother.model.dto.community.CommunityCommentAddRequest;
 import com.yupi.yuaicodemother.model.dto.community.CommunityCommentAdminQueryRequest;
 import com.yupi.yuaicodemother.model.dto.community.CommunityCommentQueryRequest;
+import com.yupi.yuaicodemother.model.dto.community.CommunityCommentReviewRequest;
 import com.yupi.yuaicodemother.model.entity.SysUser;
 import com.yupi.yuaicodemother.model.vo.CommunityCommentVO;
 import com.yupi.yuaicodemother.model.vo.CommunityLikeResultVO;
@@ -93,6 +94,16 @@ public class CommunityCommentController {
     @DeleteMapping("/admin/{id}")
     public BaseResponse<Boolean> deleteCommentByAdmin(@PathVariable Long id) {
         return ResultUtils.success(communityCommentService.adminDeleteComment(id));
+    }
+
+    /**
+     * 绠＄悊鍛樺鏍歌瘎璁猴紝浼氭寜璇勮瀛愭爲鎵归噺閫氳繃鎴栭┏鍥炪€?     */
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @PostMapping("/admin/review")
+    public BaseResponse<Boolean> reviewComment(@RequestBody CommunityCommentReviewRequest reviewRequest,
+                                               HttpServletRequest request) {
+        SysUser loginUser = sysUserService.getLoginUser(request);
+        return ResultUtils.success(communityCommentService.reviewComment(reviewRequest, loginUser));
     }
 
     private SysUser getLoginUserOrNull(HttpServletRequest request) {
