@@ -85,10 +85,12 @@ def create_app(
             )
 
     @app.get("/internal/v1/health/live")
+    @app.get("/health/live")
     async def live() -> dict[str, str]:
         return {"status": "live"}
 
     @app.get("/internal/v1/health/ready")
+    @app.get("/health/ready")
     async def ready():
         ready_state = await checkpoint_store.ping()
         body = {"status": "ready" if ready_state else "not_ready", "checkpoint": ready_state}
