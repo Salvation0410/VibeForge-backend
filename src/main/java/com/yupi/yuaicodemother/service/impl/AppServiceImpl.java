@@ -8,11 +8,8 @@ import cn.hutool.core.util.StrUtil;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
-import com.yupi.yuaicodemother.ai.AiCodeGenTypeRoutingService;
-import com.yupi.yuaicodemother.ai.AiCodeGenTypeRoutingServiceFactory;
-import com.yupi.yuaicodemother.ai.AiCodeGeneratorServiceFactory;
+import com.yupi.yuaicodemother.ai.gateway.AiGenerationGateway;
 import com.yupi.yuaicodemother.constant.AppConstant;
-import com.yupi.yuaicodemother.core.AiCodeGeneratorFacade;
 import com.yupi.yuaicodemother.core.builder.VueProjectBuilder;
 import com.yupi.yuaicodemother.core.handler.StreamHandlerExecutor;
 import com.yupi.yuaicodemother.enums.ChatHistoryMessageTypeEnum;
@@ -55,7 +52,7 @@ import java.util.stream.Collectors;
 public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppService {
 
     private final SysUserService userService;
-    private final AiCodeGeneratorFacade aiCodeGeneratorFacade;
+    private final AiGenerationGateway aiGenerationGateway;
     private final ChatHistoryService chatHistoryService;
 
     @Resource
@@ -69,10 +66,6 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
 
     @Resource
     private ChatHistoryOriginalService chatHistoryOriginalService;
-
-    //智能路由创建工厂
-    @Resource
-    private AiCodeGenTypeRoutingServiceFactory aiCodeGenTypeRoutingServiceFactory;
 
     /**
      * 对话生成代码
@@ -110,7 +103,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
                 loginUser.getId()
         );
 
-        Flux<String> contentStream = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId);
+        String requestId = java.util.UUID.randomUUID().toString();
+        Flux<String> contentStream = aiGenerationGateway.generate(message, codeGenTypeEnum, appId,
+                loginUser.getId(), requestId);
         return streamHandlerExecutor.doExecute(contentStream, chatHistoryService, chatHistoryOriginalService, appId, loginUser, codeGenTypeEnum);
     }
 
@@ -186,8 +181,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         app.setUserId(loginUser.getId());
         app.setAppName(initPrompt.substring(0, Math.min(initPrompt.length(), 12)));
         //使用Ai 智能选择代码生成类型
-        AiCodeGenTypeRoutingService routingService = aiCodeGenTypeRoutingServiceFactory.createAiCodeGenTypeRoutingService();
-        CodeGenTypeEnum selectedCodeGenType = routingService.routeCodeGenType(initPrompt);
+        String requestId = java.util.UUID.randomUUID().toString();
+        CodeGenTypeEnum selectedCodeGenType = aiGenerationGateway.route(initPrompt, null,
+                loginUser.getId(), requestId);
         app.setCodeGenType(selectedCodeGenType.getValue());
         boolean result = this.save(app);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);

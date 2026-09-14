@@ -47,3 +47,11 @@ logging:
   level:
     org.openqa.selenium.devtools.CdpVersionFinder: ERROR
     org.openqa.selenium.chromium.ChromiumDriver: ERROR
+
+# AI 引擎：legacy 保持本地链路；langgraph 全量切换；gray 按白名单/比例切换。
+ai:
+  engine: ${AI_ENGINE:legacy}
+  service-url: ${AI_SERVICE_URL:http://localhost:8000}
+  token: ${AI_SERVICE_INTERNAL_BEARER_TOKEN:}
+  gray-whitelist: []
+  gray-percentage: 0
