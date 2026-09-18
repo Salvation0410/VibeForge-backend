@@ -68,11 +68,16 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     private ChatHistoryOriginalService chatHistoryOriginalService;
 
     /**
-     * 对话生成代码
-     * @param appId 应用id
-     * @param message 用户消息
-     * @param loginUser 登录用户
-     * @return
+     * 校验应用访问权限、记录用户消息，并通过统一 AI 网关执行流式代码生成。
+     * <p>
+     * 网关会根据引擎配置选择 Legacy 或 LangGraph 实现，返回的数据继续交给既有流处理器，
+     * 由其完成消息格式转换和聊天记录持久化。
+     *
+     * @param appId 要生成或修改代码的应用 ID
+     * @param message 用户本次输入的生成需求
+     * @param loginUser 当前登录用户
+     * @return 面向控制器 SSE 响应的字符串数据流
+     * @throws BusinessException 应用不存在、用户无权访问或生成类型不受支持时抛出
      */
     @Override
     public Flux<String> chatToGenCode(Long appId, String message, SysUser loginUser) {
@@ -170,6 +175,17 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         });
     }
 
+    /**
+     * 创建应用并通过统一 AI 网关判断初始代码生成类型。
+     * <p>
+     * 方法根据初始提示词设置应用名称和所属用户，完成类型路由后持久化应用，
+     * 返回数据库生成的应用 ID。
+     *
+     * @param appAddRequest 包含初始提示词的应用创建请求
+     * @param loginUser 当前登录用户
+     * @return 新建应用 ID
+     * @throws BusinessException 初始提示词为空、类型路由失败或应用保存失败时抛出
+     */
     @Override
     public Long createApp(AppAddRequest appAddRequest, SysUser loginUser) {
         //参数校验

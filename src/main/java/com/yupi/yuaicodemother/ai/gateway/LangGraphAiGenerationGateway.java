@@ -20,7 +20,9 @@ import java.io.InputStreamReader;
 import java.time.Duration;
 import java.util.Map;
 
-/** 调用独立 LangGraph 服务并把 NDJSON 事件适配为历史 SSE 使用的流。 */
+/**
+ * 独立 LangGraph AI 服务的 HTTP 适配器，将内部 NDJSON 事件转换为既有 SSE 处理链可消费的数据。
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -30,6 +32,16 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10)).build();
 
+    /**
+     * 同步调用 Python 路由接口，并将返回值转换为 Java 代码生成枚举。
+     *
+     * @param prompt 用户输入的应用生成需求
+     * @param appId 应用 ID；创建阶段可以为空
+     * @param userId 当前用户 ID
+     * @param requestId 本次路由请求的唯一标识
+     * @return LangGraph 服务选择的代码生成类型
+     * @throws IllegalStateException 请求失败、响应非成功状态或返回未知类型时抛出
+     */
     @Override
     public CodeGenTypeEnum route(String prompt, Long appId, Long userId, String requestId) {
         try {
@@ -51,6 +63,18 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
         }
     }
 
+    /**
+     * 异步调用 Python 流式生成接口，并逐行消费 NDJSON 响应。
+     * <p>
+     * HTTP 或协议解析错误通过返回的 {@link Flux} 错误信号向下游传播。
+     *
+     * @param prompt 用户输入的代码生成或修改需求
+     * @param codeGenType 应用代码生成类型
+     * @param appId 应用 ID
+     * @param userId 当前用户 ID，会写入请求元数据
+     * @param requestId 本次生成请求的唯一标识
+     * @return 已转换为旧流消息格式的字符串数据流
+     */
     @Override
     public Flux<String> generate(String prompt, CodeGenTypeEnum codeGenType, Long appId, Long userId, String requestId) {
         return Flux.create(sink -> {
@@ -86,6 +110,14 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
         });
     }
 
+    /**
+     * 构造携带 JSON 请求体、超时设置和内部 Bearer 令牌的 HTTP 请求。
+     *
+     * @param path Python AI 服务内部接口路径
+     * @param body 需要序列化为 JSON 的请求对象
+     * @return 可由共享 {@link HttpClient} 发送的 HTTP 请求
+     * @throws Exception 请求体序列化或 URI 构造失败时抛出
+     */
     private HttpRequest buildRequest(String path, Object body) throws Exception {
         String json = objectMapper.writeValueAsString(body);
         return HttpRequest.newBuilder(URI.create(properties.getServiceUrl().replaceAll("/$", "") + path))
@@ -94,6 +126,17 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
                 .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8)).build();
     }
 
+    /**
+     * 将单行 LangGraph NDJSON 事件转换为现有流处理器使用的消息格式。
+     * <p>
+     * HTML 和多文件内容事件直接返回文本；Vue 内容与工具事件转换为带类型的 JSON 消息；
+     * 状态类事件不向前端输出，失败事件转换为异常。
+     *
+     * @param line Python 服务返回的一行 NDJSON 文本
+     * @param codeGenType 当前应用代码生成类型
+     * @return 旧流处理器可消费的文本；无需下发的事件返回空字符串
+     * @throws IllegalStateException 事件不是合法 JSON 或事件声明失败时抛出
+     */
     private String eventToLegacyMessage(String line, CodeGenTypeEnum codeGenType) {
         try {
             if (line == null || line.isBlank()) return "";
@@ -121,6 +164,13 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
         }
     }
 
+    /**
+     * 校验内部 HTTP 响应状态，非 2xx 状态统一转换为调用异常。
+     *
+     * @param status HTTP 状态码
+     * @param body 错误响应正文，用于诊断调用失败原因
+     * @throws IllegalStateException 响应状态不是 2xx 时抛出
+     */
     private void ensureSuccess(int status, String body) {
         if (HttpStatusCode.valueOf(status).is2xxSuccessful()) return;
         throw new IllegalStateException("LangGraph request failed: HTTP " + status + " " + body);

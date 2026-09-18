@@ -27,7 +27,12 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** 独立 AI 服务调用的 Spring 文件/构建工具边界。 */
+/**
+ * 独立 Python AI 服务调用的 Spring 文件与构建工具边界。
+ * <p>
+ * 控制器统一负责内部鉴权、工具调用幂等、应用目录沙箱和危险文件保护，
+ * 避免 Python 服务直接访问项目文件系统。
+ */
 @RestController
 @RequestMapping("/internal/ai-tools")
 @RequiredArgsConstructor
@@ -40,6 +45,16 @@ public class InternalAiToolsController {
     private final VueProjectBuilder projectBuilder;
     private final ObjectMapper objectMapper;
 
+    /**
+     * 校验内部调用身份并执行指定工具，同一 {@code toolCallId} 只执行一次。
+     * <p>
+     * 首次调用结果会序列化后保存在进程内幂等缓存中，重复请求直接返回原结果。
+     *
+     * @param authorization Python 服务携带的 Bearer 认证头
+     * @param request 工具调用 ID、工具名称和参数
+     * @return Spring 统一响应包装的工具执行结果
+     * @throws BusinessException 认证失败、请求参数无效或工具执行失败时抛出
+     */
     @PostMapping("/invoke")
     public BaseResponse<Map<String, Object>> invoke(@RequestHeader(value = "Authorization", required = false) String authorization,
                                                     @RequestBody ToolRequest request) {
@@ -65,6 +80,14 @@ public class InternalAiToolsController {
         }
     }
 
+    /**
+     * 根据工具名称分发到具体的文件、产物校验或项目构建方法。
+     *
+     * @param toolName Python 工作流请求的工具名称，兼容多种历史命名格式
+     * @param args 工具参数，必须包含应用 ID
+     * @return 具体工具产生的结构化结果
+     * @throws BusinessException 缺少应用 ID 或工具名称不受支持时抛出
+     */
     private Map<String, Object> execute(String toolName, Map<String, Object> args) {
         long appId = number(args.get("appId"), "appId");
         return switch (toolName) {
@@ -79,6 +102,14 @@ public class InternalAiToolsController {
         };
     }
 
+    /**
+     * 在应用沙箱内创建或覆盖 UTF-8 文件，并按需创建父目录。
+     *
+     * @param appId 应用 ID，用于确定独立项目目录
+     * @param args 包含相对文件路径、文件内容和代码生成类型的参数
+     * @return 写入状态和目标文件名
+     * @throws BusinessException 路径非法或文件写入失败时抛出
+     */
     private Map<String, Object> writeFile(long appId, Map<String, Object> args) {
         Path path = sandboxPath(appId, args, "relativeFilePath", false);
         String content = text(args.get("content"));
@@ -89,6 +120,14 @@ public class InternalAiToolsController {
         } catch (Exception e) { throw failure("file write failed", e); }
     }
 
+    /**
+     * 在应用沙箱内用新内容替换文件中的指定旧内容。
+     *
+     * @param appId 应用 ID，用于确定独立项目目录
+     * @param args 包含相对文件路径、旧内容、新内容和代码生成类型的参数
+     * @return 是否修改成功；找不到旧内容时返回失败说明
+     * @throws BusinessException 路径非法、文件不存在或读写失败时抛出
+     */
     private Map<String, Object> modifyFile(long appId, Map<String, Object> args) {
         Path path = sandboxPath(appId, args, "relativeFilePath", false);
         try {
@@ -101,6 +140,14 @@ public class InternalAiToolsController {
         } catch (Exception e) { throw failure("file modify failed", e); }
     }
 
+    /**
+     * 删除应用沙箱内的普通文件，并阻止删除项目关键入口和构建配置文件。
+     *
+     * @param appId 应用 ID，用于确定独立项目目录
+     * @param args 包含相对文件路径和代码生成类型的参数
+     * @return 文件是否实际被删除
+     * @throws BusinessException 路径非法、文件受保护或删除失败时抛出
+     */
     private Map<String, Object> deleteFile(long appId, Map<String, Object> args) {
         Path path = sandboxPath(appId, args, "relativeFilePath", false);
         String name = path.getFileName().toString();
@@ -110,21 +157,48 @@ public class InternalAiToolsController {
         catch (Exception e) { throw failure("file delete failed", e); }
     }
 
+    /**
+     * 对模型生成产物执行基础非空校验，为 LangGraph 质量流程提供结构化结果。
+     *
+     * @param args 包含待校验 {@code artifact} 的工具参数
+     * @return 校验状态和错误列表
+     */
     private Map<String, Object> validateArtifact(Map<String, Object> args) {
         String artifact = text(args.get("artifact"));
         return Map.of("valid", !artifact.isBlank(), "errors", artifact.isBlank() ? java.util.List.of("artifact is blank") : java.util.List.of());
     }
 
+    /**
+     * 定位应用项目目录并确保项目完成构建。
+     *
+     * @param appId 应用 ID，用于确定独立项目目录
+     * @param args 包含代码生成类型的工具参数
+     * @return 构建状态和项目绝对路径
+     */
     private Map<String, Object> buildProject(long appId, Map<String, Object> args) {
         Path root = projectRoot(appId, text(args.get("codeGenType")));
         return Map.of("built", projectBuilder.ensureProjectBuilt(root.toString()), "path", root.toString());
     }
 
+    /**
+     * 以 UTF-8 读取已通过沙箱校验的文件。
+     *
+     * @param path 应用沙箱内的规范化文件路径
+     * @return 文件完整文本内容
+     * @throws BusinessException 文件读取失败时抛出
+     */
     private String readFile(Path path) {
         try { return Files.readString(path, StandardCharsets.UTF_8); }
         catch (Exception e) { throw failure("file read failed", e); }
     }
 
+    /**
+     * 递归读取应用沙箱目录，并返回按路径排序的普通文件相对路径。
+     *
+     * @param path 已通过沙箱校验的目录路径
+     * @return 目录下所有普通文件的相对路径列表
+     * @throws BusinessException 目录遍历失败时抛出
+     */
     private java.util.List<String> readDir(Path path) {
         try (var stream = Files.walk(path)) {
             return stream.filter(Files::isRegularFile).sorted(Comparator.comparing(Path::toString))
@@ -132,6 +206,16 @@ public class InternalAiToolsController {
         } catch (Exception e) { throw failure("directory read failed", e); }
     }
 
+    /**
+     * 将工具传入的相对路径解析到对应应用根目录，并阻止绝对路径和目录穿越。
+     *
+     * @param appId 应用 ID，用于确定独立项目目录
+     * @param args 包含相对路径和代码生成类型的工具参数
+     * @param key 相对路径在参数 Map 中的字段名
+     * @param directory 是否允许空路径表示项目根目录
+     * @return 位于应用沙箱内的规范化绝对路径
+     * @throws BusinessException 路径缺失、使用绝对路径或越过应用根目录时抛出
+     */
     private Path sandboxPath(long appId, Map<String, Object> args, String key, boolean directory) {
         String relative = text(args.get(key));
         if (relative.isBlank() && !directory) throw new BusinessException(ErrorCode.PARAMS_ERROR, key + " is required");
@@ -142,6 +226,13 @@ public class InternalAiToolsController {
         return path;
     }
 
+    /**
+     * 根据应用 ID 和代码生成类型计算该应用唯一的代码输出根目录。
+     *
+     * @param appId 应用 ID
+     * @param codeGenType HTML、多文件或 Vue 项目类型；未知类型按 Vue 项目处理
+     * @return 规范化后的项目绝对路径
+     */
     private Path projectRoot(long appId, String codeGenType) {
         String type = codeGenType == null ? "" : codeGenType.toLowerCase().replace('-', '_');
         String name = switch (type) {
@@ -152,6 +243,12 @@ public class InternalAiToolsController {
         return Path.of(AppConstant.CODE_OUTPUT_ROOT_DIR, name).toAbsolutePath().normalize();
     }
 
+    /**
+     * 使用常量时间字节比较校验内部 Bearer 令牌。
+     *
+     * @param authorization HTTP Authorization 请求头
+     * @throws BusinessException 服务令牌未配置、请求未携带令牌或令牌不匹配时抛出
+     */
     private void authenticate(String authorization) {
         String expected = "Bearer " + properties.getToken();
         if (properties.getToken() == null || properties.getToken().isBlank()
@@ -160,21 +257,56 @@ public class InternalAiToolsController {
         }
     }
 
+    /**
+     * 将工具参数转换为长整型业务 ID。
+     *
+     * @param value 待转换的参数值
+     * @param key 参数名称，用于构造错误提示
+     * @return 转换后的长整型数值
+     * @throws BusinessException 参数为空或不是合法整数时抛出
+     */
     private long number(Object value, String key) {
         try { return Long.parseLong(text(value)); }
         catch (Exception e) { throw new BusinessException(ErrorCode.PARAMS_ERROR, key + " is required"); }
     }
 
+    /**
+     * 将可空参数转换为字符串，空值统一转换为空字符串。
+     *
+     * @param value 待转换的参数值
+     * @return 非空字符串表示
+     */
     private String text(Object value) { return value == null ? "" : String.valueOf(value); }
 
+    /**
+     * 将幂等缓存中的 JSON 反序列化为工具结果。
+     *
+     * @param value 已缓存的 JSON 文本
+     * @return 反序列化后的工具结果 Map
+     * @throws BusinessException 缓存内容无法解析时抛出
+     */
     private Map<String, Object> readResult(String value) {
         try { return objectMapper.readValue(value, Map.class); }
         catch (Exception e) { throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Invalid cached tool result"); }
     }
 
+    /**
+     * 将底层文件或构建异常转换为统一业务异常，并保留简要原因。
+     *
+     * @param message 工具操作失败的业务描述
+     * @param cause 底层异常
+     * @return 可由全局异常处理器转换为统一响应的业务异常
+     */
     private BusinessException failure(String message, Exception cause) {
         return new BusinessException(ErrorCode.OPERATION_ERROR, message + ": " + cause.getMessage());
     }
 
+    /**
+     * Python AI 服务提交的内部工具调用请求。
+     *
+     * @param toolCallId 工具调用唯一标识，用作幂等键
+     * @param toolName 要执行的工具名称
+     * @param arguments 工具参数
+     */
     public record ToolRequest(String toolCallId, String toolName, Map<String, Object> arguments) { }
 }
