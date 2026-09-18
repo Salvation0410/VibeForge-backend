@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ApiModel(BaseModel):
+    """内部 API 数据模型基类，统一使用 camelCase JSON 字段。"""
     model_config = ConfigDict(populate_by_name=True, alias_generator=lambda value: _to_camel(value))
 
 
@@ -16,6 +17,7 @@ def _to_camel(value: str) -> str:
 
 
 class CodeGenType(StrEnum):
+    """服务支持的代码生成分支。"""
     HTML = "HTML"
     MULTI_FILE = "MULTI_FILE"
     VUE_PROJECT = "VUE_PROJECT"
@@ -27,17 +29,20 @@ class ChatMessage(ApiModel):
 
 
 class RouteRequest(ApiModel):
+    """代码类型路由请求。"""
     prompt: str = Field(min_length=1, max_length=100_000)
     app_id: str | None = None
     request_id: str | None = None
 
 
 class RouteResponse(ApiModel):
+    """代码类型路由结果。"""
     request_id: str
     code_gen_type: CodeGenType
 
 
 class GenerationRequest(ApiModel):
+    """启动一次 LangGraph 代码生成所需的完整输入。"""
     request_id: str = Field(min_length=1, max_length=128)
     app_id: str = Field(min_length=1, max_length=128)
     prompt: str = Field(min_length=1, max_length=100_000)
@@ -61,6 +66,7 @@ class EventError(ApiModel):
 
 
 class GenerationEvent(ApiModel):
+    """通过 NDJSON 发送给 Spring 的标准工作流事件。"""
     type: Literal[
         "content_delta",
         "tool_started",

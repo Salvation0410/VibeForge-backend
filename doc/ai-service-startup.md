@@ -2,6 +2,22 @@
 
 本文说明 `ai-service` 独立 LangChain + LangGraph 服务的本地启动、Docker 启动及与 Spring Boot 的联调方式。
 
+## 源码目录说明
+
+AI 服务源码位于 `ai-service/src/ai_service`，按职责分为以下目录：
+
+```text
+ai_service/
+├── app.py              # 应用工厂和依赖组装入口
+├── config.py           # 环境变量与服务配置
+├── api/                # HTTP 路由、鉴权依赖、请求响应模型
+├── orchestration/      # LangGraph 工作流、事件流和取消控制
+├── models/             # 模型协议与 OpenAI 兼容模型实现
+└── infrastructure/     # Redis checkpoint 与 Spring 工具网关
+```
+
+`app.py` 是组合入口，启动命令仍使用 `ai_service.app:create_app`。Python 服务不直接访问项目目录，文件和构建操作统一经过 `infrastructure/spring_tools.py` 调用 Spring。
+
 ## 1. 前置条件
 
 - Python 3.12（必须使用 3.12，不建议使用 3.13）

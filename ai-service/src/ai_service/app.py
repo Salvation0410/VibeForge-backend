@@ -1,28 +1,23 @@
 from __future__ import annotations
 
-import hmac
-import json
-import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import FastAPI
 
-from ai_service.cancellation import CancellationRegistry
-from ai_service.checkpoint import CheckpointStore, DisabledCheckpoint, RedisCheckpoint
+from ai_service.api.dependencies import create_internal_auth_dependency
+from ai_service.api.routes import register_routes
 from ai_service.config import Settings, get_settings
-from ai_service.llm import GenerationModel, OpenAICompatibleModel
-from ai_service.models import (
-    CancelRequest,
-    CancelResponse,
-    CodeGenType,
-    GenerationRequest,
-    RouteRequest,
-    RouteResponse,
+from ai_service.infrastructure.checkpoint import (
+    CheckpointStore,
+    DisabledCheckpoint,
+    RedisCheckpoint,
 )
-from ai_service.tools import SpringToolGateway
-from ai_service.workflow import GenerationWorkflow
+from ai_service.infrastructure.spring_tools import SpringToolGateway
+from ai_service.models.base import GenerationModel
+from ai_service.models.openai_compatible import OpenAICompatibleModel
+from ai_service.orchestration.cancellation import CancellationRegistry
+from ai_service.orchestration.workflow import GenerationWorkflow
 
 
 def create_app(
@@ -32,6 +27,12 @@ def create_app(
     tool_gateway: Any | None = None,
     checkpoint: CheckpointStore | None = None,
 ) -> FastAPI:
+    """创建并组装 AI 服务。
+
+    可注入模型、工具网关和 checkpoint，便于测试或替换基础设施；未注入时根据
+    环境配置创建默认实现。函数保持为 Uvicorn 的稳定工厂入口。
+    """
+
     config = settings or get_settings()
     generation_model = model or OpenAICompatibleModel(config)
     gateway = tool_gateway or SpringToolGateway(
@@ -58,6 +59,8 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        """管理 checkpoint 和 HTTP 工具客户端的启动与释放。"""
+
         await checkpoint_store.start()
         try:
             yield
@@ -75,80 +78,12 @@ def create_app(
     app.state.cancellations = cancellations
     app.state.workflow = workflow
 
-    async def require_internal_auth(authorization: str | None = Header(default=None)) -> None:
-        expected = f"Bearer {config.internal_bearer_token}"
-        if authorization is None or not hmac.compare_digest(authorization, expected):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid internal bearer token",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-    @app.get("/internal/v1/health/live")
-    @app.get("/health/live")
-    async def live() -> dict[str, str]:
-        return {"status": "live"}
-
-    @app.get("/internal/v1/health/ready")
-    @app.get("/health/ready")
-    async def ready():
-        ready_state = await checkpoint_store.ping()
-        body = {"status": "ready" if ready_state else "not_ready", "checkpoint": ready_state}
-        return JSONResponse(body, status_code=200 if ready_state else 503)
-
-    @app.post(
-        "/internal/v1/route",
-        response_model=RouteResponse,
-        response_model_by_alias=True,
-        dependencies=[Depends(require_internal_auth)],
+    register_routes(
+        app,
+        generation_model=generation_model,
+        workflow=workflow,
+        checkpoint_store=checkpoint_store,
+        cancellations=cancellations,
+        require_internal_auth=create_internal_auth_dependency(config.internal_bearer_token),
     )
-    async def route(body: RouteRequest) -> RouteResponse:
-        raw_type = await generation_model.route(body.prompt)
-        try:
-            code_gen_type = CodeGenType(raw_type)
-        except ValueError as exc:
-            raise HTTPException(status_code=502, detail=f"Model returned unsupported route: {raw_type}") from exc
-        return RouteResponse(
-            request_id=body.request_id or str(uuid.uuid4()),
-            code_gen_type=code_gen_type,
-        )
-
-    @app.post(
-        "/internal/v1/generations:stream",
-        dependencies=[Depends(require_internal_auth)],
-    )
-    async def generate(body: GenerationRequest, request: Request) -> StreamingResponse:
-        thread_id = f"{body.app_id}:{body.request_id}"
-
-        async def stream():
-            completed = False
-            try:
-                async for event in workflow.stream(body):
-                    if await request.is_disconnected():
-                        cancellations.cancel(thread_id)
-                        break
-                    yield json.dumps(
-                        event.model_dump(by_alias=True, mode="json", exclude_none=True),
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                    ) + "\n"
-                    if event.type in {"completed", "failed"}:
-                        completed = True
-            finally:
-                if not completed:
-                    cancellations.cancel(thread_id)
-
-        return StreamingResponse(stream(), media_type="application/x-ndjson")
-
-    @app.post(
-        "/internal/v1/generations/{request_id}:cancel",
-        response_model=CancelResponse,
-        response_model_by_alias=True,
-        status_code=202,
-        dependencies=[Depends(require_internal_auth)],
-    )
-    async def cancel(request_id: str, body: CancelRequest) -> CancelResponse:
-        cancellations.cancel(f"{body.app_id}:{request_id}")
-        return CancelResponse(request_id=request_id)
-
     return app

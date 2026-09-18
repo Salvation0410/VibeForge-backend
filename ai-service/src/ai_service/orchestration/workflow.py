@@ -6,12 +6,12 @@ from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from ai_service.cancellation import CancellationRegistry, GenerationCancelled
-from ai_service.checkpoint import CheckpointStore
+from ai_service.api.schemas import EventError, GenerationEvent, GenerationRequest
 from ai_service.config import Settings
-from ai_service.events import EventEmitter
-from ai_service.llm import GenerationModel
-from ai_service.models import EventError, GenerationEvent, GenerationRequest
+from ai_service.infrastructure.checkpoint import CheckpointStore
+from ai_service.models.base import GenerationModel
+from ai_service.orchestration.cancellation import CancellationRegistry, GenerationCancelled
+from ai_service.orchestration.events import EventEmitter
 
 
 class WorkflowState(TypedDict, total=False):
@@ -32,6 +32,7 @@ class WorkflowState(TypedDict, total=False):
 
 
 class GenerationWorkflow:
+    """组织代码生成、工具调用、构建、质量检查和有限修复的 LangGraph 工作流。"""
     def __init__(
         self,
         *,
@@ -48,11 +49,13 @@ class GenerationWorkflow:
         self.settings = settings
 
     async def run(self, request: GenerationRequest) -> list[GenerationEvent]:
+        """完整执行工作流并返回本次请求产生的全部事件。"""
         emitter = EventEmitter(request.request_id)
         await self._execute(request, emitter)
         return emitter.events
 
     async def stream(self, request: GenerationRequest) -> AsyncIterator[GenerationEvent]:
+        """在后台执行工作流，并按产生顺序异步返回事件。"""
         queue: asyncio.Queue[GenerationEvent | None] = asyncio.Queue()
         emitter = EventEmitter(request.request_id, queue)
 
@@ -75,6 +78,7 @@ class GenerationWorkflow:
                 task.cancel()
 
     async def _execute(self, request: GenerationRequest, emitter: EventEmitter) -> None:
+        """构造初始状态并执行图，将取消和异常转换为终止事件。"""
         thread_id = f"{request.app_id}:{request.request_id}"
         graph = self._build_graph(emitter, thread_id)
         initial: WorkflowState = {
@@ -105,9 +109,11 @@ class GenerationWorkflow:
             )
 
     def _build_graph(self, emitter: EventEmitter, thread_id: str):
+        """构建带 checkpoint、工具循环和最多两次修复回环的状态图。"""
         builder = StateGraph(WorkflowState)
 
         def guarded(name: str, function):
+            # 统一处理取消检查、节点状态事件与业务 checkpoint。
             async def node(state: WorkflowState) -> dict[str, Any]:
                 self._raise_if_cancelled(thread_id)
                 await emitter.node_status(name, "started")
@@ -280,6 +286,7 @@ class GenerationWorkflow:
         arguments: dict[str, Any],
         tool_call_id: str,
     ) -> dict[str, Any]:
+        """调用 Spring 工具网关，并在调用前后发送成对事件。"""
         await emitter.emit("tool_started", node, data={"tool": name, "toolCallId": tool_call_id})
         result = await self.tool_gateway.invoke(name, arguments, tool_call_id=tool_call_id)
         await emitter.emit(
@@ -290,11 +297,13 @@ class GenerationWorkflow:
         return result
 
     def _raise_if_cancelled(self, thread_id: str) -> None:
+        """在节点边界检测取消信号并中断当前图执行。"""
         if self.cancellations.is_cancelled(thread_id):
             raise GenerationCancelled()
 
     @staticmethod
     def _checkpoint_payload(state: WorkflowState, node: str) -> dict[str, Any]:
+        """提取可观测的精简状态，避免将完整上下文写入业务 checkpoint。"""
         return {
             "node": node,
             "requestId": state.get("request_id"),

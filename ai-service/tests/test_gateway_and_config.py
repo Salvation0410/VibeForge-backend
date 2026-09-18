@@ -2,9 +2,9 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from ai_service.checkpoint import RedisCheckpoint
 from ai_service.config import Settings
-from ai_service.tools import SpringToolGateway
+from ai_service.infrastructure.checkpoint import RedisCheckpoint
+from ai_service.infrastructure.spring_tools import SpringToolGateway
 
 
 @pytest.mark.asyncio

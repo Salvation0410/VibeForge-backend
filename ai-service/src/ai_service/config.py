@@ -7,6 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """从 `AI_SERVICE_` 环境变量和可选 `.env` 文件加载服务配置。"""
     model_config = SettingsConfigDict(
         env_prefix="AI_SERVICE_",
         env_file=".env",
@@ -33,5 +34,6 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
+    """返回进程内缓存的配置对象，避免重复解析环境变量。"""
     return Settings()  # type: ignore[call-arg]
 

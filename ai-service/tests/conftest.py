@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from ai_service.app import create_app
 from ai_service.config import Settings
-from ai_service.llm import ModelTurn, ToolCall
+from ai_service.models.base import ModelTurn, ToolCall
 
 
 class FakeModel:

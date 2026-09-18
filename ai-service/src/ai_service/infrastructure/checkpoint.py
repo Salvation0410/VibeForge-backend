@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class CheckpointStore(Protocol):
+    """工作流依赖的 checkpoint 生命周期与持久化协议。"""
     available: bool
 
     async def start(self) -> None: ...
@@ -35,7 +36,7 @@ class CheckpointStore(Protocol):
 
 
 class DisabledCheckpoint:
-    """Explicit test/local mode; it never pretends to persist recovery state."""
+    """用于测试或本地禁用场景，不声明具备状态恢复能力。"""
 
     available = True
 
@@ -56,7 +57,7 @@ class DisabledCheckpoint:
 
 
 class RedisGraphSaver(BaseCheckpointSaver):
-    """Async LangGraph saver backed by plain Redis strings with per-key TTL."""
+    """使用 Redis 字符串和独立 TTL 实现的异步 LangGraph saver。"""
 
     def __init__(self, client: Redis, *, ttl_seconds: int):
         super().__init__()
@@ -64,6 +65,7 @@ class RedisGraphSaver(BaseCheckpointSaver):
         self._ttl_seconds = ttl_seconds
 
     async def aget_tuple(self, config: RunnableConfig) -> CheckpointTuple | None:
+        """读取指定 thread 的 checkpoint 及其待提交写入。"""
         configurable = config["configurable"]
         thread_id = str(configurable["thread_id"])
         namespace = str(configurable.get("checkpoint_ns", ""))
@@ -113,6 +115,7 @@ class RedisGraphSaver(BaseCheckpointSaver):
         metadata: CheckpointMetadata,
         new_versions: ChannelVersions,
     ) -> RunnableConfig:
+        """保存 checkpoint，并更新当前 namespace 的最新 checkpoint 指针。"""
         configurable = config["configurable"]
         thread_id = str(configurable["thread_id"])
         namespace = str(configurable.get("checkpoint_ns", ""))
@@ -156,6 +159,7 @@ class RedisGraphSaver(BaseCheckpointSaver):
         task_id: str,
         task_path: str = "",
     ) -> None:
+        """保存 LangGraph 节点产生的待提交 channel 写入。"""
         configurable = config["configurable"]
         checkpoint_id = get_checkpoint_id(config)
         if checkpoint_id is None:
@@ -172,6 +176,7 @@ class RedisGraphSaver(BaseCheckpointSaver):
         await pipeline.execute()
 
     async def adelete_thread(self, thread_id: str) -> None:
+        """删除指定 thread 下由本服务创建的全部 LangGraph 数据。"""
         keys = [key async for key in self._client.scan_iter(match=f"yu-ai:langgraph:*:{_component(thread_id)}:*")]
         if keys:
             await self._client.delete(*keys)
@@ -237,6 +242,7 @@ class RedisGraphSaver(BaseCheckpointSaver):
 
 
 class RedisCheckpoint:
+    """管理 Redis 可用性、业务状态快照和 LangGraph saver 生命周期。"""
     key_prefix = "yu-ai:langgraph:checkpoint:"
 
     def __init__(self, url: str, *, required: bool, ttl_seconds: int):
@@ -247,6 +253,7 @@ class RedisCheckpoint:
         self._graph_saver = RedisGraphSaver(self._client, ttl_seconds=ttl_seconds)
 
     async def start(self) -> None:
+        """探测 Redis；required 模式不可用时阻止服务启动。"""
         try:
             await self._client.ping()
             self.available = True
@@ -257,9 +264,11 @@ class RedisCheckpoint:
             logger.warning("Redis checkpoint unavailable; running without recovery: %s", exc)
 
     async def close(self) -> None:
+        """关闭 Redis 客户端连接。"""
         await self._client.aclose()
 
     async def save(self, thread_id: str, state: dict[str, Any]) -> None:
+        """按 TTL 保存精简业务状态；可选模式写入失败时自动降级。"""
         if not self.available:
             return
         try:
@@ -275,6 +284,7 @@ class RedisCheckpoint:
             logger.warning("Redis checkpoint write failed; degrading: %s", exc)
 
     async def ping(self) -> bool:
+        """返回当前 Redis 连接的实时可用状态。"""
         if not self.available:
             return False
         try:
@@ -284,6 +294,7 @@ class RedisCheckpoint:
             return False
 
     def get_graph_saver(self) -> BaseCheckpointSaver | None:
+        """仅在 Redis 可用时向 LangGraph 提供 saver。"""
         return self._graph_saver if self.available else None
 
 

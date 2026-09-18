@@ -6,7 +6,7 @@ import httpx
 
 
 class SpringToolGateway:
-    """The only boundary for project operations owned by the Spring service."""
+    """调用 Spring 工具网关，是 Python 服务操作项目文件和执行构建的唯一边界。"""
 
     def __init__(
         self,
@@ -29,6 +29,7 @@ class SpringToolGateway:
         *,
         tool_call_id: str,
     ) -> dict[str, Any]:
+        """携带幂等调用 ID 执行工具，并返回 Spring 统一响应中的业务数据。"""
         response = await self._client.post(
             "/invoke",
             json={
@@ -42,5 +43,6 @@ class SpringToolGateway:
         return payload.get("data", payload)
 
     async def close(self) -> None:
+        """释放异步 HTTP 客户端连接池。"""
         await self._client.aclose()
 
