@@ -124,12 +124,50 @@ AI_SERVICE_REDIS_URL=redis://localhost:6379/2
 
 ## 本地启动
 
-在 `ai-service` 目录执行：
+以下命令均在 `ai-service` 目录执行。
+
+### 推荐方案：使用固定的本地 Python 运行时
+
+Windows 上如果 uv 默认管理目录中的 Python 链接损坏，可能出现依赖检查成功但 Uvicorn 无法启动的问题。推荐首次启动时将 CPython 3.12.14 安装到当前用户的 `%LOCALAPPDATA%`，避开 uv 默认的 minor-version Junction 和 trampoline。
+
+首次初始化或重建环境前，先在运行 Uvicorn 的终端按 `Ctrl+C` 停止 AI 服务。Windows 会锁定正在使用的 `.venv` 文件；服务未停止时执行 `uv venv --clear` 会报“拒绝访问”。确认服务已停止后逐段执行：
+
+```powershell
+$runtimeDir = "$env:LOCALAPPDATA/yu-ai-code-mother/python"
+uv python install 3.12.14 --install-dir "$runtimeDir" --no-bin --force
+if ($LASTEXITCODE -ne 0) { throw "Python 3.12 installation failed" }
+
+$python = (Get-ChildItem "$runtimeDir/cpython-3.12.14-windows*/python.exe" | Select-Object -First 1).FullName
+if (-not $python) { throw "Python 3.12 executable not found" }
+
+uv venv --clear --python "$python" .venv
+if ($LASTEXITCODE -ne 0) { throw "Virtual environment creation failed" }
+
+uv sync --frozen --python "$python" --link-mode copy
+if ($LASTEXITCODE -ne 0) { throw "Dependency synchronization failed" }
+```
+
+初始化完成后，日常启动执行：
+
+```powershell
+$runtimeDir = "$env:LOCALAPPDATA/yu-ai-code-mother/python"
+$python = (Get-ChildItem "$runtimeDir/cpython-3.12.14-windows*/python.exe" | Select-Object -First 1).FullName
+if (-not $python) { throw "Python 3.12 executable not found; run the initialization steps first" }
+
+$env:PYTHONPATH = "$(Resolve-Path './.venv/Lib/site-packages');$(Resolve-Path './src')"
+& "$python" -m uvicorn ai_service.app:create_app --factory --host 0.0.0.0 --port 8000
+```
+
+### 简化方案
+
+如果 uv 管理的 Python 链接工作正常，可继续使用：
 
 ```powershell
 uv sync --frozen --python 3.12
 uv run uvicorn ai_service.app:create_app --factory --host 0.0.0.0 --port 8000
 ```
+
+如果出现 `No Python at ...`，路径前带有异常引号，或 uv 报告 `Missing expected target directory for Python minor version link`，不要重复执行简化方案，改用上面的推荐方案重新初始化。模块名必须写成 `ai_service.app:create_app`，不要在下划线前添加反斜杠。
 
 服务默认监听 `http://localhost:8000`。
 
