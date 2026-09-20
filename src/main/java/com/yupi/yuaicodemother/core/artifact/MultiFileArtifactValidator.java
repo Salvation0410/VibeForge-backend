@@ -75,6 +75,7 @@ public class MultiFileArtifactValidator {
     private void validateJavascript(String js, List<ArtifactValidationError> errors) {
         String value = safe(js);
         if (isFilenameOnly(value)) errors.add(error("JS_CONTENT_INVALID", "script.js", "JavaScript 内容不能是文件名或标题"));
+        if (!value.matches("(?s).*[;=(){}\\[\\]].*")) errors.add(error("JS_CONTENT_INVALID", "script.js", "JavaScript 缺少可执行语句"));
         if (!delimitersBalanced(value, false)) errors.add(error("JS_STRUCTURE_INVALID", "script.js", "JavaScript 分隔符不完整"));
         rejectMarkdown(value, "script.js", errors);
     }

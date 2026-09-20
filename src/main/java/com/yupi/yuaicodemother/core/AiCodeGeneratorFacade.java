@@ -186,7 +186,10 @@ public class AiCodeGeneratorFacade {
                             log.info("AI 产物发布成功, requestId={}, appId={}, type={}, chars={}, finishReason={}",
                                     requestId, appId, codeGenType, content.length(), response.finishReason());
                             sink.complete();
-                        } catch (Exception e) { sink.error(e); }
+                        } catch (Exception e) {
+                            aiCodeGeneratorServiceFactory.resetAfterFailedGeneration(appId, codeGenType);
+                            sink.error(e);
+                        }
                     })
                     .onError(sink::error)
                     .start();

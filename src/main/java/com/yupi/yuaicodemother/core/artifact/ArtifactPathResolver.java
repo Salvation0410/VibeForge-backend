@@ -40,6 +40,7 @@ public class ArtifactPathResolver {
         if (codeGenType != CodeGenTypeEnum.MULTI_FILE) return root;
         Path current = resolvePointer(root);
         if (current != null) return current;
+        if (!Files.exists(root.resolve(".current"))) return root;
         Path fallback = newestValidRelease(root);
         return fallback == null ? root : fallback;
     }

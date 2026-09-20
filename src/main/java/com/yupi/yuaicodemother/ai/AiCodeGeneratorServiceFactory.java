@@ -84,6 +84,14 @@ public class AiCodeGeneratorServiceFactory {
         return serviceCache.get(cacheKey, key -> createAiCodeGeneratorService(appId, codeGenType));
     }
 
+    /**
+     * 丢弃失败候选已污染的缓存服务和 Redis 记忆，下次请求会从成功聊天历史重建上下文。
+     */
+    public void resetAfterFailedGeneration(long appId, CodeGenTypeEnum codeGenType) {
+        serviceCache.invalidate(buildCacheKey(appId, codeGenType));
+        redisChatMemoryStore.deleteMessages(appId);
+    }
+
 
 
 

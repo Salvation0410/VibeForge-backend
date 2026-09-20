@@ -60,7 +60,8 @@ public class ArtifactPublicationService {
             verifyStaging(staging, hashes);
             Files.move(staging, release, StandardCopyOption.ATOMIC_MOVE);
             switchPointer(root, requestId);
-            cleanupOldReleases(root, requestId);
+            try { cleanupOldReleases(root, requestId); }
+            catch (Exception ignored) { /* 清理失败不改变已经原子提交的成功结果。 */ }
             return new ArtifactPublishResult(true, requestId, hashes);
         } catch (ArtifactValidationException e) { throw e; }
         catch (Exception e) {
@@ -71,12 +72,17 @@ public class ArtifactPublicationService {
     private ArtifactPublishResult existingResult(Path release, String requestId, Map<String, String> hashes) throws Exception {
         ArtifactManifest manifest = objectMapper.readValue(release.resolve("manifest.json").toFile(), ArtifactManifest.class);
         if (!hashes.equals(manifest.hashes())) throw new ArtifactValidationException("ARTIFACT_VERSION_CONFLICT", null, "相同请求 ID 对应不同产物");
+        Path pointer = release.getParent().getParent().resolve(".current");
+        if (!Files.isRegularFile(pointer)) switchPointer(pointer.getParent(), requestId);
+        else if (!requestId.equals(Files.readString(pointer).trim()))
+            throw new ArtifactValidationException("ARTIFACT_VERSION_CONFLICT", null, "该请求版本已存在但不是当前版本");
         return new ArtifactPublishResult(true, requestId, hashes);
     }
 
     /** 使用同目录临时文件原子替换当前指针，避免读到半写入内容。 */
     private void switchPointer(Path root, String requestId) throws Exception {
         Path temporary = root.resolve(".current.tmp-" + requestId);
+        Files.deleteIfExists(temporary);
         Files.writeString(temporary, requestId, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
         Files.move(temporary, root.resolve(".current"), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
     }

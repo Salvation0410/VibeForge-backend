@@ -103,18 +103,19 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
 
         String requestId = java.util.UUID.randomUUID().toString();
         // 租约覆盖消息入库、模型调用和产物发布，防止同一应用的上下文与版本交叉。
-        return Flux.defer(() -> {
-            var lease = generationLeaseService.acquire(appId, requestId);
+        return Flux.using(
+                () -> generationLeaseService.acquire(appId, requestId),
+                lease -> {
             chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
             chatHistoryOriginalService.addOriginalChatMessage(appId, message,
                     ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
             Flux<String> contentStream = aiGenerationGateway.generate(message, codeGenTypeEnum, appId,
                     loginUser.getId(), requestId);
-            return streamHandlerExecutor.doExecute(contentStream, chatHistoryService, chatHistoryOriginalService,
-                    appId, loginUser, codeGenTypeEnum)
-                    .doFinally(signal -> generationLeaseService.release(lease))
-                    .onErrorMap(error -> wrapGenerationError(requestId, error));
-        });
+                    return streamHandlerExecutor.doExecute(contentStream, chatHistoryService, chatHistoryOriginalService,
+                            appId, loginUser, codeGenTypeEnum);
+                },
+                generationLeaseService::release
+        ).onErrorMap(error -> wrapGenerationError(requestId, error));
     }
 
     /**
