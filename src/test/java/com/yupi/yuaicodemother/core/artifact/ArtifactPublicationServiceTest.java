@@ -70,6 +70,10 @@ class ArtifactPublicationServiceTest {
                 () -> fixture.service.publishHtml(7, "html-new", html("green"), "legacy", "STOP"));
         assertTrue(Files.isDirectory(appRoot.resolve(".current")));
         assertTrue(Files.isRegularFile(appRoot.resolve(".releases/html-old/index.html")));
+        Path active = fixture.resolver.resolveActiveRoot(CodeGenTypeEnum.HTML, 7);
+        assertTrue(active.endsWith("html-old"));
+        assertTrue(Files.readString(active.resolve("index.html")).contains("blue"));
+        assertFalse(Files.isRegularFile(appRoot.resolve(".committed/html-new")));
     }
 
     @Test

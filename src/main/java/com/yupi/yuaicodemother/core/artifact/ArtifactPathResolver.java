@@ -107,6 +107,8 @@ public class ArtifactPathResolver {
     private boolean isValidRelease(Path root, Path release) {
         if (!Files.isDirectory(release) || !Files.isRegularFile(release.resolve("manifest.json"))) return false;
         try {
+            if (Files.isRegularFile(root.resolve(".commit-markers-enabled"))
+                    && !Files.isRegularFile(root.resolve(".committed").resolve(release.getFileName()))) return false;
             ArtifactManifest manifest = objectMapper.readValue(release.resolve("manifest.json").toFile(), ArtifactManifest.class);
             long expectedAppId = Long.parseLong(root.getFileName().toString().substring(root.getFileName().toString().lastIndexOf('_') + 1));
             if (manifest.sequence() <= 0 || manifest.appId() != expectedAppId

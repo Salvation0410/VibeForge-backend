@@ -33,6 +33,7 @@ public class VersionedArtifactStore {
         Path tombstone = tombstonePath(root, requestId);
         Map<String, String> hashes = hashes(files);
         Files.createDirectories(releases);
+        prepareCommitMarkers(root);
         if (Files.isRegularFile(tombstone) && !Files.exists(release)) {
             throw conflict("该请求已发布但产物版本已被保留策略清理，禁止重建或回滚");
         }
@@ -50,6 +51,7 @@ public class VersionedArtifactStore {
         Files.move(staging, release, StandardCopyOption.ATOMIC_MOVE);
         persistTombstone(root, manifest);
         switchPointer(root, requestId);
+        persistCommitMarker(root, requestId);
         try { cleanupOldReleases(root, requestId); } catch (Exception ignored) { }
         return new ArtifactPublishResult(true, requestId, hashes);
     }
@@ -69,9 +71,14 @@ public class VersionedArtifactStore {
         Path pointer = root.resolve(".current");
         if (!Files.isRegularFile(pointer)) {
             ensureRecoverableSequence(manifest); persistTombstone(root, manifest); switchPointer(root, requestId);
+            persistCommitMarker(root, requestId);
         } else if (!requestId.equals(Files.readString(pointer, StandardCharsets.UTF_8).trim())) {
             ensureTargetSequenceIsNewer(root, manifest); persistTombstone(root, manifest); switchPointer(root, requestId);
-        } else persistTombstone(root, manifest);
+            persistCommitMarker(root, requestId);
+        } else {
+            persistTombstone(root, manifest);
+            persistCommitMarker(root, requestId);
+        }
         return new ArtifactPublishResult(true, requestId, hashes);
     }
 
@@ -116,6 +123,30 @@ public class VersionedArtifactStore {
         Path path = tombstonePath(root, manifest.requestId()); if (!Files.exists(path)) return;
         PublishedRequest actual; try { actual = objectMapper.readValue(path.toFile(), PublishedRequest.class); } catch (Exception e) { throw conflict("发布墓碑损坏或无法读取"); }
         if (!actual.equals(new PublishedRequest(manifest.requestId(), manifest.sequence(), manifest.hashes()))) throw conflict("发布墓碑与已有版本不一致");
+    }
+
+    /**
+     * 启用提交标记前为已有当前版本补记历史提交事实；标志文件落盘后，resolver 将不再把仅完成 move 的 release 当作成功版本。
+     */
+    private void prepareCommitMarkers(Path root) throws Exception {
+        Path enabled = root.resolve(".commit-markers-enabled");
+        if (Files.isRegularFile(enabled)) return;
+        Path pointer = root.resolve(".current");
+        if (Files.isRegularFile(pointer)) {
+            String current = Files.readString(pointer, StandardCharsets.UTF_8).trim();
+            if (current.matches("[A-Za-z0-9._-]{1,128}")
+                    && Files.isDirectory(root.resolve(".releases").resolve(current))) {
+                persistCommitMarker(root, current);
+            }
+        }
+        writeStringAtomically(enabled, "1", ".commit-markers-enabled.tmp");
+    }
+
+    /** 指针切换成功后持久化提交标记；标记失败时该 release 不得被 resolver 激活或作为回退版本。 */
+    private void persistCommitMarker(Path root, String requestId) throws Exception {
+        Path marker = root.resolve(".committed").resolve(requestId);
+        if (Files.isRegularFile(marker)) return;
+        writeStringAtomically(marker, requestId, "." + requestId + ".tmp");
     }
 
     /** 当前指针缺失时只允许有有效正序号版本恢复。 */
