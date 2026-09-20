@@ -178,7 +178,7 @@ git commit -m "feat: 增加单文件 HTML 确定性校验"
 - Modify: `src/test/java/com/yupi/yuaicodemother/core/artifact/ArtifactPublicationServiceTest.java`
 - Modify: `src/test/java/com/yupi/yuaicodemother/core/artifact/ArtifactPathResolverTest.java`
 
-- [ ] **Step 1: Add HTML release tests before refactoring**
+- [x] **Step 1: Add HTML release tests before refactoring**
 
 Test `publishHtml` for first publication, same-request idempotency, same-request hash conflict, failed pointer replacement preserving the previous release, permanent request tombstone, monotonic replay rejection, current plus two previous entity releases, and legacy flat-directory fallback.
 
@@ -191,7 +191,7 @@ public ArtifactPublishResult publishHtml(
 
 Resolver assertions must require only `index.html` for an HTML release and all three files for a MULTI_FILE release.
 
-- [ ] **Step 2: Run publication tests and verify red state**
+- [x] **Step 2: Run publication tests and verify red state**
 
 ```powershell
 mvn -q "-Dtest=ArtifactPublicationServiceTest,ArtifactPathResolverTest" test
@@ -199,7 +199,7 @@ mvn -q "-Dtest=ArtifactPublicationServiceTest,ArtifactPathResolverTest" test
 
 Expected: HTML publication assertions fail because only MULTI_FILE is supported.
 
-- [ ] **Step 3: Extract `VersionedArtifactStore` without behavior changes**
+- [x] **Step 3: Extract `VersionedArtifactStore` without behavior changes**
 
 Move release storage mechanics out of `ArtifactPublicationService` behind:
 
@@ -218,7 +218,7 @@ ArtifactPublishResult publish(
 
 Add Chinese Javadoc to publication, existing-release recovery, tombstone, pointer, and cleanup methods, including the rule that cleanup failure cannot reverse a committed version.
 
-- [ ] **Step 4: Implement HTML orchestration**
+- [x] **Step 4: Implement HTML orchestration**
 
 `ArtifactPublicationService.publishHtml` must:
 
@@ -230,7 +230,7 @@ Add Chinese Javadoc to publication, existing-release recovery, tombstone, pointe
 
 Keep `publishMultiFile` public behavior and error codes unchanged.
 
-- [ ] **Step 5: Run artifact tests**
+- [x] **Step 5: Run artifact tests**
 
 ```powershell
 mvn -q "-Dtest=CodeParserTest,HtmlArtifactValidatorTest,MultiFileArtifactValidatorTest,ArtifactPublicationServiceTest,ArtifactPathResolverTest" test
@@ -238,7 +238,7 @@ mvn -q "-Dtest=CodeParserTest,HtmlArtifactValidatorTest,MultiFileArtifactValidat
 
 Expected: all tests pass for both HTML and MULTI_FILE.
 
-- [ ] **Step 6: Commit shared publication support**
+- [x] **Step 6: Commit shared publication support**
 
 ```powershell
 git add src/main/java/com/yupi/yuaicodemother/core/artifact
