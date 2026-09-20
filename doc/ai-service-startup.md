@@ -81,6 +81,8 @@ ai:
 
 `legacy` 为原 LangChain4j 链路，`langgraph` 为 Python 链路，`gray` 按白名单和比例选择。切换配置即可回滚，不需要数据库迁移。
 
+两条生成链路共用 Spring 的多文件安全发布边界：同一应用同一时间只允许一个生成请求；取消和提交通过 Redis 状态锁决定唯一胜者；模型输出因长度或内容策略中止时不发布；完整候选必须通过严格三文件解析和确定性校验。成功版本位于 `multi_file_<appId>/.releases/<requestId>`，`.current` 原子指向当前版本，预览、部署、下载和导出都读取该版本。默认保留当前版本及最近两个成功版本，同时持久记录单调提交序号和 requestId 墓碑；失败请求或已归档旧请求不会覆盖上一成功版本。
+
 ## 4. 健康检查
 
 ```powershell
@@ -124,7 +126,11 @@ Invoke-RestMethod http://localhost:8000/internal/v1/route -Method Post -Headers 
 GET http://localhost:8123/api/apps/chat/gen/code?appId={应用ID}&message={生成提示}
 ```
 
-前端仍消费原有 SSE：`data: {"d":"..."}`，Python 与 Spring 之间使用 `application/x-ndjson`。
+前端内容事件仍为 `data: {"d":"..."}`，Python 与 Spring 之间使用 `application/x-ndjson`。正常完成时 Spring 发送命名 `done` 事件；截断、校验失败或发布失败时只发送一个命名 `error` 事件，数据包含 `code`、`errorCode`、`message` 和 `requestId`，不会再发送 `done`。
+
+LangGraph 的多文件分支会依次调用 Spring 工具 `artifact_validate` 和 `artifact_publish`。前者返回结构化校验错误供最多两次修复使用，后者在 Spring 侧重新校验并提交不可变版本。`MULTI_FILE` 不执行 Vue 项目构建，只有 `VUE_PROJECT` 进入 `project_build`。
+
+如果 `artifact_publish` 因连接中断、超时、Spring 5xx 或响应解析异常而无法确认结果，Python 会携带原 `toolCallId` 最多重试一次；Spring 返回明确 4xx 时不会重试。重试耗尽表示内部网络持续不可用，应结合 Spring 日志与 `.current` 指针排查实际发布状态。
 
 ## 7. 测试与排查
 
@@ -139,6 +145,9 @@ uv lock --check
 - `401 Invalid internal bearer token`：检查 Python 的 `AI_SERVICE_INTERNAL_BEARER_TOKEN` 与 Spring `AI_SERVICE_INTERNAL_BEARER_TOKEN` 是否完全一致。
 - ready 返回 503：检查 Redis 地址、端口、database 和 `AI_SERVICE_REDIS_REQUIRED` 配置。
 - 工具调用失败：确认 Python 的 Spring 网关地址包含 `/api/internal/ai-tools`，且工具令牌与 Spring `ai.token` 一致。
+- `GENERATION_IN_PROGRESS`：同一应用已有生成任务，等待当前请求完成或取消后重试。
+- `MODEL_OUTPUT_TRUNCATED`：模型达到 token 上限，本次候选未发布；可缩小需求或提高模型输出上限后重试。
+- `MULTI_FILE_FORMAT_INVALID` / `ARTIFACT_PUBLISH_FAILED`：三文件协议、确定性校验或版本提交失败，上一成功版本仍保持活动状态。
 - 模型调用失败：检查 API Key、Base URL、模型名称和网络连通性；不要把密钥写入 Git。
 - Docker 无法构建：先启动 Docker daemon，再执行 `docker build`。
 

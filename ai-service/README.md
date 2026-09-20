@@ -71,14 +71,26 @@ START
   -> context_prepare
   -> HTML | MULTI_FILE | VUE_PROJECT
   -> artifact_validation
-  -> project_build
+     -> 校验失败：repair（最多 2 次）或 failed
+     -> VUE_PROJECT：project_build
   -> quality_review
-  -> repair（质量不通过时，最多执行 2 次）
+     -> 质量失败：repair（最多 2 次）或 failed
+     -> MULTI_FILE：artifact_publish
   -> finalize
   -> END
 ```
 
 Vue 分支允许模型请求 Spring 工具，但工具调用次数受 `AI_SERVICE_VUE_MAX_TOOL_CALLS` 限制。每次工具调用都带有确定性的 `toolCallId`，供 Spring 执行幂等控制。
+
+### 多文件安全发布约束
+
+`MULTI_FILE` 模型响应必须严格包含且只包含 `index.html`、`style.css` 和 `script.js` 三个 Markdown 代码区块，顺序固定，正文不得为空，围栏外不得出现说明文本。Spring 的 `artifact_validate` 会再次解析该协议，并检查 HTML 外链、内联脚本/样式、Markdown 残留及 CSS/JavaScript 基础结构。
+
+模型返回 `LENGTH`、`MAX_TOKENS`、`CONTENT_FILTER` 或 `CONTENT_FILTERED` 时，候选产物不会进入发布阶段。通过硬校验和质量检查后，Python 调用 Spring 的 `artifact_publish`；Spring 将文件写入不可变的 `.releases/<requestId>`，校验摘要后原子替换 `.current` 指针，并保留当前版本及最近两个成功版本。每次成功发布还会记录单调提交序号和 requestId 墓碑，实体版本被保留策略清理后也不能通过旧请求重放回滚。校验、写入或指针切换失败时，上一成功版本保持可预览、部署和下载。
+
+`artifact_publish` 遇到连接中断、超时、Spring 5xx 或无法解析响应时，会使用相同 `toolCallId` 最多重试一次。Spring 的工具幂等缓存与 requestId/hash 校验保证重试不会创建不同版本；明确的 4xx 业务拒绝不会重试。
+
+同一应用的生成流程由 Spring 应用级租约串行化，租约覆盖用户消息入库、模型调用、校验和发布。取消和提交通过 Redis 状态锁进行原子状态转换：取消先发生则禁止发布，提交先发生则保持成功终态；下游断开不会提前释放租约。不同应用仍可并发生成。
 
 ## 环境要求
 
@@ -241,7 +253,7 @@ Authorization: Bearer <AI_SERVICE_INTERNAL_BEARER_TOKEN>
 - `completed`
 - `failed`
 
-Python 与 Spring 之间使用 NDJSON；Spring 继续向前端输出原有 SSE 格式，因此前端无需修改。
+Python 与 Spring 之间使用 NDJSON；Spring 对前端的内容事件仍为 `data: {"d":"..."}`。只有产物成功发布后才发送命名 `done` 事件；模型截断、校验失败或发布失败会发送一个命名 `error` 事件，其中包含数字 `code`、稳定的 `errorCode`、`message` 和 `requestId`，且不会再发送 `done`。
 
 ## Redis 与故障降级
 
