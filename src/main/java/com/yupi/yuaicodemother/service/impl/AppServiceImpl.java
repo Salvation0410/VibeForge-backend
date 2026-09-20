@@ -9,6 +9,7 @@ import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.yupi.yuaicodemother.ai.gateway.AiGenerationGateway;
+import com.yupi.yuaicodemother.ai.gateway.GenerationLeaseService;
 import com.yupi.yuaicodemother.constant.AppConstant;
 import com.yupi.yuaicodemother.core.builder.VueProjectBuilder;
 import com.yupi.yuaicodemother.core.artifact.ArtifactPathResolver;
@@ -56,6 +57,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     private final AiGenerationGateway aiGenerationGateway;
     private final ChatHistoryService chatHistoryService;
     private final ArtifactPathResolver artifactPathResolver;
+    private final GenerationLeaseService generationLeaseService;
 
     @Resource
     private StreamHandlerExecutor streamHandlerExecutor;
@@ -97,23 +99,18 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Unsupported code generation type");
         }
 
-        chatHistoryService.addChatMessage(
-                appId,
-                message,
-                ChatHistoryMessageTypeEnum.USER.getValue(),
-                loginUser.getId()
-        );
-        chatHistoryOriginalService.addOriginalChatMessage(
-                appId,
-                message,
-                ChatHistoryMessageTypeEnum.USER.getValue(),
-                loginUser.getId()
-        );
-
         String requestId = java.util.UUID.randomUUID().toString();
-        Flux<String> contentStream = aiGenerationGateway.generate(message, codeGenTypeEnum, appId,
-                loginUser.getId(), requestId);
-        return streamHandlerExecutor.doExecute(contentStream, chatHistoryService, chatHistoryOriginalService, appId, loginUser, codeGenTypeEnum);
+        // 租约覆盖消息入库、模型调用和产物发布，防止同一应用的上下文与版本交叉。
+        return Flux.defer(() -> {
+            var lease = generationLeaseService.acquire(appId, requestId);
+            chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
+            chatHistoryOriginalService.addOriginalChatMessage(appId, message,
+                    ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
+            Flux<String> contentStream = aiGenerationGateway.generate(message, codeGenTypeEnum, appId,
+                    loginUser.getId(), requestId);
+            return streamHandlerExecutor.doExecute(contentStream, chatHistoryService, chatHistoryOriginalService,
+                    appId, loginUser, codeGenTypeEnum).doFinally(signal -> generationLeaseService.release(lease));
+        });
     }
 
     /**
