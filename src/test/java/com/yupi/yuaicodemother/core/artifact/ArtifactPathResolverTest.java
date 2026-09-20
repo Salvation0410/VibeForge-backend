@@ -8,6 +8,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -42,6 +43,38 @@ class ArtifactPathResolverTest {
     }
 
     @Test
+    void fallbackUsesManifestSequenceAndRejectsTamperedHash() throws Exception {
+        var resolver = resolver();
+        var publisher = new ArtifactPublicationService(new MultiFileArtifactValidator(), resolver, mapper());
+        publisher.publishMultiFile(42, "req-1", artifact("blue"), "legacy", "STOP");
+        publisher.publishMultiFile(42, "req-2", artifact("green"), "legacy", "STOP");
+        Path appRoot = root.resolve("multi_file_42");
+        Files.writeString(appRoot.resolve(".current"), "missing-version");
+        Files.setLastModifiedTime(appRoot.resolve(".releases/req-1"), FileTime.fromMillis(Long.MAX_VALUE / 2));
+
+        assertTrue(resolver.resolveActiveRoot(CodeGenTypeEnum.MULTI_FILE, 42).endsWith("req-2"));
+
+        Files.writeString(appRoot.resolve(".releases/req-2/style.css"), "tampered");
+        assertTrue(resolver.resolveActiveRoot(CodeGenTypeEnum.MULTI_FILE, 42).endsWith("req-1"));
+    }
+
+    @Test
+    void htmlReleaseAcceptsIndexOnlyButMultiFileRequiresExactlyThreeFiles() throws Exception {
+        var resolver = resolver();
+        var publisher = new ArtifactPublicationService(new MultiFileArtifactValidator(), resolver, mapper());
+        publisher.publishHtml(7, "html-1", html(), "legacy", "STOP");
+        assertTrue(resolver.resolveActiveRoot(CodeGenTypeEnum.HTML, 7).endsWith("html-1"));
+
+        publisher.publishMultiFile(42, "multi-1", artifact("blue"), "legacy", "STOP");
+        Path manifestPath = root.resolve("multi_file_42/.releases/multi-1/manifest.json");
+        var manifest = mapper().readTree(manifestPath.toFile());
+        ((com.fasterxml.jackson.databind.node.ObjectNode) manifest.get("hashes")).remove("script.js");
+        mapper().writeValue(manifestPath.toFile(), manifest);
+        assertEquals(root.resolve("multi_file_42").toAbsolutePath(),
+                resolver.resolveActiveRoot(CodeGenTypeEnum.MULTI_FILE, 42));
+    }
+
+    @Test
     void absentPointerUsesLegacyFlatRootWithoutActivatingRelease() throws Exception {
         var resolver = resolver();
         Path legacyRoot = root.resolve("multi_file_42");
@@ -62,5 +95,9 @@ class ArtifactPathResolverTest {
     private String artifact(String color) {
         return "index.html\n```html\n<!doctype html><html><head><link rel=\"stylesheet\" href=\"style.css\"></head><body><main>x</main><script src=\"script.js\"></script></body></html>\n```\n\n"
                 + "style.css\n```css\nmain { color: " + color + "; }\n```\n\nscript.js\n```javascript\ndocument.querySelector('main');\n```";
+    }
+
+    private String html() {
+        return "```html\n<!doctype html><html><head></head><body>ok</body></html>\n```";
     }
 }

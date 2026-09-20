@@ -2,6 +2,7 @@ package com.yupi.yuaicodemother.core.artifact;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yupi.yuaicodemother.ai.gateway.GenerationLeaseService;
+import com.yupi.yuaicodemother.ai.gateway.GenerationStreamException;
 import com.yupi.yuaicodemother.ai.model.HtmlCodeResult;
 import com.yupi.yuaicodemother.ai.model.MultiFileCodeResult;
 import com.yupi.yuaicodemother.core.paser.MultiFileCodeParser;
@@ -65,7 +66,7 @@ public class ArtifactPublicationService {
                     ? store.publish(type, appId, requestId, files, engine, finishReason, null)
                     : generationLeaseService.commit(appId, requestId,
                     () -> store.publish(type, appId, requestId, files, engine, finishReason, null));
-        } catch (ArtifactValidationException e) {
+        } catch (ArtifactValidationException | GenerationStreamException e) {
             throw e;
         } catch (Exception e) {
             throw new ArtifactValidationException("ARTIFACT_PUBLISH_FAILED", null, "产物发布失败: " + e.getMessage());

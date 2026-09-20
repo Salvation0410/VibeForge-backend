@@ -9,7 +9,12 @@ import org.springframework.stereotype.Component;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Comparator;
+import java.util.HexFormat;
+import java.util.Map;
+import java.util.Set;
 
 /** 统一解析应用当前已提交版本，并兼容升级前的平铺目录。 */
 @Slf4j
@@ -78,7 +83,7 @@ public class ArtifactPathResolver {
             String version = Files.readString(pointer).trim();
             if (!version.matches("[A-Za-z0-9._-]{1,128}")) return null;
             Path release = root.resolve(".releases").resolve(version).normalize();
-            return isValidRelease(release) ? release : null;
+            return isValidRelease(root, release) ? release : null;
         } catch (Exception e) {
             log.warn("解析当前产物指针失败, root={}", root, e);
             return null;
@@ -90,32 +95,52 @@ public class ArtifactPathResolver {
         Path releases = root.resolve(".releases");
         if (!Files.isDirectory(releases)) return null;
         try (var stream = Files.list(releases)) {
-            return stream.filter(this::isValidRelease)
-                    .max(Comparator.comparingLong(this::lastModified)).orElse(null);
+            return stream.filter(release -> isValidRelease(root, release))
+                    .max(Comparator.comparingLong(this::releaseSequence)).orElse(null);
         } catch (Exception e) {
             log.warn("查找回退产物版本失败, root={}", root, e);
             return null;
         }
     }
 
-    /** 按 manifest 声明的文件集合校验 release，HTML 版本只要求 index.html。 */
-    private boolean isValidRelease(Path release) {
+    /** 按生成类型校验必要文件集合并重算每个 SHA-256；任何缺失、额外声明或篡改都会拒绝激活。 */
+    private boolean isValidRelease(Path root, Path release) {
         if (!Files.isDirectory(release) || !Files.isRegularFile(release.resolve("manifest.json"))) return false;
         try {
             ArtifactManifest manifest = objectMapper.readValue(release.resolve("manifest.json").toFile(), ArtifactManifest.class);
-            if (manifest.hashes() == null || manifest.hashes().isEmpty()) return false;
-            for (String fileName : manifest.hashes().keySet()) {
+            Set<String> required = requiredFiles(root);
+            if (manifest.hashes() == null || !manifest.hashes().keySet().equals(required)) return false;
+            for (Map.Entry<String, String> entry : manifest.hashes().entrySet()) {
+                String fileName = entry.getKey();
                 if (fileName == null || !fileName.matches("[A-Za-z0-9._-]+") || fileName.contains("..")
                         || !Files.isRegularFile(release.resolve(fileName).normalize())
                         || !release.equals(release.resolve(fileName).normalize().getParent())) return false;
+                String actual = sha256(Files.readString(release.resolve(fileName), StandardCharsets.UTF_8));
+                if (!actual.equals(entry.getValue())) return false;
             }
             return true;
         } catch (Exception e) { return false; }
     }
 
-    /** 读取版本目录修改时间，失败时返回最小排序值。 */
-    private long lastModified(Path path) {
-        try { return Files.getLastModifiedTime(path).toMillis(); }
+    /** 根据项目根目录类型返回 manifest 必须精确声明的业务文件。 */
+    private Set<String> requiredFiles(Path root) {
+        String name = root.getFileName().toString();
+        return name.startsWith("html_") ? Set.of("index.html")
+                : Set.of("index.html", "style.css", "script.js");
+    }
+
+    /** 读取 manifest 发布序号用于损坏指针回退，失败或非正序号不参与较新版本竞争。 */
+    private long releaseSequence(Path path) {
+        try {
+            long sequence = objectMapper.readValue(path.resolve("manifest.json").toFile(), ArtifactManifest.class).sequence();
+            return Math.max(sequence, 0L);
+        }
         catch (Exception e) { return 0L; }
+    }
+
+    /** 计算 UTF-8 文件正文的 SHA-256，用于拒绝 manifest 与磁盘内容不一致的 release。 */
+    private String sha256(String value) {
+        try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); }
+        catch (Exception e) { throw new IllegalStateException(e); }
     }
 }

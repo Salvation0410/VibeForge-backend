@@ -25,6 +25,46 @@ class ArtifactPublicationServiceTest {
     }
 
     @Test
+    void publishesHtmlIdempotentlyAndRequiresOnlyIndexFile() throws Exception {
+        var fixture = fixture();
+        String html = html("blue");
+        var first = fixture.service.publishHtml(7, "html-1", html, "legacy", "STOP");
+        var second = fixture.service.publishHtml(7, "html-1", html, "legacy", "STOP");
+
+        Path active = fixture.resolver.resolveActiveRoot(CodeGenTypeEnum.HTML, 7);
+        assertEquals(first.hashes(), second.hashes());
+        assertEquals(java.util.Set.of("index.html"), first.hashes().keySet());
+        assertTrue(Files.readString(active.resolve("index.html")).contains("blue"));
+        assertFalse(Files.exists(active.resolve("style.css")));
+    }
+
+    @Test
+    void conflictingHtmlRetryPreservesCurrentVersion() throws Exception {
+        var fixture = fixture();
+        fixture.service.publishHtml(7, "html-1", html("blue"), "legacy", "STOP");
+
+        var error = assertThrows(ArtifactValidationException.class,
+                () -> fixture.service.publishHtml(7, "html-1", html("red"), "legacy", "STOP"));
+
+        assertEquals("ARTIFACT_VERSION_CONFLICT", error.getErrorCode());
+        assertTrue(Files.readString(fixture.resolver.resolveActiveRoot(CodeGenTypeEnum.HTML, 7)
+                .resolve("index.html")).contains("blue"));
+    }
+
+    @Test
+    void temporaryTombstoneIsIgnoredWhenComputingNextSequence() throws Exception {
+        var fixture = fixture();
+        Path published = root.resolve("html_7/.published");
+        Files.createDirectories(published);
+        Files.writeString(published.resolve(".html-1.json.tmp"), "not-json");
+
+        fixture.service.publishHtml(7, "html-1", html("blue"), "legacy", "STOP");
+
+        var manifest = fixture.mapper.readValue(root.resolve("html_7/.releases/html-1/manifest.json").toFile(), ArtifactManifest.class);
+        assertEquals(1L, manifest.sequence());
+    }
+
+    @Test
     void conflictingRequestIdIsRejectedWithoutChangingCurrent() {
         var fixture = fixture();
         fixture.service.publishMultiFile(42, "req-1", artifact("blue"), "legacy", "STOP");
@@ -171,6 +211,11 @@ class ArtifactPublicationServiceTest {
     private String artifact(String color) {
         return "index.html\n```html\n<!doctype html><html><head><link rel=\"stylesheet\" href=\"style.css\"></head><body><main>x</main><script src=\"script.js\"></script></body></html>\n```\n\n"
                 + "style.css\n```css\nmain { color: "+color+"; }\n```\n\nscript.js\n```javascript\ndocument.querySelector('main');\n```";
+    }
+
+    private String html(String color) {
+        return "```html\n<!doctype html><html><head><style>body { color: " + color
+                + "; }</style></head><body>ok</body></html>\n```";
     }
     private record Fixture(ArtifactPathResolver resolver, ArtifactPublicationService service, ObjectMapper mapper) { }
 }
