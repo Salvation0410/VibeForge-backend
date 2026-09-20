@@ -6,6 +6,10 @@ import com.yupi.yuaicodemother.common.ResultUtils;
 import com.yupi.yuaicodemother.config.AiEngineProperties;
 import com.yupi.yuaicodemother.core.builder.VueProjectBuilder;
 import com.yupi.yuaicodemother.core.artifact.ArtifactPathResolver;
+import com.yupi.yuaicodemother.core.artifact.ArtifactPublicationService;
+import com.yupi.yuaicodemother.core.artifact.ArtifactValidationException;
+import com.yupi.yuaicodemother.core.artifact.MultiFileArtifactValidator;
+import com.yupi.yuaicodemother.core.paser.MultiFileCodeParser;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.exception.ErrorCode;
@@ -46,6 +50,8 @@ public class InternalAiToolsController {
     private final VueProjectBuilder projectBuilder;
     private final ObjectMapper objectMapper;
     private final ArtifactPathResolver artifactPathResolver;
+    private final ArtifactPublicationService artifactPublicationService;
+    private final MultiFileArtifactValidator artifactValidator;
 
     /**
      * 校验内部调用身份并执行指定工具，同一 {@code toolCallId} 只执行一次。
@@ -99,6 +105,7 @@ public class InternalAiToolsController {
             case "file_modify", "modifyFile", "modify_file" -> modifyFile(appId, args);
             case "file_delete", "deleteFile", "delete_file" -> deleteFile(appId, args);
             case "artifact_validate", "artifact_validation" -> validateArtifact(args);
+            case "artifact_publish" -> publishArtifact(appId, args);
             case "project_build" -> buildProject(appId, args);
             default -> throw new BusinessException(ErrorCode.PARAMS_ERROR, "Unsupported tool: " + toolName);
         };
@@ -160,14 +167,44 @@ public class InternalAiToolsController {
     }
 
     /**
-     * 对模型生成产物执行基础非空校验，为 LangGraph 质量流程提供结构化结果。
+     * 对多文件候选执行严格解析与确定性校验，并返回可供工作流修复的结构化错误。
      *
-     * @param args 包含待校验 {@code artifact} 的工具参数
-     * @return 校验状态和错误列表
+     * @param args 包含生成类型和待校验 artifact 的工具参数
+     * @return 校验状态和稳定错误列表
      */
     private Map<String, Object> validateArtifact(Map<String, Object> args) {
         String artifact = text(args.get("artifact"));
-        return Map.of("valid", !artifact.isBlank(), "errors", artifact.isBlank() ? java.util.List.of("artifact is blank") : java.util.List.of());
+        String type = text(args.get("codeGenType"));
+        if (!"MULTI_FILE".equalsIgnoreCase(type) && !"multi_file".equalsIgnoreCase(type)) {
+            return Map.of("valid", !artifact.isBlank(), "errors", artifact.isBlank()
+                    ? java.util.List.of(Map.of("code", "ARTIFACT_MISSING", "message", "artifact is blank")) : java.util.List.of());
+        }
+        try {
+            var result = artifactValidator.validate(new MultiFileCodeParser().parseCode(artifact));
+            return Map.of("valid", result.valid(), "errors", result.errors());
+        } catch (ArtifactValidationException e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("code", e.getErrorCode()); error.put("message", e.getMessage());
+            if (e.getFile() != null) error.put("file", e.getFile());
+            return Map.of("valid", false, "errors", java.util.List.of(error));
+        }
+    }
+
+    /**
+     * 将 Python 提交的最终候选交给 Spring 重新校验并版本化发布。
+     *
+     * @param appId 应用 ID
+     * @param args 包含 requestId、artifact、engine 和 finishReason 的工具参数
+     * @return 发布状态、版本 ID 和文件摘要
+     */
+    private Map<String, Object> publishArtifact(long appId, Map<String, Object> args) {
+        String type = text(args.get("codeGenType"));
+        if (!"MULTI_FILE".equalsIgnoreCase(type) && !"multi_file".equalsIgnoreCase(type)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "artifact_publish only supports MULTI_FILE");
+        }
+        var result = artifactPublicationService.publishMultiFile(appId, text(args.get("requestId")),
+                text(args.get("artifact")), text(args.get("engine")), text(args.get("finishReason")));
+        return Map.of("published", result.published(), "versionId", result.versionId(), "hashes", result.hashes());
     }
 
     /**
