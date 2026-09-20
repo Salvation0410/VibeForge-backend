@@ -53,7 +53,7 @@ Documentation and recovery:
 - Modify: `src/main/java/com/yupi/yuaicodemother/core/paser/CodeParserExecutor.java`
 - Modify: `src/test/java/com/yupi/yuaicodemother/core/CodeParserTest.java`
 
-- [ ] **Step 1: Add failing parser regressions**
+- [x] **Step 1: Add failing parser regressions**
 
 Add tests with these exact expectations:
 
@@ -70,7 +70,7 @@ assertThrowsWithCode("HTML_FORMAT_INVALID", () -> parser.parse(
 
 Also cover pure HTML whose first non-whitespace token is `<!doctype html>` or `<html` and whose final non-whitespace token is `</html>`.
 
-- [ ] **Step 2: Run the parser test and verify red state**
+- [x] **Step 2: Run the parser test and verify red state**
 
 Run:
 
@@ -80,7 +80,7 @@ mvn -q -Dtest=CodeParserTest test
 
 Expected: compilation fails because `HtmlArtifactParser` does not exist.
 
-- [ ] **Step 3: Implement the strict parser**
+- [x] **Step 3: Implement the strict parser**
 
 Expose:
 
@@ -92,7 +92,7 @@ Use anchored patterns for the two accepted forms. Do not call the old permissive
 
 Update `CodeParserExecutor` so HTML delegates to this parser; retain the existing static executor API for callers.
 
-- [ ] **Step 4: Run parser tests**
+- [x] **Step 4: Run parser tests**
 
 Run:
 
@@ -102,7 +102,7 @@ mvn -q -Dtest=CodeParserTest test
 
 Expected: all parser tests pass, including the incident prefix and `${escapeText` truncation case.
 
-- [ ] **Step 5: Commit strict parsing**
+- [x] **Step 5: Commit strict parsing**
 
 ```powershell
 git add src/main/java/com/yupi/yuaicodemother/core/artifact/HtmlArtifactParser.java src/main/java/com/yupi/yuaicodemother/core/paser/CodeParserExecutor.java
