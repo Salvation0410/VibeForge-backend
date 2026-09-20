@@ -116,7 +116,7 @@ git commit -m "fix: 严格解析单文件 HTML 产物"
 - Create: `src/main/java/com/yupi/yuaicodemother/core/artifact/HtmlArtifactValidator.java`
 - Create: `src/test/java/com/yupi/yuaicodemother/core/artifact/HtmlArtifactValidatorTest.java`
 
-- [ ] **Step 1: Add failing validator tests**
+- [x] **Step 1: Add failing validator tests**
 
 Cover these stable failures:
 
@@ -130,7 +130,7 @@ HTML_SCRIPT_TRAILING_FRAGMENT  final meaningful token is an unfinished operator/
 
 Use the incident tail ``list.innerHTML = displayList.map(msg => `${escapeText`` as a required rejection. Add passing cases for CSS braces inside strings/comments, JavaScript template literals with closed interpolations, regex literals, and empty optional script/style sets.
 
-- [ ] **Step 2: Run validator tests and verify red state**
+- [x] **Step 2: Run validator tests and verify red state**
 
 Run:
 
@@ -140,7 +140,7 @@ mvn -q -Dtest=HtmlArtifactValidatorTest test
 
 Expected: compilation fails because the validator does not exist.
 
-- [ ] **Step 3: Implement one-pass validation**
+- [x] **Step 3: Implement one-pass validation**
 
 Expose:
 
@@ -153,7 +153,7 @@ Check original source boundaries before any tolerant DOM parsing. Reuse small pa
 
 Add Chinese Javadoc to both public methods and Chinese comments before stateful scanners explaining string/comment/template handling.
 
-- [ ] **Step 4: Run parser and validator tests**
+- [x] **Step 4: Run parser and validator tests**
 
 ```powershell
 mvn -q "-Dtest=CodeParserTest,HtmlArtifactValidatorTest,MultiFileArtifactValidatorTest" test
@@ -161,7 +161,7 @@ mvn -q "-Dtest=CodeParserTest,HtmlArtifactValidatorTest,MultiFileArtifactValidat
 
 Expected: all tests pass and existing MULTI_FILE validation remains unchanged.
 
-- [ ] **Step 5: Commit deterministic validation**
+- [x] **Step 5: Commit deterministic validation**
 
 ```powershell
 git add src/main/java/com/yupi/yuaicodemother/core/artifact/HtmlArtifactValidator.java
