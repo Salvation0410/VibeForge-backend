@@ -257,7 +257,7 @@ git commit -m "feat: 为 HTML 增加不可变版本发布"
 - Modify: `src/main/resources/application.yml`
 - Create: `src/test/java/com/yupi/yuaicodemother/core/artifact/SeleniumHtmlSmokeTesterTest.java`
 
-- [ ] **Step 1: Add smoke-gate contract tests**
+- [x] **Step 1: Add smoke-gate contract tests**
 
 Use a fake `HtmlSmokeTester` in publication tests and assert:
 
@@ -271,7 +271,7 @@ assertEquals(oldVersion, Files.readString(root.resolve(".current")));
 
 Add Selenium integration tests tagged `@Tag("browser")` for a valid page, `const value = ;`, permanent `.skeleton` content, external image failure, and top-level navigation. Browser tests must use temporary files and never touch `tmp/code_output`.
 
-- [ ] **Step 2: Run the fake-gate test and verify red state**
+- [x] **Step 2: Run the fake-gate test and verify red state**
 
 ```powershell
 mvn -q -Dtest=ArtifactPublicationServiceTest test
@@ -279,7 +279,7 @@ mvn -q -Dtest=ArtifactPublicationServiceTest test
 
 Expected: compilation fails because the smoke-test contract does not exist.
 
-- [ ] **Step 3: Implement the contract and production tester**
+- [x] **Step 3: Implement the contract and production tester**
 
 Contract:
 
@@ -293,7 +293,7 @@ The Selenium implementation loads `indexHtml.toUri()` using a dedicated WebDrive
 
 Return `HTML_SMOKE_TEST_UNAVAILABLE` when Chrome/WebDriver cannot start. Do not reuse `WebScreenshotUtils`'s permissive timeout behavior; share only Chrome path lookup if extracted. Add Chinese comments explaining why inability to verify is a production-safe failure.
 
-- [ ] **Step 4: Wire configuration and staging verification**
+- [x] **Step 4: Wire configuration and staging verification**
 
 Add:
 
@@ -308,7 +308,7 @@ Production default is required. When `enabled=false` and `required=true`, fail w
 
 Pass the staging `index.html` to the store's verifier before moving the release.
 
-- [ ] **Step 5: Run smoke tests**
+- [x] **Step 5: Run smoke tests**
 
 ```powershell
 mvn -q "-Dtest=ArtifactPublicationServiceTest,SeleniumHtmlSmokeTesterTest" test
@@ -316,7 +316,7 @@ mvn -q "-Dtest=ArtifactPublicationServiceTest,SeleniumHtmlSmokeTesterTest" test
 
 Expected: unit tests pass. If local Chrome is unavailable, the tagged browser cases must report their direct environment reason; do not report them as passed.
 
-- [ ] **Step 6: Commit the smoke gate**
+- [x] **Step 6: Commit the smoke gate**
 
 ```powershell
 git add src/main/java/com/yupi/yuaicodemother/core/artifact src/main/java/com/yupi/yuaicodemother/config/HtmlArtifactProperties.java src/main/resources/application.yml
