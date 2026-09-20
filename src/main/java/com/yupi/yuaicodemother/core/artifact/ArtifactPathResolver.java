@@ -108,6 +108,9 @@ public class ArtifactPathResolver {
         if (!Files.isDirectory(release) || !Files.isRegularFile(release.resolve("manifest.json"))) return false;
         try {
             ArtifactManifest manifest = objectMapper.readValue(release.resolve("manifest.json").toFile(), ArtifactManifest.class);
+            long expectedAppId = Long.parseLong(root.getFileName().toString().substring(root.getFileName().toString().lastIndexOf('_') + 1));
+            if (manifest.sequence() <= 0 || manifest.appId() != expectedAppId
+                    || !release.getFileName().toString().equals(manifest.requestId())) return false;
             Set<String> required = requiredFiles(root);
             if (manifest.hashes() == null || !manifest.hashes().keySet().equals(required)) return false;
             for (Map.Entry<String, String> entry : manifest.hashes().entrySet()) {

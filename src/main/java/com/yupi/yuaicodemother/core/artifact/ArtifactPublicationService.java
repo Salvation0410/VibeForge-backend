@@ -42,6 +42,7 @@ public class ArtifactPublicationService {
     /** 严格解析并发布三文件产物，发布失败不会改变当前指针。 */
     public ArtifactPublishResult publishMultiFile(long appId, String requestId, String rawArtifact,
                                                   String engine, String finishReason) {
+        validateRequestId(requestId);
         MultiFileCodeResult artifact = parser.parseCode(rawArtifact);
         multiFileValidator.validateOrThrow(artifact);
         Map<String, String> files = Map.of("index.html", artifact.getHtmlCode(),
@@ -52,6 +53,7 @@ public class ArtifactPublicationService {
     /** 严格解析、校验并发布单文件 HTML；仅在完整产物通过校验后写入版本。 */
     public ArtifactPublishResult publishHtml(long appId, String requestId, String rawArtifact,
                                              String engine, String finishReason) {
+        validateRequestId(requestId);
         HtmlCodeResult artifact = htmlParser.parse(rawArtifact);
         htmlValidator.validateOrThrow(artifact);
         return publish(CodeGenTypeEnum.HTML, appId, requestId,
@@ -70,6 +72,13 @@ public class ArtifactPublicationService {
             throw e;
         } catch (Exception e) {
             throw new ArtifactValidationException("ARTIFACT_PUBLISH_FAILED", null, "产物发布失败: " + e.getMessage());
+        }
+    }
+
+    /** 在解析模型输出前校验幂等键，非法请求不得消耗解析或创建任何候选目录。 */
+    private void validateRequestId(String requestId) {
+        if (requestId == null || !requestId.matches("[A-Za-z0-9._-]{1,128}")) {
+            throw new ArtifactValidationException("REQUEST_ID_INVALID", null, "请求 ID 非法");
         }
     }
 }

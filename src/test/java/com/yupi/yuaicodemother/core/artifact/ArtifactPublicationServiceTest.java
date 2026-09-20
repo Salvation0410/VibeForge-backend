@@ -52,6 +52,62 @@ class ArtifactPublicationServiceTest {
     }
 
     @Test
+    void invalidRequestIdIsRejectedBeforeHtmlParsing() {
+        var error = assertThrows(ArtifactValidationException.class,
+                () -> fixture().service.publishHtml(7, "../bad", "not html", "legacy", "STOP"));
+        assertEquals("REQUEST_ID_INVALID", error.getErrorCode());
+    }
+
+    @Test
+    void htmlPointerReplacementFailurePreservesPreviousRelease() throws Exception {
+        var fixture = fixture();
+        fixture.service.publishHtml(7, "html-old", html("blue"), "legacy", "STOP");
+        Path appRoot = root.resolve("html_7");
+        Files.delete(appRoot.resolve(".current"));
+        Files.createDirectory(appRoot.resolve(".current"));
+
+        assertThrows(ArtifactValidationException.class,
+                () -> fixture.service.publishHtml(7, "html-new", html("green"), "legacy", "STOP"));
+        assertTrue(Files.isDirectory(appRoot.resolve(".current")));
+        assertTrue(Files.isRegularFile(appRoot.resolve(".releases/html-old/index.html")));
+    }
+
+    @Test
+    void htmlTombstonePermanentlyPreventsCleanedRequestReplay() throws Exception {
+        var fixture = fixture();
+        for (int i = 1; i <= 5; i++) fixture.service.publishHtml(7, "html-" + i, html("c" + i), "legacy", "STOP");
+        Path appRoot = root.resolve("html_7");
+        assertFalse(Files.exists(appRoot.resolve(".releases/html-1")));
+        assertTrue(Files.isRegularFile(appRoot.resolve(".published/html-1.json")));
+
+        var error = assertThrows(ArtifactValidationException.class,
+                () -> fixture.service.publishHtml(7, "html-1", html("c1"), "legacy", "STOP"));
+        assertEquals("ARTIFACT_VERSION_CONFLICT", error.getErrorCode());
+        assertEquals("html-5", Files.readString(appRoot.resolve(".current")).trim());
+    }
+
+    @Test
+    void olderHtmlReleaseCannotReplaceNewerCurrentAndRetentionKeepsThree() throws Exception {
+        var fixture = fixture();
+        for (int i = 1; i <= 5; i++) fixture.service.publishHtml(7, "html-" + i, html("c" + i), "legacy", "STOP");
+        Path appRoot = root.resolve("html_7");
+        try (var releases = Files.list(appRoot.resolve(".releases"))) { assertEquals(3, releases.count()); }
+
+        var error = assertThrows(ArtifactValidationException.class,
+                () -> fixture.service.publishHtml(7, "html-3", html("c3"), "legacy", "STOP"));
+        assertEquals("ARTIFACT_VERSION_CONFLICT", error.getErrorCode());
+        assertEquals("html-5", Files.readString(appRoot.resolve(".current")).trim());
+    }
+
+    @Test
+    void htmlFallsBackToLegacyFlatRootBeforeFirstRelease() throws Exception {
+        Path legacy = root.resolve("html_7");
+        Files.createDirectories(legacy);
+        Files.writeString(legacy.resolve("index.html"), "legacy");
+        assertEquals(legacy.toAbsolutePath(), fixture().resolver.resolveActiveRoot(CodeGenTypeEnum.HTML, 7));
+    }
+
+    @Test
     void temporaryTombstoneIsIgnoredWhenComputingNextSequence() throws Exception {
         var fixture = fixture();
         Path published = root.resolve("html_7/.published");

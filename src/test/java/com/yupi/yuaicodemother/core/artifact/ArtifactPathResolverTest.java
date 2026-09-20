@@ -75,6 +75,29 @@ class ArtifactPathResolverTest {
     }
 
     @Test
+    void resolverRejectsNonPositiveSequenceAndManifestIdentityMismatch() throws Exception {
+        var resolver = resolver();
+        var publisher = new ArtifactPublicationService(new MultiFileArtifactValidator(), resolver, mapper());
+        publisher.publishHtml(7, "html-1", html(), "legacy", "STOP");
+        Path appRoot = root.resolve("html_7");
+        Path manifestPath = appRoot.resolve(".releases/html-1/manifest.json");
+        var manifest = mapper().readTree(manifestPath.toFile());
+        ((com.fasterxml.jackson.databind.node.ObjectNode) manifest).put("sequence", 0);
+        mapper().writeValue(manifestPath.toFile(), manifest);
+        assertEquals(appRoot.toAbsolutePath(), resolver.resolveActiveRoot(CodeGenTypeEnum.HTML, 7));
+
+        ((com.fasterxml.jackson.databind.node.ObjectNode) manifest).put("sequence", 1);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) manifest).put("requestId", "other");
+        mapper().writeValue(manifestPath.toFile(), manifest);
+        assertEquals(appRoot.toAbsolutePath(), resolver.resolveActiveRoot(CodeGenTypeEnum.HTML, 7));
+
+        ((com.fasterxml.jackson.databind.node.ObjectNode) manifest).put("requestId", "html-1");
+        ((com.fasterxml.jackson.databind.node.ObjectNode) manifest).put("appId", 8);
+        mapper().writeValue(manifestPath.toFile(), manifest);
+        assertEquals(appRoot.toAbsolutePath(), resolver.resolveActiveRoot(CodeGenTypeEnum.HTML, 7));
+    }
+
+    @Test
     void absentPointerUsesLegacyFlatRootWithoutActivatingRelease() throws Exception {
         var resolver = resolver();
         Path legacyRoot = root.resolve("multi_file_42");
