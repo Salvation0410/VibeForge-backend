@@ -41,9 +41,8 @@ public class SimpleTextStreamHandler {
                     chatHistoryService.addChatMessage(appId, aiResponse, ChatHistoryMessageTypeEnum.AI.getValue(), loginUser.getId());
                 })
                 .doOnError(error -> {
-                    // 如果AI回复失败，也要记录错误消息
-                    String errorMessage = "AI回复失败: " + error.getMessage();
-                    chatHistoryService.addChatMessage(appId, errorMessage, ChatHistoryMessageTypeEnum.AI.getValue(), loginUser.getId());
+                    // 失败候选不能进入成功对话历史，否则后续模型会把截断代码当作有效上下文。
+                    log.warn("AI 回复未发布，不写入对话历史, appId={}", appId, error);
                 });
     }
 }

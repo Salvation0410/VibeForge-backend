@@ -10,6 +10,8 @@ import com.yupi.yuaicodemother.ai.model.message.ToolExecutedMessage;
 import com.yupi.yuaicodemother.ai.model.message.ToolRequestMessage;
 import com.yupi.yuaicodemother.constant.AppConstant;
 import com.yupi.yuaicodemother.core.builder.VueProjectBuilder;
+import com.yupi.yuaicodemother.core.artifact.ArtifactPublicationService;
+import dev.langchain4j.model.output.FinishReason;
 import com.yupi.yuaicodemother.core.paser.CodeParserExecutor;
 import com.yupi.yuaicodemother.core.saver.CodeFileSaverExecutor;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
@@ -39,6 +41,8 @@ public class AiCodeGeneratorFacade {
 
     @Resource
     private VueProjectBuilder vueProjectBuilder;
+    @Resource
+    private ArtifactPublicationService artifactPublicationService;
 
     /**
      * 统一入口：根据类型生成并保存代码
@@ -81,6 +85,20 @@ public class AiCodeGeneratorFacade {
      * @return 流式响应
      */
     public Flux<String> generateAndSaveCodeStream(String userMessage, CodeGenTypeEnum codeGenTypeEnum,Long appId) {
+        return generateAndSaveCodeStream(userMessage, codeGenTypeEnum, appId, java.util.UUID.randomUUID().toString());
+    }
+
+    /**
+     * 按生成类型启动流式响应，并在模型正常结束后发布完整产物。
+     *
+     * @param userMessage 用户提示词
+     * @param codeGenTypeEnum 生成类型
+     * @param appId 应用 ID
+     * @param requestId 当前请求及产物版本 ID
+     * @return 仅在产物发布成功后正常完成的文本流
+     */
+    public Flux<String> generateAndSaveCodeStream(String userMessage, CodeGenTypeEnum codeGenTypeEnum, Long appId,
+                                                   String requestId) {
         if (codeGenTypeEnum == null) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "生成类型为空");
         }
@@ -88,12 +106,12 @@ public class AiCodeGeneratorFacade {
         AiCodeGeneratorService aiCodeGeneratorService = aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(appId,codeGenTypeEnum);
         return switch (codeGenTypeEnum) {
             case HTML -> {
-                Flux<String> codeStream = aiCodeGeneratorService.generateHtmlCodeStream(userMessage);
-                yield processCodeStream(codeStream, CodeGenTypeEnum.HTML,appId);
+                TokenStream codeStream = aiCodeGeneratorService.generateHtmlCodeStream(userMessage);
+                yield processSimpleTokenStream(codeStream, CodeGenTypeEnum.HTML, appId, requestId);
             }
             case MULTI_FILE -> {
-                Flux<String> codeStream = aiCodeGeneratorService.generateMultiFileCodeStream(userMessage);
-                yield processCodeStream(codeStream, CodeGenTypeEnum.MULTI_FILE,appId);
+                TokenStream codeStream = aiCodeGeneratorService.generateMultiFileCodeStream(userMessage);
+                yield processSimpleTokenStream(codeStream, CodeGenTypeEnum.MULTI_FILE, appId, requestId);
             }
             case VUE_PROJECT -> {
                TokenStream tokenStream = aiCodeGeneratorService.generateVueProjectCodeStream(appId, userMessage);
@@ -148,103 +166,43 @@ public class AiCodeGeneratorFacade {
 
 
     /**
-     * 通用流式代码处理方法
-     *
-     * @param codeStream  代码流
-     * @param codeGenType 代码生成类型
-     * @param appId 应用Id
-     * @return 流式响应
+     * 将简单文本 TokenStream 转换为 Flux，并把结束原因检查与产物发布放入完成信号之前。
      */
-    private Flux<String> processCodeStream(Flux<String> codeStream, CodeGenTypeEnum codeGenType,Long appId) {
-        //字符串拼接器 用于当流式返回所有的代码之后 再保存代码
-        StringBuilder codeBuilder = new StringBuilder();
-        return codeStream.doOnNext(chunk ->{
-            //实时收集代码片段
-            codeBuilder.append(chunk);
-        }).doOnComplete(()->{
-            try {
-                // 流式输出完毕 拼接代码
-                String completeCode = codeBuilder.toString();
-                log.info("AI complete code output before parsing, codeGenType={}, appId={}, content:\n{}",
-                        codeGenType, appId, completeCode);
-                //解析代码 获取解析结果
-                Object parseResult = CodeParserExecutor.executeParser(completeCode, codeGenType);
-                //保存代码 也是使用解析器
-                File savedDir = CodeFileSaverExecutor.executeSaver(parseResult, codeGenType,appId);
-                log.info("保存成功，路径为：" + savedDir.getAbsolutePath());
-            } catch (Exception e) {
-                log.error("代码流解析或保存失败, codeGenType={}, appId={}", codeGenType, appId, e);
-            }
+    private Flux<String> processSimpleTokenStream(TokenStream tokenStream, CodeGenTypeEnum codeGenType, Long appId,
+                                                   String requestId) {
+        return Flux.create(sink -> {
+            StringBuilder content = new StringBuilder();
+            tokenStream.onPartialResponse(chunk -> { content.append(chunk); sink.next(chunk); })
+                    .onCompleteResponse(response -> {
+                        try {
+                            ensureComplete(response.finishReason());
+                            if (codeGenType == CodeGenTypeEnum.MULTI_FILE) {
+                                artifactPublicationService.publishMultiFile(appId, requestId, content.toString(),
+                                        "legacy", response.finishReason() == null ? "" : response.finishReason().name());
+                            } else {
+                                Object parsed = CodeParserExecutor.executeParser(content.toString(), codeGenType);
+                                CodeFileSaverExecutor.executeSaver(parsed, codeGenType, appId);
+                            }
+                            log.info("AI 产物发布成功, requestId={}, appId={}, type={}, chars={}, finishReason={}",
+                                    requestId, appId, codeGenType, content.length(), response.finishReason());
+                            sink.complete();
+                        } catch (Exception e) { sink.error(e); }
+                    })
+                    .onError(sink::error)
+                    .start();
         });
     }
 
-
-    /**
-     * 生成 HTML 模式的代码并保存（流式）
-     *
-     * @param userMessage 用户提示词
-     * @return 保存的目录
-     */
-
-    @Deprecated
-    private Flux<String> generateAndSaveHtmlCodeStream(String userMessage) {
-
-        //根据AppId获取相应的App AI Service服务实例
-        AiCodeGeneratorService aiCodeGeneratorService = aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(0);
-        //调用AI 返回流式生成对象
-        Flux<String> result = aiCodeGeneratorService.generateHtmlCodeStream(userMessage);
-        //字符串拼接器 用于当流式返回所有的代码之后 再保存代码
-        StringBuilder codeBuilder = new StringBuilder();
-        return result.doOnNext(chunk ->{
-            //实时收集代码片段
-            codeBuilder.append(chunk);
-        }).doOnComplete(()->{
-            try {
-                // 流式输出完毕 保存代码
-                String completeHtmlCode = codeBuilder.toString();
-                //解析代码
-                HtmlCodeResult htmlCodeResult = CodeParser.parseHtmlCode(completeHtmlCode);
-                //保存代码
-                File saveDir = CodeFileSaver.saveHtmlCodeResult(htmlCodeResult);
-                log.info("保存成功 保存目录为：{}", saveDir.getAbsolutePath());
-            } catch (Exception e) {
-                log.error("保存代码失败", e.getMessage());
-            }
-        });
-    }
-
-    /**
-     * 生成多文件模式的代码并保存（流式）
-     *
-     * @param userMessage 用户提示词
-     * @return 保存的目录
-     */
-    @Deprecated
-    private Flux<String> generateAndSaveMultiFileCodeStream(String userMessage)
-    {
-        //根据AppId获取相应的App AI Service服务实例
-        AiCodeGeneratorService aiCodeGeneratorService = aiCodeGeneratorServiceFactory.getAiCodeGeneratorService(0);
-        //调AI 返回流式对象
-        Flux<String> codeFlux = aiCodeGeneratorService.generateMultiFileCodeStream(userMessage);
-        // 拼接字符串
-        StringBuilder codeBuilder = new StringBuilder();
-        return codeFlux.doOnNext(chunk ->{
-            //实时收集代码片段
-            codeBuilder.append(chunk);
-        }).doOnComplete(()->{
-            try {
-                // 保存代码
-                String completeMultiFileResult = codeBuilder.toString();
-                // 解析代码
-                MultiFileCodeResult multiFileCodeResult = CodeParser.parseMultiFileCode(completeMultiFileResult);
-                //保存代码
-                File saveDir = CodeFileSaver.saveMultiFileCodeResult(multiFileCodeResult);
-                log.info("保存成功 保存目录为：{}", saveDir.getAbsolutePath());
-            } catch (Exception e) {
-                log.error("保存代码失败", e.getMessage());
-            }
-        });
-
+    /** 模型因长度或内容过滤结束时拒绝进入解析和发布阶段。 */
+    private void ensureComplete(FinishReason finishReason) {
+        if (finishReason == FinishReason.LENGTH) {
+            throw new com.yupi.yuaicodemother.core.artifact.ArtifactValidationException(
+                    "MODEL_OUTPUT_TRUNCATED", null, "模型输出达到长度限制，已保留上一版本");
+        }
+        if (finishReason == FinishReason.CONTENT_FILTER) {
+            throw new com.yupi.yuaicodemother.core.artifact.ArtifactValidationException(
+                    "MODEL_OUTPUT_BLOCKED", null, "模型输出被内容策略中止，已保留上一版本");
+        }
     }
 
     /**

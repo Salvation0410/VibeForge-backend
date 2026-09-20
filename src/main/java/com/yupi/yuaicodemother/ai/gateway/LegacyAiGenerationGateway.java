@@ -44,6 +44,6 @@ public class LegacyAiGenerationGateway implements AiGenerationGateway {
      */
     @Override
     public Flux<String> generate(String prompt, CodeGenTypeEnum codeGenType, Long appId, Long userId, String requestId) {
-        return facade.generateAndSaveCodeStream(prompt, codeGenType, appId);
+        return facade.generateAndSaveCodeStream(prompt, codeGenType, appId, requestId);
     }
 }
