@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from ai_service.models.base import ModelTurn
 from conftest import FakeModel, FakeToolGateway, MemoryCheckpoint
 
 
@@ -43,8 +44,9 @@ def test_route_returns_supported_generation_type(app_factory, auth_headers):
 def test_all_generation_branches_complete_in_order(app_factory, auth_headers, ndjson_parser):
     for branch in ("HTML", "MULTI_FILE", "VUE_PROJECT"):
         model = FakeModel()
+        gateway = FakeToolGateway()
         checkpoint = MemoryCheckpoint()
-        client = TestClient(app_factory(model=model, checkpoint=checkpoint))
+        client = TestClient(app_factory(model=model, gateway=gateway, checkpoint=checkpoint))
         response = client.post(
             "/internal/v1/generations:stream",
             json=generation_payload(branch),
@@ -61,6 +63,8 @@ def test_all_generation_branches_complete_in_order(app_factory, auth_headers, nd
         assert "context_prepare" in [event["node"] for event in events]
         assert "quality_review" in [event["node"] for event in events]
         assert "42:req-1" in checkpoint.saved
+        build_calls = [call for call in gateway.calls if call["name"] == "project_build"]
+        assert bool(build_calls) is (branch == "VUE_PROJECT")
 
 
 def test_repair_is_capped_at_two_attempts(app_factory, auth_headers, ndjson_parser):
@@ -73,10 +77,39 @@ def test_repair_is_capped_at_two_attempts(app_factory, auth_headers, ndjson_pars
     )
     events = ndjson_parser(response)
     assert len([call for call in model.calls if call[0] == "repair"]) == 2
-    completed = events[-1]
-    assert completed["type"] == "completed"
-    assert completed["data"]["repairCount"] == 2
-    assert completed["data"]["qualityPassed"] is False
+    assert events[-1]["type"] == "failed"
+    assert len([call for call in model.calls if call[0] == "repair"]) == 2
+
+
+def test_truncated_multi_file_response_fails_before_publication(app_factory, auth_headers, ndjson_parser):
+    class TruncatedModel(FakeModel):
+        async def generate(self, branch: str, context: dict) -> ModelTurn:
+            return ModelTurn(content="partial", finish_reason="LENGTH")
+
+    gateway = FakeToolGateway()
+    client = TestClient(app_factory(model=TruncatedModel(), gateway=gateway))
+    events = ndjson_parser(client.post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("MULTI_FILE"),
+        headers=auth_headers,
+    ))
+    assert events[-1]["type"] == "failed"
+    assert "MODEL_OUTPUT_TRUNCATED" in events[-1]["error"]["message"]
+    assert not [call for call in gateway.calls if call["name"] == "artifact_publish"]
+
+
+def test_multi_file_completes_only_after_publication(app_factory, auth_headers, ndjson_parser):
+    gateway = FakeToolGateway()
+    client = TestClient(app_factory(gateway=gateway))
+    events = ndjson_parser(client.post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("MULTI_FILE"),
+        headers=auth_headers,
+    ))
+    assert events[-1]["type"] == "completed"
+    calls = [call["name"] for call in gateway.calls]
+    assert "artifact_publish" in calls
+    assert "project_build" not in calls
 
 
 def test_vue_agent_tool_calls_are_bounded_and_identified(app_factory, auth_headers, ndjson_parser):

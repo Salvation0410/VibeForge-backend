@@ -51,16 +51,16 @@ class OpenAICompatibleModel:
         )
         raw = str(response.content)
         if branch != "VUE_PROJECT":
-            return ModelTurn(content=raw)
+            return _model_turn(response, raw)
         try:
             payload = json.loads(_strip_json_fence(raw))
             calls = [
                 ToolCall(name=item["name"], arguments=item.get("arguments", {}))
                 for item in payload.get("toolCalls", [])
             ]
-            return ModelTurn(content=payload.get("content", ""), tool_calls=calls)
+            return _model_turn(response, payload.get("content", ""), calls)
         except (json.JSONDecodeError, KeyError, TypeError):
-            return ModelTurn(content=raw)
+            return _model_turn(response, raw)
 
     async def review(self, artifact: str, context: dict[str, Any]) -> bool:
         """让模型以 PASS 或 REPAIR 判断产物是否通过质量检查。"""
@@ -72,7 +72,7 @@ class OpenAICompatibleModel:
         )
         return str(response.content).strip().upper() == "PASS"
 
-    async def repair(self, artifact: str, context: dict[str, Any]) -> str:
+    async def repair(self, artifact: str, context: dict[str, Any]) -> ModelTurn:
         """结合验证和构建上下文生成修复后的完整产物。"""
         response = await self._client.ainvoke(
             [
@@ -80,7 +80,21 @@ class OpenAICompatibleModel:
                 HumanMessage(content=json.dumps({"artifact": artifact, **context}, ensure_ascii=False)),
             ]
         )
-        return str(response.content)
+        return _model_turn(response, str(response.content))
+
+
+def _model_turn(response: Any, content: str, tool_calls: list[ToolCall] | None = None) -> ModelTurn:
+    """把供应商响应规范化为工作流使用的内容、结束原因和 token 用量。"""
+    metadata = getattr(response, "response_metadata", {}) or {}
+    finish_reason = metadata.get("finish_reason") or metadata.get("stop_reason")
+    usage = getattr(response, "usage_metadata", {}) or {}
+    normalized_usage = {str(key): int(value) for key, value in usage.items() if isinstance(value, int)}
+    return ModelTurn(
+        content=content,
+        tool_calls=list(tool_calls or []),
+        finish_reason=str(finish_reason).upper() if finish_reason is not None else None,
+        token_usage=normalized_usage,
+    )
 
 
 def _strip_json_fence(value: str) -> str:

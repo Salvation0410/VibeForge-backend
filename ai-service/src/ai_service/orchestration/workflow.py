@@ -29,6 +29,32 @@ class WorkflowState(TypedDict, total=False):
     quality_passed: bool
     repair_count: int
     tool_call_count: int
+    finish_reason: str | None
+    token_usage: dict[str, int]
+    publish: dict[str, Any]
+
+
+def _raise_for_incomplete_model_turn(finish_reason: str | None) -> None:
+    """在模型因长度或内容策略中止时阻止候选进入校验和发布。"""
+    normalized = (finish_reason or "").upper()
+    if normalized in {"LENGTH", "MAX_TOKENS"}:
+        raise ValueError("MODEL_OUTPUT_TRUNCATED: model output reached its length limit")
+    if normalized in {"CONTENT_FILTER", "CONTENT_FILTERED"}:
+        raise ValueError("MODEL_OUTPUT_BLOCKED: model output was filtered")
+
+
+def _after_validation(state: WorkflowState, max_attempts: int) -> str:
+    """根据硬校验结果选择构建、质量检查、修复或失败节点。"""
+    if not state.get("validation", {}).get("valid", False):
+        return "fail" if state.get("repair_count", 0) >= max_attempts else "repair"
+    return "build" if state["code_gen_type"] == "VUE_PROJECT" else "review"
+
+
+def _after_review(state: WorkflowState, max_attempts: int) -> str:
+    """质量通过后按生成类型发布，否则进入有限修复或失败。"""
+    if state.get("quality_passed", False):
+        return "publish" if state["code_gen_type"] == "MULTI_FILE" else "finalize"
+    return "fail" if state.get("repair_count", 0) >= max_attempts else "repair"
 
 
 class GenerationWorkflow:
@@ -146,7 +172,7 @@ class GenerationWorkflow:
             turn = await self.model.generate(branch, state["context"])
             if turn.content:
                 await emitter.emit("content_delta", f"generate_{branch.lower()}", data={"content": turn.content})
-            return {"artifact": turn.content}
+            return {"artifact": turn.content, "finish_reason": turn.finish_reason, "token_usage": turn.token_usage}
 
         async def vue_agent(state: WorkflowState) -> dict[str, Any]:
             context = dict(state["context"])
@@ -186,6 +212,7 @@ class GenerationWorkflow:
             return {"artifact": "\n".join(artifact_parts), "context": context, "tool_call_count": tool_count}
 
         async def artifact_validation(state: WorkflowState) -> dict[str, Any]:
+            _raise_for_incomplete_model_turn(state.get("finish_reason"))
             call_id = f"{state['request_id']}:artifact_validation:{state.get('repair_count', 0)}"
             result = await self._invoke_tool(
                 emitter,
@@ -208,6 +235,8 @@ class GenerationWorkflow:
             return {"build": result}
 
         async def quality_review(state: WorkflowState) -> dict[str, Any]:
+            if not state.get("validation", {}).get("valid", False):
+                return {"quality_passed": False}
             passed = await self.model.review(
                 state.get("artifact", ""),
                 {**state["context"], "validation": state.get("validation"), "build": state.get("build")},
@@ -216,12 +245,43 @@ class GenerationWorkflow:
 
         async def repair(state: WorkflowState) -> dict[str, Any]:
             count = state.get("repair_count", 0) + 1
-            artifact = await self.model.repair(
+            turn = await self.model.repair(
                 state.get("artifact", ""),
                 {**state["context"], "repairCount": count, "validation": state.get("validation"), "build": state.get("build")},
             )
-            await emitter.emit("content_delta", "repair", data={"content": artifact, "repairCount": count})
-            return {"artifact": artifact, "repair_count": count}
+            await emitter.emit("content_delta", "repair", data={"content": turn.content, "repairCount": count})
+            return {
+                "artifact": turn.content,
+                "repair_count": count,
+                "finish_reason": turn.finish_reason,
+                "token_usage": turn.token_usage,
+            }
+
+        async def artifact_publish(state: WorkflowState) -> dict[str, Any]:
+            """请求 Spring 重新校验并发布最终多文件候选，失败时中止完成事件。"""
+            call_id = f"{state['request_id']}:artifact_publish"
+            result = await self._invoke_tool(
+                emitter,
+                "artifact_publish",
+                "artifact_publish",
+                {
+                    "appId": state["app_id"],
+                    "requestId": state["request_id"],
+                    "codeGenType": state["code_gen_type"],
+                    "artifact": state.get("artifact", ""),
+                    "engine": "langgraph",
+                    "finishReason": state.get("finish_reason") or "",
+                },
+                call_id,
+            )
+            if not result.get("published", False):
+                raise ValueError("Spring rejected artifact publication")
+            return {"publish": result}
+
+        async def fail_quality(state: WorkflowState) -> dict[str, Any]:
+            """在硬校验或质量检查耗尽修复次数后生成明确失败终态。"""
+            errors = state.get("validation", {}).get("errors", [])
+            raise ValueError(f"Artifact did not pass validation or quality review: {errors}")
 
         async def finalize(state: WorkflowState) -> dict[str, Any]:
             self._raise_if_cancelled(thread_id)
@@ -250,6 +310,8 @@ class GenerationWorkflow:
         builder.add_node("project_build", guarded("project_build", project_build))
         builder.add_node("quality_review", guarded("quality_review", quality_review))
         builder.add_node("repair", guarded("repair", repair))
+        builder.add_node("artifact_publish", guarded("artifact_publish", artifact_publish))
+        builder.add_node("fail_quality", fail_quality)
         builder.add_node("finalize", finalize)
 
         builder.add_edge(START, "input_guard")
@@ -261,19 +323,19 @@ class GenerationWorkflow:
         )
         for generation_node in ("generate_html", "generate_multi_file", "vue_agent"):
             builder.add_edge(generation_node, "artifact_validation")
-        builder.add_edge("artifact_validation", "project_build")
+        builder.add_conditional_edges(
+            "artifact_validation",
+            lambda state: _after_validation(state, self.settings.max_repair_attempts),
+            {"repair": "repair", "fail": "fail_quality", "build": "project_build", "review": "quality_review"},
+        )
         builder.add_edge("project_build", "quality_review")
         builder.add_conditional_edges(
             "quality_review",
-            lambda state: (
-                "finalize"
-                if state.get("quality_passed", False)
-                or state.get("repair_count", 0) >= self.settings.max_repair_attempts
-                else "repair"
-            ),
-            {"repair": "repair", "finalize": "finalize"},
+            lambda state: _after_review(state, self.settings.max_repair_attempts),
+            {"repair": "repair", "fail": "fail_quality", "publish": "artifact_publish", "finalize": "finalize"},
         )
         builder.add_edge("repair", "artifact_validation")
+        builder.add_edge("artifact_publish", "finalize")
         builder.add_edge("finalize", END)
         graph_saver = getattr(self.checkpoint, "get_graph_saver", lambda: None)()
         return builder.compile(checkpointer=graph_saver)
