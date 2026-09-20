@@ -22,12 +22,16 @@ class AppControllerSseTest {
     }
 
     @Test
-    void failureEmitsErrorWithoutDone() {
+    void failureEmitsBusinessErrorWithoutDoneOrNamedTransportError() {
         var error = new GenerationStreamException(50001, "MODEL_OUTPUT_TRUNCATED", "req-1",
                 "模型输出达到长度限制，已保留上一版本", null);
         var fixture = fixture(Flux.error(error));
         var events = fixture.controller.chatToGenCode(42L, "build", fixture.request).collectList().block();
-        assertNotNull(events); assertEquals(1, events.size()); assertEquals("error", events.getFirst().event());
+        assertNotNull(events);
+        assertEquals(1, events.size());
+        assertEquals("business-error", events.getFirst().event());
+        assertTrue(events.stream().noneMatch(event -> "done".equals(event.event())));
+        assertTrue(events.stream().noneMatch(event -> "error".equals(event.event())));
         assertTrue(events.getFirst().data().contains("MODEL_OUTPUT_TRUNCATED"));
         assertTrue(events.getFirst().data().contains("req-1"));
     }

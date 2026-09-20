@@ -348,7 +348,7 @@ public class AppController {
                                 .data("")
                                 .build()
                 ))
-                // SSE 开始后不能再修改 HTTP 状态，终止异常必须转换为命名 error 事件。
+                // SSE 开始后不能再修改 HTTP 状态；业务失败使用独立事件，避免与 EventSource 原生连接错误混淆。
                 .onErrorResume(error -> {
                     GenerationStreamException streamError = error instanceof GenerationStreamException value
                             ? value : new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(),
@@ -360,7 +360,7 @@ public class AppController {
                             "message", streamError.getMessage(),
                             "requestId", streamError.getRequestId());
                     return Mono.just(ServerSentEvent.<String>builder()
-                            .event("error").data(JSONUtil.toJsonStr(body)).build());
+                            .event("business-error").data(JSONUtil.toJsonStr(body)).build());
                 });
     }
 
