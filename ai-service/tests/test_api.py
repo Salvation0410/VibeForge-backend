@@ -115,6 +115,70 @@ def test_multi_file_completes_only_after_publication(app_factory, auth_headers, 
     assert "project_build" not in calls
 
 
+def test_html_completes_only_after_successful_publication(app_factory, auth_headers, ndjson_parser):
+    """HTML 必须在 Spring 确认发布后才产生 completed 终态。"""
+    gateway = FakeToolGateway()
+    client = TestClient(app_factory(gateway=gateway))
+    events = ndjson_parser(client.post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("HTML"),
+        headers=auth_headers,
+    ))
+
+    publish_calls = [call for call in gateway.calls if call["name"] == "artifact_publish"]
+    assert len(publish_calls) == 1
+    assert publish_calls[0]["arguments"]["codeGenType"] == "HTML"
+    publish_finished = next(i for i, event in enumerate(events)
+                            if event["type"] == "tool_finished" and event["node"] == "artifact_publish")
+    completed = next(i for i, event in enumerate(events) if event["type"] == "completed")
+    assert publish_finished < completed
+
+
+def test_html_publication_rejection_fails_without_completed(app_factory, auth_headers, ndjson_parser):
+    """Spring 拒绝 HTML 发布时工作流只能发送 failed，不得伪造成功。"""
+    class RejectingGateway(FakeToolGateway):
+        async def invoke(self, name, arguments, *, tool_call_id):
+            result = await super().invoke(name, arguments, tool_call_id=tool_call_id)
+            return {"published": False} if name == "artifact_publish" else result
+
+    events = ndjson_parser(TestClient(app_factory(gateway=RejectingGateway())).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("HTML"),
+        headers=auth_headers,
+    ))
+    assert events[-1]["type"] == "failed"
+    assert not [event for event in events if event["type"] == "completed"]
+
+
+def test_html_remains_completed_when_graph_checkpoint_fails_after_publication(
+    app_factory, auth_headers, ndjson_parser
+):
+    """HTML 已提交后即使图 checkpoint 失败，也只补发一次 completed。"""
+    gateway = FakeToolGateway()
+
+    class FailAfterPublishSaver(InMemorySaver):
+        async def aput(self, config, checkpoint, metadata, new_versions):
+            if any(call["name"] == "artifact_publish" for call in gateway.calls):
+                raise RuntimeError("checkpoint failed after html publication")
+            return await super().aput(config, checkpoint, metadata, new_versions)
+
+    class GraphCheckpoint(MemoryCheckpoint):
+        def __init__(self):
+            super().__init__()
+            self.graph_saver = FailAfterPublishSaver()
+
+        def get_graph_saver(self):
+            return self.graph_saver
+
+    events = ndjson_parser(TestClient(app_factory(gateway=gateway, checkpoint=GraphCheckpoint())).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("HTML"),
+        headers=auth_headers,
+    ))
+    assert len([event for event in events if event["type"] == "completed"]) == 1
+    assert not [event for event in events if event["type"] == "failed"]
+
+
 def test_multi_file_remains_completed_when_graph_checkpoint_fails_after_publication(
     app_factory, auth_headers, ndjson_parser
 ):

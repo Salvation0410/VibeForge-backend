@@ -395,15 +395,15 @@ git commit -m "fix: 仅在 HTML 安全发布后完成生成"
 - Modify: `ai-service/src/ai_service/orchestration/workflow.py`
 - Modify: `ai-service/tests/test_api.py`
 
-- [ ] **Step 1: Add Spring tool contract tests**
+- [x] **Step 1: Add Spring tool contract tests**
 
 Add `artifact_validate` HTML success and incident rejection, plus `artifact_publish` HTML success, idempotency, and smoke-test failure. Assert `codeGenType=HTML` selects the HTML pipeline and MULTI_FILE remains unchanged.
 
-- [ ] **Step 2: Add Python workflow tests**
+- [x] **Step 2: Add Python workflow tests**
 
 Assert HTML calls `artifact_publish`, `completed` appears only after `published=true`, publish rejection produces `failed`, and a post-publication graph checkpoint failure still emits exactly one `completed`.
 
-- [ ] **Step 3: Run both test groups and verify red state**
+- [x] **Step 3: Run both test groups and verify red state**
 
 ```powershell
 mvn -q -Dtest=InternalAiToolsControllerTest test
@@ -413,7 +413,7 @@ uv run pytest tests/test_api.py -q
 
 Expected: HTML publication assertions fail in both services.
 
-- [ ] **Step 4: Extend the Spring adapter**
+- [x] **Step 4: Extend the Spring adapter**
 
 Dispatch validation and publication by parsed `CodeGenTypeEnum`:
 
@@ -425,7 +425,7 @@ default -> throw new BusinessException(ErrorCode.PARAMS_ERROR, "artifact_publish
 
 Keep the controller free of filesystem logic. Return structured validation errors and existing publication metadata.
 
-- [ ] **Step 5: Change LangGraph routing**
+- [x] **Step 5: Change LangGraph routing**
 
 Update `_after_review` so both `HTML` and `MULTI_FILE` route to `artifact_publish`. Treat both types as committed publication terminal paths in checkpoint fallback logic:
 
@@ -435,7 +435,7 @@ return "publish" if state["code_gen_type"] in {"HTML", "MULTI_FILE"} else "final
 
 Keep Vue build/finalize behavior unchanged. Add Chinese docstrings for the changed routing and terminal behavior.
 
-- [ ] **Step 6: Run cross-service tests**
+- [x] **Step 6: Run cross-service tests**
 
 ```powershell
 mvn -q "-Dtest=InternalAiToolsControllerTest,ArtifactPublicationServiceTest,LangGraphAiGenerationGatewayTest" test
@@ -447,7 +447,7 @@ uv lock --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 7: Commit LangGraph integration**
+- [x] **Step 7: Commit LangGraph integration**
 
 ```powershell
 git add src/main/java/com/yupi/yuaicodemother/controller/InternalAiToolsController.java ai-service/src/ai_service/orchestration/workflow.py ai-service/tests/test_api.py

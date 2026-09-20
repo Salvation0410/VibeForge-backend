@@ -8,6 +8,8 @@ import com.yupi.yuaicodemother.core.builder.VueProjectBuilder;
 import com.yupi.yuaicodemother.core.artifact.ArtifactPathResolver;
 import com.yupi.yuaicodemother.core.artifact.ArtifactPublicationService;
 import com.yupi.yuaicodemother.core.artifact.ArtifactValidationException;
+import com.yupi.yuaicodemother.core.artifact.HtmlArtifactParser;
+import com.yupi.yuaicodemother.core.artifact.HtmlArtifactValidator;
 import com.yupi.yuaicodemother.core.artifact.MultiFileArtifactValidator;
 import com.yupi.yuaicodemother.core.paser.MultiFileCodeParser;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
@@ -53,6 +55,7 @@ public class InternalAiToolsController {
     private final ArtifactPathResolver artifactPathResolver;
     private final ArtifactPublicationService artifactPublicationService;
     private final MultiFileArtifactValidator artifactValidator;
+    private final HtmlArtifactValidator htmlArtifactValidator;
 
     /**
      * 校验内部调用身份并执行指定工具，同一 {@code toolCallId} 只执行一次。
@@ -171,20 +174,22 @@ public class InternalAiToolsController {
     }
 
     /**
-     * 对多文件候选执行严格解析与确定性校验，并返回可供工作流修复的结构化错误。
+     * 按生成类型对候选执行确定性校验；HTML 和多文件解析失败均返回结构化错误供修复。
      *
      * @param args 包含生成类型和待校验 artifact 的工具参数
      * @return 校验状态和稳定错误列表
      */
     private Map<String, Object> validateArtifact(Map<String, Object> args) {
         String artifact = text(args.get("artifact"));
-        String type = text(args.get("codeGenType"));
-        if (!"MULTI_FILE".equalsIgnoreCase(type) && !"multi_file".equalsIgnoreCase(type)) {
+        CodeGenTypeEnum type = artifactType(args);
+        if (type != CodeGenTypeEnum.HTML && type != CodeGenTypeEnum.MULTI_FILE) {
             return Map.of("valid", !artifact.isBlank(), "errors", artifact.isBlank()
                     ? java.util.List.of(Map.of("code", "ARTIFACT_MISSING", "message", "artifact is blank")) : java.util.List.of());
         }
         try {
-            var result = artifactValidator.validate(new MultiFileCodeParser().parseCode(artifact));
+            var result = type == CodeGenTypeEnum.HTML
+                    ? htmlArtifactValidator.validate(new HtmlArtifactParser().parse(artifact))
+                    : artifactValidator.validate(new MultiFileCodeParser().parseCode(artifact));
             return Map.of("valid", result.valid(), "errors", result.errors());
         } catch (ArtifactValidationException e) {
             Map<String, Object> error = new HashMap<>();
@@ -202,13 +207,25 @@ public class InternalAiToolsController {
      * @return 发布状态、版本 ID 和文件摘要
      */
     private Map<String, Object> publishArtifact(long appId, Map<String, Object> args) {
-        String type = text(args.get("codeGenType"));
-        if (!"MULTI_FILE".equalsIgnoreCase(type) && !"multi_file".equalsIgnoreCase(type)) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "artifact_publish only supports MULTI_FILE");
-        }
-        var result = artifactPublicationService.publishMultiFile(appId, text(args.get("requestId")),
-                text(args.get("artifact")), text(args.get("engine")), text(args.get("finishReason")));
+        CodeGenTypeEnum type = artifactType(args);
+        var result = switch (type) {
+            case HTML -> artifactPublicationService.publishHtml(appId, text(args.get("requestId")),
+                    text(args.get("artifact")), text(args.get("engine")), text(args.get("finishReason")));
+            case MULTI_FILE -> artifactPublicationService.publishMultiFile(appId, text(args.get("requestId")),
+                    text(args.get("artifact")), text(args.get("engine")), text(args.get("finishReason")));
+            default -> throw new BusinessException(ErrorCode.PARAMS_ERROR, "artifact_publish does not support " + type);
+        };
         return Map.of("published", result.published(), "versionId", result.versionId(), "hashes", result.hashes());
+    }
+
+    /** 将内部工具的生成类型规范化；未知类型只沿用 Vue 的通用校验，不允许错误发布。 */
+    private CodeGenTypeEnum artifactType(Map<String, Object> args) {
+        String type = text(args.get("codeGenType")).toLowerCase().replace('-', '_');
+        return switch (type) {
+            case "html" -> CodeGenTypeEnum.HTML;
+            case "multi_file", "multifile" -> CodeGenTypeEnum.MULTI_FILE;
+            default -> CodeGenTypeEnum.VUE_PROJECT;
+        };
     }
 
     /**

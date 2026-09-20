@@ -51,9 +51,9 @@ def _after_validation(state: WorkflowState, max_attempts: int) -> str:
 
 
 def _after_review(state: WorkflowState, max_attempts: int) -> str:
-    """质量通过后按生成类型发布，否则进入有限修复或失败。"""
+    """质量通过后将 HTML 和多文件交给 Spring 原子发布，Vue 保持原构建终态。"""
     if state.get("quality_passed", False):
-        return "publish" if state["code_gen_type"] == "MULTI_FILE" else "finalize"
+        return "publish" if state["code_gen_type"] in {"HTML", "MULTI_FILE"} else "finalize"
     return "fail" if state.get("repair_count", 0) >= max_attempts else "repair"
 
 
@@ -276,7 +276,7 @@ class GenerationWorkflow:
             }
 
         async def artifact_publish(state: WorkflowState) -> dict[str, Any]:
-            """请求 Spring 重新校验并发布最终多文件候选，失败时中止完成事件。"""
+            """请求 Spring 重新校验并发布 HTML 或多文件候选，拒绝时不得进入完成终态。"""
             call_id = f"{state['request_id']}:artifact_publish"
 
             def remember_publication(result: dict[str, Any]) -> None:
@@ -324,10 +324,10 @@ class GenerationWorkflow:
             raise ValueError(f"Artifact did not pass validation or quality review: {errors}")
 
         async def finalize(state: WorkflowState) -> dict[str, Any]:
-            """发送成功终态；多文件已提交后不再执行可能失败的外部 checkpoint 写入。"""
+            """发送成功终态；版本化产物已提交后不再让外部 checkpoint 反转业务结果。"""
             self._raise_if_cancelled(thread_id)
             await emitter.node_status("finalize", "started")
-            if state["code_gen_type"] != "MULTI_FILE":
+            if state["code_gen_type"] not in {"HTML", "MULTI_FILE"}:
                 await self.checkpoint.save(thread_id, self._checkpoint_payload(state, "finalize"))
             await emitter.node_status("finalize", "completed")
             await emitter.emit(
