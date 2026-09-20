@@ -727,11 +727,11 @@ git commit -m "fix: 仅在发布成功后刷新一次预览"
 - Create: `src/test/java/com/yupi/yuaicodemother/controller/admin/ArtifactRecoveryControllerTest.java`
 - Modify: `doc/ai-service-startup.md`
 
-- [ ] **Step 1: Add recovery endpoint tests**
+- [x] **Step 1: Add recovery endpoint tests**
 
 Require admin authentication, `appId`, a new recovery `requestId`, candidate HTML, source description, and `dryRun=true` by default. Dry run executes parser, validator, and smoke test but does not create a release or change `.current`. Commit mode calls `publishHtml` with engine `manual-recovery`.
 
-- [ ] **Step 2: Run recovery tests and verify red state**
+- [x] **Step 2: Run recovery tests and verify red state**
 
 ```powershell
 mvn -q -Dtest=ArtifactRecoveryControllerTest test
@@ -739,11 +739,11 @@ mvn -q -Dtest=ArtifactRecoveryControllerTest test
 
 Expected: compilation fails because recovery types do not exist.
 
-- [ ] **Step 3: Implement the admin recovery adapter**
+- [x] **Step 3: Implement the admin recovery adapter**
 
 Expose `POST /api/apps/admin/artifacts/html/recover` using the existing `@AuthCheck(mustRole = UserConstant.ADMIN_ROLE)` pattern. The controller must not search chat history automatically; the operator supplies an explicitly reviewed candidate and source description. Return validation/smoke details in dry run and publication metadata in commit mode.
 
-- [ ] **Step 4: Implement the PowerShell wrapper**
+- [x] **Step 4: Implement the PowerShell wrapper**
 
 Script parameters:
 
@@ -760,7 +760,7 @@ param(
 
 The script reads UTF-8, sends dry run unless `-Commit` is present, passes `-WebSession $WebSession` to `Invoke-RestMethod`, and never reads or rewrites `projects/`. Do not embed credentials or session cookies.
 
-- [ ] **Step 5: Run recovery tests**
+- [x] **Step 5: Run recovery tests**
 
 ```powershell
 mvn -q "-Dtest=ArtifactRecoveryControllerTest,ArtifactPublicationServiceTest,HtmlArtifactValidatorTest" test
@@ -768,7 +768,7 @@ mvn -q "-Dtest=ArtifactRecoveryControllerTest,ArtifactPublicationServiceTest,Htm
 
 Expected: all tests pass.
 
-- [ ] **Step 6: Commit recovery tooling**
+- [x] **Step 6: Commit recovery tooling**
 
 ```powershell
 git add scripts/restore-html-release.ps1 src/main/java/com/yupi/yuaicodemother/controller/admin/ArtifactRecoveryController.java src/main/java/com/yupi/yuaicodemother/model/dto/app/HtmlArtifactRecoveryRequest.java doc/ai-service-startup.md
