@@ -43,6 +43,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequiredArgsConstructor
 public class InternalAiToolsController {
     private static final Map<String, String> IDEMPOTENT_RESULTS = new ConcurrentHashMap<>();
+    private static final String MULTI_FILE_RELEASE_IMMUTABLE = "MULTI_FILE_RELEASE_IMMUTABLE";
     private static final String[] IMPORTANT_FILES = {"package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
             "vite.config.js", "vite.config.ts", "vue.config.js", "tsconfig.json", "index.html", "main.js", "main.ts", "App.vue"};
 
@@ -120,6 +121,7 @@ public class InternalAiToolsController {
      * @throws BusinessException 路径非法或文件写入失败时抛出
      */
     private Map<String, Object> writeFile(long appId, Map<String, Object> args) {
+        rejectMultiFileMutation(args);
         Path path = sandboxPath(appId, args, "relativeFilePath", false);
         String content = text(args.get("content"));
         try {
@@ -138,6 +140,7 @@ public class InternalAiToolsController {
      * @throws BusinessException 路径非法、文件不存在或读写失败时抛出
      */
     private Map<String, Object> modifyFile(long appId, Map<String, Object> args) {
+        rejectMultiFileMutation(args);
         Path path = sandboxPath(appId, args, "relativeFilePath", false);
         try {
             String original = Files.readString(path, StandardCharsets.UTF_8);
@@ -158,6 +161,7 @@ public class InternalAiToolsController {
      * @throws BusinessException 路径非法、文件受保护或删除失败时抛出
      */
     private Map<String, Object> deleteFile(long appId, Map<String, Object> args) {
+        rejectMultiFileMutation(args);
         Path path = sandboxPath(appId, args, "relativeFilePath", false);
         String name = path.getFileName().toString();
         for (String important : IMPORTANT_FILES) if (important.equalsIgnoreCase(name))
@@ -263,6 +267,19 @@ public class InternalAiToolsController {
         Path path = root.resolve(relative).normalize();
         if (!path.startsWith(root)) throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "Path escapes app sandbox");
         return path;
+    }
+
+    /**
+     * 阻止通用文件工具修改多文件活动版本，确保发布目录只能由原子发布流程创建和切换。
+     *
+     * @param args 包含代码生成类型的工具参数
+     * @throws BusinessException 请求试图写入、修改或删除 MULTI_FILE 产物时，以稳定错误消息拒绝
+     */
+    private void rejectMultiFileMutation(Map<String, Object> args) {
+        String type = text(args.get("codeGenType")).toLowerCase().replace('-', '_');
+        if ("multi_file".equals(type) || "multifile".equals(type)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, MULTI_FILE_RELEASE_IMMUTABLE);
+        }
     }
 
     /**

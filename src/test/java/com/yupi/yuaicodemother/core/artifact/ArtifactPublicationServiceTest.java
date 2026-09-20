@@ -35,6 +35,57 @@ class ArtifactPublicationServiceTest {
     }
 
     @Test
+    void tamperedReleaseIsRejectedOnIdempotentRetry() throws Exception {
+        var fixture = fixture();
+        fixture.service.publishMultiFile(42, "req-1", artifact("blue"), "legacy", "STOP");
+        Files.writeString(root.resolve("multi_file_42/.releases/req-1/style.css"), "main { color: red; }");
+
+        var error = assertThrows(ArtifactValidationException.class,
+                () -> fixture.service.publishMultiFile(42, "req-1", artifact("blue"), "legacy", "STOP"));
+
+        assertEquals("ARTIFACT_VERSION_CONFLICT", error.getErrorCode());
+    }
+
+    @Test
+    void incompleteReleaseIsRejectedOnIdempotentRetry() throws Exception {
+        var fixture = fixture();
+        fixture.service.publishMultiFile(42, "req-1", artifact("blue"), "legacy", "STOP");
+        Files.delete(root.resolve("multi_file_42/.releases/req-1/script.js"));
+
+        var error = assertThrows(ArtifactValidationException.class,
+                () -> fixture.service.publishMultiFile(42, "req-1", artifact("blue"), "legacy", "STOP"));
+
+        assertEquals("ARTIFACT_VERSION_CONFLICT", error.getErrorCode());
+    }
+
+    @Test
+    void existingCompleteReleaseCanRecoverPointerSwitch() throws Exception {
+        var fixture = fixture();
+        fixture.service.publishMultiFile(42, "req-old", artifact("blue"), "legacy", "STOP");
+        fixture.service.publishMultiFile(42, "req-retry", artifact("green"), "legacy", "STOP");
+        Files.writeString(root.resolve("multi_file_42/.current"), "req-old");
+
+        fixture.service.publishMultiFile(42, "req-retry", artifact("green"), "legacy", "STOP");
+
+        assertEquals("req-retry", Files.readString(root.resolve("multi_file_42/.current")).trim());
+        assertEquals("main { color: green; }", Files.readString(
+                fixture.resolver.resolveActiveRoot(CodeGenTypeEnum.MULTI_FILE, 42).resolve("style.css")));
+    }
+
+    @Test
+    void olderExistingReleaseCannotReplaceNewerCurrentVersion() {
+        var fixture = fixture();
+        fixture.service.publishMultiFile(42, "req-old", artifact("blue"), "legacy", "STOP");
+        fixture.service.publishMultiFile(42, "req-new", artifact("green"), "legacy", "STOP");
+
+        var error = assertThrows(ArtifactValidationException.class,
+                () -> fixture.service.publishMultiFile(42, "req-old", artifact("blue"), "legacy", "STOP"));
+
+        assertEquals("ARTIFACT_VERSION_CONFLICT", error.getErrorCode());
+        assertTrue(fixture.resolver.resolveActiveRoot(CodeGenTypeEnum.MULTI_FILE, 42).endsWith("req-new"));
+    }
+
+    @Test
     void retainsCurrentAndTwoPreviousVersions() throws Exception {
         var fixture = fixture();
         for (int i=1;i<=5;i++) { fixture.service.publishMultiFile(42, "req-"+i, artifact("c"+i), "legacy", "STOP"); Thread.sleep(3); }

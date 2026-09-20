@@ -21,6 +21,7 @@ public class ArtifactPublicationService {
     private final ArtifactPathResolver resolver;
     private final ObjectMapper objectMapper;
 
+    /** 组装解析、校验、路径解析和 JSON manifest 能力。 */
     @Autowired
     public ArtifactPublicationService(MultiFileArtifactValidator validator, ArtifactPathResolver resolver, ObjectMapper objectMapper) {
         this.validator = validator; this.resolver = resolver; this.objectMapper = objectMapper;
@@ -69,14 +70,69 @@ public class ArtifactPublicationService {
         }
     }
 
+    /**
+     * 从磁盘重算已有版本摘要并校验 manifest；仅当活动版本更旧时恢复未完成的指针切换。
+     * <p>
+     * 任一业务文件缺失、被篡改或摘要不符都会以版本冲突拒绝，绝不自动激活可疑版本。
+     */
     private ArtifactPublishResult existingResult(Path release, String requestId, Map<String, String> hashes) throws Exception {
-        ArtifactManifest manifest = objectMapper.readValue(release.resolve("manifest.json").toFile(), ArtifactManifest.class);
-        if (!hashes.equals(manifest.hashes())) throw new ArtifactValidationException("ARTIFACT_VERSION_CONFLICT", null, "相同请求 ID 对应不同产物");
+        ArtifactManifest manifest;
+        Map<String, String> diskHashes;
+        try {
+            manifest = objectMapper.readValue(release.resolve("manifest.json").toFile(), ArtifactManifest.class);
+            diskHashes = hashesFromRelease(release);
+        } catch (Exception e) {
+            throw versionConflict("相同请求 ID 的已有版本不完整或无法读取");
+        }
+        if (!requestId.equals(manifest.requestId()) || !hashes.equals(manifest.hashes()) || !hashes.equals(diskHashes)) {
+            throw versionConflict("相同请求 ID 对应不同产物或磁盘版本已被篡改");
+        }
         Path pointer = release.getParent().getParent().resolve(".current");
         if (!Files.isRegularFile(pointer)) switchPointer(pointer.getParent(), requestId);
-        else if (!requestId.equals(Files.readString(pointer).trim()))
-            throw new ArtifactValidationException("ARTIFACT_VERSION_CONFLICT", null, "该请求版本已存在但不是当前版本");
+        else if (!requestId.equals(Files.readString(pointer, StandardCharsets.UTF_8).trim())) {
+            ensureCurrentVersionIsOlder(pointer.getParent(), manifest);
+            switchPointer(pointer.getParent(), requestId);
+        }
         return new ArtifactPublishResult(true, requestId, hashes);
+    }
+
+    /**
+     * 读取已有 release 的三个业务文件并计算摘要；文件缺失或读取失败时直接失败。
+     */
+    private Map<String, String> hashesFromRelease(Path release) throws Exception {
+        Map<String, String> values = new LinkedHashMap<>();
+        for (String fileName : List.of("index.html", "style.css", "script.js")) {
+            Path file = release.resolve(fileName);
+            if (!Files.isRegularFile(file)) throw new NoSuchFileException(file.toString());
+            values.put(fileName, sha256(Files.readString(file, StandardCharsets.UTF_8)));
+        }
+        return Map.copyOf(values);
+    }
+
+    /**
+     * 确认当前指针确实指向更早版本，防止旧请求重放覆盖更新的活动版本。
+     * 当前版本或 manifest 无法确认时拒绝恢复，由调用方保留原指针。
+     */
+    private void ensureCurrentVersionIsOlder(Path root, ArtifactManifest targetManifest) {
+        try {
+            String currentId = Files.readString(root.resolve(".current"), StandardCharsets.UTF_8).trim();
+            ArtifactManifest currentManifest = objectMapper.readValue(
+                    root.resolve(".releases").resolve(currentId).resolve("manifest.json").toFile(),
+                    ArtifactManifest.class);
+            if (currentManifest.createdAt() == null || targetManifest.createdAt() == null
+                    || !currentManifest.createdAt().isBefore(targetManifest.createdAt())) {
+                throw versionConflict("该请求版本早于或等于当前活动版本");
+            }
+        } catch (ArtifactValidationException e) {
+            throw e;
+        } catch (Exception e) {
+            throw versionConflict("无法确认当前活动版本早于待恢复版本");
+        }
+    }
+
+    /** 创建统一的已有版本冲突异常，调用方不得在此类失败后切换活动指针。 */
+    private ArtifactValidationException versionConflict(String message) {
+        return new ArtifactValidationException("ARTIFACT_VERSION_CONFLICT", null, message);
     }
 
     /** 使用同目录临时文件原子替换当前指针，避免读到半写入内容。 */
@@ -101,6 +157,7 @@ public class ArtifactPublicationService {
         }
     }
 
+    /** 从磁盘重读候选文件并核对摘要，防止写入内容与校验内容不一致。 */
     private void verifyStaging(Path staging, Map<String, String> expected) throws Exception {
         for (var entry : expected.entrySet()) {
             String actual = sha256(Files.readString(staging.resolve(entry.getKey())));
@@ -108,19 +165,26 @@ public class ArtifactPublicationService {
         }
     }
 
+    /** 计算三个业务文件的稳定 SHA-256 摘要。 */
     private Map<String, String> hashes(MultiFileCodeResult result) {
         Map<String, String> values = new LinkedHashMap<>();
         values.put("index.html", sha256(result.getHtmlCode())); values.put("style.css", sha256(result.getCssCode()));
         values.put("script.js", sha256(result.getJsCode())); return Map.copyOf(values);
     }
 
+    /** 计算 UTF-8 文本的 SHA-256 十六进制摘要。 */
     private String sha256(String value) {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); }
         catch (Exception e) { throw new IllegalStateException(e); }
     }
+    /** 以 UTF-8 新建候选文件，禁止静默覆盖已有文件。 */
     private void write(Path path, String value) throws Exception { Files.writeString(path, value, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW); }
+    /** 将可空 manifest 字段规范化为空字符串。 */
     private String safe(String value) { return value == null ? "" : value; }
+    /** 限制 requestId 字符集，防止版本路径越界。 */
     private void validateRequestId(String value) { if (value == null || !value.matches("[A-Za-z0-9._-]{1,128}")) throw new ArtifactValidationException("REQUEST_ID_INVALID", null, "请求 ID 非法"); }
+    /** 读取版本时间用于保留策略排序。 */
     private long lastModified(Path path) { try { return Files.getLastModifiedTime(path).toMillis(); } catch (Exception e) { return 0; } }
+    /** 仅递归删除调用方已限定在 staging 或 release 下的目标目录。 */
     private void deleteTree(Path path) throws Exception { if (!Files.exists(path)) return; try (var s=Files.walk(path)){ for(Path p:s.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(p); } }
 }
