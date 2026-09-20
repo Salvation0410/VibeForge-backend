@@ -673,11 +673,11 @@ Do not stage `package-lock.json`.
 - Create: `src/utils/previewRefreshCoordinator.ts`
 - Create: `tests/previewRefreshCoordinator.test.ts`
 
-- [ ] **Step 1: Add refresh coordinator tests**
+- [x] **Step 1: Add refresh coordinator tests**
 
 Assert that generation start performs zero reloads, success performs one reload, repeated success callbacks for the same request perform one reload, error/cancel performs zero reloads, and dispose cancels pending work.
 
-- [ ] **Step 2: Run the coordinator test and verify red state**
+- [x] **Step 2: Run the coordinator test and verify red state**
 
 ```powershell
 node --test --experimental-strip-types tests/previewRefreshCoordinator.test.ts
@@ -685,7 +685,7 @@ node --test --experimental-strip-types tests/previewRefreshCoordinator.test.ts
 
 Expected: module-not-found failure.
 
-- [ ] **Step 3: Implement one-shot refresh coordination**
+- [x] **Step 3: Implement one-shot refresh coordination**
 
 Expose:
 
@@ -695,13 +695,13 @@ createPreviewRefreshCoordinator(reload: () => Promise<void> | void)
 
 with `begin(requestKey)`, `complete(requestKey)`, `fail(requestKey)`, and `dispose()`. Ignore duplicate or stale terminal calls.
 
-- [ ] **Step 4: Remove speculative preview reloads**
+- [x] **Step 4: Remove speculative preview reloads**
 
 In `sendMessage`, remove the generation-start `finalizePreview()` call. Keep the existing iframe/srcdoc mounted under the generating overlay. In `onDone`, reload app detail and history, then call the coordinator once. Delete `schedulePreviewReloads`, `pendingPreviewReloadTimers`, and the meta-refresh fallback; fetch failure must retain the old `previewSrcDoc` and show a retryable message.
 
 Add Chinese comments to the changed methods explaining that preview refresh follows committed `done`, not timing guesses.
 
-- [ ] **Step 5: Run frontend verification**
+- [x] **Step 5: Run frontend verification**
 
 ```powershell
 node --test --experimental-strip-types tests/previewRefreshCoordinator.test.ts tests/generationStreamProgress.test.ts tests/optimizePrompt.test.ts
@@ -711,7 +711,7 @@ npm run build-only
 
 Expected: all exit 0.
 
-- [ ] **Step 6: Commit one-shot preview refresh**
+- [x] **Step 6: Commit one-shot preview refresh**
 
 ```powershell
 git add src/pages/AppChatView.vue src/utils/previewRefreshCoordinator.ts tests/previewRefreshCoordinator.test.ts
