@@ -39,7 +39,8 @@ public class ArtifactPathResolver {
      */
     public Path resolveActiveRoot(CodeGenTypeEnum codeGenType, long appId) {
         Path root = projectRoot(codeGenType, appId);
-        if (codeGenType != CodeGenTypeEnum.MULTI_FILE) return root;
+        // HTML 与多文件都使用不可变 release；没有新版本时仍回退到旧平铺目录。
+        if (codeGenType != CodeGenTypeEnum.MULTI_FILE && codeGenType != CodeGenTypeEnum.HTML) return root;
         Path current = resolvePointer(root);
         if (current != null) return current;
         if (!Files.exists(root.resolve(".current"))) return root;
@@ -97,13 +98,18 @@ public class ArtifactPathResolver {
         }
     }
 
-    /** 校验 release 的 manifest 和三个必要文件是否齐全。 */
+    /** 按 manifest 声明的文件集合校验 release，HTML 版本只要求 index.html。 */
     private boolean isValidRelease(Path release) {
         if (!Files.isDirectory(release) || !Files.isRegularFile(release.resolve("manifest.json"))) return false;
         try {
-            objectMapper.readValue(release.resolve("manifest.json").toFile(), ArtifactManifest.class);
-            return Files.isRegularFile(release.resolve("index.html")) && Files.isRegularFile(release.resolve("style.css"))
-                    && Files.isRegularFile(release.resolve("script.js"));
+            ArtifactManifest manifest = objectMapper.readValue(release.resolve("manifest.json").toFile(), ArtifactManifest.class);
+            if (manifest.hashes() == null || manifest.hashes().isEmpty()) return false;
+            for (String fileName : manifest.hashes().keySet()) {
+                if (fileName == null || !fileName.matches("[A-Za-z0-9._-]+") || fileName.contains("..")
+                        || !Files.isRegularFile(release.resolve(fileName).normalize())
+                        || !release.equals(release.resolve(fileName).normalize().getParent())) return false;
+            }
+            return true;
         } catch (Exception e) { return false; }
     }
 
