@@ -332,7 +332,7 @@ git commit -m "feat: 发布 HTML 前执行浏览器烟测"
 - Modify: `src/main/resources/prompt/codegen-html-system-prompt.txt`
 - Modify: `src/test/java/com/yupi/yuaicodemother/core/AiCodeGeneratorFacadeTest.java`
 
-- [ ] **Step 1: Add Legacy HTML completion tests**
+- [x] **Step 1: Add Legacy HTML completion tests**
 
 Extend the fake `TokenStream` tests:
 
@@ -342,7 +342,7 @@ Extend the fake `TokenStream` tests:
 - smoke/publish failure reaches the Flux error channel and never completes normally.
 - a cancellation mark set before completion prevents publication.
 
-- [ ] **Step 2: Run the Legacy tests and verify red state**
+- [x] **Step 2: Run the Legacy tests and verify red state**
 
 ```powershell
 mvn -q -Dtest=AiCodeGeneratorFacadeTest test
@@ -350,7 +350,7 @@ mvn -q -Dtest=AiCodeGeneratorFacadeTest test
 
 Expected: HTML cases fail because current completion still uses the old saver.
 
-- [ ] **Step 3: Route HTML through `publishHtml`**
+- [x] **Step 3: Route HTML through `publishHtml`**
 
 In the existing simple `TokenStream` adapter, collect chunks for HTML, call `ensureComplete(response.finishReason())`, then call:
 
@@ -361,7 +361,7 @@ artifactPublicationService.publishHtml(
 
 Only call `sink.complete()` after publication returns. Never catch and log publication errors as success. Keep MULTI_FILE behavior intact. Add Chinese Javadoc explaining success and cancellation semantics.
 
-- [ ] **Step 4: Tighten the system prompt**
+- [x] **Step 4: Tighten the system prompt**
 
 Replace the permission for surrounding explanations with these exact requirements:
 
@@ -371,7 +371,7 @@ Replace the permission for surrounding explanations with these exact requirement
 必须输出从 <!DOCTYPE html> 到 </html> 的完整文档；无法完整输出时不得提交部分代码。
 ```
 
-- [ ] **Step 5: Run Legacy and artifact tests**
+- [x] **Step 5: Run Legacy and artifact tests**
 
 ```powershell
 mvn -q "-Dtest=AiCodeGeneratorFacadeTest,CodeParserTest,HtmlArtifactValidatorTest,ArtifactPublicationServiceTest" test
@@ -379,7 +379,7 @@ mvn -q "-Dtest=AiCodeGeneratorFacadeTest,CodeParserTest,HtmlArtifactValidatorTes
 
 Expected: all tests pass.
 
-- [ ] **Step 6: Commit Legacy integration**
+- [x] **Step 6: Commit Legacy integration**
 
 ```powershell
 git add src/main/java/com/yupi/yuaicodemother/ai/AiCodeGeneratorService.java src/main/java/com/yupi/yuaicodemother/core/AiCodeGeneratorFacade.java src/main/resources/prompt/codegen-html-system-prompt.txt
@@ -587,7 +587,7 @@ Do not stage the user's pre-existing `package-lock.json` change.
 - Modify: `src/main/java/com/yupi/yuaicodemother/controller/AppController.java`
 - Modify: `src/test/java/com/yupi/yuaicodemother/controller/AppControllerSseTest.java`
 
-- [ ] **Step 1: Add deterministic progress-buffer tests**
+- [x] **Step 1: Add deterministic progress-buffer tests**
 
 Inject scheduler functions so Node tests need no browser timers. Cover 10,000 chunks, one scheduled flush per 80 ms window, accumulated character count, final flush, cancel cleanup, and no callback after disposal.
 
@@ -604,7 +604,7 @@ createGenerationStreamProgress({
 
 The accumulator stores only character count and timing metadata, never concatenated source text.
 
-- [ ] **Step 2: Run the buffer test and verify red state**
+- [x] **Step 2: Run the buffer test and verify red state**
 
 ```powershell
 node --test --experimental-strip-types tests/generationStreamProgress.test.ts
@@ -612,17 +612,17 @@ node --test --experimental-strip-types tests/generationStreamProgress.test.ts
 
 Expected: module-not-found failure.
 
-- [ ] **Step 3: Implement the non-reactive accumulator**
+- [x] **Step 3: Implement the non-reactive accumulator**
 
 Expose `push(chunk)`, `finish()`, and `dispose()`. Chinese comments must state that source chunks intentionally stay outside Vue reactive state to avoid repeated full-text DOM updates.
 
-- [ ] **Step 4: Standardize the business failure event**
+- [x] **Step 4: Standardize the business failure event**
 
 Change `AppController` to emit `event("business-error")` for structured generation failures. Keep native EventSource `error` exclusively for transport/protocol failures. Preserve `code`, `errorCode`, `message`, and `requestId` in the JSON body.
 
 Update `AppControllerSseTest` to assert one `business-error`, no `done`, and no named `error` event. Keep `src/api/app.ts` listening to `business-error` and its existing native `onerror` handler for network failures.
 
-- [ ] **Step 5: Integrate lightweight progress UI**
+- [x] **Step 5: Integrate lightweight progress UI**
 
 In `AppChatView.vue`:
 
@@ -635,7 +635,7 @@ In `AppChatView.vue`:
 
 Add a “停止生成” button while streaming. Its click calls `currentEventSource?.close()`, clears local progress, leaves the previous preview intact, and relies on the existing server-side reactive cancellation path to prevent publication.
 
-- [ ] **Step 6: Replace per-chunk smooth scrolling**
+- [x] **Step 6: Replace per-chunk smooth scrolling**
 
 Throttle auto-follow to at most once per 200 ms and use `behavior: 'auto'` during streaming. Track whether the viewport is within 48 px of the bottom; pause following after the user scrolls upward and resume only when they return to the bottom.
 
