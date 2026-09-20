@@ -7,12 +7,14 @@ param(
     [switch] $Commit
 )
 
-$resolvedCandidate = (Resolve-Path -LiteralPath $CandidateFile -ErrorAction Stop).Path
+$resolvedCandidate = [System.IO.Path]::GetFullPath((Resolve-Path -LiteralPath $CandidateFile -ErrorAction Stop).Path)
 if (-not (Test-Path -LiteralPath $resolvedCandidate -PathType Leaf)) {
     throw "CandidateFile 必须是 UTF-8 HTML 文件: $CandidateFile"
 }
-$projectsRoot = Join-Path (Get-Location) 'projects'
-if ($resolvedCandidate.StartsWith(($projectsRoot.TrimEnd('\') + '\'), [System.StringComparison]::OrdinalIgnoreCase)) {
+$repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$projectsRoot = [System.IO.Path]::GetFullPath((Join-Path $repositoryRoot 'projects'))
+$projectsPrefix = $projectsRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+if ($resolvedCandidate.StartsWith($projectsPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw '禁止从 projects/ 读取恢复候选；请提供操作员明确审核的独立文件。'
 }
 
