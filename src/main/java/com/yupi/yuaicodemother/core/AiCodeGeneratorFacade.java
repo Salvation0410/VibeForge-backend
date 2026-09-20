@@ -192,8 +192,10 @@ public class AiCodeGeneratorFacade {
                                 artifactPublicationService.publishMultiFile(appId, requestId, content.toString(),
                                         "legacy", response.finishReason() == null ? "" : response.finishReason().name());
                             } else {
-                                Object parsed = CodeParserExecutor.executeParser(content.toString(), codeGenType);
-                                CodeFileSaverExecutor.executeSaver(parsed, codeGenType, appId);
+                                // HTML 必须先完成严格解析、确定性校验和浏览器烟测，再允许 SSE 进入正常完成态。
+                                // 发布失败直接进入 error，保留上一版本，禁止旧的平铺保存器覆盖活动产物。
+                                artifactPublicationService.publishHtml(appId, requestId, content.toString(),
+                                        "legacy", response.finishReason() == null ? "" : response.finishReason().name());
                             }
                             log.info("AI 产物发布成功, requestId={}, appId={}, type={}, chars={}, finishReason={}",
                                     requestId, appId, codeGenType, content.length(), response.finishReason());
