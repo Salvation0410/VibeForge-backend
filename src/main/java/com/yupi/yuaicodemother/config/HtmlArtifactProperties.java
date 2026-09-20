@@ -11,4 +11,6 @@ import org.springframework.stereotype.Component;
 public class HtmlArtifactProperties {
     private boolean enabled = true;
     private boolean required = true;
+    /** 允许单文件 HTML 继续执行全量重写的当前源码字符数上限。 */
+    private int maxRewriteSourceChars = 24_000;
 }

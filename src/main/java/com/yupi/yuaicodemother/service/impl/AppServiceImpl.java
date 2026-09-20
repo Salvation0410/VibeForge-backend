@@ -15,6 +15,7 @@ import com.yupi.yuaicodemother.core.artifact.ArtifactValidationException;
 import com.yupi.yuaicodemother.constant.AppConstant;
 import com.yupi.yuaicodemother.core.builder.VueProjectBuilder;
 import com.yupi.yuaicodemother.core.artifact.ArtifactPathResolver;
+import com.yupi.yuaicodemother.core.artifact.HtmlOutputBudgetGuard;
 import com.yupi.yuaicodemother.core.handler.StreamHandlerExecutor;
 import com.yupi.yuaicodemother.enums.ChatHistoryMessageTypeEnum;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
@@ -60,6 +61,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     private final ChatHistoryService chatHistoryService;
     private final ArtifactPathResolver artifactPathResolver;
     private final GenerationLeaseService generationLeaseService;
+    private final HtmlOutputBudgetGuard htmlOutputBudgetGuard;
 
     @Resource
     private StreamHandlerExecutor streamHandlerExecutor;
@@ -106,6 +108,8 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         return Flux.defer(() -> {
             var lease = generationLeaseService.acquire(appId, requestId);
             try {
+                // 在写入历史和调用模型前拒绝超预算的 HTML 全量重写，失败时保留当前活动版本。
+                htmlOutputBudgetGuard.checkRewriteAllowed(codeGenTypeEnum, appId);
                 chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
                 chatHistoryOriginalService.addOriginalChatMessage(appId, message,
                         ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());

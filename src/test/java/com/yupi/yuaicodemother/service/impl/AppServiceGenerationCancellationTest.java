@@ -3,7 +3,10 @@ package com.yupi.yuaicodemother.service.impl;
 import com.yupi.yuaicodemother.ai.gateway.AiGenerationGateway;
 import com.yupi.yuaicodemother.ai.gateway.GenerationLease;
 import com.yupi.yuaicodemother.ai.gateway.GenerationLeaseService;
+import com.yupi.yuaicodemother.ai.gateway.GenerationStreamException;
 import com.yupi.yuaicodemother.core.artifact.ArtifactPathResolver;
+import com.yupi.yuaicodemother.core.artifact.ArtifactValidationException;
+import com.yupi.yuaicodemother.core.artifact.HtmlOutputBudgetGuard;
 import com.yupi.yuaicodemother.core.handler.StreamHandlerExecutor;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
 import com.yupi.yuaicodemother.model.entity.App;
@@ -18,6 +21,8 @@ import reactor.core.publisher.Sinks;
 
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class AppServiceGenerationCancellationTest {
 
@@ -39,7 +44,7 @@ class AppServiceGenerationCancellationTest {
                 eq(CodeGenTypeEnum.MULTI_FILE))).thenAnswer(invocation -> invocation.getArgument(0));
 
         AppServiceImpl service = spy(new AppServiceImpl(mock(SysUserService.class), gateway, history,
-                mock(ArtifactPathResolver.class), leases));
+                mock(ArtifactPathResolver.class), leases, mock(HtmlOutputBudgetGuard.class)));
         ReflectionTestUtils.setField(service, "streamHandlerExecutor", streamHandler);
         ReflectionTestUtils.setField(service, "chatHistoryOriginalService", originalHistory);
         doReturn(App.builder().id(42L).userId(7L).codeGenType("multi_file").build())
@@ -53,5 +58,35 @@ class AppServiceGenerationCancellationTest {
 
         engine.tryEmitError(new IllegalStateException("cancelled"));
         verify(leases, timeout(1000)).release(lease);
+    }
+
+    @Test
+    void oversizedHtmlIsRejectedBeforeHistoryAndModelInvocation() {
+        AiGenerationGateway gateway = mock(AiGenerationGateway.class);
+        ChatHistoryService history = mock(ChatHistoryService.class);
+        ChatHistoryOriginalService originalHistory = mock(ChatHistoryOriginalService.class);
+        GenerationLeaseService leases = mock(GenerationLeaseService.class);
+        GenerationLease lease = mock(GenerationLease.class);
+        HtmlOutputBudgetGuard budgetGuard = mock(HtmlOutputBudgetGuard.class);
+        StreamHandlerExecutor streamHandler = mock(StreamHandlerExecutor.class);
+
+        when(leases.acquire(eq(42L), anyString())).thenReturn(lease);
+        doThrow(new ArtifactValidationException("HTML_OUTPUT_BUDGET_EXCEEDED", "index.html", "页面过大"))
+                .when(budgetGuard).checkRewriteAllowed(CodeGenTypeEnum.HTML, 42L);
+
+        AppServiceImpl service = spy(new AppServiceImpl(mock(SysUserService.class), gateway, history,
+                mock(ArtifactPathResolver.class), leases, budgetGuard));
+        ReflectionTestUtils.setField(service, "streamHandlerExecutor", streamHandler);
+        ReflectionTestUtils.setField(service, "chatHistoryOriginalService", originalHistory);
+        doReturn(App.builder().id(42L).userId(7L).codeGenType("html").build())
+                .when(service).getById(42L);
+
+        GenerationStreamException error = assertThrows(GenerationStreamException.class,
+                () -> service.chatToGenCode(42L, "optimize", SysUser.builder().id(7L).build()).blockLast());
+        assertEquals("HTML_OUTPUT_BUDGET_EXCEEDED", error.getErrorCode());
+        verify(history, never()).addChatMessage(anyLong(), anyString(), anyString(), anyLong());
+        verify(originalHistory, never()).addOriginalChatMessage(anyLong(), anyString(), anyString(), anyLong());
+        verifyNoInteractions(gateway, streamHandler);
+        verify(leases).release(lease);
     }
 }
