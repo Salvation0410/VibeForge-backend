@@ -2,6 +2,7 @@ package com.yupi.yuaicodemother.core.artifact;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.yupi.yuaicodemother.config.HtmlArtifactProperties;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -36,6 +37,50 @@ class ArtifactPublicationServiceTest {
         assertEquals(java.util.Set.of("index.html"), first.hashes().keySet());
         assertTrue(Files.readString(active.resolve("index.html")).contains("blue"));
         assertFalse(Files.exists(active.resolve("style.css")));
+    }
+
+    @Test
+    void failedSmokeGatePreservesPreviousHtmlRelease() throws Exception {
+        var fixture = fixture();
+        fixture.service.publishHtml(7, "html-old", html("blue"), "legacy", "STOP");
+        Path appRoot = root.resolve("html_7");
+        var properties = new HtmlArtifactProperties();
+        HtmlSmokeTester rejected = path -> HtmlSmokeTestResult.failure("HTML_SMOKE_TEST_FAILED", "JavaScript syntax error");
+        var guarded = new ArtifactPublicationService(new MultiFileArtifactValidator(), new HtmlArtifactValidator(),
+                fixture.resolver, fixture.mapper, null, rejected, properties);
+
+        var error = assertThrows(ArtifactValidationException.class,
+                () -> guarded.publishHtml(7, "html-new", html("green"), "legacy", "STOP"));
+
+        assertEquals("HTML_SMOKE_TEST_FAILED", error.getErrorCode());
+        assertEquals("html-old", Files.readString(appRoot.resolve(".current")).trim());
+        assertFalse(Files.exists(appRoot.resolve(".releases/html-new")));
+    }
+
+    @Test
+    void requiredSmokeGateCannotBeDisabled() {
+        var fixture = fixture();
+        var properties = new HtmlArtifactProperties();
+        properties.setEnabled(false);
+        var guarded = new ArtifactPublicationService(new MultiFileArtifactValidator(), new HtmlArtifactValidator(),
+                fixture.resolver, fixture.mapper, null, path -> HtmlSmokeTestResult.success(), properties);
+
+        var error = assertThrows(ArtifactValidationException.class,
+                () -> guarded.publishHtml(7, "html-new", html("green"), "legacy", "STOP"));
+        assertEquals("HTML_SMOKE_TEST_UNAVAILABLE", error.getErrorCode());
+    }
+
+    @Test
+    void developmentCanExplicitlyDisableOptionalSmokeGate() {
+        var fixture = fixture();
+        var properties = new HtmlArtifactProperties();
+        properties.setEnabled(false);
+        properties.setRequired(false);
+        var guarded = new ArtifactPublicationService(new MultiFileArtifactValidator(), new HtmlArtifactValidator(),
+                fixture.resolver, fixture.mapper, null,
+                path -> { throw new AssertionError("禁用后不应调用浏览器"); }, properties);
+
+        assertTrue(guarded.publishHtml(7, "html-dev", html("green"), "legacy", "STOP").published());
     }
 
     @Test
