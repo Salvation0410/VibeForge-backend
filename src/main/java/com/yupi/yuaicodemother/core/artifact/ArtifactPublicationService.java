@@ -10,6 +10,8 @@ import com.yupi.yuaicodemother.core.paser.MultiFileCodeParser;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import lombok.extern.slf4j.Slf4j;
 
 import java.nio.file.Path;
@@ -27,26 +29,28 @@ public class ArtifactPublicationService {
     private final GenerationLeaseService generationLeaseService;
     private final HtmlSmokeTester smokeTester;
     private final HtmlArtifactProperties htmlProperties;
+    private final Environment environment;
 
     /** 组装解析器、确定性校验器、浏览器烟测、共享版本存储和生成提交状态门。 */
     @Autowired
     public ArtifactPublicationService(MultiFileArtifactValidator validator, HtmlArtifactValidator htmlValidator,
                                       ArtifactPathResolver resolver, ObjectMapper objectMapper,
                                       GenerationLeaseService generationLeaseService, HtmlSmokeTester smokeTester,
-                                      HtmlArtifactProperties htmlProperties) {
+                                      HtmlArtifactProperties htmlProperties, Environment environment) {
         this.multiFileValidator = validator;
         this.htmlValidator = htmlValidator;
         this.store = new VersionedArtifactStore(resolver, objectMapper);
         this.generationLeaseService = generationLeaseService;
         this.smokeTester = smokeTester;
         this.htmlProperties = htmlProperties;
+        this.environment = environment;
     }
 
     /** 隔离测试构造器；不启用生成取消状态门。 */
     ArtifactPublicationService(MultiFileArtifactValidator validator, ArtifactPathResolver resolver,
                                ObjectMapper objectMapper) {
         this(validator, new HtmlArtifactValidator(), resolver, objectMapper, null,
-                path -> HtmlSmokeTestResult.success(), new HtmlArtifactProperties());
+                path -> HtmlSmokeTestResult.success(), new HtmlArtifactProperties(), null);
     }
 
     /** 严格解析并发布三文件产物，发布失败不会改变当前指针。 */
@@ -98,7 +102,11 @@ public class ArtifactPublicationService {
             if (htmlProperties.isRequired()) {
                 throw new ArtifactValidationException("HTML_SMOKE_TEST_UNAVAILABLE", "index.html", "HTML 浏览器烟测已禁用，无法验证候选版本");
             }
-            log.warn("开发配置跳过 HTML 浏览器烟测: {}", staging);
+            if (environment == null || !environment.acceptsProfiles(Profiles.of("local", "dev", "test"))) {
+                throw new ArtifactValidationException("HTML_SMOKE_TEST_UNAVAILABLE", "index.html",
+                        "只有 local、dev 或 test profile 可跳过 HTML 浏览器烟测");
+            }
+            log.warn("开发 profile 显式跳过 HTML 浏览器烟测: {}", staging);
             return;
         }
         HtmlSmokeTestResult result;

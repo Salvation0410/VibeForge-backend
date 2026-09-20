@@ -6,6 +6,7 @@ import com.yupi.yuaicodemother.config.HtmlArtifactProperties;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.mock.env.MockEnvironment;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -47,7 +48,7 @@ class ArtifactPublicationServiceTest {
         var properties = new HtmlArtifactProperties();
         HtmlSmokeTester rejected = path -> HtmlSmokeTestResult.failure("HTML_SMOKE_TEST_FAILED", "JavaScript syntax error");
         var guarded = new ArtifactPublicationService(new MultiFileArtifactValidator(), new HtmlArtifactValidator(),
-                fixture.resolver, fixture.mapper, null, rejected, properties);
+                fixture.resolver, fixture.mapper, null, rejected, properties, new MockEnvironment());
 
         var error = assertThrows(ArtifactValidationException.class,
                 () -> guarded.publishHtml(7, "html-new", html("green"), "legacy", "STOP"));
@@ -63,7 +64,8 @@ class ArtifactPublicationServiceTest {
         var properties = new HtmlArtifactProperties();
         properties.setEnabled(false);
         var guarded = new ArtifactPublicationService(new MultiFileArtifactValidator(), new HtmlArtifactValidator(),
-                fixture.resolver, fixture.mapper, null, path -> HtmlSmokeTestResult.success(), properties);
+                fixture.resolver, fixture.mapper, null, path -> HtmlSmokeTestResult.success(), properties,
+                new MockEnvironment());
 
         var error = assertThrows(ArtifactValidationException.class,
                 () -> guarded.publishHtml(7, "html-new", html("green"), "legacy", "STOP"));
@@ -78,9 +80,26 @@ class ArtifactPublicationServiceTest {
         properties.setRequired(false);
         var guarded = new ArtifactPublicationService(new MultiFileArtifactValidator(), new HtmlArtifactValidator(),
                 fixture.resolver, fixture.mapper, null,
-                path -> { throw new AssertionError("禁用后不应调用浏览器"); }, properties);
+                path -> { throw new AssertionError("禁用后不应调用浏览器"); }, properties,
+                new MockEnvironment().withProperty("spring.profiles.active", "local"));
 
         assertTrue(guarded.publishHtml(7, "html-dev", html("green"), "legacy", "STOP").published());
+    }
+
+    @Test
+    void productionProfileCannotDisableOptionalSmokeGate() {
+        var fixture = fixture();
+        var properties = new HtmlArtifactProperties();
+        properties.setEnabled(false);
+        properties.setRequired(false);
+        MockEnvironment production = new MockEnvironment();
+        production.setActiveProfiles("prod");
+        var guarded = new ArtifactPublicationService(new MultiFileArtifactValidator(), new HtmlArtifactValidator(),
+                fixture.resolver, fixture.mapper, null, path -> HtmlSmokeTestResult.success(), properties, production);
+
+        var error = assertThrows(ArtifactValidationException.class,
+                () -> guarded.publishHtml(7, "html-prod", html("green"), "legacy", "STOP"));
+        assertEquals("HTML_SMOKE_TEST_UNAVAILABLE", error.getErrorCode());
     }
 
     @Test

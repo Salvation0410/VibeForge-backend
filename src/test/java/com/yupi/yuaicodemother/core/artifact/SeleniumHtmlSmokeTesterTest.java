@@ -44,6 +44,14 @@ class SeleniumHtmlSmokeTesterTest {
                 "<div class='skeleton'>Loading application...</div>")).errorCode());
     }
 
+    @Test void delayedRenderingPassesAfterObservationStarts() throws Exception {
+        assertTrue(tester.verify(page("<script>setTimeout(()=>document.body.innerHTML='<main>Ready later</main>',1000)</script>")).passed());
+    }
+
+    @Test void permanentlyBlankPageFailsAfterObservation() throws Exception {
+        assertEquals("HTML_SMOKE_TEST_FAILED", tester.verify(page("")).errorCode());
+    }
+
     @Test void externalImageFailureIsWarning() throws Exception {
         assertTrue(tester.verify(page("<main>Ready application</main><img src='https://127.0.0.1:1/missing.png'>")).passed());
     }

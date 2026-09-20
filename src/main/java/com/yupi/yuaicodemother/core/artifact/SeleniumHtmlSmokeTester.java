@@ -96,6 +96,7 @@ public class SeleniumHtmlSmokeTester implements HtmlSmokeTester {
         }
         try {
             ((ChromeDriver) driver).executeCdpCommand("Page.addScriptToEvaluateOnNewDocument", Map.of("source", ERROR_HOOK));
+            ((ChromeDriver) driver).executeCdpCommand("Browser.setDownloadBehavior", Map.of("behavior", "deny"));
             driver.manage().timeouts().pageLoadTimeout(Duration.ofSeconds(8));
             String expected = indexHtml.toAbsolutePath().toUri().toString();
             driver.get(expected);
@@ -148,7 +149,8 @@ public class SeleniumHtmlSmokeTester implements HtmlSmokeTester {
             }
             log.warn("HTML 烟测资源告警: {}", message);
         }
-        if (((Number) state.get("meaningful")).intValue() == 0 && ((String) state.get("text")).isBlank()) {
+        if (observationComplete && ((Number) state.get("meaningful")).intValue() == 0
+                && ((String) state.get("text")).isBlank()) {
             return HtmlSmokeTestResult.failure(FAILED, "HTML 页面没有可见内容");
         }
         if (observationComplete && Boolean.TRUE.equals(state.get("loading"))) {
