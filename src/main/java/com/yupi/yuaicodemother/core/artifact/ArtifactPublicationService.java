@@ -1,7 +1,9 @@
 package com.yupi.yuaicodemother.core.artifact;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yupi.yuaicodemother.ai.gateway.GenerationStreamException;
 import com.yupi.yuaicodemother.ai.model.MultiFileCodeResult;
+import com.yupi.yuaicodemother.ai.gateway.GenerationLeaseService;
 import com.yupi.yuaicodemother.core.paser.MultiFileCodeParser;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,11 +22,22 @@ public class ArtifactPublicationService {
     private final MultiFileArtifactValidator validator;
     private final ArtifactPathResolver resolver;
     private final ObjectMapper objectMapper;
+    private final GenerationLeaseService generationLeaseService;
 
-    /** 组装解析、校验、路径解析和 JSON manifest 能力。 */
+    /** 组装解析、校验、路径解析、提交状态门和 JSON manifest 能力。 */
     @Autowired
-    public ArtifactPublicationService(MultiFileArtifactValidator validator, ArtifactPathResolver resolver, ObjectMapper objectMapper) {
-        this.validator = validator; this.resolver = resolver; this.objectMapper = objectMapper;
+    public ArtifactPublicationService(MultiFileArtifactValidator validator, ArtifactPathResolver resolver,
+                                      ObjectMapper objectMapper, GenerationLeaseService generationLeaseService) {
+        this.validator = validator;
+        this.resolver = resolver;
+        this.objectMapper = objectMapper;
+        this.generationLeaseService = generationLeaseService;
+    }
+
+    /** 测试使用的隔离构造器，不启用 Redis 取消与提交状态门。 */
+    ArtifactPublicationService(MultiFileArtifactValidator validator, ArtifactPathResolver resolver,
+                               ObjectMapper objectMapper) {
+        this(validator, resolver, objectMapper, null);
     }
 
     /**
@@ -48,32 +61,51 @@ public class ArtifactPublicationService {
         Path tombstone = tombstonePath(root, requestId);
         Map<String, String> hashes = hashes(artifact);
         try {
-            Files.createDirectories(releases);
-            if (Files.isRegularFile(tombstone) && !Files.exists(release)) {
-                throw versionConflict("该请求已发布但产物版本已被保留策略清理，禁止重建或回滚");
-            }
-            if (Files.exists(release)) return existingResult(release, requestId, hashes);
-            long sequence = nextPublicationSequence(root);
-            Path staging = root.resolve(".staging").resolve(requestId);
-            deleteTree(staging);
-            Files.createDirectories(staging);
-            write(staging.resolve("index.html"), artifact.getHtmlCode());
-            write(staging.resolve("style.css"), artifact.getCssCode());
-            write(staging.resolve("script.js"), artifact.getJsCode());
-            ArtifactManifest manifest = new ArtifactManifest(requestId, appId, safe(engine), Instant.now(),
-                    sequence, hashes, safe(finishReason), 1);
-            objectMapper.writeValue(staging.resolve("manifest.json").toFile(), manifest);
-            verifyStaging(staging, hashes);
-            Files.move(staging, release, StandardCopyOption.ATOMIC_MOVE);
-            persistTombstone(root, manifest);
-            switchPointer(root, requestId);
-            try { cleanupOldReleases(root, requestId); }
-            catch (Exception ignored) { /* 清理失败不改变已经原子提交的成功结果。 */ }
-            return new ArtifactPublishResult(true, requestId, hashes);
-        } catch (ArtifactValidationException e) { throw e; }
-        catch (Exception e) {
+            return commitPublication(appId, requestId, () -> publishValidated(
+                    appId, requestId, engine, finishReason, root, releases, release, tombstone, hashes, artifact));
+        } catch (ArtifactValidationException | GenerationStreamException e) {
+            throw e;
+        } catch (Exception e) {
             throw new ArtifactValidationException("ARTIFACT_PUBLISH_FAILED", null, "产物发布失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * 在取消/提交原子状态门内写入并切换已校验版本；任一步失败都不会将请求标记为已提交。
+     */
+    private ArtifactPublishResult publishValidated(long appId, String requestId, String engine, String finishReason,
+                                                    Path root, Path releases, Path release, Path tombstone,
+                                                    Map<String, String> hashes, MultiFileCodeResult artifact) throws Exception {
+        Files.createDirectories(releases);
+        if (Files.isRegularFile(tombstone) && !Files.exists(release)) {
+            throw versionConflict("该请求已发布但产物版本已被保留策略清理，禁止重建或回滚");
+        }
+        if (Files.exists(release)) return existingResult(release, requestId, hashes);
+        long sequence = nextPublicationSequence(root);
+        Path staging = root.resolve(".staging").resolve(requestId);
+        deleteTree(staging);
+        Files.createDirectories(staging);
+        write(staging.resolve("index.html"), artifact.getHtmlCode());
+        write(staging.resolve("style.css"), artifact.getCssCode());
+        write(staging.resolve("script.js"), artifact.getJsCode());
+        ArtifactManifest manifest = new ArtifactManifest(requestId, appId, safe(engine), Instant.now(),
+                sequence, hashes, safe(finishReason), 1);
+        objectMapper.writeValue(staging.resolve("manifest.json").toFile(), manifest);
+        verifyStaging(staging, hashes);
+        Files.move(staging, release, StandardCopyOption.ATOMIC_MOVE);
+        persistTombstone(root, manifest);
+        switchPointer(root, requestId);
+        try { cleanupOldReleases(root, requestId); }
+        catch (Exception ignored) { /* 清理失败不改变已经原子提交的成功结果。 */ }
+        return new ArtifactPublishResult(true, requestId, hashes);
+    }
+
+    /** 有生成租约时串行化取消与提交；隔离单元测试直接执行发布动作。 */
+    private ArtifactPublishResult commitPublication(long appId, String requestId,
+                                                    GenerationLeaseService.CommitAction<ArtifactPublishResult> action)
+            throws Exception {
+        return generationLeaseService == null ? action.execute()
+                : generationLeaseService.commit(appId, requestId, action);
     }
 
     /**

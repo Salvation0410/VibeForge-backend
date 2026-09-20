@@ -116,7 +116,12 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
                         .doFinally(signal -> generationLeaseService.release(lease));
                 // 零历史缓存让下游取消后生成仍能走到真实终态并释放租约，同时不在内存保留代码块。
                 return execution.cache(0)
-                        .doOnCancel(() -> aiGenerationGateway.cancel(appId, loginUser.getId(), requestId));
+                        .doOnCancel(() -> {
+                            // 取消只有在提交尚未开始时才能胜出；提交胜出后保持成功终态。
+                            if (generationLeaseService.cancel(lease)) {
+                                aiGenerationGateway.cancel(appId, loginUser.getId(), requestId);
+                            }
+                        });
             } catch (Throwable error) {
                 generationLeaseService.release(lease);
                 return Flux.error(error);

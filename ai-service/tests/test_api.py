@@ -1,6 +1,8 @@
 from fastapi.testclient import TestClient
+from langgraph.checkpoint.memory import InMemorySaver
 
 from ai_service.models.base import ModelTurn
+from ai_service.orchestration.events import EventEmitter
 from conftest import FakeModel, FakeToolGateway, MemoryCheckpoint
 
 
@@ -113,6 +115,72 @@ def test_multi_file_completes_only_after_publication(app_factory, auth_headers, 
     assert "project_build" not in calls
 
 
+def test_multi_file_remains_completed_when_graph_checkpoint_fails_after_publication(
+    app_factory, auth_headers, ndjson_parser
+):
+    gateway = FakeToolGateway()
+
+    class FailAfterPublishSaver(InMemorySaver):
+        """模拟 Spring 已发布后 LangGraph 自动 checkpoint 写入失败。"""
+
+        async def aput(self, config, checkpoint, metadata, new_versions):
+            if any(call["name"] == "artifact_publish" for call in gateway.calls):
+                raise RuntimeError("checkpoint failed after artifact publication")
+            return await super().aput(config, checkpoint, metadata, new_versions)
+
+    class GraphCheckpoint(MemoryCheckpoint):
+        """同时提供业务 checkpoint 与故障注入用 LangGraph saver。"""
+
+        def __init__(self):
+            super().__init__()
+            self.graph_saver = FailAfterPublishSaver()
+
+        def get_graph_saver(self):
+            return self.graph_saver
+
+    client = TestClient(app_factory(gateway=gateway, checkpoint=GraphCheckpoint()))
+    events = ndjson_parser(client.post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("MULTI_FILE"),
+        headers=auth_headers,
+    ))
+
+    assert len([event for event in events if event["type"] == "completed"]) == 1
+    assert not [event for event in events if event["type"] == "failed"]
+    assert any(call["name"] == "artifact_publish" for call in gateway.calls)
+
+
+def test_multi_file_records_publication_before_tool_finished_event(
+    app_factory, auth_headers, ndjson_parser, monkeypatch
+):
+    gateway = FakeToolGateway()
+    original_emit = EventEmitter.emit
+    failed_once = False
+
+    async def fail_publish_finished_once(self, event_type, node, *, data=None, error=None):
+        nonlocal failed_once
+        if (
+            not failed_once
+            and event_type == "tool_finished"
+            and node == "artifact_publish"
+        ):
+            failed_once = True
+            raise RuntimeError("tool_finished delivery failed")
+        return await original_emit(self, event_type, node, data=data, error=error)
+
+    monkeypatch.setattr(EventEmitter, "emit", fail_publish_finished_once)
+    client = TestClient(app_factory(gateway=gateway))
+    events = ndjson_parser(client.post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("MULTI_FILE"),
+        headers=auth_headers,
+    ))
+
+    assert len([event for event in events if event["type"] == "completed"]) == 1
+    assert not [event for event in events if event["type"] == "failed"]
+    assert any(call["name"] == "artifact_publish" for call in gateway.calls)
+
+
 def test_vue_agent_tool_calls_are_bounded_and_identified(app_factory, auth_headers, ndjson_parser):
     model = FakeModel(vue_tool_calls=10)
     gateway = FakeToolGateway()
@@ -161,6 +229,7 @@ def test_cancelled_generation_has_explicit_terminal_event(app_factory, auth_head
     assert events[-1]["type"] == "failed"
     assert events[-1]["data"]["status"] == "cancelled"
     assert events[-1]["error"]["code"] == "cancelled"
+    assert not app.state.cancellations.is_cancelled("42:req-cancel")
 
 
 def test_health_ready_reports_checkpoint_failure(app_factory):

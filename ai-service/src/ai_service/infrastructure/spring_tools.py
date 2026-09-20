@@ -29,18 +29,26 @@ class SpringToolGateway:
         *,
         tool_call_id: str,
     ) -> dict[str, Any]:
-        """携带幂等调用 ID 执行工具，并返回 Spring 统一响应中的业务数据。"""
-        response = await self._client.post(
-            "/invoke",
-            json={
-                "toolCallId": tool_call_id,
-                "toolName": name,
-                "arguments": arguments,
-            },
-        )
-        response.raise_for_status()
-        payload = response.json()
-        return payload.get("data", payload)
+        """携带幂等调用 ID 执行工具；发布响应不确定时使用原 ID 有界重试。"""
+        request_body = {
+            "toolCallId": tool_call_id,
+            "toolName": name,
+            "arguments": arguments,
+        }
+        max_attempts = 2 if name == "artifact_publish" else 1
+        for attempt in range(max_attempts):
+            try:
+                response = await self._client.post("/invoke", json=request_body)
+                response.raise_for_status()
+                payload = response.json()
+                return payload.get("data", payload)
+            except httpx.HTTPStatusError as error:
+                if error.response.status_code < 500 or attempt + 1 >= max_attempts:
+                    raise
+            except (httpx.TransportError, ValueError):
+                if attempt + 1 >= max_attempts:
+                    raise
+        raise RuntimeError("Spring tool invocation exhausted without a result")
 
     async def close(self) -> None:
         """释放异步 HTTP 客户端连接池。"""

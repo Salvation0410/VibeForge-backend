@@ -165,13 +165,14 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
     /**
      * 将单行 LangGraph NDJSON 事件转换为现有流处理器使用的消息格式。
      * <p>
-     * HTML 和多文件内容事件直接返回文本；Vue 内容与工具事件转换为带类型的 JSON 消息；
-     * 状态类事件不向前端输出，失败事件转换为异常。
+     * HTML 和多文件内容只保留最后一个完整候选，收到 completed 后才交给下游；
+     * Vue 内容与工具事件转换为带类型的 JSON 消息，失败事件转换为带稳定错误码的异常。
      *
      * @param line Python 服务返回的一行 NDJSON 文本
      * @param codeGenType 当前应用代码生成类型
-     * @return 旧流处理器可消费的文本；无需下发的事件返回空字符串
-     * @throws IllegalStateException 事件不是合法 JSON 或事件声明失败时抛出
+     * @param fallbackRequestId 事件缺少请求 ID 时使用的当前请求 ID
+     * @return 包含前端消息、最终候选或成功终态标记的解析结果
+     * @throws IllegalStateException 事件不是合法 JSON 时抛出
      */
     private ParsedEvent parseEvent(String line, CodeGenTypeEnum codeGenType, String fallbackRequestId) {
         try {

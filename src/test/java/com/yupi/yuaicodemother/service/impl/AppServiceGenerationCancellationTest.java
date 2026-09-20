@@ -32,6 +32,7 @@ class AppServiceGenerationCancellationTest {
         Sinks.Many<String> engine = Sinks.many().unicast().onBackpressureBuffer();
 
         when(leases.acquire(eq(42L), anyString())).thenReturn(lease);
+        when(leases.cancel(lease)).thenReturn(true);
         when(gateway.generate(anyString(), eq(CodeGenTypeEnum.MULTI_FILE), eq(42L), eq(7L), anyString()))
                 .thenReturn(engine.asFlux());
         when(streamHandler.doExecute(any(), eq(history), eq(originalHistory), eq(42L), any(),
