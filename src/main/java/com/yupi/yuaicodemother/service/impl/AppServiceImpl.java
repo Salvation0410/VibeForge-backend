@@ -10,6 +10,8 @@ import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.yupi.yuaicodemother.ai.gateway.AiGenerationGateway;
 import com.yupi.yuaicodemother.ai.gateway.GenerationLeaseService;
+import com.yupi.yuaicodemother.ai.gateway.GenerationStreamException;
+import com.yupi.yuaicodemother.core.artifact.ArtifactValidationException;
 import com.yupi.yuaicodemother.constant.AppConstant;
 import com.yupi.yuaicodemother.core.builder.VueProjectBuilder;
 import com.yupi.yuaicodemother.core.artifact.ArtifactPathResolver;
@@ -109,8 +111,22 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             Flux<String> contentStream = aiGenerationGateway.generate(message, codeGenTypeEnum, appId,
                     loginUser.getId(), requestId);
             return streamHandlerExecutor.doExecute(contentStream, chatHistoryService, chatHistoryOriginalService,
-                    appId, loginUser, codeGenTypeEnum).doFinally(signal -> generationLeaseService.release(lease));
+                    appId, loginUser, codeGenTypeEnum)
+                    .doFinally(signal -> generationLeaseService.release(lease))
+                    .onErrorMap(error -> wrapGenerationError(requestId, error));
         });
+    }
+
+    /**
+     * 将底层模型、校验或发布异常转换为可通过 SSE 返回的稳定业务错误。
+     */
+    private GenerationStreamException wrapGenerationError(String requestId, Throwable error) {
+        if (error instanceof GenerationStreamException streamError) return streamError;
+        String stableCode = error instanceof ArtifactValidationException validation
+                ? validation.getErrorCode() : "GENERATION_FAILED";
+        int code = error instanceof BusinessException business ? business.getCode() : ErrorCode.OPERATION_ERROR.getCode();
+        String message = error.getMessage() == null ? "生成失败，已保留上一版本" : error.getMessage();
+        return new GenerationStreamException(code, stableCode, requestId, message, error);
     }
 
     /**

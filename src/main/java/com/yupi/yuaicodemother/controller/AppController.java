@@ -11,6 +11,7 @@ import com.yupi.yuaicodemother.common.DeleteRequest;
 import com.yupi.yuaicodemother.common.ResultUtils;
 import com.yupi.yuaicodemother.constant.AppConstant;
 import com.yupi.yuaicodemother.core.artifact.ArtifactPathResolver;
+import com.yupi.yuaicodemother.ai.gateway.GenerationStreamException;
 import com.yupi.yuaicodemother.constant.UserConstant;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
@@ -346,7 +347,21 @@ public class AppController {
                                 .event("done")
                                 .data("")
                                 .build()
-                ));
+                ))
+                // SSE 开始后不能再修改 HTTP 状态，终止异常必须转换为命名 error 事件。
+                .onErrorResume(error -> {
+                    GenerationStreamException streamError = error instanceof GenerationStreamException value
+                            ? value : new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(),
+                            "GENERATION_FAILED", "", "生成失败，已保留上一版本", error);
+                    Map<String, Object> body = Map.of(
+                            "error", true,
+                            "code", streamError.getCode(),
+                            "errorCode", streamError.getErrorCode(),
+                            "message", streamError.getMessage(),
+                            "requestId", streamError.getRequestId());
+                    return Mono.just(ServerSentEvent.<String>builder()
+                            .event("error").data(JSONUtil.toJsonStr(body)).build());
+                });
     }
 
     /**
