@@ -465,11 +465,11 @@ git commit -m "feat: 统一发布 LangGraph HTML 产物"
 - Create: `src/test/java/com/yupi/yuaicodemother/core/artifact/HtmlOutputBudgetGuardTest.java`
 - Modify: `src/test/java/com/yupi/yuaicodemother/service/impl/AppServiceGenerationCancellationTest.java`
 
-- [ ] **Step 1: Add budget guard tests**
+- [x] **Step 1: Add budget guard tests**
 
 Test no active HTML, HTML below threshold, HTML at threshold, HTML above threshold, and non-HTML types. Above-threshold HTML must throw `HTML_OUTPUT_BUDGET_EXCEEDED` before chat history insertion or model invocation.
 
-- [ ] **Step 2: Run tests and verify red state**
+- [x] **Step 2: Run tests and verify red state**
 
 ```powershell
 mvn -q "-Dtest=HtmlOutputBudgetGuardTest,AppServiceGenerationCancellationTest" test
@@ -477,7 +477,7 @@ mvn -q "-Dtest=HtmlOutputBudgetGuardTest,AppServiceGenerationCancellationTest" t
 
 Expected: compilation fails because the guard does not exist.
 
-- [ ] **Step 3: Implement and integrate the guard**
+- [x] **Step 3: Implement and integrate the guard**
 
 Add configuration:
 
@@ -495,7 +495,7 @@ public void checkRewriteAllowed(CodeGenTypeEnum type, long appId)
 
 Resolve the active HTML root, read `index.html` size as UTF-8 characters, and throw `ArtifactValidationException("HTML_OUTPUT_BUDGET_EXCEEDED", "index.html", "当前单文件页面过大，请迁移为多文件应用后继续优化")` when above the configured limit. `AppServiceImpl.wrapGenerationError` adds the current request ID. Run the guard after permission checks and lease acquisition but before history insertion/model invocation. Missing first-version files are allowed.
 
-- [ ] **Step 4: Run service tests**
+- [x] **Step 4: Run service tests**
 
 ```powershell
 mvn -q "-Dtest=HtmlOutputBudgetGuardTest,AppServiceGenerationCancellationTest" test
@@ -503,7 +503,7 @@ mvn -q "-Dtest=HtmlOutputBudgetGuardTest,AppServiceGenerationCancellationTest" t
 
 Expected: all tests pass and rejected requests do not pollute history.
 
-- [ ] **Step 5: Commit the budget guard**
+- [x] **Step 5: Commit the budget guard**
 
 ```powershell
 git add src/main/java/com/yupi/yuaicodemother/core/artifact/HtmlOutputBudgetGuard.java src/main/java/com/yupi/yuaicodemother/config/HtmlArtifactProperties.java src/main/java/com/yupi/yuaicodemother/service/impl/AppServiceImpl.java src/main/resources/application.yml
