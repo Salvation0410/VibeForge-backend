@@ -33,6 +33,13 @@ class HtmlArtifactValidatorTest {
     }
 
     @Test
+    void embeddedBlockScannerIgnoresTagsInsideHtmlComments() {
+        String comments = "<!-- <script>const broken = {</script> -->"
+                + "<!-- <style>broken {</style> -->";
+        assertTrue(validator.validate(artifact(completeBody(comments))).valid());
+    }
+
+    @Test
     void incompleteDocumentReturnsStableError() {
         for (String html : new String[]{
                 "<!doctype html><html><head></head><body></body>",

@@ -116,6 +116,11 @@ public class HtmlArtifactValidator {
         Matcher open = RAW_OPEN.matcher(html);
         int cursor = 0;
         while (open.find(cursor)) {
+            Matcher comment = Pattern.compile("(?s)<!--.*?-->").matcher(html);
+            if (comment.find(cursor) && comment.start() < open.start()) {
+                cursor = comment.end();
+                continue;
+            }
             String actualTag = open.group(1).toLowerCase(Locale.ROOT);
             Pattern closePattern = Pattern.compile("(?is)</" + actualTag + "\\s*>");
             Matcher close = closePattern.matcher(html);
@@ -139,6 +144,11 @@ public class HtmlArtifactValidator {
         Matcher open = RAW_OPEN.matcher(html);
         int cursor = 0;
         while (open.find(cursor)) {
+            Matcher comment = Pattern.compile("(?s)<!--.*?-->").matcher(html);
+            if (comment.find(cursor) && comment.start() < open.start()) {
+                cursor = comment.end();
+                continue;
+            }
             String actualTag = open.group(1).toLowerCase(Locale.ROOT);
             Matcher close = Pattern.compile("(?is)</" + actualTag + "\\s*>").matcher(html);
             if (!close.find(open.end())) {
@@ -147,6 +157,10 @@ public class HtmlArtifactValidator {
             }
             replaceWithSpaces(masked, open.end(), close.start());
             cursor = close.end();
+        }
+        Matcher comments = Pattern.compile("(?s)<!--.*?-->").matcher(html);
+        while (comments.find()) {
+            replaceWithSpaces(masked, comments.start(), comments.end());
         }
         return masked.toString();
     }
