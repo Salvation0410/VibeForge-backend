@@ -11,6 +11,7 @@ import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.yupi.yuaicodemother.ai.gateway.AiGenerationGateway;
 import com.yupi.yuaicodemother.constant.AppConstant;
 import com.yupi.yuaicodemother.core.builder.VueProjectBuilder;
+import com.yupi.yuaicodemother.core.artifact.ArtifactPathResolver;
 import com.yupi.yuaicodemother.core.handler.StreamHandlerExecutor;
 import com.yupi.yuaicodemother.enums.ChatHistoryMessageTypeEnum;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
@@ -54,6 +55,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     private final SysUserService userService;
     private final AiGenerationGateway aiGenerationGateway;
     private final ChatHistoryService chatHistoryService;
+    private final ArtifactPathResolver artifactPathResolver;
 
     @Resource
     private StreamHandlerExecutor streamHandlerExecutor;
@@ -208,6 +210,12 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     }
 
     private File resolveSourceRootDir(Long appId, String codeGenType) {
+        CodeGenTypeEnum type = CodeGenTypeEnum.getEnumByValue(codeGenType);
+        if (type != null) {
+            // 部署读取当前已提交版本，生成失败时继续使用上一成功版本。
+            File active = artifactPathResolver.resolveActiveRoot(type, appId).toFile();
+            if (active.isDirectory()) return active;
+        }
         if (StrUtil.isNotBlank(codeGenType)) {
             File sourceDir = new File(AppConstant.CODE_OUTPUT_ROOT_DIR, codeGenType + "_" + appId);
             if (sourceDir.isDirectory()) {

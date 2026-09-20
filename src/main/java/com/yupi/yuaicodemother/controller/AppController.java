@@ -10,8 +10,10 @@ import com.yupi.yuaicodemother.common.BaseResponse;
 import com.yupi.yuaicodemother.common.DeleteRequest;
 import com.yupi.yuaicodemother.common.ResultUtils;
 import com.yupi.yuaicodemother.constant.AppConstant;
+import com.yupi.yuaicodemother.core.artifact.ArtifactPathResolver;
 import com.yupi.yuaicodemother.constant.UserConstant;
 import com.yupi.yuaicodemother.exception.BusinessException;
+import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
 import com.yupi.yuaicodemother.exception.ErrorCode;
 import com.yupi.yuaicodemother.exception.ThrowUtils;
 import com.yupi.yuaicodemother.model.dto.app.*;
@@ -54,6 +56,8 @@ public class AppController {
 
     @Resource
     private ProjectDownloadService projectDownloadService;
+    @Resource
+    private ArtifactPathResolver artifactPathResolver;
 
     /**
      * 用户创建应用。
@@ -388,8 +392,10 @@ public class AppController {
         }
         // 4. 构建应用代码目录路径（生成目录，非部署目录）
         String codeGenType = app.getCodeGenType();
-        String sourceDirName = codeGenType + "_" + appId;
-        String sourceDirPath = AppConstant.CODE_OUTPUT_ROOT_DIR + File.separator + sourceDirName;
+        CodeGenTypeEnum type = CodeGenTypeEnum.getEnumByValue(codeGenType);
+        ThrowUtils.throwIf(type == null, ErrorCode.SYSTEM_ERROR, "不支持的代码生成类型");
+        // 下载只读取当前已提交版本，失败候选不会进入压缩包。
+        String sourceDirPath = artifactPathResolver.resolveActiveRoot(type, appId).toString();
         // 5. 检查代码目录是否存在
         File sourceDir = new File(sourceDirPath);
         ThrowUtils.throwIf(!sourceDir.exists() || !sourceDir.isDirectory(),

@@ -4,8 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yupi.yuaicodemother.common.BaseResponse;
 import com.yupi.yuaicodemother.common.ResultUtils;
 import com.yupi.yuaicodemother.config.AiEngineProperties;
-import com.yupi.yuaicodemother.constant.AppConstant;
 import com.yupi.yuaicodemother.core.builder.VueProjectBuilder;
+import com.yupi.yuaicodemother.core.artifact.ArtifactPathResolver;
+import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -44,6 +45,7 @@ public class InternalAiToolsController {
     private final AiEngineProperties properties;
     private final VueProjectBuilder projectBuilder;
     private final ObjectMapper objectMapper;
+    private final ArtifactPathResolver artifactPathResolver;
 
     /**
      * 校验内部调用身份并执行指定工具，同一 {@code toolCallId} 只执行一次。
@@ -235,12 +237,13 @@ public class InternalAiToolsController {
      */
     private Path projectRoot(long appId, String codeGenType) {
         String type = codeGenType == null ? "" : codeGenType.toLowerCase().replace('-', '_');
-        String name = switch (type) {
-            case "html" -> "html_" + appId;
-            case "multi_file", "multifile" -> "multi_file_" + appId;
-            default -> "vue_project_" + appId;
+        CodeGenTypeEnum generationType = switch (type) {
+            case "html" -> CodeGenTypeEnum.HTML;
+            case "multi_file", "multifile" -> CodeGenTypeEnum.MULTI_FILE;
+            default -> CodeGenTypeEnum.VUE_PROJECT;
         };
-        return Path.of(AppConstant.CODE_OUTPUT_ROOT_DIR, name).toAbsolutePath().normalize();
+        // 内部读取工具与预览共享同一个已提交版本解析规则。
+        return artifactPathResolver.resolveActiveRoot(generationType, appId);
     }
 
     /**
