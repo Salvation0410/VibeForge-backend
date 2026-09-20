@@ -334,7 +334,7 @@ VUE_PROJECT 模板：
 | `HTML_OUTPUT_BUDGET_EXCEEDED` | 单文件已不适合安全全量重写 | 是 |
 | `ARTIFACT_PUBLISH_FAILED` | 文件或指针提交失败 | 是 |
 
-失败流只能发出一个命名 `error` 事件，不能再发送 `done`。成功流只有 `.current` 切换后才能发送一个 `done`。
+失败流只能发出一个命名 `business-error` 事件，不能再发送 `done`。不使用 EventSource 保留的原生 `error` 事件承载业务 JSON；原生 `error` 只表示网络或协议故障。成功流只有 `.current` 切换后才能发送一个 `done`。
 
 ## 15. 事故应用恢复
 
