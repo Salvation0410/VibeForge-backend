@@ -154,3 +154,25 @@ uv lock --check
 ## 8. 安全要求
 
 `.env` 仅用于本机或部署环境，不得提交。生产环境必须使用密钥管理系统或运行时环境变量，并轮换历史中曾暴露的 AI、OSS、邮件凭据。Python 服务不应直接挂载项目目录，所有文件和构建操作必须经过 Spring 工具网关。
+
+## 9. HTML 人工恢复
+
+只有管理员可以调用 `POST /api/apps/admin/artifacts/html/recover`。接口不会自动搜索聊天历史；操作员必须先从可信来源导出并人工审核一份完整候选，提供新的 `requestId` 和来源说明。默认 `dryRun=true`，只执行严格解析、确定性校验和浏览器烟测，不创建 release，也不改变 `.current`。
+
+推荐使用 PowerShell 包装脚本，并先执行 dry-run：
+
+```powershell
+$session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+# 先通过项目登录接口让 $session 获得管理员会话，再运行只读校验。
+.\scripts\restore-html-release.ps1 -AppId 123 -CandidateFile C:\recovery\candidate.html `
+  -RequestId recovery-20260920-001 -WebSession $session
+```
+
+确认响应中 `valid=true`、烟测通过且候选来源无误后，才用相同参数显式提交：
+
+```powershell
+.\scripts\restore-html-release.ps1 -AppId 123 -CandidateFile C:\recovery\candidate.html `
+  -RequestId recovery-20260920-001 -WebSession $session -Commit
+```
+
+`-Commit` 会以 `manual-recovery` 引擎发布新的不可变 HTML release，并与在线生成共用应用级互斥和发布门禁。脚本不包含凭据或 Cookie，只使用调用方传入的 `WebRequestSession`；它只读取 `CandidateFile`，不会搜索历史目录，也不会读取或修改 `projects/`。不得把损坏的平铺 `index.html` 直接作为候选，无法找到完整候选时应保留现场并从原始需求重新生成。

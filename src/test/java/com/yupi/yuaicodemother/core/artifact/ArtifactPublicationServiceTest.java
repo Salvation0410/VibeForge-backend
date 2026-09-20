@@ -41,6 +41,35 @@ class ArtifactPublicationServiceTest {
     }
 
     @Test
+    void dryRunInspectsHtmlWithoutCreatingApplicationFiles() {
+        var fixture = fixture();
+
+        var result = fixture.service.inspectHtml(html("blue"));
+
+        assertTrue(result.valid());
+        assertNotNull(result.smokeTest());
+        assertTrue(result.smokeTest().passed());
+        assertFalse(Files.exists(root.resolve("html_7")));
+    }
+
+    @Test
+    void dryRunReturnsStructuredErrorsWithoutRunningSmokeTest() {
+        ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        var resolver = new ArtifactPathResolver(root, mapper);
+        var properties = new HtmlArtifactProperties();
+        var service = new ArtifactPublicationService(new MultiFileArtifactValidator(), new HtmlArtifactValidator(),
+                resolver, mapper, null, path -> { throw new AssertionError("确定性校验失败后不应烟测"); },
+                properties, new MockEnvironment());
+
+        var result = service.inspectHtml("```html\n<html><body>truncated");
+
+        assertFalse(result.valid());
+        assertEquals("HTML_FORMAT_INVALID", result.errors().getFirst().code());
+        assertNull(result.smokeTest());
+        assertFalse(Files.exists(root.resolve("html_7")));
+    }
+
+    @Test
     void failedSmokeGatePreservesPreviousHtmlRelease() throws Exception {
         var fixture = fixture();
         fixture.service.publishHtml(7, "html-old", html("blue"), "legacy", "STOP");

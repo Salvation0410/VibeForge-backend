@@ -15,6 +15,9 @@ import org.springframework.core.env.Profiles;
 import lombok.extern.slf4j.Slf4j;
 
 import java.nio.file.Path;
+import java.nio.file.Files;
+import java.nio.file.StandardOpenOption;
+import java.util.List;
 import java.util.Map;
 
 /** 负责解析、校验并把不同生成类型交给统一的不可变版本存储。 */
@@ -70,8 +73,49 @@ public class ArtifactPublicationService {
         validateRequestId(requestId);
         HtmlCodeResult artifact = htmlParser.parse(rawArtifact);
         htmlValidator.validateOrThrow(artifact);
+        if (generationLeaseService != null && "manual-recovery".equals(engine)) {
+            var lease = generationLeaseService.acquire(appId, requestId);
+            try {
+                return publish(CodeGenTypeEnum.HTML, appId, requestId,
+                        Map.of("index.html", artifact.getHtmlCode()), engine, finishReason, this::verifyHtmlStaging);
+            } finally {
+                generationLeaseService.release(lease);
+            }
+        }
         return publish(CodeGenTypeEnum.HTML, appId, requestId,
                 Map.of("index.html", artifact.getHtmlCode()), engine, finishReason, this::verifyHtmlStaging);
+    }
+
+    /**
+     * 在系统临时目录对人工候选执行与发布一致的解析、确定性校验和烟测，但不创建 release 或修改活动指针。
+     * 任一阶段失败都会作为结构化结果返回，临时文件无论成功失败都立即清理。
+     */
+    public HtmlInspectionResult inspectHtml(String rawArtifact) {
+        HtmlCodeResult artifact;
+        try {
+            artifact = htmlParser.parse(rawArtifact);
+        } catch (ArtifactValidationException e) {
+            return new HtmlInspectionResult(false,
+                    List.of(new ArtifactValidationError(e.getErrorCode(), e.getFile(), e.getMessage())), null);
+        }
+        ArtifactValidationResult validation = htmlValidator.validate(artifact);
+        if (!validation.valid()) {
+            return new HtmlInspectionResult(false, validation.errors(), null);
+        }
+
+        Path temporaryDirectory = null;
+        try {
+            temporaryDirectory = Files.createTempDirectory("html-recovery-inspect-");
+            Files.writeString(temporaryDirectory.resolve("index.html"), artifact.getHtmlCode(),
+                    StandardOpenOption.CREATE_NEW);
+            HtmlSmokeTestResult smokeResult = inspectHtmlStaging(temporaryDirectory);
+            return new HtmlInspectionResult(smokeResult.passed(), List.of(), smokeResult);
+        } catch (Exception e) {
+            return new HtmlInspectionResult(false, List.of(), HtmlSmokeTestResult.failure(
+                    "HTML_SMOKE_TEST_UNAVAILABLE", "HTML 浏览器烟测不可用: " + e.getMessage()));
+        } finally {
+            deleteInspectionDirectory(temporaryDirectory);
+        }
     }
 
     /** 在取消与提交的原子状态门内执行共享发布，确保只有一个请求获胜。 */
@@ -98,28 +142,57 @@ public class ArtifactPublicationService {
 
     /** 生产默认失败关闭；只有显式关闭 enabled 和 required 才允许开发环境跳过。 */
     private void verifyHtmlStaging(Path staging) {
+        HtmlSmokeTestResult result = inspectHtmlStaging(staging);
+        if (!result.passed()) {
+            throw new ArtifactValidationException(result.errorCode(), "index.html", result.message());
+        }
+    }
+
+    /** 执行统一烟测策略并返回结构化结果，使 dry-run 可以展示失败而不发布。 */
+    private HtmlSmokeTestResult inspectHtmlStaging(Path staging) {
         if (!htmlProperties.isEnabled()) {
             if (htmlProperties.isRequired()) {
-                throw new ArtifactValidationException("HTML_SMOKE_TEST_UNAVAILABLE", "index.html", "HTML 浏览器烟测已禁用，无法验证候选版本");
+                return HtmlSmokeTestResult.failure("HTML_SMOKE_TEST_UNAVAILABLE", "HTML 浏览器烟测已禁用，无法验证候选版本");
             }
             if (environment == null || !environment.acceptsProfiles(Profiles.of("local", "dev", "test"))) {
-                throw new ArtifactValidationException("HTML_SMOKE_TEST_UNAVAILABLE", "index.html",
+                return HtmlSmokeTestResult.failure("HTML_SMOKE_TEST_UNAVAILABLE",
                         "只有 local、dev 或 test profile 可跳过 HTML 浏览器烟测");
             }
             log.warn("开发 profile 显式跳过 HTML 浏览器烟测: {}", staging);
-            return;
+            return HtmlSmokeTestResult.success();
         }
-        HtmlSmokeTestResult result;
         try {
-            result = smokeTester.verify(staging.resolve("index.html"));
+            HtmlSmokeTestResult result = smokeTester.verify(staging.resolve("index.html"));
+            if (result == null) {
+                return HtmlSmokeTestResult.failure("HTML_SMOKE_TEST_UNAVAILABLE", "HTML 浏览器烟测未返回结果");
+            }
+            if (!result.passed() && (result.errorCode() == null || result.errorCode().isBlank())) {
+                return HtmlSmokeTestResult.failure("HTML_SMOKE_TEST_FAILED",
+                        result.message() == null ? "HTML 浏览器烟测失败" : result.message());
+            }
+            return result;
         } catch (Exception e) {
-            throw new ArtifactValidationException("HTML_SMOKE_TEST_UNAVAILABLE", "index.html", "HTML 浏览器烟测不可用: " + e.getMessage());
+            return HtmlSmokeTestResult.failure("HTML_SMOKE_TEST_UNAVAILABLE", "HTML 浏览器烟测不可用: " + e.getMessage());
         }
-        if (result == null || !result.passed()) {
-            String code = result == null || result.errorCode() == null
-                    ? "HTML_SMOKE_TEST_UNAVAILABLE" : result.errorCode();
-            throw new ArtifactValidationException(code, "index.html",
-                    result == null ? "HTML 浏览器烟测未返回结果" : result.message());
+    }
+
+    /** 只清理本方法创建的系统临时目录；清理失败降级记录，不改变已得到的校验结果。 */
+    private void deleteInspectionDirectory(Path directory) {
+        if (directory == null || !Files.exists(directory)) return;
+        try (var paths = Files.walk(directory)) {
+            for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(path);
+            }
+        } catch (Exception e) {
+            log.warn("清理 HTML 恢复 dry-run 临时目录失败: {}", directory, e);
+        }
+    }
+
+    /** dry-run 校验结果；确定性错误与烟测结果分开返回，便于运维定位。 */
+    public record HtmlInspectionResult(boolean valid, List<ArtifactValidationError> errors,
+                                       HtmlSmokeTestResult smokeTest) {
+        public HtmlInspectionResult {
+            errors = List.copyOf(errors);
         }
     }
 
