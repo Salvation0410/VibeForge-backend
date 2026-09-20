@@ -518,7 +518,7 @@ git commit -m "feat: 阻止超预算 HTML 全量重写"
 - Create: `tests/optimizePrompt.test.ts`
 - Modify: `src/pages/AppChatView.vue`
 
-- [ ] **Step 1: Add prompt selection tests**
+- [x] **Step 1: Add prompt selection tests**
 
 Use the exact three templates approved in the design spec. Tests must assert:
 
@@ -531,7 +531,7 @@ assert.doesNotMatch(buildOptimizePrompt('HTML'), /补全.*加载.*空状态.*动
 
 Unknown types must use the conservative Vue-style “minimal required changes” template without inventing an output protocol.
 
-- [ ] **Step 2: Run the Node test and verify red state**
+- [x] **Step 2: Run the Node test and verify red state**
 
 ```powershell
 node --test --experimental-strip-types tests/optimizePrompt.test.ts
@@ -539,7 +539,7 @@ node --test --experimental-strip-types tests/optimizePrompt.test.ts
 
 Expected: module-not-found failure for `src/utils/optimizePrompt.ts`.
 
-- [ ] **Step 3: Implement prompt selection**
+- [x] **Step 3: Implement prompt selection**
 
 Expose:
 
@@ -559,7 +559,7 @@ const MULTI_FILE_PROMPT = '请基于当前应用的完整代码优化页面。�
 const VUE_PROMPT = '请在当前 Vue 工程内优化页面。必须保留现有路由、组件职责、业务功能、数据内容和交互逻辑，只修改完成本次视觉与体验优化所必需的文件；不要重建工程、替换技术栈、引入无关依赖、模块、动画或模拟数据。优先复用现有组件和样式约定，确保修改后项目能够正常构建，并完整完成所有必要文件修改。'
 ```
 
-- [ ] **Step 4: Run prompt and type checks**
+- [x] **Step 4: Run prompt and type checks**
 
 ```powershell
 node --test --experimental-strip-types tests/optimizePrompt.test.ts
@@ -568,7 +568,7 @@ npm run type-check
 
 Expected: both exit 0.
 
-- [ ] **Step 5: Commit prompt optimization in the frontend repository**
+- [x] **Step 5: Commit prompt optimization in the frontend repository**
 
 ```powershell
 git add src/utils/optimizePrompt.ts src/pages/AppChatView.vue tests/optimizePrompt.test.ts
