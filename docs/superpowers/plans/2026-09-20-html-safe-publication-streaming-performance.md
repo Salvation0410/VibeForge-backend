@@ -785,15 +785,15 @@ Do not run commit-mode recovery for application `459157197728309248` until a com
 - Modify: `doc/ai-service-startup.md`
 - Modify: `docs/superpowers/plans/2026-09-20-html-safe-publication-streaming-performance.md`
 
-- [ ] **Step 1: Document the final contract**
+- [x] **Step 1: Document the final contract**
 
 Document HTML accepted formats, error codes, smoke-test configuration, rewrite-size guard, immutable directory layout, dynamic optimization prompts, frontend progress behavior, one-shot preview refresh, and explicit recovery steps.
 
-- [ ] **Step 2: Verify Chinese method comments**
+- [x] **Step 2: Verify Chinese method comments**
 
 Review every created or materially changed core method. Confirm Chinese comments state responsibility and failure behavior for parser, validator, smoke tester, release store, publisher, workflow terminal handling, frontend progress buffer, preview coordinator, and recovery adapter.
 
-- [ ] **Step 3: Run backend targeted verification**
+- [x] **Step 3: Run backend targeted verification**
 
 ```powershell
 mvn -q "-Dtest=CodeParserTest,HtmlArtifactValidatorTest,MultiFileArtifactValidatorTest,ArtifactPublicationServiceTest,ArtifactPathResolverTest,SeleniumHtmlSmokeTesterTest,AiCodeGeneratorFacadeTest,InternalAiToolsControllerTest,LangGraphAiGenerationGatewayTest,AppServiceGenerationCancellationTest,AppControllerSseTest,ArtifactRecoveryControllerTest" test
@@ -802,7 +802,7 @@ mvn -q clean -DskipTests compile
 
 Expected: both commands exit 0. Record browser-tagged cases separately if Chrome is unavailable.
 
-- [ ] **Step 4: Run the full backend suite and record baseline status**
+- [x] **Step 4: Run the full backend suite and record baseline status**
 
 ```powershell
 mvn -q test
@@ -810,7 +810,7 @@ mvn -q test
 
 Expected task-related tests: pass. If `YuAiCodeMotherApplicationTests.contextLoads` still fails only because `openAiChatModel` is absent, record the exact count and reason; do not change unrelated model configuration or claim the full suite passed.
 
-- [ ] **Step 5: Run Python verification**
+- [x] **Step 5: Run Python verification**
 
 ```powershell
 Set-Location ai-service
@@ -821,7 +821,7 @@ uv lock --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 6: Run frontend verification**
+- [x] **Step 6: Run frontend verification**
 
 ```powershell
 Set-Location C:/Users/ASUS/.config/superpowers/worktrees/yu-ai-code-mother-frontend/ai-multifile-safe-generation
@@ -838,7 +838,7 @@ Start the backend from the implementation worktree, not `D:/VibeForge/yu-ai-code
 
 Do not use application `459157197728309248` for mutation in this step.
 
-- [ ] **Step 8: Check repository state**
+- [x] **Step 8: Check repository state**
 
 ```powershell
 git diff --check
@@ -848,7 +848,7 @@ git log --oneline --decorate -15
 
 Backend worktree must be clean. Frontend worktree may contain only the user's pre-existing `package-lock.json` modification. Original workspaces and `projects/` must remain untouched.
 
-- [ ] **Step 9: Commit documentation and plan completion**
+- [x] **Step 9: Commit documentation and plan completion**
 
 ```powershell
 git add ai-service/README.md doc/ai-service-startup.md docs/superpowers/plans/2026-09-20-html-safe-publication-streaming-performance.md
@@ -856,3 +856,12 @@ git commit -m "docs: 更新 HTML 安全发布与流式性能说明"
 ```
 
 Before deployment, explicitly merge/deploy the preceding MULTI_FILE safety branch and verify the running Spring classpath points to the merged build. A correct implementation that is not loaded by the running service does not resolve the incident.
+
+### Task 12 verification record (2026-09-20)
+
+- 定向后端测试退出码 0；包含 Selenium 浏览器用例。Chrome 153 与当前 Selenium 没有匹配的 CDP 模块，日志有警告，但用例完成且未失败。
+- `mvn -q clean -DskipTests compile` 退出码 0。
+- `mvn -q test` 共执行 98 个测试，97 通过、1 个错误；唯一错误是既有 `YuAiCodeMotherApplicationTests.contextLoads`，原因是测试上下文缺少 `openAiChatModel` Bean。本轮不修改无关模型配置，也不宣称全量通过。
+- Python `compileall`、`pytest`、`uv lock --check` 全部退出码 0，pytest 为 22 passed。
+- 前端 Node 定向测试 12 passed，`npm run type-check` 与 `npm run build-only` 退出码 0；Vite 仅报告既有大 chunk 和静态/动态导入警告。
+- Step 7 本轮未执行：需要启动两端服务和测试 fixture；没有修改事故应用 `459157197728309248`。部署前仍需确认运行中的 Spring classpath 指向合并后的构建。

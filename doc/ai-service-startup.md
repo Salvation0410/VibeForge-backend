@@ -81,7 +81,9 @@ ai:
 
 `legacy` 为原 LangChain4j 链路，`langgraph` 为 Python 链路，`gray` 按白名单和比例选择。切换配置即可回滚，不需要数据库迁移。
 
-两条生成链路共用 Spring 的多文件安全发布边界：同一应用同一时间只允许一个生成请求；取消和提交通过 Redis 状态锁决定唯一胜者；模型输出因长度或内容策略中止时不发布；完整候选必须通过严格三文件解析和确定性校验。成功版本位于 `multi_file_<appId>/.releases/<requestId>`，`.current` 原子指向当前版本，预览、部署、下载和导出都读取该版本。默认保留当前版本及最近两个成功版本，同时持久记录单调提交序号和 requestId 墓碑；失败请求或已归档旧请求不会覆盖上一成功版本。
+两条生成链路共用 Spring 的不可变安全发布边界：同一应用同一时间只允许一个生成请求；取消和提交通过 Redis 状态锁决定唯一胜者；模型输出因长度或内容策略中止时不发布。`HTML` 只接受唯一闭合代码块或边界完整纯文档，发布前执行确定性 HTML/CSS/JavaScript 校验和 Selenium 烟测；`MULTI_FILE` 必须是严格的三文件协议。成功版本位于 `<类型>_<appId>/.releases/<requestId>`，`.current` 原子指向当前版本，预览、部署、下载和导出都读取该版本。默认保留当前版本及最近两个成功版本，同时持久记录单调提交序号、requestId 墓碑和提交标记；失败请求或已归档旧请求不会覆盖上一成功版本。
+
+HTML 烟测默认由 `AI_HTML_SMOKE_TEST_ENABLED=true` 和 `AI_HTML_SMOKE_TEST_REQUIRED=true` 开启；浏览器不可用、加载超时、脚本错误或骨架屏未消失都会拒绝发布。`AI_HTML_MAX_REWRITE_SOURCE_CHARS` 默认 24000，超过预算的全量重写返回 `HTML_OUTPUT_BUDGET_EXCEEDED`。前端生成期间保留旧预览，进度按 80ms 批处理，成功 `done` 后只刷新一次；`business-error`、取消和截断不会刷新预览。
 
 ## 4. 健康检查
 

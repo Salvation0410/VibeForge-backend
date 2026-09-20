@@ -92,6 +92,16 @@ Vue 分支允许模型请求 Spring 工具，但工具调用次数受 `AI_SERVIC
 
 同一应用的生成流程由 Spring 应用级租约串行化，租约覆盖用户消息入库、模型调用、校验和发布。取消和提交通过 Redis 状态锁进行原子状态转换：取消先发生则禁止发布，提交先发生则保持成功终态；下游断开不会提前释放租约。不同应用仍可并发生成。
 
+### HTML 安全发布与前端体验契约
+
+`HTML` 只接受两种输入：唯一且闭合的 ` ```html ... ``` ` 代码块，或首个非空 token 为 `<!doctype html>`/`<html` 且以 `</html>` 结束的纯文档。代码块外说明、重复代码块、空响应和截断响应均拒绝；典型错误码为 `HTML_FORMAT_INVALID`、`HTML_VALIDATION_FAILED`、`HTML_DOCUMENT_INCOMPLETE`、`HTML_STYLE_INCOMPLETE`、`HTML_SCRIPT_INCOMPLETE`、`HTML_SCRIPT_TRAILING_FRAGMENT`。
+
+Spring 在发布前执行 HTML/CSS/JavaScript 确定性扫描和 Selenium 烟测。烟测默认开启且必需（`AI_HTML_SMOKE_TEST_ENABLED=true`、`AI_HTML_SMOKE_TEST_REQUIRED=true`），浏览器不可用或页面在 8 秒内不能加载、3 秒观察期仍有错误/骨架屏时不会发布。仅本地开发可同时关闭两个开关。单文件全量重写超过 `AI_HTML_MAX_REWRITE_SOURCE_CHARS`（默认 24000）时返回 `HTML_OUTPUT_BUDGET_EXCEEDED`，避免大页面再次被截断覆盖。
+
+HTML 和多文件版本均写入 `<类型>_<appId>/.releases/<requestId>`，`.current` 以原子替换指向活动版本；`.published` 墓碑、`.publication-sequence` 和 `.committed` 标记防止旧请求重放。默认保留当前版本及最近两个历史版本，校验、烟测、指针切换或请求失败都保留上一成功版本。
+
+前端只在 80ms 批处理窗口更新字符计数和轻量进度，滚动最多每 200ms 一次；生成期间保留旧 iframe，只有收到发布成功的 `done` 才刷新一次。取消、业务失败（`business-error`）或截断不会刷新预览。优化提示按 `HTML`、`MULTI_FILE`、`VUE_PROJECT` 分别约束输出协议和修改范围。
+
 ## 环境要求
 
 - Python `3.12`，项目不支持 Python 3.13
