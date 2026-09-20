@@ -22,6 +22,7 @@ public class HtmlArtifactValidator {
     private static final Pattern HEAD_CLOSE = Pattern.compile("(?is)</head\\s*>");
     private static final Pattern BODY_OPEN = Pattern.compile("(?is)<body\\b[^>]*>");
     private static final Pattern BODY_CLOSE = Pattern.compile("(?is)</body\\s*>");
+    private static final Pattern RAW_OPEN = Pattern.compile("(?is)<(style|script)\\b[^>]*>");
     private static final Pattern TRAILING_OPERATOR = Pattern.compile(
             "(?s)(?:=>|===|!==|==|!=|<=|>=|&&|\\|\\||\\?\\?|[=+\\-*/%&|^!~<>?:,])$");
     private static final Set<String> REGEX_PREFIX_KEYWORDS = Set.of(
@@ -66,48 +67,95 @@ public class HtmlArtifactValidator {
 
     /** 原样检查文档标签是否存在且按 html > head > body 的边界顺序闭合，不借助解析器补齐缺失标签。 */
     private boolean hasOrderedDocumentBoundary(String html) {
-        int htmlOpen = start(HTML_OPEN, html, 0);
-        int headOpen = start(HEAD_OPEN, html, Math.max(0, htmlOpen));
-        int headClose = start(HEAD_CLOSE, html, Math.max(0, headOpen));
-        int bodyOpen = start(BODY_OPEN, html, Math.max(0, headClose));
-        int bodyClose = start(BODY_CLOSE, html, Math.max(0, bodyOpen));
-        int htmlClose = start(HTML_CLOSE, html, Math.max(0, bodyClose));
+        String masked = maskRawTextContents(html);
+        int htmlOpen = start(HTML_OPEN, masked, 0);
+        int headOpen = start(HEAD_OPEN, masked, Math.max(0, htmlOpen));
+        int headClose = start(HEAD_CLOSE, masked, Math.max(0, headOpen));
+        int bodyOpen = start(BODY_OPEN, masked, Math.max(0, headClose));
+        int bodyClose = start(BODY_CLOSE, masked, Math.max(0, bodyOpen));
+        int htmlClose = start(HTML_CLOSE, masked, Math.max(0, bodyClose));
         return htmlOpen >= 0 && headOpen > htmlOpen && headClose > headOpen
                 && bodyOpen > headClose && bodyClose > bodyOpen && htmlClose > bodyClose;
     }
 
     /** 按原始标签边界提取所有 style/script 区块；缺少结束标签与正文词法截断使用同一稳定错误。 */
     private void validateEmbeddedBlocks(String html, String tag, boolean css, List<ArtifactValidationError> errors) {
-        Pattern openPattern = Pattern.compile("(?is)<" + tag + "\\b[^>]*>");
-        Pattern closePattern = Pattern.compile("(?is)</" + tag + "\\s*>");
-        int cursor = 0;
+        List<RawBlock> blocks = rawTextBlocks(html, tag);
         boolean invalid = false;
-        while (cursor < html.length()) {
-            Matcher open = openPattern.matcher(html);
-            if (!open.find(cursor)) {
-                invalid |= closePattern.matcher(html).find(cursor);
-                break;
-            }
-            Matcher orphanClose = closePattern.matcher(html);
-            if (orphanClose.find(cursor) && orphanClose.start() < open.start()) {
+        for (RawBlock block : blocks) {
+            if (!block.closed()) {
                 invalid = true;
+                continue;
             }
-            Matcher close = closePattern.matcher(html);
-            if (!close.find(open.end())) {
-                invalid = true;
-                break;
-            }
-            String code = html.substring(open.end(), close.start());
+            String code = html.substring(block.openEnd(), block.closeStart());
             ScanResult scan = css ? scanCss(code) : scanJavascript(code);
             invalid |= !scan.complete();
             if (!css && isTrailingJavascriptFragment(code, scan)) {
                 addError(errors, "HTML_SCRIPT_TRAILING_FRAGMENT", "script 末尾存在未完成的运算符或表达式");
             }
-            cursor = close.end();
+        }
+        String masked = maskRawTextContents(html);
+        Pattern closePattern = Pattern.compile("(?is)</" + tag + "\\s*>");
+        Matcher closeMatcher = closePattern.matcher(masked);
+        while (closeMatcher.find()) {
+            boolean knownClose = blocks.stream().anyMatch(block -> block.closed() && block.closeStart() == closeMatcher.start());
+            if (!knownClose) {
+                invalid = true;
+                break;
+            }
         }
         if (invalid) {
             addError(errors, css ? "HTML_STYLE_INCOMPLETE" : "HTML_SCRIPT_INCOMPLETE",
                     css ? "style 标签或 CSS 词法结构未闭合" : "script 标签或 JavaScript 词法结构未闭合");
+        }
+    }
+
+    /** 建立 HTML raw-text 区块索引；找到真实开标签后，区块内部所有标签文本都不再作为 HTML 处理。 */
+    private List<RawBlock> rawTextBlocks(String html, String wantedTag) {
+        List<RawBlock> blocks = new ArrayList<>();
+        Matcher open = RAW_OPEN.matcher(html);
+        int cursor = 0;
+        while (open.find(cursor)) {
+            String actualTag = open.group(1).toLowerCase(Locale.ROOT);
+            Pattern closePattern = Pattern.compile("(?is)</" + actualTag + "\\s*>");
+            Matcher close = closePattern.matcher(html);
+            if (!close.find(open.end())) {
+                if (actualTag.equals(wantedTag)) {
+                    blocks.add(new RawBlock(open.start(), open.end(), html.length(), false));
+                }
+                break;
+            }
+            if (actualTag.equals(wantedTag)) {
+                blocks.add(new RawBlock(open.start(), open.end(), close.start(), true));
+            }
+            cursor = close.end();
+        }
+        return blocks;
+    }
+
+    /** 用空格屏蔽真实 raw-text 内容但保留外层标签，使文档边界正则不会命中脚本/样式字符串。 */
+    private String maskRawTextContents(String html) {
+        StringBuilder masked = new StringBuilder(html);
+        Matcher open = RAW_OPEN.matcher(html);
+        int cursor = 0;
+        while (open.find(cursor)) {
+            String actualTag = open.group(1).toLowerCase(Locale.ROOT);
+            Matcher close = Pattern.compile("(?is)</" + actualTag + "\\s*>").matcher(html);
+            if (!close.find(open.end())) {
+                replaceWithSpaces(masked, open.end(), html.length());
+                break;
+            }
+            replaceWithSpaces(masked, open.end(), close.start());
+            cursor = close.end();
+        }
+        return masked.toString();
+    }
+
+    private void replaceWithSpaces(StringBuilder value, int start, int end) {
+        for (int i = start; i < end; i++) {
+            if (value.charAt(i) != '\n' && value.charAt(i) != '\r') {
+                value.setCharAt(i, ' ');
+            }
         }
     }
 
@@ -351,4 +399,6 @@ public class HtmlArtifactValidator {
             return new ScanResult(false, unfinishedTemplate);
         }
     }
+
+    private record RawBlock(int openStart, int openEnd, int closeStart, boolean closed) { }
 }

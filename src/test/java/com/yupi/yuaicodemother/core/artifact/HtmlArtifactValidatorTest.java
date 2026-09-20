@@ -20,6 +20,19 @@ class HtmlArtifactValidatorTest {
     }
 
     @Test
+    void documentBoundaryScannerIgnoresTagsInsideScriptRawText() {
+        String script = "<script>const s = '<body></body></html>';</script>";
+        assertTrue(validator.validate(artifact("<html><head></head><body>" + script + "</body></html>")).valid());
+        assertHasError("<html><head></head>" + script + "</html>", "HTML_DOCUMENT_INCOMPLETE");
+    }
+
+    @Test
+    void embeddedBlockScannerIgnoresCrossTagTextInsideRawText() {
+        assertTrue(validator.validate(artifact(completeBody("<script>const x = '<style>';</script>"))).valid());
+        assertTrue(validator.validate(artifact(completeBody("<style>content: '<script>';</style>"))).valid());
+    }
+
+    @Test
     void incompleteDocumentReturnsStableError() {
         for (String html : new String[]{
                 "<!doctype html><html><head></head><body></body>",
