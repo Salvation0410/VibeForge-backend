@@ -639,7 +639,7 @@ Add a “停止生成” button while streaming. Its click calls `currentEventSo
 
 Throttle auto-follow to at most once per 200 ms and use `behavior: 'auto'` during streaming. Track whether the viewport is within 48 px of the bottom; pause following after the user scrolls upward and resume only when they return to the bottom.
 
-- [ ] **Step 7: Run backend SSE and frontend verification**
+- [x] **Step 7: Run backend SSE and frontend verification**
 
 ```powershell
 mvn -q -Dtest=AppControllerSseTest test
@@ -651,7 +651,7 @@ npm run build-only
 
 Expected: tests, type check, and build exit 0; existing chunk-size warnings may remain.
 
-- [ ] **Step 8: Commit responsive streaming changes in each repository**
+- [x] **Step 8: Commit responsive streaming changes in each repository**
 
 ```powershell
 # Backend repository
