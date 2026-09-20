@@ -18,11 +18,13 @@ public class ArtifactPathResolver {
     private final Path outputRoot;
     private final ObjectMapper objectMapper;
 
+    /** 使用生产代码输出根目录创建活动版本解析器。 */
     @Autowired
     public ArtifactPathResolver(ObjectMapper objectMapper) {
         this(Path.of(AppConstant.CODE_OUTPUT_ROOT_DIR), objectMapper);
     }
 
+    /** 使用指定输出根目录创建解析器，供隔离测试复用。 */
     ArtifactPathResolver(Path outputRoot, ObjectMapper objectMapper) {
         this.outputRoot = outputRoot.toAbsolutePath().normalize();
         this.objectMapper = objectMapper;
@@ -62,10 +64,12 @@ public class ArtifactPathResolver {
         return resolveActiveRoot(type, appId);
     }
 
+    /** 根据生成类型和应用 ID 计算兼容旧结构的应用根目录。 */
     Path projectRoot(CodeGenTypeEnum type, long appId) {
         return outputRoot.resolve(type.getValue() + "_" + appId).normalize();
     }
 
+    /** 读取并校验 `.current` 指针，非法或不完整版本返回空。 */
     private Path resolvePointer(Path root) {
         try {
             Path pointer = root.resolve(".current");
@@ -93,6 +97,7 @@ public class ArtifactPathResolver {
         }
     }
 
+    /** 校验 release 的 manifest 和三个必要文件是否齐全。 */
     private boolean isValidRelease(Path release) {
         if (!Files.isDirectory(release) || !Files.isRegularFile(release.resolve("manifest.json"))) return false;
         try {
@@ -102,6 +107,7 @@ public class ArtifactPathResolver {
         } catch (Exception e) { return false; }
     }
 
+    /** 读取版本目录修改时间，失败时返回最小排序值。 */
     private long lastModified(Path path) {
         try { return Files.getLastModifiedTime(path).toMillis(); }
         catch (Exception e) { return 0L; }

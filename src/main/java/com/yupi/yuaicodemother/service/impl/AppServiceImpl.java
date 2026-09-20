@@ -103,19 +103,25 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
 
         String requestId = java.util.UUID.randomUUID().toString();
         // 租约覆盖消息入库、模型调用和产物发布，防止同一应用的上下文与版本交叉。
-        return Flux.using(
-                () -> generationLeaseService.acquire(appId, requestId),
-                lease -> {
-            chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
-            chatHistoryOriginalService.addOriginalChatMessage(appId, message,
-                    ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
-            Flux<String> contentStream = aiGenerationGateway.generate(message, codeGenTypeEnum, appId,
-                    loginUser.getId(), requestId);
-                    return streamHandlerExecutor.doExecute(contentStream, chatHistoryService, chatHistoryOriginalService,
-                            appId, loginUser, codeGenTypeEnum);
-                },
-                generationLeaseService::release
-        ).onErrorMap(error -> wrapGenerationError(requestId, error));
+        return Flux.defer(() -> {
+            var lease = generationLeaseService.acquire(appId, requestId);
+            try {
+                chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
+                chatHistoryOriginalService.addOriginalChatMessage(appId, message,
+                        ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
+                Flux<String> contentStream = aiGenerationGateway.generate(message, codeGenTypeEnum, appId,
+                        loginUser.getId(), requestId);
+                Flux<String> execution = streamHandlerExecutor.doExecute(contentStream, chatHistoryService,
+                                chatHistoryOriginalService, appId, loginUser, codeGenTypeEnum)
+                        .doFinally(signal -> generationLeaseService.release(lease));
+                // 零历史缓存让下游取消后生成仍能走到真实终态并释放租约，同时不在内存保留代码块。
+                return execution.cache(0)
+                        .doOnCancel(() -> aiGenerationGateway.cancel(appId, loginUser.getId(), requestId));
+            } catch (Throwable error) {
+                generationLeaseService.release(lease);
+                return Flux.error(error);
+            }
+        }).onErrorMap(error -> wrapGenerationError(requestId, error));
     }
 
     /**
@@ -223,6 +229,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         return app.getId();
     }
 
+    /**
+     * 解析部署使用的源码根目录；多文件应用优先返回当前已提交版本，失败候选不可见。
+     */
     private File resolveSourceRootDir(Long appId, String codeGenType) {
         CodeGenTypeEnum type = CodeGenTypeEnum.getEnumByValue(codeGenType);
         if (type != null) {

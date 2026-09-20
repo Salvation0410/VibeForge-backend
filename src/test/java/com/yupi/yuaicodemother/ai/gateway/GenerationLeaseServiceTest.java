@@ -1,6 +1,5 @@
 package com.yupi.yuaicodemother.ai.gateway;
 
-import com.yupi.yuaicodemother.exception.BusinessException;
 import org.junit.jupiter.api.Test;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
@@ -30,8 +29,9 @@ class GenerationLeaseServiceTest {
         RLock lock = mock(RLock.class);
         when(client.getLock("ai:generation:app:42")).thenReturn(lock);
         when(lock.tryLock()).thenReturn(false);
-        BusinessException error = assertThrows(BusinessException.class,
+        GenerationStreamException error = assertThrows(GenerationStreamException.class,
                 () -> new GenerationLeaseService(client).acquire(42, "req-2"));
-        assertTrue(error.getMessage().contains("GENERATION_IN_PROGRESS"));
+        assertEquals("GENERATION_IN_PROGRESS", error.getErrorCode());
+        assertEquals("req-2", error.getRequestId());
     }
 }

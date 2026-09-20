@@ -14,7 +14,7 @@ class ToolCall:
 
 @dataclass(slots=True)
 class ModelTurn:
-    """一次模型响应，包含文本产物和可选工具调用。"""
+    """一次模型响应，包含文本产物、工具调用和可用于阻止截断发布的结束元数据。"""
 
     content: str
     tool_calls: list[ToolCall] = field(default_factory=list)

@@ -57,6 +57,14 @@ def _after_review(state: WorkflowState, max_attempts: int) -> str:
     return "fail" if state.get("repair_count", 0) >= max_attempts else "repair"
 
 
+def _stable_error_code(exc: Exception) -> str:
+    """从业务异常前缀提取稳定错误码，未知异常统一归为生成失败。"""
+    prefix = str(exc).partition(":")[0].strip()
+    if prefix and prefix == prefix.upper() and prefix.replace("_", "").isalnum():
+        return prefix
+    return "GENERATION_FAILED"
+
+
 class GenerationWorkflow:
     """组织代码生成、工具调用、构建、质量检查和有限修复的 LangGraph 工作流。"""
     def __init__(
@@ -131,7 +139,7 @@ class GenerationWorkflow:
             await emitter.emit(
                 "failed",
                 "workflow",
-                error=EventError(code="generation_failed", message=str(exc)),
+                error=EventError(code=_stable_error_code(exc), message=str(exc)),
             )
 
     def _build_graph(self, emitter: EventEmitter, thread_id: str):
@@ -168,6 +176,7 @@ class GenerationWorkflow:
             }
 
         async def generate_branch(state: WorkflowState) -> dict[str, Any]:
+            """生成普通分支候选，并把结束原因传递给后续硬校验节点。"""
             branch = state["code_gen_type"]
             turn = await self.model.generate(branch, state["context"])
             if turn.content:
@@ -212,6 +221,7 @@ class GenerationWorkflow:
             return {"artifact": "\n".join(artifact_parts), "context": context, "tool_call_count": tool_count}
 
         async def artifact_validation(state: WorkflowState) -> dict[str, Any]:
+            """先拒绝截断或被过滤的响应，再调用 Spring 执行产物硬校验。"""
             _raise_for_incomplete_model_turn(state.get("finish_reason"))
             call_id = f"{state['request_id']}:artifact_validation:{state.get('repair_count', 0)}"
             result = await self._invoke_tool(
@@ -235,6 +245,7 @@ class GenerationWorkflow:
             return {"build": result}
 
         async def quality_review(state: WorkflowState) -> dict[str, Any]:
+            """仅对已通过确定性硬校验的候选执行模型质量检查。"""
             if not state.get("validation", {}).get("valid", False):
                 return {"quality_passed": False}
             passed = await self.model.review(
@@ -244,6 +255,7 @@ class GenerationWorkflow:
             return {"quality_passed": passed}
 
         async def repair(state: WorkflowState) -> dict[str, Any]:
+            """生成完整修复候选并更新结束元数据，供下一轮重新校验。"""
             count = state.get("repair_count", 0) + 1
             turn = await self.model.repair(
                 state.get("artifact", ""),

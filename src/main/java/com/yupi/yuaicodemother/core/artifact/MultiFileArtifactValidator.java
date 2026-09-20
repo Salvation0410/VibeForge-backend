@@ -49,6 +49,7 @@ public class MultiFileArtifactValidator {
         }
     }
 
+    /** 校验 HTML 文档结构、外链资源和内联代码限制。 */
     private void validateHtml(String html, List<ArtifactValidationError> errors) {
         String value = safe(html);
         String lower = value.toLowerCase(Locale.ROOT);
@@ -63,6 +64,7 @@ public class MultiFileArtifactValidator {
         rejectMarkdown(value, "index.html", errors);
     }
 
+    /** 校验 CSS 至少包含一个闭合规则块且不是标题文本。 */
     private void validateCss(String css, List<ArtifactValidationError> errors) {
         String value = safe(css);
         if (!value.contains("{") || !value.contains("}") || !delimitersBalanced(value, true)) {
@@ -72,6 +74,7 @@ public class MultiFileArtifactValidator {
         rejectMarkdown(value, "style.css", errors);
     }
 
+    /** 校验 JavaScript 含可执行语句且基础分隔符闭合。 */
     private void validateJavascript(String js, List<ArtifactValidationError> errors) {
         String value = safe(js);
         if (isFilenameOnly(value)) errors.add(error("JS_CONTENT_INVALID", "script.js", "JavaScript 内容不能是文件名或标题"));
@@ -101,19 +104,24 @@ public class MultiFileArtifactValidator {
         return stack.isEmpty() && quote == 0 && !blockComment;
     }
 
+    /** 判断一对代码分隔符是否对应。 */
     private boolean matches(char open, char close) {
         return open == '{' && close == '}' || open == '(' && close == ')' || open == '[' && close == ']';
     }
 
+    /** 拒绝被解析进文件正文的 Markdown 围栏。 */
     private void rejectMarkdown(String value, String file, List<ArtifactValidationError> errors) {
         if (value.contains("```")) errors.add(error("MARKDOWN_RESIDUE", file, "文件内容包含 Markdown 围栏"));
     }
 
+    /** 识别被误当作正文的文件名或章节标题。 */
     private boolean isFilenameOnly(String value) {
         String normalized = value.trim().toLowerCase(Locale.ROOT);
         return normalized.matches("(?:index\\.html|style\\.css|script\\.js|html|css|javascript|js)");
     }
 
+    /** 将可空文件内容规范化为空字符串。 */
     private String safe(String value) { return value == null ? "" : value; }
+    /** 创建带稳定错误码的校验错误。 */
     private ArtifactValidationError error(String code, String file, String message) { return new ArtifactValidationError(code, file, message); }
 }

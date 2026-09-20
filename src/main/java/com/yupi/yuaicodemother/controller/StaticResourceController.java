@@ -29,6 +29,13 @@ public class StaticResourceController {
     @Resource
     private ArtifactPathResolver artifactPathResolver;
 
+    /**
+     * 从应用当前已提交版本提供预览资源，避免生成中的候选文件被外部读取。
+     *
+     * @param deployKey 应用产物目录标识
+     * @param request 当前 HTTP 请求
+     * @return 资源响应；路径无效或读取失败时返回对应错误状态
+     */
     @GetMapping("/{deployKey}/**")
     public ResponseEntity<org.springframework.core.io.Resource> serveStaticResource(
             @PathVariable String deployKey,

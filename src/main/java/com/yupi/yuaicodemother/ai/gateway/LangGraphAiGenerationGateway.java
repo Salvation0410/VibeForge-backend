@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yupi.yuaicodemother.config.AiEngineProperties;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
+import com.yupi.yuaicodemother.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatusCode;
@@ -96,9 +97,24 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
                             Thread.startVirtualThread(() -> {
                                 try (BufferedReader reader = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
                                     String line;
+                                    String latestArtifact = null;
+                                    boolean completed = false;
                                     while ((line = reader.readLine()) != null) {
-                                        String message = eventToLegacyMessage(line, codeGenType);
-                                        if (!message.isBlank()) sink.next(message);
+                                        ParsedEvent event = parseEvent(line, codeGenType, requestId);
+                                        if (event.artifact() != null) latestArtifact = event.artifact();
+                                        if (!event.message().isBlank()) sink.next(event.message());
+                                        if (event.completed()) {
+                                            completed = true;
+                                            if (codeGenType != CodeGenTypeEnum.VUE_PROJECT && latestArtifact != null) {
+                                                sink.next(latestArtifact);
+                                            }
+                                            break;
+                                        }
+                                    }
+                                    if (!completed) {
+                                        throw new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(),
+                                                "LANGGRAPH_STREAM_INCOMPLETE", requestId,
+                                                "LangGraph 事件流未收到 completed 终态，已保留上一版本", null);
                                     }
                                     sink.complete();
                                 } catch (Exception streamError) {
@@ -108,6 +124,26 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
                         });
             } catch (Exception e) { sink.error(e); }
         });
+    }
+
+    /**
+     * 向 Python 发送协作式取消；读取协程继续等待明确失败终态，调用方因此不会提前释放应用租约。
+     */
+    @Override
+    public void cancel(Long appId, Long userId, String requestId) {
+        try {
+            HttpRequest request = buildRequest("/internal/v1/generations/" + requestId + ":cancel",
+                    Map.of("appId", String.valueOf(appId)));
+            httpClient.sendAsync(request, HttpResponse.BodyHandlers.discarding())
+                    .whenComplete((response, error) -> {
+                        if (error != null || response.statusCode() / 100 != 2) {
+                            log.warn("LangGraph 取消请求失败, requestId={}, status={}", requestId,
+                                    response == null ? null : response.statusCode(), error);
+                        }
+                    });
+        } catch (Exception error) {
+            log.warn("构造 LangGraph 取消请求失败, requestId={}", requestId, error);
+        }
     }
 
     /**
@@ -137,31 +173,44 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
      * @return 旧流处理器可消费的文本；无需下发的事件返回空字符串
      * @throws IllegalStateException 事件不是合法 JSON 或事件声明失败时抛出
      */
-    private String eventToLegacyMessage(String line, CodeGenTypeEnum codeGenType) {
+    private ParsedEvent parseEvent(String line, CodeGenTypeEnum codeGenType, String fallbackRequestId) {
         try {
-            if (line == null || line.isBlank()) return "";
+            if (line == null || line.isBlank()) return ParsedEvent.EMPTY;
             JsonNode event = objectMapper.readTree(line);
             String type = event.path("type").asText();
             JsonNode data = event.path("data");
             if ("content_delta".equals(type)) {
                 if (codeGenType != CodeGenTypeEnum.VUE_PROJECT) {
-                    return data.path("content").asText();
+                    return new ParsedEvent("", data.path("content").asText(), false);
                 }
-                return objectMapper.writeValueAsString(Map.of("type", "ai_response", "data", data.path("content").asText()));
+                return new ParsedEvent(objectMapper.writeValueAsString(
+                        Map.of("type", "ai_response", "data", data.path("content").asText())), null, false);
             }
-            if ("tool_started".equals(type)) {
-                return objectMapper.writeValueAsString(Map.of("type", "tool_request", "id", data.path("toolCallId").asText(), "name", data.path("tool").asText(), "arguments", "{}"));
+            if ("tool_started".equals(type) && codeGenType == CodeGenTypeEnum.VUE_PROJECT) {
+                return new ParsedEvent(objectMapper.writeValueAsString(Map.of("type", "tool_request", "id", data.path("toolCallId").asText(), "name", data.path("tool").asText(), "arguments", "{}")), null, false);
             }
-            if ("tool_finished".equals(type)) {
-                return objectMapper.writeValueAsString(Map.of("type", "tool_executed", "id", data.path("toolCallId").asText(), "name", data.path("tool").asText(), "arguments", objectMapper.writeValueAsString(data.path("result"))));
+            if ("tool_finished".equals(type) && codeGenType == CodeGenTypeEnum.VUE_PROJECT) {
+                return new ParsedEvent(objectMapper.writeValueAsString(Map.of("type", "tool_executed", "id", data.path("toolCallId").asText(), "name", data.path("tool").asText(), "arguments", objectMapper.writeValueAsString(data.path("result")))), null, false);
             }
             if ("failed".equals(type)) {
-                throw new IllegalStateException(event.path("error").path("message").asText("LangGraph generation failed"));
+                JsonNode error = event.path("error");
+                String requestId = event.path("requestId").asText(fallbackRequestId);
+                throw new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(),
+                        error.path("code").asText("GENERATION_FAILED").toUpperCase(), requestId,
+                        error.path("message").asText("LangGraph generation failed"), null);
             }
-            return "";
+            if ("completed".equals(type)) return new ParsedEvent("", null, true);
+            return ParsedEvent.EMPTY;
+        } catch (GenerationStreamException e) {
+            throw e;
         } catch (Exception e) {
             throw new IllegalStateException("Invalid LangGraph NDJSON event", e);
         }
+    }
+
+    /** 表示一条内部事件转换后的前端消息、最终候选或成功终态。 */
+    private record ParsedEvent(String message, String artifact, boolean completed) {
+        private static final ParsedEvent EMPTY = new ParsedEvent("", null, false);
     }
 
     /**

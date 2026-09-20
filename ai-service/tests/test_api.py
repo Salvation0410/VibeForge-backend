@@ -94,6 +94,7 @@ def test_truncated_multi_file_response_fails_before_publication(app_factory, aut
         headers=auth_headers,
     ))
     assert events[-1]["type"] == "failed"
+    assert events[-1]["error"]["code"] == "MODEL_OUTPUT_TRUNCATED"
     assert "MODEL_OUTPUT_TRUNCATED" in events[-1]["error"]["message"]
     assert not [call for call in gateway.calls if call["name"] == "artifact_publish"]
 

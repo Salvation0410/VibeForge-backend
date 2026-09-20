@@ -26,6 +26,8 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
 import java.io.File;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * @author huang
@@ -36,6 +38,8 @@ import java.io.File;
 @Service
 @Slf4j
 public class AiCodeGeneratorFacade {
+
+    private final Set<String> cancelledRequests = ConcurrentHashMap.newKeySet();
     @Resource
     private AiCodeGeneratorServiceFactory aiCodeGeneratorServiceFactory;
 
@@ -115,7 +119,7 @@ public class AiCodeGeneratorFacade {
             }
             case VUE_PROJECT -> {
                TokenStream tokenStream = aiCodeGeneratorService.generateVueProjectCodeStream(appId, userMessage);
-                yield processTokenStream(tokenStream,appId);
+                yield processTokenStream(tokenStream, appId, requestId);
             }
             default -> {
                 String errorMessage = "不支持的生成类型：" + codeGenTypeEnum.getValue();
@@ -132,7 +136,7 @@ public class AiCodeGeneratorFacade {
      * @param tokenStream TokenStream 对象
      * @return Flux<String> 流式响应
      */
-    private Flux<String> processTokenStream(TokenStream tokenStream,Long appId) {
+    private Flux<String> processTokenStream(TokenStream tokenStream, Long appId, String requestId) {
         return Flux.create(sink -> {
             //监听tokenStream
             tokenStream.onPartialResponse((String partialResponse) -> {
@@ -149,6 +153,10 @@ public class AiCodeGeneratorFacade {
                         sink.next(JSONUtil.toJsonStr(toolExecutedMessage));
                     })
                     .onCompleteResponse((ChatResponse response) -> {
+                        if (cancelledRequests.remove(requestId)) {
+                            sink.error(new java.util.concurrent.CancellationException("生成请求已取消"));
+                            return;
+                        }
                         // 执行 Vue 项目构建（同步执行，确保预览时项目已就绪）
                         // TODO 可以考虑使用sse 向前端推送构建进度
                         String projectPath = AppConstant.CODE_OUTPUT_ROOT_DIR + File.separator + "vue_project_" + appId;
@@ -156,6 +164,7 @@ public class AiCodeGeneratorFacade {
                         sink.complete();
                     })
                     .onError((Throwable error) -> {
+                        cancelledRequests.remove(requestId);
                         error.printStackTrace();
                         sink.error(error);
                     })
@@ -175,6 +184,9 @@ public class AiCodeGeneratorFacade {
             tokenStream.onPartialResponse(chunk -> { content.append(chunk); sink.next(chunk); })
                     .onCompleteResponse(response -> {
                         try {
+                            if (cancelledRequests.remove(requestId)) {
+                                throw new java.util.concurrent.CancellationException("生成请求已取消");
+                            }
                             ensureComplete(response.finishReason());
                             if (codeGenType == CodeGenTypeEnum.MULTI_FILE) {
                                 artifactPublicationService.publishMultiFile(appId, requestId, content.toString(),
@@ -191,9 +203,21 @@ public class AiCodeGeneratorFacade {
                             sink.error(e);
                         }
                     })
-                    .onError(sink::error)
+                    .onError(error -> {
+                        cancelledRequests.remove(requestId);
+                        // 模型流中途失败也可能留下不完整记忆，必须与校验或发布失败采用相同清理策略。
+                        aiCodeGeneratorServiceFactory.resetAfterFailedGeneration(appId, codeGenType);
+                        sink.error(error);
+                    })
                     .start();
         });
+    }
+
+    /**
+     * 标记请求已取消；Legacy 模型不支持主动中断，因此完成回调必须据此拒绝构建和发布。
+     */
+    public void cancelGeneration(String requestId) {
+        if (requestId != null && !requestId.isBlank()) cancelledRequests.add(requestId);
     }
 
     /** 模型因长度或内容过滤结束时拒绝进入解析和发布阶段。 */

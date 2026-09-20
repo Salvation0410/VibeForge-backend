@@ -80,6 +80,7 @@ public class ChatHistoryExportServiceImpl implements ChatHistoryExportService {
         return chatHistoryService.list(queryWrapper);
     }
 
+    /** 导出应用当前已提交的源码版本；不存在有效版本时明确拒绝导出。 */
     private File resolveSourceDir(App app) {
         String codeGenType = StrUtil.blankToDefault(app.getCodeGenType(), "multi_file");
         CodeGenTypeEnum type = CodeGenTypeEnum.getEnumByValue(codeGenType);

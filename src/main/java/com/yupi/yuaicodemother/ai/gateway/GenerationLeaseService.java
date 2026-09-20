@@ -1,6 +1,5 @@
 package com.yupi.yuaicodemother.ai.gateway;
 
-import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.redisson.api.RLock;
@@ -19,13 +18,14 @@ public class GenerationLeaseService {
      * @param appId 应用 ID
      * @param requestId 当前请求 ID
      * @return 包含锁所有者信息的租约
-     * @throws BusinessException 同一应用已有生成任务时抛出
+     * @throws GenerationStreamException 同一应用已有生成任务时携带稳定错误码抛出
      */
     public GenerationLease acquire(long appId, String requestId) {
         RLock lock = redissonClient.getLock("ai:generation:app:" + appId);
         long ownerThreadId = Thread.currentThread().threadId();
         if (!lock.tryLock()) {
-            throw new BusinessException(ErrorCode.OPERATION_ERROR, "GENERATION_IN_PROGRESS: 当前应用正在生成，请稍后再试");
+            throw new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(), "GENERATION_IN_PROGRESS",
+                    requestId, "当前应用正在生成，请稍后再试", null);
         }
         return new GenerationLease(appId, requestId, lock, ownerThreadId);
     }
