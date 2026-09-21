@@ -105,11 +105,11 @@ Expected: PASS.
 - Modify: `ai-service/README.md`
 - Modify: `doc/ai-service-phase-one-handoff.md`
 
-- [ ] **Step 1: Document the canonical tool list and validation boundary**
+- [x] **Step 1: Document the canonical tool list and validation boundary**
 
 Describe model-callable versus internal tools and remove the resolved P0 mismatch from the handoff risk list.
 
-- [ ] **Step 2: Run Python verification**
+- [x] **Step 2: Run Python verification**
 
 Run: `uv run python -m compileall -q src`
 
@@ -119,7 +119,7 @@ Run: `uv lock --check`
 
 Expected: exit 0 for all commands.
 
-- [ ] **Step 3: Run Java verification**
+- [x] **Step 3: Run Java verification**
 
 Run: `mvn test -Dtest=InternalAiToolsControllerTest,InternalAiToolContractTest`
 
@@ -127,7 +127,7 @@ Run: `mvn clean -DskipTests compile`
 
 Expected: BUILD SUCCESS.
 
-- [ ] **Step 4: Check repository hygiene**
+- [x] **Step 4: Check repository hygiene**
 
 Run: `git diff --check`
 
