@@ -51,13 +51,27 @@ class FakeToolGateway:
     def __init__(self):
         self.calls: list[dict[str, Any]] = []
 
-    async def invoke(self, name: str, arguments: dict[str, Any], *, tool_call_id: str) -> dict[str, Any]:
-        call = {"name": name, "arguments": arguments, "toolCallId": tool_call_id}
+    async def invoke(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        app_id: str,
+        request_id: str,
+        tool_call_id: str,
+    ) -> dict[str, Any]:
+        call = {
+            "name": name,
+            "arguments": arguments,
+            "appId": app_id,
+            "requestId": request_id,
+            "toolCallId": tool_call_id,
+        }
         self.calls.append(call)
         if name == "artifact_validate":
             return {"valid": True, "errors": []}
         if name == "artifact_publish":
-            return {"published": True, "versionId": arguments["requestId"], "hashes": {}}
+            return {"published": True, "versionId": request_id, "hashes": {}}
         return {"ok": True, "echo": call}
 
 

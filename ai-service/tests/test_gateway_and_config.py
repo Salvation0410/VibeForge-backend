@@ -10,7 +10,7 @@ from ai_service.infrastructure.spring_tools import SpringToolGateway
 
 
 @pytest.mark.asyncio
-async def test_spring_gateway_uses_bearer_and_tool_call_id():
+async def test_spring_gateway_uses_bearer_and_scoped_tool_request():
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -23,9 +23,21 @@ async def test_spring_gateway_uses_bearer_and_tool_call_id():
         bearer_token="gateway-token",
         transport=httpx.MockTransport(handler),
     )
-    result = await gateway.invoke("project_build", {"appId": "42"}, tool_call_id="req:build:1")
+    result = await gateway.invoke(
+        "project_build",
+        {"codeGenType": "VUE_PROJECT"},
+        app_id="42",
+        request_id="req-1",
+        tool_call_id="req-1:build:1",
+    )
     assert captured["authorization"] == "Bearer gateway-token"
-    assert '"toolCallId":"req:build:1"' in captured["body"]
+    assert json.loads(captured["body"]) == {
+        "appId": "42",
+        "requestId": "req-1",
+        "toolCallId": "req-1:build:1",
+        "toolName": "project_build",
+        "arguments": {"codeGenType": "VUE_PROJECT"},
+    }
     assert result == {"result": "ok"}
     await gateway.close()
 
@@ -48,7 +60,9 @@ async def test_artifact_publish_retries_lost_response_with_same_tool_call_id():
 
     result = await gateway.invoke(
         "artifact_publish",
-        {"appId": "42", "requestId": "req-1"},
+        {"codeGenType": "MULTI_FILE"},
+        app_id="42",
+        request_id="req-1",
         tool_call_id="req-1:artifact_publish",
     )
 
@@ -57,6 +71,8 @@ async def test_artifact_publish_retries_lost_response_with_same_tool_call_id():
         "req-1:artifact_publish",
         "req-1:artifact_publish",
     ]
+    assert all(request["appId"] == "42" for request in requests)
+    assert all(request["requestId"] == "req-1" for request in requests)
     await gateway.close()
 
 

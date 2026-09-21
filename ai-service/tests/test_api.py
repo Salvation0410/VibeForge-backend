@@ -260,7 +260,9 @@ def test_vue_agent_tool_calls_are_bounded_and_identified(app_factory, auth_heade
     assert len(vue_calls) == 4
     assert all(call["toolCallId"].startswith("req-1:vue:") for call in vue_calls)
     assert len({call["toolCallId"] for call in vue_calls}) == 4
-    assert all(call["arguments"]["appId"] == "42" for call in vue_calls)
+    assert all(call["appId"] == "42" for call in vue_calls)
+    assert all(call["requestId"] == "req-1" for call in vue_calls)
+    assert all("appId" not in call["arguments"] for call in vue_calls)
     assert all(call["arguments"]["codeGenType"] == "VUE_PROJECT" for call in vue_calls)
     assert len([event for event in events if event["type"] == "tool_started" and event["node"] == "vue_agent"]) == 4
     assert len([event for event in events if event["type"] == "tool_finished" and event["node"] == "vue_agent"]) == 4

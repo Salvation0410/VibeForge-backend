@@ -27,10 +27,14 @@ class SpringToolGateway:
         name: str,
         arguments: dict[str, Any],
         *,
+        app_id: str,
+        request_id: str,
         tool_call_id: str,
     ) -> dict[str, Any]:
         """携带幂等调用 ID 执行工具；发布响应不确定时使用原 ID 有界重试。"""
         request_body = {
+            "appId": app_id,
+            "requestId": request_id,
             "toolCallId": tool_call_id,
             "toolName": name,
             "arguments": arguments,

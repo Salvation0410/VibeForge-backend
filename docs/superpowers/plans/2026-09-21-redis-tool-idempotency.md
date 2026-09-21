@@ -19,7 +19,7 @@
 - Modify: `ai-service/tests/test_gateway_and_config.py`
 - Modify: `ai-service/tests/test_api.py`
 
-- [ ] **Step 1: Write failing gateway request tests**
+- [x] **Step 1: Write failing gateway request tests**
 
 Change the gateway test to require request-level scope fields and assert that controlled scope is not duplicated inside `arguments`:
 
@@ -44,7 +44,7 @@ assert body == {
 
 Update `FakeToolGateway.invoke` to record `appId` and `requestId`, then assert every workflow tool call carries `42` and `req-1` at request scope.
 
-- [ ] **Step 2: Run focused Python tests and verify they fail**
+- [x] **Step 2: Run focused Python tests and verify they fail**
 
 Run:
 
@@ -55,7 +55,7 @@ uv run pytest tests/test_gateway_and_config.py tests/test_api.py -q
 
 Expected: FAIL because `SpringToolGateway.invoke` does not accept `app_id` or `request_id` and the workflow still places `appId` in tool arguments.
 
-- [ ] **Step 3: Implement the scoped gateway contract**
+- [x] **Step 3: Implement the scoped gateway contract**
 
 Use this signature and body shape in `spring_tools.py`:
 
@@ -80,7 +80,7 @@ async def invoke(
 
 Change `GenerationWorkflow` so every Vue, validation, build, and publication invocation passes `state["app_id"]` and `state["request_id"]`. Remove `appId` from tool argument maps. Remove `requestId` from `artifact_publish` arguments because Spring receives it at request scope.
 
-- [ ] **Step 4: Run focused and full Python tests**
+- [x] **Step 4: Run focused and full Python tests**
 
 Run:
 
@@ -91,7 +91,7 @@ uv run pytest
 
 Expected: all tests PASS.
 
-- [ ] **Step 5: Commit the Python contract change**
+- [x] **Step 5: Commit the Python contract change**
 
 ```powershell
 git add ai-service/src/ai_service/infrastructure/spring_tools.py `

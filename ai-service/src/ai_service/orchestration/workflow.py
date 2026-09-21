@@ -217,9 +217,10 @@ class GenerationWorkflow:
                         call.name,
                         {
                             **arguments,
-                            "appId": state["app_id"],
                             "codeGenType": state["code_gen_type"],
                         },
+                        app_id=state["app_id"],
+                        request_id=state["request_id"],
                         tool_call_id=tool_call_id,
                     )
                     await emitter.emit(
@@ -240,7 +241,9 @@ class GenerationWorkflow:
                 emitter,
                 "artifact_validation",
                 "artifact_validate",
-                {"appId": state["app_id"], "codeGenType": state["code_gen_type"], "artifact": state.get("artifact", "")},
+                {"codeGenType": state["code_gen_type"], "artifact": state.get("artifact", "")},
+                state["app_id"],
+                state["request_id"],
                 call_id,
             )
             return {"validation": result}
@@ -251,7 +254,9 @@ class GenerationWorkflow:
                 emitter,
                 "project_build",
                 "project_build",
-                {"appId": state["app_id"], "codeGenType": state["code_gen_type"]},
+                {"codeGenType": state["code_gen_type"]},
+                state["app_id"],
+                state["request_id"],
                 call_id,
             )
             return {"build": result}
@@ -303,13 +308,13 @@ class GenerationWorkflow:
                 "artifact_publish",
                 "artifact_publish",
                 {
-                    "appId": state["app_id"],
-                    "requestId": state["request_id"],
                     "codeGenType": state["code_gen_type"],
                     "artifact": state.get("artifact", ""),
                     "engine": "langgraph",
                     "finishReason": state.get("finish_reason") or "",
                 },
+                state["app_id"],
+                state["request_id"],
                 call_id,
                 on_result=remember_publication,
             )
@@ -406,12 +411,20 @@ class GenerationWorkflow:
         node: str,
         name: str,
         arguments: dict[str, Any],
+        app_id: str,
+        request_id: str,
         tool_call_id: str,
         on_result: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         """调用 Spring 工具网关，并在完成事件前执行可选的权威结果记录。"""
         await emitter.emit("tool_started", node, data={"tool": name, "toolCallId": tool_call_id})
-        result = await self.tool_gateway.invoke(name, arguments, tool_call_id=tool_call_id)
+        result = await self.tool_gateway.invoke(
+            name,
+            arguments,
+            app_id=app_id,
+            request_id=request_id,
+            tool_call_id=tool_call_id,
+        )
         if on_result is not None:
             on_result(result)
         await emitter.emit(
