@@ -293,7 +293,7 @@ Pass the top-level requestId to `publishArtifact(long appId, String requestId, M
 Run:
 
 ```powershell
-mvn test -Dtest=InternalAiToolsControllerTest,InternalAiToolContractTest,ToolInvocationIdempotencyServiceTest
+mvn test "-Dtest=InternalAiToolsControllerTest,InternalAiToolContractTest,ToolInvocationIdempotencyServiceTest"
 ```
 
 Expected: all selected tests PASS.
@@ -363,7 +363,7 @@ Actual: `compileall` and `uv lock --check` exited 0; `pytest` passed 35 tests wi
 Run from the repository root:
 
 ```powershell
-mvn test -Dtest=InternalAiToolsControllerTest,InternalAiToolContractTest,ToolInvocationIdempotencyServiceTest
+mvn test "-Dtest=InternalAiToolsControllerTest,InternalAiToolContractTest,ToolInvocationIdempotencyServiceTest"
 mvn clean -DskipTests compile
 ```
 
