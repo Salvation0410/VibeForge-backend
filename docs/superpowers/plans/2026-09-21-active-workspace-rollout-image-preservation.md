@@ -19,7 +19,7 @@
 - Preserve: `D:/VibeForge/yu-ai-code-mother-frontend/package-lock.json`
 - Exclude: `projects/`
 
-- [ ] **Step 1: Record exact status and diffs**
+- [x] **Step 1: Record exact status and diffs**
 
 ```powershell
 git status --short
@@ -30,7 +30,7 @@ git -C D:/VibeForge/yu-ai-code-mother-frontend diff -- src/pages/AppChatView.vue
 
 Expected: backend shows the existing service/document changes and untracked `projects/`; frontend shows `AppChatView.vue` and `package-lock.json` changes.
 
-- [ ] **Step 2: Stash only tracked user changes**
+- [x] **Step 2: Stash only tracked user changes**
 
 ```powershell
 git stash push -m "pre-rollout-user-backend" -- src/main/java/com/yupi/yuaicodemother/service/impl/AppServiceImpl.java doc/ai-service-phase-one-handoff.md
@@ -46,7 +46,7 @@ Expected: `projects/` remains untracked; the named stashes contain only the list
 - Restore: `src/main/java/com/yupi/yuaicodemother/service/impl/AppServiceImpl.java`
 - Restore: `doc/ai-service-phase-one-handoff.md`
 
-- [ ] **Step 1: Merge the validated branch without rewriting history**
+- [x] **Step 1: Merge the validated branch without rewriting history**
 
 ```powershell
 git merge --no-ff codex/ai-multifile-safe-generation -m "merge: 接入 HTML 安全发布与流式性能治理"
@@ -54,7 +54,7 @@ git merge --no-ff codex/ai-multifile-safe-generation -m "merge: 接入 HTML 安�
 
 Expected: merge succeeds without touching `projects/`.
 
-- [ ] **Step 2: Restore tracked user changes and resolve overlaps behaviorally**
+- [x] **Step 2: Restore tracked user changes and resolve overlaps behaviorally**
 
 ```powershell
 git stash pop stash^{/pre-rollout-user-backend}
@@ -62,7 +62,7 @@ git stash pop stash^{/pre-rollout-user-backend}
 
 If `AppServiceImpl.java` conflicts, retain both the user's pre-rollout behavior and the merged `HtmlOutputBudgetGuard` call placed after lease acquisition and before history/model invocation. Retain the user's deletion state for `doc/ai-service-phase-one-handoff.md`.
 
-- [ ] **Step 3: Verify the backend integration**
+- [x] **Step 3: Verify the backend integration**
 
 ```powershell
 mvn -q "-Dtest=CodeParserTest,HtmlArtifactValidatorTest,ArtifactPublicationServiceTest,SeleniumHtmlSmokeTesterTest,AiCodeGeneratorFacadeTest,InternalAiToolsControllerTest,AppServiceGenerationCancellationTest,AppControllerSseTest" test
@@ -78,7 +78,7 @@ Expected: both commands exit 0; Selenium may log the known Chrome 153 CDP compat
 - Restore: `D:/VibeForge/yu-ai-code-mother-frontend/package-lock.json`
 - Modify: `D:/VibeForge/yu-ai-code-mother-frontend/src/pages/AppChatView.vue`
 
-- [ ] **Step 1: Merge the validated frontend branch**
+- [x] **Step 1: Merge the validated frontend branch**
 
 ```powershell
 git -C D:/VibeForge/yu-ai-code-mother-frontend merge --no-ff codex/ai-multifile-safe-generation -m "merge: 接入生成流式性能与单次预览刷新"
@@ -87,7 +87,7 @@ git -C D:/VibeForge/yu-ai-code-mother-frontend stash pop stash^{/pre-rollout-use
 
 Expected: `package-lock.json` remains a user modification. If `AppChatView.vue` conflicts at `useOptimizePrompt`, keep `buildOptimizePrompt(appDetail.value?.codeGenType)` instead of restoring a single hard-coded prompt.
 
-- [ ] **Step 2: Remove the redundant streaming tip**
+- [x] **Step 2: Remove the redundant streaming tip**
 
 Delete the template block and unused style for:
 
@@ -97,7 +97,7 @@ Delete the template block and unused style for:
 
 Keep the compact progress placeholder and “停止生成” action.
 
-- [ ] **Step 3: Verify the frontend integration**
+- [x] **Step 3: Verify the frontend integration**
 
 ```powershell
 npx --yes tsx --test tests/*.test.ts
@@ -113,7 +113,7 @@ Expected: tests, type checking, and build exit 0; existing Vite chunk warnings m
 - Modify: `D:/VibeForge/yu-ai-code-mother-frontend/src/utils/optimizePrompt.ts`
 - Modify: `D:/VibeForge/yu-ai-code-mother-frontend/tests/optimizePrompt.test.ts`
 
-- [ ] **Step 1: Add failing image-contract tests**
+- [x] **Step 1: Add failing image-contract tests**
 
 Add assertions for HTML, MULTI_FILE, VUE_PROJECT, and unknown types:
 
@@ -127,7 +127,7 @@ for (const type of ['HTML', 'MULTI_FILE', 'VUE_PROJECT', undefined]) {
 assert.match(buildOptimizePrompt('HTML'), /禁止输出任何解释文字/)
 ```
 
-- [ ] **Step 2: Run the prompt test and verify red state**
+- [x] **Step 2: Run the prompt test and verify red state**
 
 ```powershell
 node --test --experimental-strip-types tests/optimizePrompt.test.ts
@@ -135,7 +135,7 @@ node --test --experimental-strip-types tests/optimizePrompt.test.ts
 
 Expected: image-preservation assertions fail.
 
-- [ ] **Step 3: Add the shared media-preservation suffix**
+- [x] **Step 3: Add the shared media-preservation suffix**
 
 Append this contract to every returned template:
 
@@ -145,7 +145,7 @@ Append this contract to every returned template:
 
 Add a Chinese comment to `buildOptimizePrompt` explaining that this shared suffix prevents optimization from silently deleting business media.
 
-- [ ] **Step 4: Run tests and commit frontend changes**
+- [x] **Step 4: Run tests and commit frontend changes**
 
 ```powershell
 node --test --experimental-strip-types tests/optimizePrompt.test.ts tests/generationStreamProgress.test.ts tests/previewRefreshCoordinator.test.ts
@@ -162,7 +162,7 @@ Expected: all checks exit 0; do not stage `package-lock.json`.
 **Files:**
 - Read only: `tmp/code_output/html_459466135980023808/index.html`
 
-- [ ] **Step 1: Prove the old artifact failure mode**
+- [x] **Step 1: Prove the old artifact failure mode**
 
 ```powershell
 $html = Get-Content tmp/code_output/html_459466135980023808/index.html -Raw
@@ -176,11 +176,11 @@ $html = Get-Content tmp/code_output/html_459466135980023808/index.html -Raw
 
 Expected: natural-language prefix true, script/html closed false, image data true. This records why the old page had a prompt and no rendered images without mutating it.
 
-- [ ] **Step 2: Restart services from the integrated workspaces**
+- [x] **Step 2: Restart services from the integrated workspaces**
 
 Stop only the identified project Spring/Python/Vite processes after verifying their command lines. Start Spring from `D:/VibeForge/yu-ai-code-mother`, Python from its `ai-service` directory, and Vite from `D:/VibeForge/yu-ai-code-mother-frontend`.
 
-- [ ] **Step 3: Verify health and loaded behavior**
+- [x] **Step 3: Verify health and loaded behavior**
 
 ```powershell
 Invoke-RestMethod http://localhost:8000/health/live
@@ -191,11 +191,11 @@ Invoke-WebRequest http://localhost:5173 -UseBasicParsing
 
 Expected: both AI health endpoints are healthy and Spring/Vite return HTTP success.
 
-- [ ] **Step 4: Browser acceptance without mutating the accident application**
+- [x] **Step 4: Browser acceptance without mutating the accident application**
 
 Open the existing chat page, confirm the redundant streaming tip is absent and the old preview remains visible. Do not start a new generation for application `459466135980023808`. Record that a fresh optimization must be tested on a separate fixture application before deployment acceptance.
 
-- [ ] **Step 5: Final repository checks**
+- [x] **Step 5: Final repository checks**
 
 ```powershell
 git diff --check
@@ -205,3 +205,12 @@ git -C D:/VibeForge/yu-ai-code-mother-frontend status --short
 ```
 
 Expected: backend retains only the user's pre-existing deletion/service modification and untracked `projects/` if not incorporated by conflict resolution; frontend retains only the user's pre-existing `package-lock.json` modification outside committed task changes.
+
+### Execution Record (2026-09-21)
+
+- Backend targeted tests and `mvn -q clean -DskipTests compile` exited 0. Selenium completed with the known Chrome 153 CDP warning.
+- Frontend prompt/progress/preview tests passed 14/14; `npm run type-check` and `npm run build-only` exited 0. Vite retained only the existing chunk warnings.
+- The old artifact has a natural-language prefix and image data, but lacks both `</script>` and `</html>`; it was not mutated.
+- Spring, Python AI, and Vite are listening on 8123, 8000, and 5173 from the integrated workspaces; both Python health endpoints and Spring/Vite HTTP checks returned 200.
+- Browser acceptance completed after the user established a login session. The page responded normally, the redundant streaming tip was absent, and “优化提示” populated the HTML format and image-preservation contract. The temporary unsent input was cleared; no generation was started for the accident application.
+- Backend preserves the user's deleted handoff document, routing TODO, and untracked `projects/`; frontend preserves the user's exact `package-lock.json` content as an unstaged modification.
