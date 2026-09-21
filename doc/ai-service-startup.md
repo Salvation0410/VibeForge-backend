@@ -138,7 +138,7 @@ GET http://localhost:8123/api/apps/chat/gen/code?appId={应用ID}&message={生�
 
 LangGraph 的多文件分支会依次调用 Spring 工具 `artifact_validate` 和 `artifact_publish`。前者返回结构化校验错误供最多两次修复使用，后者在 Spring 侧重新校验并提交不可变版本。`MULTI_FILE` 不执行 Vue 项目构建，只有 `VUE_PROJECT` 进入 `project_build`。
 
-如果 `artifact_publish` 因连接中断、超时、Spring 5xx 或响应解析异常而无法确认结果，Python 会携带原 `toolCallId` 最多重试一次；Spring 返回明确 4xx 时不会重试。重试耗尽表示内部网络持续不可用，应结合 Spring 日志与 `.current` 指针排查实际发布状态。
+仅当 `artifact_publish` 因连接中断、超时、Spring 5xx 或响应解析异常而无法确认结果时，Python 才会携带原 `toolCallId` 最多重试一次。Spring 明确返回的业务失败包括 HTTP 4xx，以及 HTTP 200 但 `BaseResponse.code != 0`；这两类结果都不会重试。重试耗尽表示内部网络持续不可用，应结合 Spring 日志与 `.current` 指针排查实际发布状态。
 
 Spring 工具幂等状态和成功结果保存在现有 Spring Redis 配置中（本地默认 database 1），可跨 Spring 实例共享。幂等作用域为 `appId + requestId + toolCallId`；同一作用域对应不同 canonical 工具名或参数指纹时会拒绝执行。已存在（包括陈旧）的 `RUNNING` 记录属于不确定状态，不会自动重放；action 已成功但完成状态写回 Redis 失败时也会返回 indeterminate，因此该机制不承诺文件系统与 Redis 之间严格 exactly-once。
 

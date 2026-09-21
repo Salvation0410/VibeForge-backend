@@ -90,7 +90,7 @@ Vue 分支允许模型请求 Spring 工具，但工具调用次数受 `AI_SERVIC
 
 模型返回 `LENGTH`、`MAX_TOKENS`、`CONTENT_FILTER` 或 `CONTENT_FILTERED` 时，候选产物不会进入发布阶段。通过硬校验和质量检查后，Python 调用 Spring 的 `artifact_publish`；Spring 将文件写入不可变的 `.releases/<requestId>`，校验摘要后原子替换 `.current` 指针，并保留当前版本及最近两个成功版本。每次成功发布还会记录单调提交序号和 requestId 墓碑，实体版本被保留策略清理后也不能通过旧请求重放回滚。校验、写入或指针切换失败时，上一成功版本保持可预览、部署和下载。
 
-`artifact_publish` 遇到连接中断、超时、Spring 5xx 或无法解析响应时，会使用相同 `toolCallId` 最多重试一次。Spring 的 Redis 工具幂等作用域是 `appId + requestId + toolCallId`；同一作用域只有 canonical 工具名和参数指纹都一致时才能回放成功结果，不一致会拒绝为冲突。明确的 4xx 业务拒绝不会重试。
+仅当 `artifact_publish` 遇到连接中断、超时、Spring 5xx 或无法解析响应时，Python 才会使用相同 `toolCallId` 最多重试一次。Spring 明确返回的业务失败包括 HTTP 4xx，以及 HTTP 200 但 `BaseResponse.code != 0`；这两类结果都不会重试。Spring 的 Redis 工具幂等作用域是 `appId + requestId + toolCallId`；同一作用域只有 canonical 工具名和参数指纹都一致时才能回放成功结果，不一致会拒绝为冲突。
 
 同一应用的生成流程由 Spring 应用级租约串行化，租约覆盖用户消息入库、模型调用、校验和发布。取消和提交通过 Redis 状态锁进行原子状态转换：取消先发生则禁止发布，提交先发生则保持成功终态；下游断开不会提前释放租约。不同应用仍可并发生成。
 
