@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "tools": [
+    {
+      "name": "dir_read",
+      "aliases": ["readDir", "read_dir"],
+      "modelCallable": true,
+      "modelArguments": ["relativeDirPath"],
+      "description": "List files under a project-relative directory; use an empty path for the project root."
+    },
+    {
+      "name": "file_read",
+      "aliases": ["readFile", "read_file"],
+      "modelCallable": true,
+      "modelArguments": ["relativeFilePath"],
+      "description": "Read a UTF-8 file from a project-relative path."
+    },
+    {
+      "name": "file_write",
+      "aliases": ["writeFile", "write_file"],
+      "modelCallable": true,
+      "modelArguments": ["relativeFilePath", "content"],
+      "description": "Create or replace a UTF-8 file at a project-relative path."
+    },
+    {
+      "name": "file_modify",
+      "aliases": ["modifyFile", "modify_file"],
+      "modelCallable": true,
+      "modelArguments": ["relativeFilePath", "oldContent", "newContent"],
+      "description": "Replace an exact text fragment in an existing project file."
+    },
+    {
+      "name": "file_delete",
+      "aliases": ["deleteFile", "delete_file"],
+      "modelCallable": true,
+      "modelArguments": ["relativeFilePath"],
+      "description": "Delete a non-protected file at a project-relative path."
+    },
+    {
+      "name": "artifact_validate",
+      "aliases": ["artifact_validation"],
+      "modelCallable": false,
+      "modelArguments": [],
+      "description": "Validate a generated artifact inside the workflow."
+    },
+    {
+      "name": "artifact_publish",
+      "aliases": [],
+      "modelCallable": false,
+      "modelArguments": [],
+      "description": "Publish an immutable artifact release inside the workflow."
+    },
+    {
+      "name": "project_build",
+      "aliases": [],
+      "modelCallable": false,
+      "modelArguments": [],
+      "description": "Build a generated project inside the workflow."
+    }
+  ]
+}

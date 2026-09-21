@@ -22,6 +22,7 @@
 - LangGraph 支持 HTML、MULTI_FILE、VUE_PROJECT 三类分支、质量检查、最多两次修复、Vue 工具循环上限和协作式取消。
 - Spring 通过 `AiGenerationGateway` 统一接入 Legacy、LangGraph 和灰度路由，并保持原有外部 SSE 协议。
 - Python 不连接业务 MySQL，也不直接访问生成项目目录；文件、校验、发布和构建操作通过 Spring 内部工具网关完成。
+- Vue 模型工具已收敛为五个标准文件工具；Python 在出站前校验名称和参数，Java/Python 通过包内版本化 JSON 契约防止名称漂移。
 - Redis checkpoint 默认使用数据库 2；不可用时按当前配置和实现降级。
 
 ### 产物安全发布
@@ -107,6 +108,8 @@ Spring 是业务数据、项目文件和活动发布版本的唯一所有者。P
 | `orchestration/events.py` | 事件序号和异步队列 |
 | `orchestration/cancellation.py` | Python 进程内协作式取消状态 |
 | `models/openai_compatible.py` | DeepSeek/OpenAI 兼容模型适配 |
+| `models/tool_contract.py` | Vue 模型工具提示与出站校验 |
+| `contracts/internal-ai-tools-v1.json` | Java/Python 共享的版本化工具契约 |
 | `infrastructure/checkpoint.py` | Redis checkpoint 和 LangGraph saver |
 | `infrastructure/spring_tools.py` | Spring 工具网关客户端和发布重试 |
 
@@ -208,8 +211,7 @@ caeb0cb fix: 保持预览加载图为正圆
 ### P0：全量生产切换前必须验证或修复
 
 1. **真实三类型端到端仍缺少最新验收。** 需要在真实 Spring、Python、Redis、模型和文件系统环境中分别生成 HTML、MULTI_FILE、VUE_PROJECT，并验证发布、预览、停止和二次优化。
-2. **Vue 模型工具名仍未完全对齐。** `OpenAICompatibleModel` 提示仍可能请求 `search_reference`，但 Spring `InternalAiToolsController` 当前不支持该工具。
-3. **内部工具调用结果幂等仍是进程内 Map。** `InternalAiToolsController` 使用静态 `ConcurrentHashMap`，重启丢失、多实例不共享且没有 TTL。它不同于已实现的不可变产物发布幂等。
+2. **内部工具调用结果幂等仍是进程内 Map。** `InternalAiToolsController` 使用静态 `ConcurrentHashMap`，重启丢失、多实例不共享且没有 TTL。它不同于已实现的不可变产物发布幂等。
 
 ### P1：稳定性与契约问题
 
@@ -233,11 +235,10 @@ caeb0cb fix: 保持预览加载图为正圆
 ## 10. 下一阶段建议顺序
 
 1. 在独立测试应用上完成 HTML、MULTI_FILE、VUE_PROJECT 的真实生成和二次优化验收，不复用事故应用。
-2. 对齐 Vue 工具名称和参数，并建立 Java/Python 共享契约测试。
-3. 将内部工具调用幂等迁移到 Redis，加入 TTL 和 `appId + requestId + toolCallId` 作用域。
-4. 压测大流式响应、客户端停止、网络中断和提交竞争，验证 2000 字符窗口与取消状态门。
-5. 修正灰度稳定性、路由降级和多实例取消状态。
-6. 补齐可观测性和安全加固后，再提高 LangGraph 灰度比例。
+2. 将内部工具调用幂等迁移到 Redis，加入 TTL 和 `appId + requestId + toolCallId` 作用域。
+3. 压测大流式响应、客户端停止、网络中断和提交竞争，验证 2000 字符窗口与取消状态门。
+4. 修正灰度稳定性、路由降级和多实例取消状态。
+5. 补齐可观测性和安全加固后，再提高 LangGraph 灰度比例。
 
 ## 11. 下一轮开始前检查清单
 

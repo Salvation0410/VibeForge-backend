@@ -82,6 +82,8 @@ START
 
 Vue 分支允许模型请求 Spring 工具，但工具调用次数受 `AI_SERVICE_VUE_MAX_TOOL_CALLS` 限制。每次工具调用都带有确定性的 `toolCallId`，供 Spring 执行幂等控制。
 
+工具名称与参数由 `src/ai_service/contracts/internal-ai-tools-v1.json` 统一约束。模型只能调用 `dir_read`、`file_read`、`file_write`、`file_modify` 和 `file_delete`；Python 在请求 Spring 前校验工具名和参数，并注入可信的 `appId` 与 `codeGenType`。`artifact_validate`、`artifact_publish` 和 `project_build` 只允许工作流调用。Spring 继续兼容已存在的 camelCase 和旧 snake_case 别名，但模型提示只使用标准名称。
+
 ### 多文件安全发布约束
 
 `MULTI_FILE` 模型响应必须严格包含且只包含 `index.html`、`style.css` 和 `script.js` 三个 Markdown 代码区块，顺序固定，正文不得为空，围栏外不得出现说明文本。Spring 的 `artifact_validate` 会再次解析该协议，并检查 HTML 外链、内联脚本/样式、Markdown 残留及 CSS/JavaScript 基础结构。

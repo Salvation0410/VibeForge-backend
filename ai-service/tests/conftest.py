@@ -34,7 +34,7 @@ class FakeModel:
             self._vue_turn += 1
             return ModelTurn(
                 content=f"vue-step-{self._vue_turn}",
-                tool_calls=[ToolCall(name="search_reference", arguments={"q": "layout"})],
+                tool_calls=[ToolCall(name="file_read", arguments={"relativeFilePath": "src/App.vue"})],
             )
         return ModelTurn(content=f"artifact:{branch}", finish_reason="STOP")
 
