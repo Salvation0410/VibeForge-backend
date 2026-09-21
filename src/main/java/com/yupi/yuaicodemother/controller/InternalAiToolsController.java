@@ -1,9 +1,9 @@
 package com.yupi.yuaicodemother.controller;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yupi.yuaicodemother.common.BaseResponse;
 import com.yupi.yuaicodemother.common.ResultUtils;
 import com.yupi.yuaicodemother.ai.gateway.InternalAiTool;
+import com.yupi.yuaicodemother.ai.gateway.ToolInvocationIdempotencyService;
 import com.yupi.yuaicodemother.config.AiEngineProperties;
 import com.yupi.yuaicodemother.core.builder.VueProjectBuilder;
 import com.yupi.yuaicodemother.core.artifact.ArtifactPathResolver;
@@ -33,7 +33,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 独立 Python AI 服务调用的 Spring 文件与构建工具边界。
@@ -45,23 +44,20 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequestMapping("/internal/ai-tools")
 @RequiredArgsConstructor
 public class InternalAiToolsController {
-    private static final Map<String, String> IDEMPOTENT_RESULTS = new ConcurrentHashMap<>();
     private static final String MULTI_FILE_RELEASE_IMMUTABLE = "MULTI_FILE_RELEASE_IMMUTABLE";
     private static final String[] IMPORTANT_FILES = {"package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
             "vite.config.js", "vite.config.ts", "vue.config.js", "tsconfig.json", "index.html", "main.js", "main.ts", "App.vue"};
 
     private final AiEngineProperties properties;
     private final VueProjectBuilder projectBuilder;
-    private final ObjectMapper objectMapper;
     private final ArtifactPathResolver artifactPathResolver;
     private final ArtifactPublicationService artifactPublicationService;
     private final MultiFileArtifactValidator artifactValidator;
     private final HtmlArtifactValidator htmlArtifactValidator;
+    private final ToolInvocationIdempotencyService idempotencyService;
 
     /**
-     * 校验内部调用身份并执行指定工具，同一 {@code toolCallId} 只执行一次。
-     * <p>
-     * 首次调用结果会序列化后保存在进程内幂等缓存中，重复请求直接返回原结果。
+     * 校验内部调用身份，并通过共享幂等边界执行指定工具。
      *
      * @param authorization Python 服务携带的 Bearer 认证头
      * @param request 工具调用 ID、工具名称和参数
@@ -72,43 +68,38 @@ public class InternalAiToolsController {
     public BaseResponse<Map<String, Object>> invoke(@RequestHeader(value = "Authorization", required = false) String authorization,
                                                     @RequestBody ToolRequest request) {
         authenticate(authorization);
-        if (request == null || request.toolCallId() == null || request.toolCallId().isBlank()
+        if (request == null || request.requestId() == null || request.requestId().isBlank()
+                || request.toolCallId() == null || request.toolCallId().isBlank()
                 || request.toolName() == null || request.toolName().isBlank()) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "toolCallId and toolName are required");
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "requestId, toolCallId and toolName are required");
         }
-        String key = request.toolCallId();
-        String cached = IDEMPOTENT_RESULTS.get(key);
-        if (cached != null) return ResultUtils.success(readResult(cached));
-        synchronized (IDEMPOTENT_RESULTS) {
-            cached = IDEMPOTENT_RESULTS.get(key);
-            if (cached != null) return ResultUtils.success(readResult(cached));
-            Map<String, Object> result = execute(request.toolName(), request.arguments() == null ? Map.of() : request.arguments());
-            try {
-                String encoded = objectMapper.writeValueAsString(result);
-                IDEMPOTENT_RESULTS.put(key, encoded);
-                return ResultUtils.success(result);
-            } catch (Exception e) {
-                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Failed to cache tool result");
-            }
-        }
+        InternalAiTool tool = parseTool(request.toolName());
+        Map<String, Object> arguments = request.arguments() == null ? Map.of() : request.arguments();
+        Map<String, Object> result = idempotencyService.execute(
+                request.appId(),
+                request.requestId(),
+                request.toolCallId(),
+                tool,
+                arguments,
+                () -> execute(tool, request.appId(), request.requestId(), arguments));
+        return ResultUtils.success(result);
     }
 
     /**
      * 根据工具名称分发到具体的文件、产物校验或项目构建方法。
      *
-     * @param toolName Python 工作流请求的工具名称，兼容多种历史命名格式
-     * @param args 工具参数，必须包含应用 ID
+     * @param tool 已规范化的内部工具
+     * @param appId 顶层请求中的应用 ID
+     * @param requestId 顶层请求中的生成请求 ID
+     * @param args 工具参数
      * @return 具体工具产生的结构化结果
-     * @throws BusinessException 缺少应用 ID 或工具名称不受支持时抛出
+     * @throws BusinessException 工具执行参数无效时抛出
      */
-    private Map<String, Object> execute(String toolName, Map<String, Object> args) {
-        long appId = number(args.get("appId"), "appId");
-        InternalAiTool tool;
-        try {
-            tool = InternalAiTool.fromExternalName(toolName);
-        } catch (IllegalArgumentException exception) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, exception.getMessage());
-        }
+    private Map<String, Object> execute(
+            InternalAiTool tool,
+            long appId,
+            String requestId,
+            Map<String, Object> args) {
         return switch (tool) {
             case FILE_READ -> Map.of("content", readFile(sandboxPath(appId, args, "relativeFilePath", false)));
             case DIR_READ -> Map.of("entries", readDir(sandboxPath(appId, args, "relativeDirPath", true)));
@@ -116,7 +107,7 @@ public class InternalAiToolsController {
             case FILE_MODIFY -> modifyFile(appId, args);
             case FILE_DELETE -> deleteFile(appId, args);
             case ARTIFACT_VALIDATE -> validateArtifact(args);
-            case ARTIFACT_PUBLISH -> publishArtifact(appId, args);
+            case ARTIFACT_PUBLISH -> publishArtifact(appId, requestId, args);
             case PROJECT_BUILD -> buildProject(appId, args);
         };
     }
@@ -209,15 +200,16 @@ public class InternalAiToolsController {
      * 将 Python 提交的最终候选交给 Spring 重新校验并版本化发布。
      *
      * @param appId 应用 ID
-     * @param args 包含 requestId、artifact、engine 和 finishReason 的工具参数
+     * @param requestId 顶层请求中的生成请求 ID
+     * @param args 包含 artifact、engine 和 finishReason 的工具参数
      * @return 发布状态、版本 ID 和文件摘要
      */
-    private Map<String, Object> publishArtifact(long appId, Map<String, Object> args) {
+    private Map<String, Object> publishArtifact(long appId, String requestId, Map<String, Object> args) {
         CodeGenTypeEnum type = artifactType(args);
         var result = switch (type) {
-            case HTML -> artifactPublicationService.publishHtml(appId, text(args.get("requestId")),
+            case HTML -> artifactPublicationService.publishHtml(appId, requestId,
                     text(args.get("artifact")), text(args.get("engine")), text(args.get("finishReason")));
-            case MULTI_FILE -> artifactPublicationService.publishMultiFile(appId, text(args.get("requestId")),
+            case MULTI_FILE -> artifactPublicationService.publishMultiFile(appId, requestId,
                     text(args.get("artifact")), text(args.get("engine")), text(args.get("finishReason")));
             default -> throw new BusinessException(ErrorCode.PARAMS_ERROR, "artifact_publish does not support " + type);
         };
@@ -337,17 +329,13 @@ public class InternalAiToolsController {
         }
     }
 
-    /**
-     * 将工具参数转换为长整型业务 ID。
-     *
-     * @param value 待转换的参数值
-     * @param key 参数名称，用于构造错误提示
-     * @return 转换后的长整型数值
-     * @throws BusinessException 参数为空或不是合法整数时抛出
-     */
-    private long number(Object value, String key) {
-        try { return Long.parseLong(text(value)); }
-        catch (Exception e) { throw new BusinessException(ErrorCode.PARAMS_ERROR, key + " is required"); }
+    /** 将外部工具名（含历史别名）规范化为内部枚举。 */
+    private InternalAiTool parseTool(String toolName) {
+        try {
+            return InternalAiTool.fromExternalName(toolName);
+        } catch (IllegalArgumentException exception) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, exception.getMessage());
+        }
     }
 
     /**
@@ -357,18 +345,6 @@ public class InternalAiToolsController {
      * @return 非空字符串表示
      */
     private String text(Object value) { return value == null ? "" : String.valueOf(value); }
-
-    /**
-     * 将幂等缓存中的 JSON 反序列化为工具结果。
-     *
-     * @param value 已缓存的 JSON 文本
-     * @return 反序列化后的工具结果 Map
-     * @throws BusinessException 缓存内容无法解析时抛出
-     */
-    private Map<String, Object> readResult(String value) {
-        try { return objectMapper.readValue(value, Map.class); }
-        catch (Exception e) { throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Invalid cached tool result"); }
-    }
 
     /**
      * 将底层文件或构建异常转换为统一业务异常，并保留简要原因。
@@ -384,9 +360,16 @@ public class InternalAiToolsController {
     /**
      * Python AI 服务提交的内部工具调用请求。
      *
-     * @param toolCallId 工具调用唯一标识，用作幂等键
+     * @param appId 应用 ID，用于限定沙箱和幂等作用域
+     * @param requestId 生成请求 ID，用于限定幂等作用域
+     * @param toolCallId 工具调用唯一标识
      * @param toolName 要执行的工具名称
      * @param arguments 工具参数
      */
-    public record ToolRequest(String toolCallId, String toolName, Map<String, Object> arguments) { }
+    public record ToolRequest(
+            long appId,
+            String requestId,
+            String toolCallId,
+            String toolName,
+            Map<String, Object> arguments) { }
 }
