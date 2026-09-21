@@ -356,7 +356,7 @@ uv lock --check
 
 Expected: all commands exit 0.
 
-Actual: `compileall` and `uv lock --check` exited 0; `pytest` passed 35 tests with 2 dependency deprecation warnings.
+Actual: `compileall` and `uv lock --check` exited 0; final full `pytest` passed 62 tests with 2 dependency deprecation warnings.
 
 - [x] **Step 3: Run Java verification**
 

@@ -182,7 +182,7 @@ Python checkpoint Redis: redis://localhost:6379/2
 
 - 后端定向测试通过：`CodeParserTest`、`HtmlArtifactValidatorTest`、`ArtifactPublicationServiceTest`、`SeleniumHtmlSmokeTesterTest`、`AiCodeGeneratorFacadeTest`、`InternalAiToolsControllerTest`、`AppServiceGenerationCancellationTest`、`AppControllerSseTest`。
 - Redis 工具幂等本轮定向 Java 测试通过：`InternalAiToolsControllerTest`、`InternalAiToolContractTest`、`ToolInvocationIdempotencyServiceTest` 共 36 项，0 failures/errors/skips。
-- Python 本轮 `compileall`、完整 `pytest` 和 `uv lock --check` 通过，其中 `pytest` 共 35 项测试通过；测试使用 Fake Model 和内存工具网关。
+- Python 本轮 `compileall`、完整 `pytest` 和 `uv lock --check` 通过，其中 `pytest` 共 62 项测试通过并有 2 个依赖弃用警告。多数测试使用 Fake Model 和内存工具网关；新增 MockTransport 测试覆盖 Spring `BaseResponse` 非零业务码、协议畸形响应、错误脱敏，以及 workflow `failed` 稳定错误码链路，仍不属于真实 Spring 或端到端验证。
 - `mvn -q clean -DskipTests compile` 通过。
 - 前端 `optimizePrompt`、`generationStreamProgress`、`previewRefreshCoordinator` 共 14 项测试通过。
 - 前端 `npm run type-check` 和 `npm run build-only` 通过；构建仍有既有的大 chunk 警告。
@@ -211,6 +211,9 @@ b397192 fix: 加固工具幂等作用域与类型语义
 66ced8f fix: 保留幂等序列化基础配置
 8f4b4e4 fix: 统一幂等结果回放类型
 75bd652 fix: 校验内部工具应用作用域
+597c300 fix: 保留 Spring 工具业务错误
+972bd43 fix: 加固 Spring 工具响应边界
+4231df0 fix: 收紧 Spring 工具错误白名单
 ```
 
 此前后端与文档基线：
