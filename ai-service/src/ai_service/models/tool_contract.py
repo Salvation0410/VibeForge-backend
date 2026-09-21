@@ -74,24 +74,22 @@ def validate_vue_tool_call(name: str, arguments: dict[str, Any]) -> dict[str, An
     specs = {spec.name: spec for spec in all_tool_specs()}
     spec = specs.get(name)
     if spec is None:
-        raise InvalidVueToolCall(f"Unsupported Vue tool: {name}")
+        raise _invalid_call(f"Unsupported Vue tool: {name}")
     if not spec.model_callable:
-        raise InvalidVueToolCall(f"Tool {name} is not available to the Vue model")
+        raise _invalid_call(f"Tool {name} is not available to the Vue model")
     if not isinstance(arguments, dict):
-        raise InvalidVueToolCall(f"Tool {name} arguments must be an object")
+        raise _invalid_call(f"Tool {name} arguments must be an object")
     for controlled_name in _CONTROLLED_ARGUMENTS:
         if controlled_name in arguments:
-            raise InvalidVueToolCall(
-                f"Tool {name} must not provide controlled argument: {controlled_name}"
-            )
+            raise _invalid_call(f"Tool {name} must not provide controlled argument: {controlled_name}")
     missing = [key for key in spec.model_arguments if key not in arguments]
     if missing:
-        raise InvalidVueToolCall(
-            f"Tool {name} is missing required arguments: {', '.join(missing)}"
-        )
+        raise _invalid_call(f"Tool {name} is missing required arguments: {', '.join(missing)}")
     unexpected = [key for key in arguments if key not in spec.model_arguments]
     if unexpected:
-        raise InvalidVueToolCall(
-            f"Tool {name} has unsupported arguments: {', '.join(unexpected)}"
-        )
+        raise _invalid_call(f"Tool {name} has unsupported arguments: {', '.join(unexpected)}")
     return dict(arguments)
+
+
+def _invalid_call(message: str) -> InvalidVueToolCall:
+    return InvalidVueToolCall(f"INVALID_VUE_TOOL_CALL: {message}")

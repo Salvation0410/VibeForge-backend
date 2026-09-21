@@ -10,6 +10,7 @@ from ai_service.api.schemas import EventError, GenerationEvent, GenerationReques
 from ai_service.config import Settings
 from ai_service.infrastructure.checkpoint import CheckpointStore
 from ai_service.models.base import GenerationModel
+from ai_service.models.tool_contract import validate_vue_tool_call
 from ai_service.orchestration.cancellation import CancellationRegistry, GenerationCancelled
 from ai_service.orchestration.events import EventEmitter
 
@@ -204,6 +205,7 @@ class GenerationWorkflow:
                 for call in turn.tool_calls:
                     if tool_count >= self.settings.vue_max_tool_calls:
                         break
+                    arguments = validate_vue_tool_call(call.name, call.arguments)
                     tool_count += 1
                     tool_call_id = f"{state['request_id']}:vue:{tool_count}"
                     await emitter.emit(
@@ -213,7 +215,11 @@ class GenerationWorkflow:
                     )
                     result = await self.tool_gateway.invoke(
                         call.name,
-                        {**call.arguments, "appId": state["app_id"]},
+                        {
+                            **arguments,
+                            "appId": state["app_id"],
+                            "codeGenType": state["code_gen_type"],
+                        },
                         tool_call_id=tool_call_id,
                     )
                     await emitter.emit(

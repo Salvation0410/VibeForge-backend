@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 
-from ai_service.models.base import ModelTurn
+from ai_service.models.base import ModelTurn, ToolCall
 from ai_service.orchestration.events import EventEmitter
 from conftest import FakeModel, FakeToolGateway, MemoryCheckpoint
 
@@ -256,12 +256,36 @@ def test_vue_agent_tool_calls_are_bounded_and_identified(app_factory, auth_heade
             headers=auth_headers,
         )
     )
-    vue_calls = [call for call in gateway.calls if call["name"] == "search_reference"]
+    vue_calls = [call for call in gateway.calls if call["name"] == "file_read"]
     assert len(vue_calls) == 4
     assert all(call["toolCallId"].startswith("req-1:vue:") for call in vue_calls)
     assert len({call["toolCallId"] for call in vue_calls}) == 4
+    assert all(call["arguments"]["appId"] == "42" for call in vue_calls)
+    assert all(call["arguments"]["codeGenType"] == "VUE_PROJECT" for call in vue_calls)
     assert len([event for event in events if event["type"] == "tool_started" and event["node"] == "vue_agent"]) == 4
     assert len([event for event in events if event["type"] == "tool_finished" and event["node"] == "vue_agent"]) == 4
+
+
+def test_invalid_vue_tool_is_rejected_before_spring_gateway(app_factory, auth_headers, ndjson_parser):
+    class InvalidToolModel(FakeModel):
+        async def generate(self, branch, context):
+            if branch == "VUE_PROJECT":
+                return ModelTurn(tool_calls=[ToolCall(name="search_reference", arguments={"q": "layout"})], content="")
+            return await super().generate(branch, context)
+
+    gateway = FakeToolGateway()
+    client = TestClient(app_factory(model=InvalidToolModel(), gateway=gateway))
+
+    events = ndjson_parser(client.post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    assert not gateway.calls
+    assert events[-1]["type"] == "failed"
+    assert events[-1]["error"]["code"] == "INVALID_VUE_TOOL_CALL"
+    assert "search_reference" in events[-1]["error"]["message"]
 
 
 def test_cancel_endpoint_marks_generation_cancelled(app_factory, auth_headers):

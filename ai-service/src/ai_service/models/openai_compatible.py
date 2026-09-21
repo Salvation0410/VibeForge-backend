@@ -8,6 +8,7 @@ from langchain_openai import ChatOpenAI
 
 from ai_service.config import Settings
 from ai_service.models.base import ModelTurn, ToolCall
+from ai_service.models.tool_contract import vue_tool_prompt
 
 
 class OpenAICompatibleModel:
@@ -38,14 +39,14 @@ class OpenAICompatibleModel:
 
     async def generate(self, branch: str, context: dict[str, Any]) -> ModelTurn:
         """生成代码产物，并解析 Vue 分支返回的结构化工具调用。"""
-        tool_note = (
-            "For VUE_PROJECT, you may request a Spring-owned tool using strict JSON: "
-            '{"content":"...","toolCalls":[{"name":"search_reference","arguments":{}}]}. '
-            "Otherwise return the artifact as content with an empty toolCalls list."
+        generation_instructions = (
+            vue_tool_prompt()
+            if branch == "VUE_PROJECT"
+            else "Return only the complete artifact content."
         )
         response = await self._client.ainvoke(
             [
-                SystemMessage(content=f"Generate a {branch} application. {tool_note}"),
+                SystemMessage(content=f"Generate a {branch} application. {generation_instructions}"),
                 HumanMessage(content=json.dumps(context, ensure_ascii=False)),
             ]
         )

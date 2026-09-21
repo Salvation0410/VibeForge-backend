@@ -45,25 +45,25 @@ Expected: PASS.
 - Modify: `ai-service/tests/conftest.py`
 - Modify: `ai-service/tests/test_api.py`
 
-- [ ] **Step 1: Write failing adapter and workflow tests**
+- [x] **Step 1: Write failing adapter and workflow tests**
 
 Assert the generated prompt contains canonical tools, the fake Vue model calls `file_read`, controlled fields are injected by the workflow, and invalid calls never reach the fake gateway.
 
-- [ ] **Step 2: Run the focused tests and verify they fail**
+- [x] **Step 2: Run the focused tests and verify they fail**
 
 Run: `uv run pytest tests/test_tool_contract.py tests/test_api.py -q`
 
 Expected: FAIL on the old `search_reference` behavior and missing validation.
 
-- [ ] **Step 3: Generate the prompt from the contract**
+- [x] **Step 3: Generate the prompt from the contract**
 
 Replace the hard-coded example in `OpenAICompatibleModel.generate()` with `vue_tool_prompt()` for `VUE_PROJECT` only.
 
-- [ ] **Step 4: Validate and enrich tool calls before gateway invocation**
+- [x] **Step 4: Validate and enrich tool calls before gateway invocation**
 
 Call `validate_vue_tool_call()`, then add the trusted `appId` and `codeGenType="VUE_PROJECT"`. Keep the current call counter, event sequence, and deterministic tool call IDs.
 
-- [ ] **Step 5: Run the focused and full Python suites**
+- [x] **Step 5: Run the focused and full Python suites**
 
 Run: `uv run pytest tests/test_tool_contract.py tests/test_api.py -q`
 
