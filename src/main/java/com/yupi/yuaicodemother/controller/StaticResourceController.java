@@ -1,6 +1,6 @@
 package com.yupi.yuaicodemother.controller;
 
-import com.yupi.yuaicodemother.constant.AppConstant;
+import com.yupi.yuaicodemother.core.artifact.ArtifactPathResolver;
 import com.yupi.yuaicodemother.core.builder.VueProjectBuilder;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
@@ -22,12 +22,20 @@ import java.io.File;
 @RequestMapping("/static")
 public class StaticResourceController {
 
-    private static final String PREVIEW_ROOT_DIR = AppConstant.CODE_OUTPUT_ROOT_DIR;
     private static final Logger log = LoggerFactory.getLogger(StaticResourceController.class);
 
     @Resource
     private VueProjectBuilder vueProjectBuilder;
+    @Resource
+    private ArtifactPathResolver artifactPathResolver;
 
+    /**
+     * 从应用当前已提交版本提供预览资源，避免生成中的候选文件被外部读取。
+     *
+     * @param deployKey 应用产物目录标识
+     * @param request 当前 HTTP 请求
+     * @return 资源响应；路径无效或读取失败时返回对应错误状态
+     */
     @GetMapping("/{deployKey}/**")
     public ResponseEntity<org.springframework.core.io.Resource> serveStaticResource(
             @PathVariable String deployKey,
@@ -42,7 +50,8 @@ public class StaticResourceController {
                 return new ResponseEntity<>(headers, HttpStatus.MOVED_PERMANENTLY);
             }
 
-            File projectDir = new File(PREVIEW_ROOT_DIR, deployKey);
+            // 多文件预览必须读取已提交版本，不能直接读取可变应用根目录。
+            File projectDir = artifactPathResolver.resolveDirectoryName(deployKey).toFile();
             boolean isVueProject = vueProjectBuilder.isVueProject(projectDir);
 
             if ("/".equals(resourcePath)) {

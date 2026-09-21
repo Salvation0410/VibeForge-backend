@@ -29,4 +29,15 @@ public interface AiGenerationGateway {
      * @return 可被既有 SSE 处理链消费的字符串数据流
      */
     Flux<String> generate(String prompt, CodeGenTypeEnum codeGenType, Long appId, Long userId, String requestId);
+
+    /**
+     * 请求取消正在运行的生成；不支持主动中断的引擎至少应阻止后续发布。
+     *
+     * @param appId 应用 ID
+     * @param userId 当前用户 ID
+     * @param requestId 要取消的生成请求 ID
+     */
+    default void cancel(Long appId, Long userId, String requestId) {
+        // 默认实现兼容尚不具备取消能力的网关。
+    }
 }

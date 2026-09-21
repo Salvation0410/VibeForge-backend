@@ -9,8 +9,13 @@ import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.yupi.yuaicodemother.ai.gateway.AiGenerationGateway;
+import com.yupi.yuaicodemother.ai.gateway.GenerationLeaseService;
+import com.yupi.yuaicodemother.ai.gateway.GenerationStreamException;
+import com.yupi.yuaicodemother.core.artifact.ArtifactValidationException;
 import com.yupi.yuaicodemother.constant.AppConstant;
 import com.yupi.yuaicodemother.core.builder.VueProjectBuilder;
+import com.yupi.yuaicodemother.core.artifact.ArtifactPathResolver;
+import com.yupi.yuaicodemother.core.artifact.HtmlOutputBudgetGuard;
 import com.yupi.yuaicodemother.core.handler.StreamHandlerExecutor;
 import com.yupi.yuaicodemother.enums.ChatHistoryMessageTypeEnum;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
@@ -54,6 +59,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     private final SysUserService userService;
     private final AiGenerationGateway aiGenerationGateway;
     private final ChatHistoryService chatHistoryService;
+    private final ArtifactPathResolver artifactPathResolver;
+    private final GenerationLeaseService generationLeaseService;
+    private final HtmlOutputBudgetGuard htmlOutputBudgetGuard;
 
     @Resource
     private StreamHandlerExecutor streamHandlerExecutor;
@@ -95,23 +103,46 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Unsupported code generation type");
         }
 
-        chatHistoryService.addChatMessage(
-                appId,
-                message,
-                ChatHistoryMessageTypeEnum.USER.getValue(),
-                loginUser.getId()
-        );
-        chatHistoryOriginalService.addOriginalChatMessage(
-                appId,
-                message,
-                ChatHistoryMessageTypeEnum.USER.getValue(),
-                loginUser.getId()
-        );
-
         String requestId = java.util.UUID.randomUUID().toString();
-        Flux<String> contentStream = aiGenerationGateway.generate(message, codeGenTypeEnum, appId,
-                loginUser.getId(), requestId);
-        return streamHandlerExecutor.doExecute(contentStream, chatHistoryService, chatHistoryOriginalService, appId, loginUser, codeGenTypeEnum);
+        // 租约覆盖消息入库、模型调用和产物发布，防止同一应用的上下文与版本交叉。
+        return Flux.defer(() -> {
+            var lease = generationLeaseService.acquire(appId, requestId);
+            try {
+                // 在写入历史和调用模型前拒绝超预算的 HTML 全量重写，失败时保留当前活动版本。
+                htmlOutputBudgetGuard.checkRewriteAllowed(codeGenTypeEnum, appId);
+                chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
+                chatHistoryOriginalService.addOriginalChatMessage(appId, message,
+                        ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
+                Flux<String> contentStream = aiGenerationGateway.generate(message, codeGenTypeEnum, appId,
+                        loginUser.getId(), requestId);
+                Flux<String> execution = streamHandlerExecutor.doExecute(contentStream, chatHistoryService,
+                                chatHistoryOriginalService, appId, loginUser, codeGenTypeEnum)
+                        .doFinally(signal -> generationLeaseService.release(lease));
+                // 零历史缓存让下游取消后生成仍能走到真实终态并释放租约，同时不在内存保留代码块。
+                return execution.cache(0)
+                        .doOnCancel(() -> {
+                            // 取消只有在提交尚未开始时才能胜出；提交胜出后保持成功终态。
+                            if (generationLeaseService.cancel(lease)) {
+                                aiGenerationGateway.cancel(appId, loginUser.getId(), requestId);
+                            }
+                        });
+            } catch (Throwable error) {
+                generationLeaseService.release(lease);
+                return Flux.error(error);
+            }
+        }).onErrorMap(error -> wrapGenerationError(requestId, error));
+    }
+
+    /**
+     * 将底层模型、校验或发布异常转换为可通过 SSE 返回的稳定业务错误。
+     */
+    private GenerationStreamException wrapGenerationError(String requestId, Throwable error) {
+        if (error instanceof GenerationStreamException streamError) return streamError;
+        String stableCode = error instanceof ArtifactValidationException validation
+                ? validation.getErrorCode() : "GENERATION_FAILED";
+        int code = error instanceof BusinessException business ? business.getCode() : ErrorCode.OPERATION_ERROR.getCode();
+        String message = error.getMessage() == null ? "生成失败，已保留上一版本" : error.getMessage();
+        return new GenerationStreamException(code, stableCode, requestId, message, error);
     }
 
     /**
@@ -207,7 +238,16 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         return app.getId();
     }
 
+    /**
+     * 解析部署使用的源码根目录；多文件应用优先返回当前已提交版本，失败候选不可见。
+     */
     private File resolveSourceRootDir(Long appId, String codeGenType) {
+        CodeGenTypeEnum type = CodeGenTypeEnum.getEnumByValue(codeGenType);
+        if (type != null) {
+            // 部署读取当前已提交版本，生成失败时继续使用上一成功版本。
+            File active = artifactPathResolver.resolveActiveRoot(type, appId).toFile();
+            if (active.isDirectory()) return active;
+        }
         if (StrUtil.isNotBlank(codeGenType)) {
             File sourceDir = new File(AppConstant.CODE_OUTPUT_ROOT_DIR, codeGenType + "_" + appId);
             if (sourceDir.isDirectory()) {

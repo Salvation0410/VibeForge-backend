@@ -14,10 +14,12 @@ class ToolCall:
 
 @dataclass(slots=True)
 class ModelTurn:
-    """一次模型响应，包含文本产物和可选工具调用。"""
+    """一次模型响应，包含文本产物、工具调用和可用于阻止截断发布的结束元数据。"""
 
     content: str
     tool_calls: list[ToolCall] = field(default_factory=list)
+    finish_reason: str | None = None
+    token_usage: dict[str, int] = field(default_factory=dict)
 
 
 class GenerationModel(Protocol):
@@ -35,6 +37,6 @@ class GenerationModel(Protocol):
         """检查生成产物是否达到结束工作流的质量要求。"""
         ...
 
-    async def repair(self, artifact: str, context: dict[str, Any]) -> str:
-        """根据验证与构建上下文修复生成产物。"""
+    async def repair(self, artifact: str, context: dict[str, Any]) -> ModelTurn:
+        """根据验证与构建上下文修复产物，并保留模型结束元数据。"""
         ...

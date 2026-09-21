@@ -36,14 +36,18 @@ public class SimpleTextStreamHandler {
                     return chunk;
                 })
                 .doOnComplete(() -> {
-                    // 流式响应完成后，添加AI消息到对话历史
-                    String aiResponse = aiResponseBuilder.toString();
-                    chatHistoryService.addChatMessage(appId, aiResponse, ChatHistoryMessageTypeEnum.AI.getValue(), loginUser.getId());
+                    try {
+                        // 产物已经成功发布，历史落库失败只能记录，不能把成功终态翻转为 error。
+                        String aiResponse = aiResponseBuilder.toString();
+                        chatHistoryService.addChatMessage(appId, aiResponse,
+                                ChatHistoryMessageTypeEnum.AI.getValue(), loginUser.getId());
+                    } catch (Exception historyError) {
+                        log.error("已发布 AI 回复写入聊天历史失败, appId={}", appId, historyError);
+                    }
                 })
                 .doOnError(error -> {
-                    // 如果AI回复失败，也要记录错误消息
-                    String errorMessage = "AI回复失败: " + error.getMessage();
-                    chatHistoryService.addChatMessage(appId, errorMessage, ChatHistoryMessageTypeEnum.AI.getValue(), loginUser.getId());
+                    // 失败候选不能进入成功对话历史，否则后续模型会把截断代码当作有效上下文。
+                    log.warn("AI 回复未发布，不写入对话历史, appId={}", appId, error);
                 });
     }
 }

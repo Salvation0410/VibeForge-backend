@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 from pydantic import ValidationError
@@ -25,6 +27,36 @@ async def test_spring_gateway_uses_bearer_and_tool_call_id():
     assert captured["authorization"] == "Bearer gateway-token"
     assert '"toolCallId":"req:build:1"' in captured["body"]
     assert result == {"result": "ok"}
+    await gateway.close()
+
+
+@pytest.mark.asyncio
+async def test_artifact_publish_retries_lost_response_with_same_tool_call_id():
+    requests: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.read()))
+        if len(requests) == 1:
+            raise httpx.ReadError("response lost after Spring committed", request=request)
+        return httpx.Response(200, json={"data": {"published": True, "versionId": "req-1"}})
+
+    gateway = SpringToolGateway(
+        base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="gateway-token",
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await gateway.invoke(
+        "artifact_publish",
+        {"appId": "42", "requestId": "req-1"},
+        tool_call_id="req-1:artifact_publish",
+    )
+
+    assert result["published"] is True
+    assert [request["toolCallId"] for request in requests] == [
+        "req-1:artifact_publish",
+        "req-1:artifact_publish",
+    ]
     await gateway.close()
 
 

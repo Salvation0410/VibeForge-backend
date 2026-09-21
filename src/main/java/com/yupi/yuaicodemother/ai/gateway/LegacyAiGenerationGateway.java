@@ -44,6 +44,12 @@ public class LegacyAiGenerationGateway implements AiGenerationGateway {
      */
     @Override
     public Flux<String> generate(String prompt, CodeGenTypeEnum codeGenType, Long appId, Long userId, String requestId) {
-        return facade.generateAndSaveCodeStream(prompt, codeGenType, appId);
+        return facade.generateAndSaveCodeStream(prompt, codeGenType, appId, requestId);
+    }
+
+    /** 标记 Legacy 请求已取消，使无法中断的模型流在回调完成时拒绝构建或发布。 */
+    @Override
+    public void cancel(Long appId, Long userId, String requestId) {
+        facade.cancelGeneration(requestId);
     }
 }

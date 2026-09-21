@@ -81,6 +81,10 @@ ai:
 
 `legacy` 为原 LangChain4j 链路，`langgraph` 为 Python 链路，`gray` 按白名单和比例选择。切换配置即可回滚，不需要数据库迁移。
 
+两条生成链路共用 Spring 的不可变安全发布边界：同一应用同一时间只允许一个生成请求；取消和提交通过 Redis 状态锁决定唯一胜者；模型输出因长度或内容策略中止时不发布。`HTML` 只接受唯一闭合代码块或边界完整纯文档，发布前执行确定性 HTML/CSS/JavaScript 校验和 Selenium 烟测；`MULTI_FILE` 必须是严格的三文件协议。成功版本位于 `<类型>_<appId>/.releases/<requestId>`，`.current` 原子指向当前版本，预览、部署、下载和导出都读取该版本。默认保留当前版本及最近两个成功版本，同时持久记录单调提交序号、requestId 墓碑和提交标记；失败请求或已归档旧请求不会覆盖上一成功版本。
+
+HTML 烟测默认由 `AI_HTML_SMOKE_TEST_ENABLED=true` 和 `AI_HTML_SMOKE_TEST_REQUIRED=true` 开启；浏览器不可用、加载超时、脚本错误或骨架屏未消失都会拒绝发布。`AI_HTML_MAX_REWRITE_SOURCE_CHARS` 默认 24000，超过预算的全量重写返回 `HTML_OUTPUT_BUDGET_EXCEEDED`。前端生成期间保留旧预览，进度按 80ms 批处理，成功 `done` 后只刷新一次；`business-error`、取消和截断不会刷新预览。
+
 ## 4. 健康检查
 
 ```powershell
@@ -124,7 +128,11 @@ Invoke-RestMethod http://localhost:8000/internal/v1/route -Method Post -Headers 
 GET http://localhost:8123/api/apps/chat/gen/code?appId={应用ID}&message={生成提示}
 ```
 
-前端仍消费原有 SSE：`data: {"d":"..."}`，Python 与 Spring 之间使用 `application/x-ndjson`。
+前端内容事件仍为 `data: {"d":"..."}`，Python 与 Spring 之间使用 `application/x-ndjson`。正常完成时 Spring 发送命名 `done` 事件；截断、校验失败或发布失败时只发送一个命名 `error` 事件，数据包含 `code`、`errorCode`、`message` 和 `requestId`，不会再发送 `done`。
+
+LangGraph 的多文件分支会依次调用 Spring 工具 `artifact_validate` 和 `artifact_publish`。前者返回结构化校验错误供最多两次修复使用，后者在 Spring 侧重新校验并提交不可变版本。`MULTI_FILE` 不执行 Vue 项目构建，只有 `VUE_PROJECT` 进入 `project_build`。
+
+如果 `artifact_publish` 因连接中断、超时、Spring 5xx 或响应解析异常而无法确认结果，Python 会携带原 `toolCallId` 最多重试一次；Spring 返回明确 4xx 时不会重试。重试耗尽表示内部网络持续不可用，应结合 Spring 日志与 `.current` 指针排查实际发布状态。
 
 ## 7. 测试与排查
 
@@ -139,9 +147,34 @@ uv lock --check
 - `401 Invalid internal bearer token`：检查 Python 的 `AI_SERVICE_INTERNAL_BEARER_TOKEN` 与 Spring `AI_SERVICE_INTERNAL_BEARER_TOKEN` 是否完全一致。
 - ready 返回 503：检查 Redis 地址、端口、database 和 `AI_SERVICE_REDIS_REQUIRED` 配置。
 - 工具调用失败：确认 Python 的 Spring 网关地址包含 `/api/internal/ai-tools`，且工具令牌与 Spring `ai.token` 一致。
+- `GENERATION_IN_PROGRESS`：同一应用已有生成任务，等待当前请求完成或取消后重试。
+- `MODEL_OUTPUT_TRUNCATED`：模型达到 token 上限，本次候选未发布；可缩小需求或提高模型输出上限后重试。
+- `MULTI_FILE_FORMAT_INVALID` / `ARTIFACT_PUBLISH_FAILED`：三文件协议、确定性校验或版本提交失败，上一成功版本仍保持活动状态。
 - 模型调用失败：检查 API Key、Base URL、模型名称和网络连通性；不要把密钥写入 Git。
 - Docker 无法构建：先启动 Docker daemon，再执行 `docker build`。
 
 ## 8. 安全要求
 
 `.env` 仅用于本机或部署环境，不得提交。生产环境必须使用密钥管理系统或运行时环境变量，并轮换历史中曾暴露的 AI、OSS、邮件凭据。Python 服务不应直接挂载项目目录，所有文件和构建操作必须经过 Spring 工具网关。
+
+## 9. HTML 人工恢复
+
+只有管理员可以调用 `POST /api/apps/admin/artifacts/html/recover`。接口不会自动搜索聊天历史；操作员必须先从可信来源导出并人工审核一份完整候选，提供新的 `requestId` 和来源说明。默认 `dryRun=true`，只执行严格解析、确定性校验和浏览器烟测，不创建 release，也不改变 `.current`。
+
+推荐使用 PowerShell 包装脚本，并先执行 dry-run：
+
+```powershell
+$session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+# 先通过项目登录接口让 $session 获得管理员会话，再运行只读校验。
+.\scripts\restore-html-release.ps1 -AppId 123 -CandidateFile C:\recovery\candidate.html `
+  -RequestId recovery-20260920-001 -WebSession $session
+```
+
+确认响应中 `valid=true`、烟测通过且候选来源无误后，才用相同参数显式提交：
+
+```powershell
+.\scripts\restore-html-release.ps1 -AppId 123 -CandidateFile C:\recovery\candidate.html `
+  -RequestId recovery-20260920-001 -WebSession $session -Commit
+```
+
+`-Commit` 会以 `manual-recovery` 引擎发布新的不可变 HTML release，并与在线生成共用应用级互斥和发布门禁。脚本不包含凭据或 Cookie，只使用调用方传入的 `WebRequestSession`；它只读取 `CandidateFile`，不会搜索历史目录，也不会读取或修改 `projects/`。不得把损坏的平铺 `index.html` 直接作为候选，无法找到完整候选时应保留现场并从原始需求重新生成。

@@ -49,6 +49,12 @@ public class DelegatingAiGenerationGateway implements AiGenerationGateway {
         return delegate(userId, requestId).generate(prompt, codeGenType, appId, userId, requestId);
     }
 
+    /** 将取消请求发送给本次请求确定性选中的同一生成引擎。 */
+    @Override
+    public void cancel(Long appId, Long userId, String requestId) {
+        delegate(userId, requestId).cancel(appId, userId, requestId);
+    }
+
     /**
      * 根据引擎配置选择具体网关。
      * <p>

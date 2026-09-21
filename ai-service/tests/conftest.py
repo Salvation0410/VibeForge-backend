@@ -36,15 +36,15 @@ class FakeModel:
                 content=f"vue-step-{self._vue_turn}",
                 tool_calls=[ToolCall(name="search_reference", arguments={"q": "layout"})],
             )
-        return ModelTurn(content=f"artifact:{branch}")
+        return ModelTurn(content=f"artifact:{branch}", finish_reason="STOP")
 
     async def review(self, artifact: str, context: dict[str, Any]) -> bool:
         self.calls.append(("review", {"artifact": artifact, "context": context}))
         return self.reviews.pop(0) if self.reviews else False
 
-    async def repair(self, artifact: str, context: dict[str, Any]) -> str:
+    async def repair(self, artifact: str, context: dict[str, Any]) -> ModelTurn:
         self.calls.append(("repair", {"artifact": artifact, "context": context}))
-        return artifact + "|repaired"
+        return ModelTurn(content=artifact + "|repaired", finish_reason="STOP")
 
 
 class FakeToolGateway:
@@ -54,6 +54,10 @@ class FakeToolGateway:
     async def invoke(self, name: str, arguments: dict[str, Any], *, tool_call_id: str) -> dict[str, Any]:
         call = {"name": name, "arguments": arguments, "toolCallId": tool_call_id}
         self.calls.append(call)
+        if name == "artifact_validate":
+            return {"valid": True, "errors": []}
+        if name == "artifact_publish":
+            return {"published": True, "versionId": arguments["requestId"], "hashes": {}}
         return {"ok": True, "echo": call}
 
 

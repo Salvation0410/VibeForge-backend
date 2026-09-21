@@ -3,7 +3,8 @@ package com.yupi.yuaicodemother.service.impl;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.StrUtil;
 import com.mybatisflex.core.query.QueryWrapper;
-import com.yupi.yuaicodemother.constant.AppConstant;
+import com.yupi.yuaicodemother.core.artifact.ArtifactPathResolver;
+import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
 import com.yupi.yuaicodemother.constant.UserConstant;
 import com.yupi.yuaicodemother.enums.ChatHistoryMessageTypeEnum;
 import com.yupi.yuaicodemother.exception.BusinessException;
@@ -39,6 +40,7 @@ public class ChatHistoryExportServiceImpl implements ChatHistoryExportService {
 
     private final AppService appService;
     private final ChatHistoryService chatHistoryService;
+    private final ArtifactPathResolver artifactPathResolver;
 
     @Override
     public String exportAppChatHistoryAsMarkdown(Long appId, SysUser loginUser) {
@@ -78,10 +80,13 @@ public class ChatHistoryExportServiceImpl implements ChatHistoryExportService {
         return chatHistoryService.list(queryWrapper);
     }
 
+    /** 导出应用当前已提交的源码版本；不存在有效版本时明确拒绝导出。 */
     private File resolveSourceDir(App app) {
         String codeGenType = StrUtil.blankToDefault(app.getCodeGenType(), "multi_file");
-        String sourceDirName = codeGenType + "_" + app.getId();
-        File sourceDir = new File(AppConstant.CODE_OUTPUT_ROOT_DIR, sourceDirName);
+        CodeGenTypeEnum type = CodeGenTypeEnum.getEnumByValue(codeGenType);
+        if (type == null) throw new BusinessException(ErrorCode.SYSTEM_ERROR, "不支持的代码生成类型");
+        // 导出读取活动版本，确保源码与用户当前预览一致。
+        File sourceDir = artifactPathResolver.resolveActiveRoot(type, app.getId()).toFile();
         if (!sourceDir.exists() || !sourceDir.isDirectory()) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "请先完成一次代码生成后再导出");
         }
