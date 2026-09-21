@@ -57,5 +57,7 @@ ai:
   engine: ${AI_ENGINE:legacy}
   service-url: ${AI_SERVICE_URL:http://localhost:8000}
   token: ${AI_SERVICE_INTERNAL_BEARER_TOKEN:}
+  tool-idempotency-ttl-seconds: ${AI_TOOL_IDEMPOTENCY_TTL_SECONDS:86400}
+  tool-idempotency-lock-wait-millis: ${AI_TOOL_IDEMPOTENCY_LOCK_WAIT_MILLIS:30000}
   gray-whitelist: []
   gray-percentage: 0

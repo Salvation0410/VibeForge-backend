@@ -90,7 +90,7 @@ Vue 分支允许模型请求 Spring 工具，但工具调用次数受 `AI_SERVIC
 
 模型返回 `LENGTH`、`MAX_TOKENS`、`CONTENT_FILTER` 或 `CONTENT_FILTERED` 时，候选产物不会进入发布阶段。通过硬校验和质量检查后，Python 调用 Spring 的 `artifact_publish`；Spring 将文件写入不可变的 `.releases/<requestId>`，校验摘要后原子替换 `.current` 指针，并保留当前版本及最近两个成功版本。每次成功发布还会记录单调提交序号和 requestId 墓碑，实体版本被保留策略清理后也不能通过旧请求重放回滚。校验、写入或指针切换失败时，上一成功版本保持可预览、部署和下载。
 
-`artifact_publish` 遇到连接中断、超时、Spring 5xx 或无法解析响应时，会使用相同 `toolCallId` 最多重试一次。Spring 的工具幂等缓存与 requestId/hash 校验保证重试不会创建不同版本；明确的 4xx 业务拒绝不会重试。
+`artifact_publish` 遇到连接中断、超时、Spring 5xx 或无法解析响应时，会使用相同 `toolCallId` 最多重试一次。Spring 的 Redis 工具幂等作用域是 `appId + requestId + toolCallId`；同一作用域只有 canonical 工具名和参数指纹都一致时才能回放成功结果，不一致会拒绝为冲突。明确的 4xx 业务拒绝不会重试。
 
 同一应用的生成流程由 Spring 应用级租约串行化，租约覆盖用户消息入库、模型调用、校验和发布。取消和提交通过 Redis 状态锁进行原子状态转换：取消先发生则禁止发布，提交先发生则保持成功终态；下游断开不会提前释放租约。不同应用仍可并发生成。
 
@@ -201,7 +201,13 @@ Spring Boot 侧至少配置：
 $env:AI_ENGINE = "langgraph"
 $env:AI_SERVICE_URL = "http://localhost:8000"
 $env:AI_SERVICE_INTERNAL_BEARER_TOKEN = "与Python服务一致的内部令牌"
+# Spring 内部工具幂等记录的保留时间，单位为秒
+$env:AI_TOOL_IDEMPOTENCY_TTL_SECONDS = "86400"
+# Spring 等待同一工具调用分布式锁的最长时间，单位为毫秒
+$env:AI_TOOL_IDEMPOTENCY_LOCK_WAIT_MILLIS = "30000"
 ```
+
+后两项是启动 Spring 时注入的可选运行时环境变量，不属于 `ai-service/.env` 的必需配置。
 
 随后在仓库根目录启动 Spring Boot：
 
@@ -274,6 +280,10 @@ Redis key 使用 `yu-ai:langgraph:*` 命名空间，LangGraph `thread_id` 为 `{
 - `AI_SERVICE_REDIS_REQUIRED=false`：Redis 不可用时记录警告，服务继续运行但不具备 checkpoint 恢复能力，ready 返回 503。
 - `AI_SERVICE_REDIS_REQUIRED=true`：启动探测或 checkpoint 写入失败时显式失败。
 - `AI_SERVICE_REDIS_ENABLED=false`：完全关闭 checkpoint，仅建议用于测试或明确接受无恢复能力的本地环境。
+
+Spring 内部工具幂等使用现有 Spring Redis 配置（本地默认 database 1），因此幂等状态和成功结果可跨 Spring 实例共享。作用域为 `appId + requestId + toolCallId`；同一作用域复用不同 canonical 工具名或参数指纹会被拒绝。已存在（包括陈旧）的 `RUNNING` 记录表示执行结果不确定，不会自动重放；action 已成功但完成状态写回 Redis 失败时同样返回 indeterminate。该机制不承诺文件系统与 Redis 之间的严格 exactly-once。
+
+工具调用 Redis 幂等与 `VersionedArtifactStore` 的不可变版本发布幂等是两套独立机制，不能相互替代。本轮单元和契约验证不包含真实 Redis 多 Spring 实例场景，该场景仍需集成测试验证。
 
 ## 测试与校验
 

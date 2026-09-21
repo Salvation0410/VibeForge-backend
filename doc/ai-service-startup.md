@@ -62,7 +62,13 @@ Spring Boot 需要指向 Python 服务，并配置相同的内部令牌：
 $env:AI_ENGINE = "langgraph"
 $env:AI_SERVICE_URL = "http://localhost:8000"
 $env:AI_SERVICE_INTERNAL_BEARER_TOKEN = "与Python一致的服务令牌"
+# Spring 内部工具幂等记录的保留时间，单位为秒
+$env:AI_TOOL_IDEMPOTENCY_TTL_SECONDS = "86400"
+# Spring 等待同一工具调用分布式锁的最长时间，单位为毫秒
+$env:AI_TOOL_IDEMPOTENCY_LOCK_WAIT_MILLIS = "30000"
 ```
+
+后两项是 Spring 的可选运行时环境变量，不需要写入 `ai-service/.env`。
 
 随后在仓库根目录启动：
 
@@ -133,6 +139,10 @@ GET http://localhost:8123/api/apps/chat/gen/code?appId={应用ID}&message={生�
 LangGraph 的多文件分支会依次调用 Spring 工具 `artifact_validate` 和 `artifact_publish`。前者返回结构化校验错误供最多两次修复使用，后者在 Spring 侧重新校验并提交不可变版本。`MULTI_FILE` 不执行 Vue 项目构建，只有 `VUE_PROJECT` 进入 `project_build`。
 
 如果 `artifact_publish` 因连接中断、超时、Spring 5xx 或响应解析异常而无法确认结果，Python 会携带原 `toolCallId` 最多重试一次；Spring 返回明确 4xx 时不会重试。重试耗尽表示内部网络持续不可用，应结合 Spring 日志与 `.current` 指针排查实际发布状态。
+
+Spring 工具幂等状态和成功结果保存在现有 Spring Redis 配置中（本地默认 database 1），可跨 Spring 实例共享。幂等作用域为 `appId + requestId + toolCallId`；同一作用域对应不同 canonical 工具名或参数指纹时会拒绝执行。已存在（包括陈旧）的 `RUNNING` 记录属于不确定状态，不会自动重放；action 已成功但完成状态写回 Redis 失败时也会返回 indeterminate，因此该机制不承诺文件系统与 Redis 之间严格 exactly-once。
+
+工具调用 Redis 幂等和 `VersionedArtifactStore` 的不可变版本发布幂等彼此独立。前者控制 Spring 工具调用的去重与冲突，后者控制产物 release、墓碑和活动指针。本轮没有运行真实 Redis 多 Spring 实例集成验证，上线前仍需覆盖该场景。
 
 ## 7. 测试与排查
 

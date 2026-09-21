@@ -24,6 +24,8 @@
 - Python 不连接业务 MySQL，也不直接访问生成项目目录；文件、校验、发布和构建操作通过 Spring 内部工具网关完成。
 - Vue 模型工具已收敛为五个标准文件工具；Python 在出站前校验名称和参数，Java/Python 通过包内版本化 JSON 契约防止名称漂移。
 - Redis checkpoint 默认使用数据库 2；不可用时按当前配置和实现降级。
+- Spring 内部工具幂等状态和成功结果使用现有 Spring Redis 配置（本地默认 database 1），可跨 Spring 实例共享。作用域为 `appId + requestId + toolCallId`；同一作用域的 canonical 工具名或参数指纹不一致时拒绝执行。
+- 已存在（包括陈旧）的 `RUNNING` 工具记录视为不确定状态，不自动重放。action 成功但完成状态写回 Redis 失败也属于 indeterminate，因此不承诺文件系统与 Redis 之间严格 exactly-once。
 
 ### 产物安全发布
 
@@ -31,6 +33,7 @@
 - HTML 在发布前执行文档、CSS、JavaScript 完整性校验，并用 Selenium 检查脚本错误、永久加载态、外部图片失败和越界导航。
 - MULTI_FILE 继续要求完整匹配的 `index.html`、`style.css` 和 `script.js`。
 - HTML 和 MULTI_FILE 通过 `VersionedArtifactStore` 发布不可变版本，使用 manifest 哈希、请求墓碑、单调序号和原子活动指针。
+- `VersionedArtifactStore` 的版本发布幂等与内部工具 Redis 幂等是独立机制，分别约束发布状态和工具调用，不能相互替代。
 - 发布失败不会替换上一版本；默认保留当前版本和最近两个历史版本。
 - Legacy HTML 和 LangGraph HTML/MULTI_FILE 都必须在 Spring 发布成功后才能产生完成终态。
 - `MODEL_OUTPUT_TRUNCATED`、`HTML_FORMAT_INVALID`、`HTML_VALIDATION_FAILED` 和 `HTML_SMOKE_TEST_FAILED` 会作为结构化业务错误返回前端。
@@ -88,6 +91,7 @@ Spring 是业务数据、项目文件和活动发布版本的唯一所有者。P
 | `ai/gateway/DelegatingAiGenerationGateway.java` | Legacy、LangGraph 和灰度路由 |
 | `ai/gateway/LangGraphAiGenerationGateway.java` | Python NDJSON 事件适配 |
 | `ai/gateway/GenerationLeaseService.java` | 应用级租约与取消/提交仲裁 |
+| `ai/gateway/ToolInvocationIdempotencyService.java` | Redis 工具幂等作用域、冲突检测与不确定态保护 |
 | `controller/InternalAiToolsController.java` | 内部文件、校验、发布和构建工具边界 |
 | `core/artifact/HtmlArtifactParser.java` | 严格解析单文件 HTML |
 | `core/artifact/HtmlArtifactValidator.java` | HTML/CSS/JavaScript 确定性校验 |
@@ -182,6 +186,8 @@ Python checkpoint Redis: redis://localhost:6379/2
 
 本轮没有以真实模型完成新的三类型端到端生成，因此不能据此声称真实 DeepSeek、真实 Redis 恢复或完整跨服务生成已经通过。
 
+本轮也没有运行真实 Redis 多 Spring 实例的工具幂等集成验证；跨实例共享、锁竞争和 Redis/文件系统故障窗口仍需在集成环境覆盖。
+
 ## 8. 关键提交
 
 后端与文档：
@@ -211,7 +217,7 @@ caeb0cb fix: 保持预览加载图为正圆
 ### P0：全量生产切换前必须验证或修复
 
 1. **真实三类型端到端仍缺少最新验收。** 需要在真实 Spring、Python、Redis、模型和文件系统环境中分别生成 HTML、MULTI_FILE、VUE_PROJECT，并验证发布、预览、停止和二次优化。
-2. **内部工具调用结果幂等仍是进程内 Map。** `InternalAiToolsController` 使用静态 `ConcurrentHashMap`，重启丢失、多实例不共享且没有 TTL。它不同于已实现的不可变产物发布幂等。
+2. **内部工具 Redis 幂等仍缺少真实多实例验证。** 单元测试覆盖作用域、冲突、锁等待、回放和不确定态，但真实 Redis 下的多 Spring 实例竞争、进程中止及 action 成功后状态写回失败仍需集成测试；该机制不等同于文件系统/Redis 严格 exactly-once。
 
 ### P1：稳定性与契约问题
 
@@ -236,7 +242,7 @@ caeb0cb fix: 保持预览加载图为正圆
 
 ## 10. 下一阶段建议顺序
 
-1. 将内部工具调用幂等迁移到 Redis，加入 TTL 和 `appId + requestId + toolCallId` 作用域。
+1. 在真实 Redis 上验证多 Spring 实例的工具幂等共享、锁竞争和不确定态故障窗口。
 2. 在独立测试应用上完成 HTML、MULTI_FILE、VUE_PROJECT 的真实生成和二次优化验收，不复用事故应用。
 3. 压测大流式响应、客户端停止、网络中断和提交竞争，验证 2000 字符窗口与取消状态门。
 4. 修正灰度稳定性、路由降级和多实例取消状态。

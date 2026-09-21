@@ -109,7 +109,7 @@ git commit -m "feat: 扩展内部工具请求作用域"
 - Create: `src/main/java/com/yupi/yuaicodemother/ai/gateway/ToolInvocationIdempotencyService.java`
 - Create: `src/test/java/com/yupi/yuaicodemother/ai/gateway/ToolInvocationIdempotencyServiceTest.java`
 
-- [ ] **Step 1: Write failing service tests**
+- [x] **Step 1: Write failing service tests**
 
 Cover these behaviors with mocked `RedissonClient`, `RLock`, and `RBucket<String>`:
 
@@ -142,7 +142,7 @@ Add tests for:
 - action 已成功但 `SUCCEEDED` 写回失败时保留 `RUNNING`，返回 `TOOL_EXECUTION_INDETERMINATE`；
 - two service instances sharing the same mocked bucket replay the same result.
 
-- [ ] **Step 2: Run the service test and verify it fails**
+- [x] **Step 2: Run the service test and verify it fails**
 
 Run:
 
@@ -152,7 +152,7 @@ mvn test -Dtest=ToolInvocationIdempotencyServiceTest
 
 Expected: FAIL because `ToolInvocationIdempotencyService` and its properties do not exist.
 
-- [ ] **Step 3: Add Redis idempotency configuration**
+- [x] **Step 3: Add Redis idempotency configuration**
 
 Add to `AiEngineProperties`:
 
@@ -163,7 +163,7 @@ private long toolIdempotencyTtlSeconds = 86400;
 private long toolIdempotencyLockWaitMillis = 30000;
 ```
 
-- [ ] **Step 4: Implement the service state and fingerprint**
+- [x] **Step 4: Implement the service state and fingerprint**
 
 Create a Spring `@Service` with this public boundary:
 
@@ -196,7 +196,7 @@ Use `RLock.tryLock(lockWaitMillis, TimeUnit.MILLISECONDS)` without a fixed lease
 
 Store both `RUNNING` and `SUCCEEDED` with `bucket.set(json, ttlSeconds, TimeUnit.SECONDS)`. Delete `RUNNING` only when the action throws an explicit exception. Do not execute the action if lock、state read or `RUNNING` claim fails. If the action returns successfully but storing `SUCCEEDED` fails, preserve `RUNNING` and raise `TOOL_EXECUTION_INDETERMINATE` because the external side effect may already exist.
 
-- [ ] **Step 5: Run the service tests**
+- [x] **Step 5: Run the service tests**
 
 Run:
 
@@ -206,7 +206,7 @@ mvn test -Dtest=ToolInvocationIdempotencyServiceTest
 
 Expected: all service tests PASS.
 
-- [ ] **Step 6: Commit the Redis service**
+- [x] **Step 6: Commit the Redis service**
 
 ```powershell
 git add src/main/java/com/yupi/yuaicodemother/config/AiEngineProperties.java `
@@ -221,7 +221,7 @@ git commit -m "feat: 增加 Redis 工具幂等服务"
 - Modify: `src/main/java/com/yupi/yuaicodemother/controller/InternalAiToolsController.java`
 - Modify: `src/test/java/com/yupi/yuaicodemother/controller/InternalAiToolsControllerTest.java`
 
-- [ ] **Step 1: Write failing controller contract tests**
+- [x] **Step 1: Write failing controller contract tests**
 
 Change `ToolRequest` construction to:
 
@@ -242,7 +242,7 @@ Add assertions that:
 - `artifact_publish` receives the top-level requestId;
 - the old static `ConcurrentHashMap` no longer exists or influences a second controller instance.
 
-- [ ] **Step 2: Run controller tests and verify they fail**
+- [x] **Step 2: Run controller tests and verify they fail**
 
 Run:
 
@@ -252,7 +252,7 @@ mvn test -Dtest=InternalAiToolsControllerTest
 
 Expected: FAIL because `ToolRequest` and the controller constructor still use the process-local cache contract.
 
-- [ ] **Step 3: Route controller execution through the Redis service**
+- [x] **Step 3: Route controller execution through the Redis service**
 
 Replace the request record with:
 
@@ -288,7 +288,7 @@ private Map<String, Object> execute(
 
 Pass the top-level requestId to `publishArtifact(long appId, String requestId, Map<String,Object> args)`. All file and build methods use the top-level appId.
 
-- [ ] **Step 4: Run Spring tests**
+- [x] **Step 4: Run Spring tests**
 
 Run:
 
@@ -298,7 +298,7 @@ mvn test -Dtest=InternalAiToolsControllerTest,InternalAiToolContractTest,ToolInv
 
 Expected: all selected tests PASS.
 
-- [ ] **Step 5: Commit the controller integration**
+- [x] **Step 5: Commit the controller integration**
 
 ```powershell
 git add src/main/java/com/yupi/yuaicodemother/controller/InternalAiToolsController.java `
@@ -315,7 +315,7 @@ git commit -m "refactor: 接入 Redis 工具幂等边界"
 - Modify: `doc/ai-service-phase-one-handoff.md`
 - Modify: `docs/superpowers/plans/2026-09-21-redis-tool-idempotency.md`
 
-- [ ] **Step 1: Document the new configuration and semantics**
+- [x] **Step 1: Document the new configuration and semantics**
 
 Add these Spring properties to `application.yml`:
 
@@ -343,7 +343,7 @@ Update the README, startup guide, and handoff document to state:
 - Redis idempotency and versioned artifact publication remain separate mechanisms;
 - real Redis multi-instance verification remains an integration-test requirement unless run during this task.
 
-- [ ] **Step 2: Run Python verification**
+- [x] **Step 2: Run Python verification**
 
 Run:
 
@@ -356,7 +356,9 @@ uv lock --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 3: Run Java verification**
+Actual: `compileall` and `uv lock --check` exited 0; `pytest` passed 35 tests with 2 dependency deprecation warnings.
+
+- [x] **Step 3: Run Java verification**
 
 Run from the repository root:
 
@@ -367,7 +369,9 @@ mvn clean -DskipTests compile
 
 Expected: selected tests pass and compile reports `BUILD SUCCESS`.
 
-- [ ] **Step 4: Verify repository hygiene and plan coverage**
+Actual: 36 selected tests passed with no failures, errors, or skips; clean compile built 234 source files and reported `BUILD SUCCESS`.
+
+- [x] **Step 4: Verify repository hygiene and plan coverage**
 
 Run:
 
@@ -379,7 +383,7 @@ rg -n "ConcurrentHashMap|IDEMPOTENT_RESULTS" src/main/java/com/yupi/yuaicodemoth
 
 Expected: no whitespace errors, only task files are changed, and the final search returns no process-local idempotency cache.
 
-- [ ] **Step 5: Commit documentation and completed plan state**
+- [x] **Step 5: Commit documentation and completed plan state**
 
 ```powershell
 git add src/main/resources/application.yml ai-service/README.md `
