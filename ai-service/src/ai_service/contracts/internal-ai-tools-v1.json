@@ -3,35 +3,35 @@
   "tools": [
     {
       "name": "dir_read",
-      "aliases": ["readDir"],
+      "aliases": ["readDir", "read_dir"],
       "modelCallable": true,
       "modelArguments": ["relativeDirPath"],
       "description": "List files under a project-relative directory; use an empty path for the project root."
     },
     {
       "name": "file_read",
-      "aliases": ["readFile"],
+      "aliases": ["readFile", "read_file"],
       "modelCallable": true,
       "modelArguments": ["relativeFilePath"],
       "description": "Read a UTF-8 file from a project-relative path."
     },
     {
       "name": "file_write",
-      "aliases": ["writeFile"],
+      "aliases": ["writeFile", "write_file"],
       "modelCallable": true,
       "modelArguments": ["relativeFilePath", "content"],
       "description": "Create or replace a UTF-8 file at a project-relative path."
     },
     {
       "name": "file_modify",
-      "aliases": ["modifyFile"],
+      "aliases": ["modifyFile", "modify_file"],
       "modelCallable": true,
       "modelArguments": ["relativeFilePath", "oldContent", "newContent"],
       "description": "Replace an exact text fragment in an existing project file."
     },
     {
       "name": "file_delete",
-      "aliases": ["deleteFile"],
+      "aliases": ["deleteFile", "delete_file"],
       "modelCallable": true,
       "modelArguments": ["relativeFilePath"],
       "description": "Delete a non-protected file at a project-relative path."

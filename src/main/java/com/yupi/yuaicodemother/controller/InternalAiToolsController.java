@@ -3,6 +3,7 @@ package com.yupi.yuaicodemother.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yupi.yuaicodemother.common.BaseResponse;
 import com.yupi.yuaicodemother.common.ResultUtils;
+import com.yupi.yuaicodemother.ai.gateway.InternalAiTool;
 import com.yupi.yuaicodemother.config.AiEngineProperties;
 import com.yupi.yuaicodemother.core.builder.VueProjectBuilder;
 import com.yupi.yuaicodemother.core.artifact.ArtifactPathResolver;
@@ -102,16 +103,21 @@ public class InternalAiToolsController {
      */
     private Map<String, Object> execute(String toolName, Map<String, Object> args) {
         long appId = number(args.get("appId"), "appId");
-        return switch (toolName) {
-            case "file_read", "readFile", "read_file" -> Map.of("content", readFile(sandboxPath(appId, args, "relativeFilePath", false)));
-            case "dir_read", "readDir", "read_dir" -> Map.of("entries", readDir(sandboxPath(appId, args, "relativeDirPath", true)));
-            case "file_write", "writeFile", "write_file" -> writeFile(appId, args);
-            case "file_modify", "modifyFile", "modify_file" -> modifyFile(appId, args);
-            case "file_delete", "deleteFile", "delete_file" -> deleteFile(appId, args);
-            case "artifact_validate", "artifact_validation" -> validateArtifact(args);
-            case "artifact_publish" -> publishArtifact(appId, args);
-            case "project_build" -> buildProject(appId, args);
-            default -> throw new BusinessException(ErrorCode.PARAMS_ERROR, "Unsupported tool: " + toolName);
+        InternalAiTool tool;
+        try {
+            tool = InternalAiTool.fromExternalName(toolName);
+        } catch (IllegalArgumentException exception) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, exception.getMessage());
+        }
+        return switch (tool) {
+            case FILE_READ -> Map.of("content", readFile(sandboxPath(appId, args, "relativeFilePath", false)));
+            case DIR_READ -> Map.of("entries", readDir(sandboxPath(appId, args, "relativeDirPath", true)));
+            case FILE_WRITE -> writeFile(appId, args);
+            case FILE_MODIFY -> modifyFile(appId, args);
+            case FILE_DELETE -> deleteFile(appId, args);
+            case ARTIFACT_VALIDATE -> validateArtifact(args);
+            case ARTIFACT_PUBLISH -> publishArtifact(appId, args);
+            case PROJECT_BUILD -> buildProject(appId, args);
         };
     }
 

@@ -120,4 +120,20 @@ class InternalAiToolsControllerTest {
         assertEquals("MULTI_FILE_RELEASE_IMMUTABLE", error.getMessage());
         verifyNoInteractions(resolver);
     }
+
+    @Test
+    void rejectsUnsupportedModelToolName() {
+        var controller = controller(mock(ArtifactPublicationService.class));
+        var request = new InternalAiToolsController.ToolRequest(
+                UUID.randomUUID().toString(),
+                "search_reference",
+                Map.of("appId", 42L, "q", "layout")
+        );
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> controller.invoke("Bearer test-token", request));
+
+        assertEquals(ErrorCode.PARAMS_ERROR.getCode(), error.getCode());
+        assertEquals("Unsupported tool: search_reference", error.getMessage());
+    }
 }

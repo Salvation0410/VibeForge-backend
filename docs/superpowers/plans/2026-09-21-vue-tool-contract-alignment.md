@@ -79,21 +79,21 @@ Expected: all tests PASS.
 - Modify: `src/test/java/com/yupi/yuaicodemother/controller/InternalAiToolsControllerTest.java`
 - Create: `src/test/java/com/yupi/yuaicodemother/ai/gateway/InternalAiToolContractTest.java`
 
-- [ ] **Step 1: Write failing parsing and shared-contract tests**
+- [x] **Step 1: Write failing parsing and shared-contract tests**
 
 Assert canonical names and aliases resolve, `search_reference` fails, and the Java registry matches `contracts/internal-ai-tools-v1.json`.
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run: `mvn test -Dtest=InternalAiToolsControllerTest,InternalAiToolContractTest`
 
 Expected: FAIL because `InternalAiTool` does not exist.
 
-- [ ] **Step 3: Implement the tool enum and update dispatch**
+- [x] **Step 3: Implement the tool enum and update dispatch**
 
 Parse all existing aliases into a canonical enum and switch on the enum in the controller. Preserve every existing handler and error response.
 
-- [ ] **Step 4: Run Java tests**
+- [x] **Step 4: Run Java tests**
 
 Run: `mvn test -Dtest=InternalAiToolsControllerTest,InternalAiToolContractTest`
 
