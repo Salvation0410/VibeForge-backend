@@ -2,7 +2,7 @@
 
 ## 1. 文档用途与当前基线
 
-本文供下一轮 AI Agent 或开发者继续维护代码生成链路。内容已更新到 2026-09-21 的 `dev` 分支，覆盖第一阶段 LangChain + LangGraph 重构，以及后续接入的 HTML 安全发布、生成取消治理和前端流式性能修复。
+本文供下一轮 AI Agent 或开发者继续维护代码生成链路。内容更新至 2026-09-21 的 Redis 工具幂等实现基线，覆盖第一阶段 LangChain + LangGraph 重构，以及后续接入的 HTML 安全发布、生成取消治理和前端流式性能修复。
 
 开始工作前依次阅读：
 
@@ -138,7 +138,9 @@ START
      MULTI_FILE: generate_multi_file
      VUE_PROJECT: vue_agent <-> Spring tools
   -> artifact_validation
-  -> project_build
+     HTML: 严格解析、确定性校验和 Selenium 烟测
+     MULTI_FILE: 严格解析和确定性校验
+     VUE_PROJECT: project_build
   -> quality_review
   -> repair（不通过时最多 2 次）
   -> HTML/MULTI_FILE: artifact_publish
@@ -178,6 +180,8 @@ Python checkpoint Redis: redis://localhost:6379/2
 2026-09-21 已记录的验证结果：
 
 - 后端定向测试通过：`CodeParserTest`、`HtmlArtifactValidatorTest`、`ArtifactPublicationServiceTest`、`SeleniumHtmlSmokeTesterTest`、`AiCodeGeneratorFacadeTest`、`InternalAiToolsControllerTest`、`AppServiceGenerationCancellationTest`、`AppControllerSseTest`。
+- Redis 工具幂等本轮定向 Java 测试通过：`InternalAiToolsControllerTest`、`InternalAiToolContractTest`、`ToolInvocationIdempotencyServiceTest` 共 36 项，0 failures/errors/skips。
+- Python 本轮 `compileall`、完整 `pytest` 和 `uv lock --check` 通过，其中 `pytest` 共 35 项测试通过；测试使用 Fake Model 和内存工具网关。
 - `mvn -q clean -DskipTests compile` 通过。
 - 前端 `optimizePrompt`、`generationStreamProgress`、`previewRefreshCoordinator` 共 14 项测试通过。
 - 前端 `npm run type-check` 和 `npm run build-only` 通过；构建仍有既有的大 chunk 警告。
@@ -190,7 +194,25 @@ Python checkpoint Redis: redis://localhost:6379/2
 
 ## 8. 关键提交
 
-后端与文档：
+本轮 Redis 工具幂等主实现与文档：
+
+```text
+0cc84a3 feat: 扩展内部工具请求作用域
+5aa25f1 feat: 增加 Redis 工具幂等服务
+f33f2e6 refactor: 接入 Redis 工具幂等边界
+1cf8964 docs: 记录 Redis 工具幂等契约
+```
+
+后续加固提交：
+
+```text
+b397192 fix: 加固工具幂等作用域与类型语义
+66ced8f fix: 保留幂等序列化基础配置
+8f4b4e4 fix: 统一幂等结果回放类型
+75bd652 fix: 校验内部工具应用作用域
+```
+
+此前后端与文档基线：
 
 ```text
 0ce5db7 merge: 接入 HTML 安全发布与流式性能治理
@@ -222,7 +244,7 @@ caeb0cb fix: 保持预览加载图为正圆
 ### P1：稳定性与契约问题
 
 1. 灰度比例仍需确认是否稳定使用用户维度以及 `graySalt`；不能仅凭配置存在就认为路由稳定。
-2. Python 对三种模式都经过 `project_build`，需要继续确认 HTML 和 MULTI_FILE 的构建语义是否符合部署要求。
+2. **生成类型边界必须保持。** 只有 `VUE_PROJECT` 调用 `project_build`；`HTML` 和 `MULTI_FILE` 经过严格解析、确定性校验并由 `VersionedArtifactStore` 发布，其中 `HTML` 还必须通过 Selenium 烟测。
 3. Python 路由接口在应用创建阶段可能拿不到 appId，需要统一白名单按 appId 还是 userId。
 4. `LangGraphAiGenerationGateway` 使用 JDK HttpClient 和虚拟线程，连接池、超时和断连传播仍需真实压力验证。
 5. Python `CancellationRegistry` 是单进程状态，多 worker 或多实例不共享。
