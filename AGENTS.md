@@ -4,10 +4,11 @@
 
 ## 项目概览
 
-`yu-ai-code-mother` 当前由两个服务组成：
+`yu-ai-code-mother` 当前由两个服务组成，并配套一个独立前端仓库：
 
 - Spring Boot 业务后端：负责用户与应用权限、聊天记录、文件安全、代码保存与构建、部署、下载、社区和管理后台，并维持面向前端的 SSE 协议。
 - Python AI 服务：位于 `ai-service/`，使用 FastAPI、LangChain 和 LangGraph，负责模型调用、生成类型路由、工作流编排、质量检查、有限修复和工具调用决策。
+- Vue 前端：默认位于同级目录 `D:/VibeForge/yu-ai-code-mother-frontend`，负责应用生成对话、SSE 消费、预览、部署、下载和社区界面。它是独立 Git 仓库，不要在后端仓库中假定其工作树状态。
 
 Spring 是业务数据和项目文件的唯一所有者。Python 不访问 MySQL，也不直接操作生成项目目录；需要文件或构建操作时必须调用 Spring 内部工具网关。
 
@@ -29,6 +30,7 @@ Spring 是业务数据和项目文件的唯一所有者。Python 不访问 MySQL
 - MySQL：`jdbc:mysql://localhost:3306/yu_ai_code_mother`
 - Spring Redis：`localhost:6379/1`
 - Python checkpoint Redis：默认 `localhost:6379/2`
+- Vue 前端：`http://localhost:5173`
 
 ## 常用命令
 
@@ -60,6 +62,15 @@ uv lock --check
 ```powershell
 Invoke-RestMethod http://localhost:8000/health/live
 Invoke-RestMethod http://localhost:8000/health/ready
+```
+
+在同级前端仓库执行：
+
+```powershell
+Set-Location D:/VibeForge/yu-ai-code-mother-frontend
+node --test --experimental-strip-types tests/optimizePrompt.test.ts tests/generationStreamProgress.test.ts tests/previewRefreshCoordinator.test.ts
+npm run type-check
+npm run build-only
 ```
 
 接口回归脚本位于 `scripts/`。运行前确认 Spring、MySQL、Redis 和任务需要的 Python AI 服务均已启动。
@@ -97,6 +108,15 @@ Python AI 服务：
 - `docs/superpowers`：实施过程中的设计与执行计划。
 - `scripts`：本地接口测试和数据脚本。
 - `projects`：用户或工具生成的本地产物，默认不要修改或提交。
+
+独立 Vue 前端仓库的相关文件：
+
+- `src/pages/AppChatView.vue`：生成对话、停止操作、预览状态和最终刷新。
+- `src/api/app.ts`：SSE 连接与 `business-error` 事件适配。
+- `src/utils/generationStreamProgress.ts`：在 Vue 响应式状态之外维护流式进度和有限文本窗口。
+- `src/utils/previewRefreshCoordinator.ts`：确保仅在当前生成成功后刷新一次预览。
+- `src/utils/optimizePrompt.ts`：按生成类型提供简短、普通用户可理解的优化提示。
+- `tests`：前端纯函数和流式状态测试。
 
 ## 核心业务模块
 
@@ -138,6 +158,10 @@ Python 工作流包含输入校验、上下文准备、HTML/多文件/Vue 分支
 
 内部事件为 `content_delta`、`tool_started`、`tool_finished`、`node_status`、`completed`、`failed`。Java 网关将 NDJSON 转换为现有流处理器可消费的格式，对外 SSE 协议保持不变。
 
+HTML 和 MULTI_FILE 只有通过 Spring 的严格解析、确定性校验和不可变版本发布后才能完成。HTML 还会执行 Selenium 浏览器烟测；发布失败、模型长度截断或页面运行检查失败时保留上一活动版本。生成提交与取消通过 `GenerationLeaseService` 的 Redis 状态门仲裁，避免已取消请求覆盖有效版本。
+
+前端仍实时展示流式输出，但只在非响应式累加器中保留最近 2000 个字符，每 80ms 最多提交一次 Vue 快照，同时显示累计字符数。完成后重新读取服务端聊天历史，不能把这 2000 个字符的临时窗口当成最终完整消息。预览在生成期间保留旧版本，只在当前请求成功后刷新一次；失败、停止和迟到回调不得刷新预览。
+
 ## 配置与令牌
 
 Spring 配置：
@@ -173,6 +197,9 @@ Python AI_SERVICE_INTERNAL_BEARER_TOKEN
 - Python 不直接访问 MySQL 或项目目录；文件操作必须经过 Spring 工具网关。
 - 修改代码生成类型时检查 `CodeGenTypeEnum`、Python `CodeGenType`、Parser、Saver、Builder、Gateway 和 Workflow。
 - 保持公共 SSE 协议兼容；内部 Spring/Python 使用 NDJSON。
+- 前端不得把完整流式源码逐分片拼接进 Vue 响应式状态；调整生成展示时保留 2000 字符窗口、80ms 刷新上限和终态回源语义。
+- “优化提示”必须使用普通用户能理解的简短文案，并按 HTML、MULTI_FILE、VUE_PROJECT 区分完整产物要求；三类提示都必须保留原有功能、文字、图片和操作方式，禁止残缺结果和额外解释。
+- 固定尺寸加载图位于 Flex 容器时必须禁止收缩并保持 1:1 比例，避免长提示文字将圆形挤成椭圆。
 - 不大面积重写历史乱码注释，不进行无关重构。
 - 不提交生成文件、日志、下载产物、`.venv`、`.env` 或 `projects/`。
 
@@ -181,6 +208,8 @@ Python AI_SERVICE_INTERNAL_BEARER_TOKEN
 `InternalAiToolsController` 当前提供文件读取、目录读取、写入、修改、删除、产物非空校验和项目构建。所有调用必须通过 Bearer 认证，携带 `toolCallId` 和 `appId`，使用固定应用沙箱和相对路径，并禁止绝对路径、目录穿越和删除受保护文件。
 
 当前工具幂等结果保存在 Spring 进程内 `ConcurrentHashMap`，服务重启后丢失，也不支持多实例共享。原方案中的 Redis 幂等尚未实现，不要误称已经实现。
+
+HTML 和 MULTI_FILE 发布使用 `VersionedArtifactStore` 保存不可变 release、manifest、请求墓碑和活动指针；它与上述内部工具调用结果缓存不是同一套幂等机制。不要把版本发布幂等误写成工具网关已经实现 Redis 幂等。
 
 ## API 与响应规范
 
@@ -225,12 +254,25 @@ uv lock --check
 
 AI、截图、OSS、邮件、浏览器驱动和真实模型测试可能依赖本地环境、网络、密钥或 Chrome。无法运行时必须说明失败命令和直接原因。
 
+前端改动：
+
+```powershell
+Set-Location D:/VibeForge/yu-ai-code-mother-frontend
+node --test --experimental-strip-types tests/optimizePrompt.test.ts tests/generationStreamProgress.test.ts tests/previewRefreshCoordinator.test.ts
+npm run type-check
+npm run build-only
+```
+
+当前前端测试覆盖 2000 字符尾部窗口、80ms 合并刷新、终态刷新与销毁、三类简短优化提示、图片保护和单次预览刷新。真实模型生成仍需在 Spring、Python 和前端都可用时单独验收。
+
 ## 交付前检查
 
 - 运行 `git status --short`，只提交任务相关文件；保留用户未跟踪文件。
 - Java 改动至少执行干净编译和相关测试。
 - Python 改动执行 compileall、pytest 和 `uv lock --check`。
 - 跨服务接口变更同步检查 Java 事件适配、Python schema、README 和设计文档。
+- 前端流式或预览改动同步检查累计字符数、2000 字符上限、80ms 刷新、停止/失败/卸载、聊天记录回源和单次预览刷新。
+- 后端与前端是独立 Git 仓库，分别运行 `git status --short`，分别提交；不得把前端既有 `package-lock.json` 修改混入无关提交。
 - 配置改动检查真实密钥、个人路径和生产地址。
 - 代码生成链路改动检查三种生成类型、事件顺序、修复上限、取消和工具调用。
 - 使用 `git diff --check` 检查空白错误。
@@ -242,6 +284,8 @@ AI、截图、OSS、邮件、浏览器驱动和真实模型测试可能依赖本
 - `doc/ai-service-startup.md`：AI 服务详细启动和联调说明。
 - `doc/ai-service-langchain-langgraph-refactor-design.md`：重构方案设计。
 - `doc/ai-service-phase-one-handoff.md`：第一阶段重构交接说明。
+- `docs/superpowers/specs/2026-09-21-bounded-streaming-simple-prompts-design.md`：有限流式窗口与简短优化提示设计。
+- `docs/superpowers/specs/2026-09-21-circular-preview-spinner-design.md`：预览加载图正圆修复设计。
 
 ## 给后续 Agent 的建议
 
