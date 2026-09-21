@@ -6,7 +6,11 @@ from pydantic import ValidationError
 
 from ai_service.config import Settings
 from ai_service.infrastructure.checkpoint import RedisCheckpoint
-from ai_service.infrastructure.spring_tools import SpringToolError, SpringToolGateway
+from ai_service.infrastructure.spring_tools import (
+    SpringToolError,
+    SpringToolGateway,
+    SpringToolProtocolError,
+)
 
 
 @pytest.mark.asyncio
@@ -115,9 +119,115 @@ async def test_artifact_publish_does_not_retry_explicit_spring_business_error():
 
     assert len(requests) == 1
     assert exc_info.value.spring_code == 50001
-    assert exc_info.value.message == "TOOL_EXECUTION_INDETERMINATE"
+    assert exc_info.value.spring_message == "TOOL_EXECUTION_INDETERMINATE"
     assert str(exc_info.value).startswith("TOOL_EXECUTION_INDETERMINATE:")
     assert "code=50001" in str(exc_info.value)
+    await gateway.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"code": True, "data": {}},
+        {"code": "0", "data": {}},
+        {"code": 0},
+        {"code": 0, "data": None},
+        {"code": 0, "data": []},
+        {"code": 0, "data": "C:/private/generated-project"},
+        {"data": []},
+        [],
+        "C:/private/generated-project",
+        42,
+    ],
+)
+async def test_spring_gateway_rejects_malformed_response_schema(payload):
+    gateway = SpringToolGateway(
+        base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="gateway-token",
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, json=payload)
+        ),
+    )
+
+    with pytest.raises(SpringToolProtocolError) as exc_info:
+        await gateway.invoke(
+            "project_build",
+            {"codeGenType": "VUE_PROJECT"},
+            app_id="42",
+            request_id="req-1",
+            tool_call_id="req-1:build:1",
+        )
+
+    assert str(exc_info.value) == (
+        "SPRING_TOOL_PROTOCOL_ERROR: Spring tool response did not match expected schema"
+    )
+    assert "private" not in str(exc_info.value)
+    await gateway.close()
+
+
+@pytest.mark.asyncio
+async def test_spring_gateway_keeps_legacy_dict_response_compatibility():
+    gateway = SpringToolGateway(
+        base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="gateway-token",
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, json={"data": {"result": "legacy-ok"}})
+        ),
+    )
+
+    result = await gateway.invoke(
+        "project_build",
+        {"codeGenType": "VUE_PROJECT"},
+        app_id="42",
+        request_id="req-1",
+        tool_call_id="req-1:build:1",
+    )
+
+    assert result == {"result": "legacy-ok"}
+    await gateway.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message", "expected_code"),
+    [
+        ("TOOL_EXECUTION_INDETERMINATE", "TOOL_EXECUTION_INDETERMINATE"),
+        (None, "SPRING_TOOL_ERROR"),
+        ("", "SPRING_TOOL_ERROR"),
+        ("   ", "SPRING_TOOL_ERROR"),
+        (123, "SPRING_TOOL_ERROR"),
+        ("failed at C:/private/generated-project", "SPRING_TOOL_ERROR"),
+        ("ordinary failure message", "SPRING_TOOL_ERROR"),
+    ],
+)
+async def test_spring_business_error_message_is_sanitized(message, expected_code):
+    gateway = SpringToolGateway(
+        base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="gateway-token",
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200,
+                json={"code": 50001, "data": None, "message": message},
+            )
+        ),
+    )
+
+    with pytest.raises(SpringToolError) as exc_info:
+        await gateway.invoke(
+            "project_build",
+            {"codeGenType": "VUE_PROJECT"},
+            app_id="42",
+            request_id="req-1",
+            tool_call_id="req-1:build:1",
+        )
+
+    assert exc_info.value.spring_message == message
+    assert str(exc_info.value) == (
+        f"{expected_code}: Spring tool request failed (code=50001)"
+    )
+    assert "private" not in str(exc_info.value)
+    assert "ordinary failure" not in str(exc_info.value)
     await gateway.close()
 
 

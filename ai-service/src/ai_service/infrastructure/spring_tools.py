@@ -1,18 +1,34 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import httpx
 
 
+class SpringToolProtocolError(RuntimeError):
+    """Spring 工具响应不符合预期协议。"""
+
+    def __init__(self):
+        super().__init__(
+            "SPRING_TOOL_PROTOCOL_ERROR: Spring tool response did not match expected schema"
+        )
+
+
 class SpringToolError(RuntimeError):
     """Spring 工具网关返回的明确业务错误。"""
 
-    def __init__(self, *, spring_code: Any, message: str | None):
+    def __init__(self, *, spring_code: int, message: Any):
         self.spring_code = spring_code
-        self.message = message or "SPRING_TOOL_ERROR"
+        self.spring_message = message
+        normalized = message.strip() if isinstance(message, str) else ""
+        stable_code = (
+            normalized
+            if re.fullmatch(r"[A-Z][A-Z0-9_]{1,127}", normalized)
+            else "SPRING_TOOL_ERROR"
+        )
         super().__init__(
-            f"{self.message}: Spring tool request failed (code={self.spring_code})"
+            f"{stable_code}: Spring tool request failed (code={self.spring_code})"
         )
 
 
@@ -56,16 +72,24 @@ class SpringToolGateway:
                 response = await self._client.post("/invoke", json=request_body)
                 response.raise_for_status()
                 payload = response.json()
-                if isinstance(payload, dict) and "code" in payload:
-                    if payload["code"] != 0:
+                if not isinstance(payload, dict):
+                    raise SpringToolProtocolError()
+                if "code" in payload:
+                    code = payload["code"]
+                    if type(code) is not int:
+                        raise SpringToolProtocolError()
+                    if code != 0:
                         raise SpringToolError(
-                            spring_code=payload["code"],
+                            spring_code=code,
                             message=payload.get("message"),
                         )
-                    return payload.get("data")
-                if isinstance(payload, dict):
-                    return payload.get("data", payload)
-                return payload
+                    if "data" not in payload or not isinstance(payload["data"], dict):
+                        raise SpringToolProtocolError()
+                    return payload["data"]
+                result = payload.get("data", payload)
+                if not isinstance(result, dict):
+                    raise SpringToolProtocolError()
+                return result
             except httpx.HTTPStatusError as error:
                 if error.response.status_code < 500 or attempt + 1 >= max_attempts:
                     raise

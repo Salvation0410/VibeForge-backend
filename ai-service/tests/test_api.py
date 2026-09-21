@@ -1,6 +1,10 @@
+import json
+
+import httpx
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 
+from ai_service.infrastructure.spring_tools import SpringToolGateway
 from ai_service.models.base import ModelTurn, ToolCall
 from ai_service.orchestration.events import EventEmitter
 from conftest import FakeModel, FakeToolGateway, MemoryCheckpoint
@@ -163,34 +167,44 @@ def test_html_publication_rejection_fails_without_completed(app_factory, auth_he
 
 
 def test_spring_business_error_code_reaches_failed_event(app_factory, auth_headers, ndjson_parser):
-    class IndeterminateGateway(FakeToolGateway):
-        async def invoke(self, name, arguments, *, app_id, request_id, tool_call_id):
-            result = await super().invoke(
-                name,
-                arguments,
-                app_id=app_id,
-                request_id=request_id,
-                tool_call_id=tool_call_id,
-            )
-            if name == "artifact_publish":
-                raise RuntimeError(
-                    "TOOL_EXECUTION_INDETERMINATE: Spring tool request failed (code=50001)"
-                )
-            return result
+    requests: list[dict] = []
 
-    gateway = IndeterminateGateway()
-    events = ndjson_parser(TestClient(app_factory(gateway=gateway)).post(
-        "/internal/v1/generations:stream",
-        json=generation_payload("HTML"),
-        headers=auth_headers,
-    ))
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.read())
+        requests.append(body)
+        if body["toolName"] == "artifact_validate":
+            return httpx.Response(
+                200,
+                json={"code": 0, "data": {"valid": True, "errors": []}, "message": "ok"},
+            )
+        assert body["toolName"] == "artifact_publish"
+        return httpx.Response(
+            200,
+            json={
+                "code": 50001,
+                "data": None,
+                "message": "TOOL_EXECUTION_INDETERMINATE",
+            },
+        )
+
+    gateway = SpringToolGateway(
+        base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="gateway-token",
+        transport=httpx.MockTransport(handler),
+    )
+    with TestClient(app_factory(gateway=gateway)) as client:
+        events = ndjson_parser(client.post(
+            "/internal/v1/generations:stream",
+            json=generation_payload("HTML"),
+            headers=auth_headers,
+        ))
 
     assert events[-1]["type"] == "failed"
     assert events[-1]["error"] == {
         "code": "TOOL_EXECUTION_INDETERMINATE",
         "message": "TOOL_EXECUTION_INDETERMINATE: Spring tool request failed (code=50001)",
     }
-    assert len([call for call in gateway.calls if call["name"] == "artifact_publish"]) == 1
+    assert len([request for request in requests if request["toolName"] == "artifact_publish"]) == 1
     assert not [event for event in events if event["type"] == "completed"]
 
 
