@@ -1,6 +1,10 @@
 package com.yupi.yuaicodemother.ai.gateway;
 
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.databind.JsonSerializer;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializerProvider;
+import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.yupi.yuaicodemother.config.AiEngineProperties;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import org.junit.jupiter.api.Test;
@@ -8,7 +12,9 @@ import org.redisson.api.RBucket;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 
+import java.io.IOException;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -279,7 +285,70 @@ class ToolInvocationIdempotencyServiceTest {
         assertEquals(1, executions.get());
     }
 
+    @Test
+    void encodesColonInScopeComponentsWithoutChangingPlainKeys() throws Exception {
+        RedissonClient client = mock(RedissonClient.class);
+        RLock lock = mock(RLock.class);
+        Map<String, AtomicReference<String>> values = new ConcurrentHashMap<>();
+        when(client.getLock(anyString())).thenReturn(lock);
+        when(lock.tryLock(30000L, TimeUnit.MILLISECONDS)).thenReturn(true);
+        when(lock.isHeldByCurrentThread()).thenReturn(true);
+        when(client.<String>getBucket(anyString())).thenAnswer(invocation ->
+                stateBucket(values.computeIfAbsent(invocation.getArgument(0), ignored -> new AtomicReference<>())));
+        AtomicInteger executions = new AtomicInteger();
+        ToolInvocationIdempotencyService service = new ToolInvocationIdempotencyService(
+                client, new ObjectMapper(), new AiEngineProperties());
+
+        service.execute(42L, "a:b", "c", InternalAiTool.FILE_READ, Map.of(),
+                () -> { executions.incrementAndGet(); return Map.of("scope", 1); });
+        service.execute(42L, "a", "b:c", InternalAiTool.FILE_READ, Map.of(),
+                () -> { executions.incrementAndGet(); return Map.of("scope", 2); });
+        service.execute(42L, "req-1", "call-1", InternalAiTool.FILE_READ, Map.of(), Map::of);
+
+        assertEquals(2, executions.get());
+        verify(client).getBucket("ai:tool:idempotency:v1:42:a%3Ab:c");
+        verify(client).getBucket("ai:tool:idempotency:v1:42:a:b%3Ac");
+        verify(client).getBucket("ai:tool:idempotency:v1:42:req-1:call-1");
+    }
+
+    @Test
+    void ignoresMvcLongSerializerForFingerprintAndCachedResultTypes() {
+        ObjectMapper mvcMapper = new ObjectMapper();
+        SimpleModule module = new SimpleModule();
+        module.addSerializer(Long.class, new JsonSerializer<>() {
+            @Override
+            public void serialize(Long value, JsonGenerator generator, SerializerProvider serializers)
+                    throws IOException {
+                generator.writeString(value.toString());
+            }
+        });
+        mvcMapper.registerModule(module);
+        Fixture fixture = fixture(mvcMapper);
+        ToolInvocationIdempotencyService second = new ToolInvocationIdempotencyService(
+                fixture.client, mvcMapper, fixture.properties);
+        long largeValue = 2147483648L;
+
+        Map<String, Object> first = fixture.service.execute(
+                42L, "req-1", "call-1", InternalAiTool.FILE_READ,
+                Map.of("value", largeValue), () -> Map.of("value", largeValue));
+        Map<String, Object> replay = second.execute(
+                42L, "req-1", "call-1", InternalAiTool.FILE_READ,
+                Map.of("value", largeValue), () -> Map.of("value", "wrong"));
+        BusinessException conflict = assertThrows(BusinessException.class,
+                () -> second.execute(42L, "req-1", "call-1", InternalAiTool.FILE_READ,
+                        Map.of("value", Long.toString(largeValue)), Map::of));
+
+        assertEquals(largeValue, first.get("value"));
+        assertEquals(Long.class, replay.get("value").getClass());
+        assertEquals(largeValue, replay.get("value"));
+        assertEquals("TOOL_IDEMPOTENCY_CONFLICT", conflict.getMessage());
+    }
+
     private Fixture fixture() {
+        return fixture(new ObjectMapper());
+    }
+
+    private Fixture fixture(ObjectMapper objectMapper) {
         RedissonClient client = mock(RedissonClient.class);
         RLock lock = mock(RLock.class);
         @SuppressWarnings("unchecked")
@@ -305,8 +374,20 @@ class ToolInvocationIdempotencyServiceTest {
         when(bucket.delete()).thenAnswer(invocation -> value.getAndSet(null) != null);
 
         ToolInvocationIdempotencyService service = new ToolInvocationIdempotencyService(
-                client, new ObjectMapper(), properties);
+                client, objectMapper, properties);
         return new Fixture(client, lock, bucket, value, properties, service);
+    }
+
+    @SuppressWarnings("unchecked")
+    private RBucket<String> stateBucket(AtomicReference<String> value) {
+        RBucket<String> bucket = mock(RBucket.class);
+        when(bucket.get()).thenAnswer(invocation -> value.get());
+        doAnswer(invocation -> {
+            value.set(invocation.getArgument(0));
+            return null;
+        }).when(bucket).set(anyString(), anyLong(), eq(TimeUnit.SECONDS));
+        when(bucket.delete()).thenAnswer(invocation -> value.getAndSet(null) != null);
+        return bucket;
     }
 
     private record Fixture(

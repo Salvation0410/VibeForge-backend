@@ -39,7 +39,7 @@ public class ToolInvocationIdempotencyService {
             ObjectMapper objectMapper,
             AiEngineProperties properties) {
         this.redissonClient = redissonClient;
-        this.objectMapper = objectMapper.copy()
+        this.objectMapper = new ObjectMapper()
                 .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
         this.properties = properties;
     }
@@ -59,7 +59,8 @@ public class ToolInvocationIdempotencyService {
 
         String toolName = tool.canonicalName();
         String fingerprint = fingerprint(toolName, arguments);
-        String key = KEY_PREFIX + appId + ":" + requestId + ":" + toolCallId;
+        String key = KEY_PREFIX + appId + ":" + encodeKeyComponent(requestId)
+                + ":" + encodeKeyComponent(toolCallId);
         RLock lock;
         try {
             lock = redissonClient.getLock(key + ":lock");
@@ -147,6 +148,10 @@ public class ToolInvocationIdempotencyService {
         if (value == null || !SCOPE_ID_PATTERN.matcher(value).matches()) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "INVALID_" + field.toUpperCase());
         }
+    }
+
+    private String encodeKeyComponent(String value) {
+        return value.replace("%", "%25").replace(":", "%3A");
     }
 
     private String fingerprint(String toolName, Map<String, Object> arguments) {
