@@ -193,6 +193,11 @@ async def test_spring_gateway_keeps_legacy_dict_response_compatibility():
     ("message", "expected_code"),
     [
         ("TOOL_EXECUTION_INDETERMINATE", "TOOL_EXECUTION_INDETERMINATE"),
+        ("TOOL_IDEMPOTENCY_CONFLICT", "TOOL_IDEMPOTENCY_CONFLICT"),
+        ("TOOL_EXECUTION_BUSY", "TOOL_EXECUTION_BUSY"),
+        ("TOOL_IDEMPOTENCY_UNAVAILABLE", "TOOL_IDEMPOTENCY_UNAVAILABLE"),
+        ("INTERNAL_SECRET_TOKEN", "SPRING_TOOL_ERROR"),
+        ("INVALID_RELATIVE_PATH", "SPRING_TOOL_ERROR"),
         (None, "SPRING_TOOL_ERROR"),
         ("", "SPRING_TOOL_ERROR"),
         ("   ", "SPRING_TOOL_ERROR"),
@@ -228,6 +233,52 @@ async def test_spring_business_error_message_is_sanitized(message, expected_code
     )
     assert "private" not in str(exc_info.value)
     assert "ordinary failure" not in str(exc_info.value)
+    await gateway.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_name", "expected_requests"),
+    [
+        ("project_build", 1),
+        ("artifact_publish", 2),
+    ],
+)
+async def test_invalid_json_becomes_protocol_error_after_bounded_retry(
+    tool_name, expected_requests
+):
+    request_count = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(
+            200,
+            content="C:/private/raw-response-body",
+            headers={"content-type": "application/json"},
+        )
+
+    gateway = SpringToolGateway(
+        base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="gateway-token",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(SpringToolProtocolError) as exc_info:
+        await gateway.invoke(
+            tool_name,
+            {"codeGenType": "MULTI_FILE"},
+            app_id="42",
+            request_id="req-1",
+            tool_call_id=f"req-1:{tool_name}",
+        )
+
+    assert request_count == expected_requests
+    assert str(exc_info.value) == (
+        "SPRING_TOOL_PROTOCOL_ERROR: Spring tool response did not match expected schema"
+    )
+    assert "private" not in str(exc_info.value)
+    assert isinstance(exc_info.value.__cause__, ValueError)
     await gateway.close()
 
 

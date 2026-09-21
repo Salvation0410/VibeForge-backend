@@ -1,9 +1,18 @@
 from __future__ import annotations
 
-import re
 from typing import Any
 
 import httpx
+
+
+_STABLE_SPRING_TOOL_ERROR_CODES = frozenset(
+    {
+        "TOOL_IDEMPOTENCY_CONFLICT",
+        "TOOL_EXECUTION_INDETERMINATE",
+        "TOOL_EXECUTION_BUSY",
+        "TOOL_IDEMPOTENCY_UNAVAILABLE",
+    }
+)
 
 
 class SpringToolProtocolError(RuntimeError):
@@ -24,7 +33,7 @@ class SpringToolError(RuntimeError):
         normalized = message.strip() if isinstance(message, str) else ""
         stable_code = (
             normalized
-            if re.fullmatch(r"[A-Z][A-Z0-9_]{1,127}", normalized)
+            if normalized in _STABLE_SPRING_TOOL_ERROR_CODES
             else "SPRING_TOOL_ERROR"
         )
         super().__init__(
@@ -71,7 +80,12 @@ class SpringToolGateway:
             try:
                 response = await self._client.post("/invoke", json=request_body)
                 response.raise_for_status()
-                payload = response.json()
+                try:
+                    payload = response.json()
+                except ValueError as error:
+                    if attempt + 1 < max_attempts:
+                        continue
+                    raise SpringToolProtocolError() from error
                 if not isinstance(payload, dict):
                     raise SpringToolProtocolError()
                 if "code" in payload:
@@ -93,7 +107,7 @@ class SpringToolGateway:
             except httpx.HTTPStatusError as error:
                 if error.response.status_code < 500 or attempt + 1 >= max_attempts:
                     raise
-            except (httpx.TransportError, ValueError):
+            except httpx.TransportError:
                 if attempt + 1 >= max_attempts:
                     raise
         raise RuntimeError("Spring tool invocation exhausted without a result")
