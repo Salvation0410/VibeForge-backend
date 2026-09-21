@@ -5,6 +5,17 @@ from typing import Any
 import httpx
 
 
+class SpringToolError(RuntimeError):
+    """Spring 工具网关返回的明确业务错误。"""
+
+    def __init__(self, *, spring_code: Any, message: str | None):
+        self.spring_code = spring_code
+        self.message = message or "SPRING_TOOL_ERROR"
+        super().__init__(
+            f"{self.message}: Spring tool request failed (code={self.spring_code})"
+        )
+
+
 class SpringToolGateway:
     """调用 Spring 工具网关，是 Python 服务操作项目文件和执行构建的唯一边界。"""
 
@@ -45,7 +56,16 @@ class SpringToolGateway:
                 response = await self._client.post("/invoke", json=request_body)
                 response.raise_for_status()
                 payload = response.json()
-                return payload.get("data", payload)
+                if isinstance(payload, dict) and "code" in payload:
+                    if payload["code"] != 0:
+                        raise SpringToolError(
+                            spring_code=payload["code"],
+                            message=payload.get("message"),
+                        )
+                    return payload.get("data")
+                if isinstance(payload, dict):
+                    return payload.get("data", payload)
+                return payload
             except httpx.HTTPStatusError as error:
                 if error.response.status_code < 500 or attempt + 1 >= max_attempts:
                     raise

@@ -137,16 +137,60 @@ def test_html_completes_only_after_successful_publication(app_factory, auth_head
 def test_html_publication_rejection_fails_without_completed(app_factory, auth_headers, ndjson_parser):
     """Spring 拒绝 HTML 发布时工作流只能发送 failed，不得伪造成功。"""
     class RejectingGateway(FakeToolGateway):
-        async def invoke(self, name, arguments, *, tool_call_id):
-            result = await super().invoke(name, arguments, tool_call_id=tool_call_id)
+        async def invoke(self, name, arguments, *, app_id, request_id, tool_call_id):
+            result = await super().invoke(
+                name,
+                arguments,
+                app_id=app_id,
+                request_id=request_id,
+                tool_call_id=tool_call_id,
+            )
             return {"published": False} if name == "artifact_publish" else result
 
-    events = ndjson_parser(TestClient(app_factory(gateway=RejectingGateway())).post(
+    gateway = RejectingGateway()
+    events = ndjson_parser(TestClient(app_factory(gateway=gateway)).post(
         "/internal/v1/generations:stream",
         json=generation_payload("HTML"),
         headers=auth_headers,
     ))
     assert events[-1]["type"] == "failed"
+    assert events[-1]["error"] == {
+        "code": "GENERATION_FAILED",
+        "message": "Spring rejected artifact publication",
+    }
+    assert len([call for call in gateway.calls if call["name"] == "artifact_publish"]) == 1
+    assert not [event for event in events if event["type"] == "completed"]
+
+
+def test_spring_business_error_code_reaches_failed_event(app_factory, auth_headers, ndjson_parser):
+    class IndeterminateGateway(FakeToolGateway):
+        async def invoke(self, name, arguments, *, app_id, request_id, tool_call_id):
+            result = await super().invoke(
+                name,
+                arguments,
+                app_id=app_id,
+                request_id=request_id,
+                tool_call_id=tool_call_id,
+            )
+            if name == "artifact_publish":
+                raise RuntimeError(
+                    "TOOL_EXECUTION_INDETERMINATE: Spring tool request failed (code=50001)"
+                )
+            return result
+
+    gateway = IndeterminateGateway()
+    events = ndjson_parser(TestClient(app_factory(gateway=gateway)).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("HTML"),
+        headers=auth_headers,
+    ))
+
+    assert events[-1]["type"] == "failed"
+    assert events[-1]["error"] == {
+        "code": "TOOL_EXECUTION_INDETERMINATE",
+        "message": "TOOL_EXECUTION_INDETERMINATE: Spring tool request failed (code=50001)",
+    }
+    assert len([call for call in gateway.calls if call["name"] == "artifact_publish"]) == 1
     assert not [event for event in events if event["type"] == "completed"]
 
 

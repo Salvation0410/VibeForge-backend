@@ -6,7 +6,7 @@ from pydantic import ValidationError
 
 from ai_service.config import Settings
 from ai_service.infrastructure.checkpoint import RedisCheckpoint
-from ai_service.infrastructure.spring_tools import SpringToolGateway
+from ai_service.infrastructure.spring_tools import SpringToolError, SpringToolGateway
 
 
 @pytest.mark.asyncio
@@ -16,7 +16,7 @@ async def test_spring_gateway_uses_bearer_and_scoped_tool_request():
     def handler(request: httpx.Request) -> httpx.Response:
         captured["authorization"] = request.headers["Authorization"]
         captured["body"] = request.read().decode()
-        return httpx.Response(200, json={"data": {"result": "ok"}})
+        return httpx.Response(200, json={"code": 0, "data": {"result": "ok"}, "message": "ok"})
 
     gateway = SpringToolGateway(
         base_url="http://spring.test/api/internal/ai-tools",
@@ -50,7 +50,14 @@ async def test_artifact_publish_retries_lost_response_with_same_tool_call_id():
         requests.append(json.loads(request.read()))
         if len(requests) == 1:
             raise httpx.ReadError("response lost after Spring committed", request=request)
-        return httpx.Response(200, json={"data": {"published": True, "versionId": "req-1"}})
+        return httpx.Response(
+            200,
+            json={
+                "code": 0,
+                "data": {"published": True, "versionId": "req-1"},
+                "message": "ok",
+            },
+        )
 
     gateway = SpringToolGateway(
         base_url="http://spring.test/api/internal/ai-tools",
@@ -73,6 +80,44 @@ async def test_artifact_publish_retries_lost_response_with_same_tool_call_id():
     ]
     assert all(request["appId"] == "42" for request in requests)
     assert all(request["requestId"] == "req-1" for request in requests)
+    await gateway.close()
+
+
+@pytest.mark.asyncio
+async def test_artifact_publish_does_not_retry_explicit_spring_business_error():
+    requests: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.read()))
+        return httpx.Response(
+            200,
+            json={
+                "code": 50001,
+                "data": None,
+                "message": "TOOL_EXECUTION_INDETERMINATE",
+            },
+        )
+
+    gateway = SpringToolGateway(
+        base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="gateway-token",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(SpringToolError) as exc_info:
+        await gateway.invoke(
+            "artifact_publish",
+            {"codeGenType": "MULTI_FILE"},
+            app_id="42",
+            request_id="req-1",
+            tool_call_id="req-1:artifact_publish",
+        )
+
+    assert len(requests) == 1
+    assert exc_info.value.spring_code == 50001
+    assert exc_info.value.message == "TOOL_EXECUTION_INDETERMINATE"
+    assert str(exc_info.value).startswith("TOOL_EXECUTION_INDETERMINATE:")
+    assert "code=50001" in str(exc_info.value)
     await gateway.close()
 
 
