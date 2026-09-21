@@ -100,10 +100,9 @@ class SpringToolGateway:
                     if "data" not in payload or not isinstance(payload["data"], dict):
                         raise SpringToolProtocolError()
                     return payload["data"]
-                result = payload.get("data", payload)
-                if not isinstance(result, dict):
+                if set(payload) != {"data"} or not isinstance(payload["data"], dict):
                     raise SpringToolProtocolError()
-                return result
+                return payload["data"]
             except httpx.HTTPStatusError as error:
                 if error.response.status_code < 500 or attempt + 1 >= max_attempts:
                     raise

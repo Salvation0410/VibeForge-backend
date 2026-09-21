@@ -136,6 +136,9 @@ async def test_artifact_publish_does_not_retry_explicit_spring_business_error():
         {"code": 0, "data": []},
         {"code": 0, "data": "C:/private/generated-project"},
         {"data": []},
+        {"error": "failed", "detail": "C:/private/generated-project"},
+        {"data": {"result": "legacy-ok"}, "extra": "C:/private/generated-project"},
+        {},
         [],
         "C:/private/generated-project",
         42,
@@ -167,7 +170,7 @@ async def test_spring_gateway_rejects_malformed_response_schema(payload):
 
 
 @pytest.mark.asyncio
-async def test_spring_gateway_keeps_legacy_dict_response_compatibility():
+async def test_spring_gateway_keeps_exact_legacy_data_envelope_compatibility():
     gateway = SpringToolGateway(
         base_url="http://spring.test/api/internal/ai-tools",
         bearer_token="gateway-token",
