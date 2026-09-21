@@ -138,12 +138,13 @@ START
      MULTI_FILE: generate_multi_file
      VUE_PROJECT: vue_agent <-> Spring tools
   -> artifact_validation
-     HTML: 严格解析、确定性校验和 Selenium 烟测
+     HTML: 严格解析和确定性校验
      MULTI_FILE: 严格解析和确定性校验
      VUE_PROJECT: project_build
   -> quality_review
   -> repair（不通过时最多 2 次）
-  -> HTML/MULTI_FILE: artifact_publish
+  -> HTML: artifact_publish（staging Selenium 烟测通过后发布）
+     MULTI_FILE: artifact_publish
      VUE_PROJECT: finalize
   -> finalize
   -> END
