@@ -1,8 +1,12 @@
 package com.yupi.yuaicodemother.ai.gateway;
 
+import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonSerializer;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.yupi.yuaicodemother.config.AiEngineProperties;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.exception.ErrorCode;
@@ -12,6 +16,7 @@ import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -39,8 +44,20 @@ public class ToolInvocationIdempotencyService {
             ObjectMapper objectMapper,
             AiEngineProperties properties) {
         this.redissonClient = redissonClient;
-        this.objectMapper = new ObjectMapper()
+        ObjectMapper idempotencyMapper = objectMapper.copy()
                 .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
+        SimpleModule numericLongModule = new SimpleModule("tool-idempotency-numeric-long");
+        JsonSerializer<Long> numericLongSerializer = new JsonSerializer<>() {
+            @Override
+            public void serialize(Long value, JsonGenerator generator, SerializerProvider serializers)
+                    throws IOException {
+                generator.writeNumber(value);
+            }
+        };
+        numericLongModule.addSerializer(Long.class, numericLongSerializer);
+        numericLongModule.addSerializer(long.class, numericLongSerializer);
+        idempotencyMapper.registerModule(numericLongModule);
+        this.objectMapper = idempotencyMapper;
         this.properties = properties;
     }
 
