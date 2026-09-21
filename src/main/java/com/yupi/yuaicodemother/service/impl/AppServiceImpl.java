@@ -229,6 +229,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         app.setAppName(initPrompt.substring(0, Math.min(initPrompt.length(), 12)));
         //使用Ai 智能选择代码生成类型
         String requestId = java.util.UUID.randomUUID().toString();
+        // TODO 路由单独选择一个智能体进行路由
         CodeGenTypeEnum selectedCodeGenType = aiGenerationGateway.route(initPrompt, null,
                 loginUser.getId(), requestId);
         app.setCodeGenType(selectedCodeGenType.getValue());
