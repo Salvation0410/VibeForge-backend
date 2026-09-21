@@ -1,5 +1,6 @@
 package com.yupi.yuaicodemother.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yupi.yuaicodemother.ai.gateway.InternalAiTool;
 import com.yupi.yuaicodemother.ai.gateway.ToolInvocationIdempotencyService;
 import com.yupi.yuaicodemother.config.AiEngineProperties;
@@ -116,6 +117,46 @@ class InternalAiToolsControllerTest {
 
         assertEquals(ErrorCode.PARAMS_ERROR.getCode(), error.getCode());
         verifyNoInteractions(idempotencyService, publisher);
+    }
+
+    @Test
+    void rejectsJsonRequestWithoutAppIdBeforeIdempotencyAndSandbox() throws Exception {
+        var idempotencyService = mock(ToolInvocationIdempotencyService.class);
+        var resolver = mock(ArtifactPathResolver.class);
+        var controller = controller(mock(ArtifactPublicationService.class), resolver, idempotencyService);
+        var request = new ObjectMapper().readValue("""
+                {
+                  "requestId": "req-1",
+                  "toolCallId": "call-1",
+                  "toolName": "file_read",
+                  "arguments": {"relativeFilePath": "index.html"}
+                }
+                """, InternalAiToolsController.ToolRequest.class);
+        assertEquals(0L, request.appId());
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> controller.invoke("Bearer test-token", request));
+
+        assertEquals(ErrorCode.PARAMS_ERROR.getCode(), error.getCode());
+        assertEquals("appId is required", error.getMessage());
+        verifyNoInteractions(idempotencyService, resolver);
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {0L, -1L, -42L})
+    void rejectsNonPositiveAppIdBeforeIdempotencyAndSandbox(long appId) {
+        var idempotencyService = mock(ToolInvocationIdempotencyService.class);
+        var resolver = mock(ArtifactPathResolver.class);
+        var controller = controller(mock(ArtifactPublicationService.class), resolver, idempotencyService);
+        var request = new InternalAiToolsController.ToolRequest(
+                appId, "req-1", "call-1", "file_read", Map.of("relativeFilePath", "index.html"));
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> controller.invoke("Bearer test-token", request));
+
+        assertEquals(ErrorCode.PARAMS_ERROR.getCode(), error.getCode());
+        assertEquals("appId is required", error.getMessage());
+        verifyNoInteractions(idempotencyService, resolver);
     }
 
     @Test

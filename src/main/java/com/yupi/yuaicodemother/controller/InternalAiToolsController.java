@@ -73,6 +73,9 @@ public class InternalAiToolsController {
                 || request.toolName() == null || request.toolName().isBlank()) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "requestId, toolCallId and toolName are required");
         }
+        if (request.appId() <= 0) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "appId is required");
+        }
         InternalAiTool tool = parseTool(request.toolName());
         Map<String, Object> arguments = request.arguments() == null ? Map.of() : request.arguments();
         Map<String, Object> result = idempotencyService.execute(
