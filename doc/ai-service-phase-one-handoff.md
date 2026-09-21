@@ -228,17 +228,21 @@ caeb0cb fix: 保持预览加载图为正圆
 - 拆分两个调用方向的服务令牌并支持平滑轮换。
 - 增加模型超时、重试、限流、token 使用和各节点耗时指标。
 - 完善 requestId、appId、userId、engine、node、model、tool 和 status 结构化日志。
+- 后续引入 CloseAI 单模型多 Agent 工作流：Planner、三类 Coder、Reviewer 和 Repairer 共享同一个模型，由确定性 LangGraph 控制预算、工具权限、校验、构建和发布。
+- 接入 LangSmith Trace、指标和评估数据集；生产环境默认隐藏完整提示词、源码和工具参数，LangSmith 故障不得影响业务终态。
 - 增加真实 Redis、真实工具、真实构建、真实浏览器和真实模型的持续集成测试。
 - 灰度稳定后再评估删除 Legacy LangChain4j 和历史 LangGraph4j 实验代码。
 - 检查并轮换仓库历史中可能暴露的 AI、OSS、邮件等凭据。
 
 ## 10. 下一阶段建议顺序
 
-1. 在独立测试应用上完成 HTML、MULTI_FILE、VUE_PROJECT 的真实生成和二次优化验收，不复用事故应用。
-2. 将内部工具调用幂等迁移到 Redis，加入 TTL 和 `appId + requestId + toolCallId` 作用域。
+1. 将内部工具调用幂等迁移到 Redis，加入 TTL 和 `appId + requestId + toolCallId` 作用域。
+2. 在独立测试应用上完成 HTML、MULTI_FILE、VUE_PROJECT 的真实生成和二次优化验收，不复用事故应用。
 3. 压测大流式响应、客户端停止、网络中断和提交竞争，验证 2000 字符窗口与取消状态门。
 4. 修正灰度稳定性、路由降级和多实例取消状态。
-5. 补齐可观测性和安全加固后，再提高 LangGraph 灰度比例。
+5. 按 `docs/superpowers/specs/2026-09-21-redis-idempotency-multi-agent-observability-design.md` 引入 CloseAI 单模型多 Agent，先保持现有单工作流为默认回滚路径。
+6. 接入 LangSmith Trace、指标和评估数据集，完成隐私与降级验证。
+7. 补齐可观测性和安全加固后，再提高 LangGraph 多 Agent 灰度比例。
 
 ## 11. 下一轮开始前检查清单
 
