@@ -313,16 +313,7 @@ class ToolInvocationIdempotencyServiceTest {
 
     @Test
     void ignoresMvcLongSerializerForFingerprintAndCachedResultTypes() {
-        ObjectMapper mvcMapper = new ObjectMapper();
-        SimpleModule module = new SimpleModule();
-        module.addSerializer(Long.class, new JsonSerializer<>() {
-            @Override
-            public void serialize(Long value, JsonGenerator generator, SerializerProvider serializers)
-                    throws IOException {
-                generator.writeString(value.toString());
-            }
-        });
-        mvcMapper.registerModule(module);
+        ObjectMapper mvcMapper = mvcLongAsStringMapper();
         Fixture fixture = fixture(mvcMapper);
         ToolInvocationIdempotencyService second = new ToolInvocationIdempotencyService(
                 fixture.client, mvcMapper, fixture.properties);
@@ -342,6 +333,25 @@ class ToolInvocationIdempotencyServiceTest {
         assertEquals(Long.class, replay.get("value").getClass());
         assertEquals(largeValue, replay.get("value"));
         assertEquals("TOOL_IDEMPOTENCY_CONFLICT", conflict.getMessage());
+    }
+
+    @Test
+    void normalizesFirstSmallLongResultToSameShapeAsReplay() throws Exception {
+        ObjectMapper mvcMapper = mvcLongAsStringMapper();
+        Fixture fixture = fixture(mvcMapper);
+        ToolInvocationIdempotencyService second = new ToolInvocationIdempotencyService(
+                fixture.client, mvcMapper, fixture.properties);
+
+        Map<String, Object> first = fixture.service.execute(
+                42L, "req-1", "call-1", InternalAiTool.FILE_READ,
+                Map.of(), () -> Map.of("value", 42L));
+        Map<String, Object> replay = second.execute(
+                42L, "req-1", "call-1", InternalAiTool.FILE_READ,
+                Map.of(), () -> Map.of("value", "wrong"));
+
+        assertEquals(first, replay);
+        assertEquals(first.get("value").getClass(), replay.get("value").getClass());
+        assertEquals(mvcMapper.writeValueAsString(first), mvcMapper.writeValueAsString(replay));
     }
 
     private Fixture fixture() {
@@ -388,6 +398,20 @@ class ToolInvocationIdempotencyServiceTest {
         }).when(bucket).set(anyString(), anyLong(), eq(TimeUnit.SECONDS));
         when(bucket.delete()).thenAnswer(invocation -> value.getAndSet(null) != null);
         return bucket;
+    }
+
+    private ObjectMapper mvcLongAsStringMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        SimpleModule module = new SimpleModule();
+        module.addSerializer(Long.class, new JsonSerializer<>() {
+            @Override
+            public void serialize(Long value, JsonGenerator generator, SerializerProvider serializers)
+                    throws IOException {
+                generator.writeString(value.toString());
+            }
+        });
+        mapper.registerModule(module);
+        return mapper;
     }
 
     private record Fixture(

@@ -45,6 +45,7 @@ public class ToolInvocationIdempotencyService {
             AiEngineProperties properties) {
         this.redissonClient = redissonClient;
         ObjectMapper idempotencyMapper = objectMapper.copy()
+                .deactivateDefaultTyping()
                 .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
         SimpleModule numericLongModule = new SimpleModule("tool-idempotency-numeric-long");
         JsonSerializer<Long> numericLongSerializer = new JsonSerializer<>() {
@@ -141,12 +142,20 @@ public class ToolInvocationIdempotencyService {
 
             IdempotencyState succeeded = new IdempotencyState(
                     SUCCEEDED, toolName, fingerprint, result, startedAt, System.currentTimeMillis());
+            String succeededJson;
+            IdempotencyState normalizedSucceeded;
             try {
-                writeState(bucket, succeeded);
+                succeededJson = serializeState(succeeded);
+                normalizedSucceeded = readState(succeededJson);
             } catch (RuntimeException error) {
                 throw indeterminate(error);
             }
-            return result;
+            try {
+                writeState(bucket, succeededJson);
+            } catch (RuntimeException error) {
+                throw indeterminate(error);
+            }
+            return normalizedSucceeded.result();
         } finally {
             if (locked) releaseLock(lock, key);
         }
@@ -192,9 +201,16 @@ public class ToolInvocationIdempotencyService {
     }
 
     private void writeState(RBucket<String> bucket, IdempotencyState state) {
+        writeState(bucket, serializeState(state));
+    }
+
+    private void writeState(RBucket<String> bucket, String json) {
+        bucket.set(json, properties.getToolIdempotencyTtlSeconds(), TimeUnit.SECONDS);
+    }
+
+    private String serializeState(IdempotencyState state) {
         try {
-            bucket.set(objectMapper.writeValueAsString(state),
-                    properties.getToolIdempotencyTtlSeconds(), TimeUnit.SECONDS);
+            return objectMapper.writeValueAsString(state);
         } catch (JsonProcessingException error) {
             throw unavailable(error);
         }
