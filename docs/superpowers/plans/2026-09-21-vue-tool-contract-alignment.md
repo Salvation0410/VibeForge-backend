@@ -17,21 +17,21 @@
 - Create: `ai-service/src/ai_service/models/tool_contract.py`
 - Create: `ai-service/tests/test_tool_contract.py`
 
-- [ ] **Step 1: Write failing tests for contract loading, prompt rendering, and validation**
+- [x] **Step 1: Write failing tests for contract loading, prompt rendering, and validation**
 
 Test the five model-callable names, exclusion of `search_reference`, required arguments, rejection of controlled arguments, and rejection of internal tools.
 
-- [ ] **Step 2: Run the contract tests and verify they fail**
+- [x] **Step 2: Run the contract tests and verify they fail**
 
 Run: `uv run pytest tests/test_tool_contract.py -q`
 
 Expected: FAIL because `tool_contract.py` and the JSON contract do not exist.
 
-- [ ] **Step 3: Add the minimal JSON contract and Python loader**
+- [x] **Step 3: Add the minimal JSON contract and Python loader**
 
 Implement immutable `ToolSpec` values, `vue_tool_prompt()` and `validate_vue_tool_call()` without adding a JSON Schema dependency.
 
-- [ ] **Step 4: Run the contract tests**
+- [x] **Step 4: Run the contract tests**
 
 Run: `uv run pytest tests/test_tool_contract.py -q`
 
