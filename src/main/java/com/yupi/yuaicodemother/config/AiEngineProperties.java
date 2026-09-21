@@ -24,4 +24,8 @@ public class AiEngineProperties {
     private int grayPercentage = 0;
     /** 预留的灰度散列盐配置。 */
     private String graySalt = "ai-generation";
+    /** 内部工具成功结果和状态的 Redis 保留时间，单位为秒。 */
+    private long toolIdempotencyTtlSeconds = 86400;
+    /** 等待同一工具调用分布式锁的最长时间，单位为毫秒。 */
+    private long toolIdempotencyLockWaitMillis = 30000;
 }
