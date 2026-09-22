@@ -24,6 +24,7 @@ def test_html_prompt_requires_a_complete_single_document():
     assert "只能输出一个完整的 html Markdown 代码块" in prompt
     assert "完整页面" in prompt
     assert "保留其他功能、文字、图片和操作方式" in prompt
+    assert "currentArtifact.exists" in prompt
 
 
 def test_multi_file_prompt_requires_the_three_complete_files():
@@ -33,6 +34,7 @@ def test_multi_file_prompt_requires_the_three_complete_files():
         assert filename in prompt
     assert "顺序固定" in prompt
     assert "只能输出三个 Markdown 代码块" in prompt
+    assert "currentArtifact.artifact" in prompt
 
 
 def test_vue_prompt_uses_python_tool_call_contract():
@@ -41,6 +43,7 @@ def test_vue_prompt_uses_python_tool_call_contract():
     assert "toolCalls" in prompt
     assert "Spring 工具" in prompt
     assert "appId 或 codeGenType" in prompt
+    assert "currentArtifact.entries" in prompt
 
 
 def test_review_and_repair_prompts_define_the_python_workflow_contract():

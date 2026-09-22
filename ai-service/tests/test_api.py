@@ -66,11 +66,63 @@ def test_all_generation_branches_complete_in_order(app_factory, auth_headers, nd
         assert all(event["requestId"] == "req-1" for event in events)
         generation_calls = [payload for name, payload in model.calls if name == "generate"]
         assert generation_calls[0]["branch"] == branch
+        assert generation_calls[0]["context"]["currentArtifact"] == {"exists": False}
         assert "context_prepare" in [event["node"] for event in events]
         assert "quality_review" in [event["node"] for event in events]
         assert "42:req-1" in checkpoint.saved
         build_calls = [call for call in gateway.calls if call["name"] == "project_build"]
         assert bool(build_calls) is (branch == "VUE_PROJECT")
+
+
+def test_existing_artifact_context_is_loaded_before_generation(app_factory, auth_headers, ndjson_parser):
+    current_artifact = {
+        "exists": True,
+        "codeGenType": "HTML",
+        "entry": "index.html",
+        "artifact": "```html\n<html><body>old</body></html>\n```",
+    }
+    model = FakeModel()
+    gateway = FakeToolGateway(artifact_context=current_artifact)
+    client = TestClient(app_factory(model=model, gateway=gateway))
+
+    events = ndjson_parser(client.post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("HTML"),
+        headers=auth_headers,
+    ))
+
+    assert events[-1]["type"] == "completed"
+    context_calls = [call for call in gateway.calls if call["name"] == "artifact_context"]
+    assert len(context_calls) == 1
+    assert context_calls[0]["toolCallId"] == "req-1:artifact_context"
+    assert context_calls[0]["arguments"] == {"codeGenType": "HTML"}
+    generate_context = next(data for name, data in model.calls if name == "generate")["context"]
+    assert generate_context["currentArtifact"] == current_artifact
+
+
+def test_artifact_context_failure_stops_before_model_generation(app_factory, auth_headers, ndjson_parser):
+    class FailingContextGateway(FakeToolGateway):
+        async def invoke(self, name, arguments, *, app_id, request_id, tool_call_id):
+            if name == "artifact_context":
+                raise RuntimeError("ARTIFACT_CONTEXT_READ_FAILED: failed to read active artifact")
+            return await super().invoke(
+                name,
+                arguments,
+                app_id=app_id,
+                request_id=request_id,
+                tool_call_id=tool_call_id,
+            )
+
+    model = FakeModel()
+    events = ndjson_parser(TestClient(app_factory(model=model, gateway=FailingContextGateway())).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("HTML"),
+        headers=auth_headers,
+    ))
+
+    assert events[-1]["type"] == "failed"
+    assert events[-1]["error"]["code"] == "ARTIFACT_CONTEXT_READ_FAILED"
+    assert not [call for call in model.calls if call[0] == "generate"]
 
 
 def test_repair_is_capped_at_two_attempts(app_factory, auth_headers, ndjson_parser):
@@ -172,6 +224,11 @@ def test_spring_business_error_code_reaches_failed_event(app_factory, auth_heade
     def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.read())
         requests.append(body)
+        if body["toolName"] == "artifact_context":
+            return httpx.Response(
+                200,
+                json={"code": 0, "data": {"exists": False}, "message": "ok"},
+            )
         if body["toolName"] == "artifact_validate":
             return httpx.Response(
                 200,
@@ -342,7 +399,7 @@ def test_invalid_vue_tool_is_rejected_before_spring_gateway(app_factory, auth_he
         headers=auth_headers,
     ))
 
-    assert not gateway.calls
+    assert [call["name"] for call in gateway.calls] == ["artifact_context"]
     assert events[-1]["type"] == "failed"
     assert events[-1]["error"]["code"] == "INVALID_VUE_TOOL_CALL"
     assert "search_reference" in events[-1]["error"]["message"]

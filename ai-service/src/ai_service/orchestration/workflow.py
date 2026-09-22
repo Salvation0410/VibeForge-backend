@@ -172,6 +172,15 @@ class GenerationWorkflow:
             return {}
 
         async def context_prepare(state: WorkflowState) -> dict[str, Any]:
+            current_artifact = await self._invoke_tool(
+                emitter,
+                "context_prepare",
+                "artifact_context",
+                {"codeGenType": state["code_gen_type"]},
+                state["app_id"],
+                state["request_id"],
+                f"{state['request_id']}:artifact_context",
+            )
             return {
                 "context": {
                     "appId": state["app_id"],
@@ -179,6 +188,7 @@ class GenerationWorkflow:
                     "prompt": state["prompt"],
                     "conversation": state.get("conversation", []),
                     "metadata": state.get("metadata", {}),
+                    "currentArtifact": current_artifact,
                 }
             }
 

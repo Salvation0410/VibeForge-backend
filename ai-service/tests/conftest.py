@@ -48,8 +48,9 @@ class FakeModel:
 
 
 class FakeToolGateway:
-    def __init__(self):
+    def __init__(self, *, artifact_context: dict[str, Any] | None = None):
         self.calls: list[dict[str, Any]] = []
+        self.artifact_context = artifact_context or {"exists": False}
 
     async def invoke(
         self,
@@ -68,6 +69,8 @@ class FakeToolGateway:
             "toolCallId": tool_call_id,
         }
         self.calls.append(call)
+        if name == "artifact_context":
+            return dict(self.artifact_context)
         if name == "artifact_validate":
             return {"valid": True, "errors": []}
         if name == "artifact_publish":

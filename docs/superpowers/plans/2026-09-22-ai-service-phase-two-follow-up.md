@@ -99,7 +99,7 @@ git commit -m "feat: 提供活动产物上下文工具"
 - Modify: `ai-service/src/ai_service/prompts/generation.py`
 - Modify: `ai-service/tests/test_prompts.py`
 
-- [ ] **Step 1: 写失败测试，区分首次生成和二次修改**
+- [x] **Step 1: 写失败测试，区分首次生成和二次修改**
 
 为 `FakeToolGateway` 增加可配置的 `artifact_context` 返回值，断言 `context_prepare` 在调用模型前执行一次：
 
@@ -113,13 +113,13 @@ assert generate_context["currentArtifact"]["exists"] is True
 
 另加首次生成用例，Spring 返回 `exists=false` 时模型仍正常生成；工具读取失败必须产生 `failed` 终态，不得假装没有旧版本。
 
-- [ ] **Step 2: 运行定向测试并确认失败**
+- [x] **Step 2: 运行定向测试并确认失败**
 
 Run: `Set-Location ai-service; uv run pytest tests/test_api.py -k "artifact_context or existing_artifact" -q`
 
 Expected: 当前 `context_prepare` 不调用 Spring，新增断言失败。
 
-- [ ] **Step 3: 在 `context_prepare` 调用工作流工具**
+- [x] **Step 3: 在 `context_prepare` 调用工作流工具**
 
 使用稳定调用 ID：
 
@@ -137,11 +137,11 @@ result = await self._invoke_tool(
 
 把结果写入 `context["currentArtifact"]`。不把聊天数据库、文件绝对路径或用户密钥写入上下文、事件或 checkpoint。
 
-- [ ] **Step 4: 更新三类生成提示词的上下文规则**
+- [x] **Step 4: 更新三类生成提示词的上下文规则**
 
 HTML/MULTI_FILE 明确：`currentArtifact.exists=true` 时基于完整活动产物修改并保留未指定内容；`false` 时视为首次生成。Vue 明确：文件列表只用于判断项目现状，修改源码前仍必须调用 `file_read`。
 
-- [ ] **Step 5: 运行 Python 完整测试并提交**
+- [x] **Step 5: 运行 Python 完整测试并提交**
 
 Run: `Set-Location ai-service; uv run pytest`
 
