@@ -2,7 +2,7 @@
 
 ## 1. 文档用途与当前基线
 
-本文供下一轮 AI Agent 或开发者继续维护代码生成链路。内容更新至 2026-09-21 的 Redis 工具幂等实现基线，覆盖第一阶段 LangChain + LangGraph 重构，以及后续接入的 HTML 安全发布、生成取消治理和前端流式性能修复。
+本文供下一轮 AI Agent 或开发者继续维护代码生成链路。内容更新至 2026-09-22 本地 `dev` 的 Redis 工具幂等实现基线，覆盖第一阶段 LangChain + LangGraph 重构，以及后续接入的 HTML 安全发布、生成取消治理、前端流式性能修复和 Spring 工具响应契约加固。
 
 开始工作前依次阅读：
 
@@ -26,6 +26,7 @@
 - Redis checkpoint 默认使用数据库 2；不可用时按当前配置和实现降级。
 - Spring 内部工具幂等状态和成功结果使用现有 Spring Redis 配置（本地默认 database 1），可跨 Spring 实例共享。作用域为 `appId + requestId + toolCallId`；同一作用域的 canonical 工具名或参数指纹不一致时拒绝执行。
 - 已存在（包括陈旧）的 `RUNNING` 工具记录视为不确定状态，不自动重放。action 成功但完成状态写回 Redis 失败也属于 indeterminate，因此不承诺文件系统与 Redis 之间严格 exactly-once。
+- Python `SpringToolGateway` 已识别 Spring HTTP 200 中非零 `BaseResponse.code`，仅向工作流保留四个 Redis 幂等稳定错误码，并对其他业务消息和协议错误做脱敏。非法 JSON、错误字段类型、缺少结果以及非精确旧版 `{"data": {...}}` envelope 都会被拒绝；明确业务错误不参与发布重试。
 
 ### 产物安全发布
 
@@ -178,7 +179,7 @@ Python checkpoint Redis: redis://localhost:6379/2
 
 ## 7. 当前验证基线
 
-2026-09-21 已记录的验证结果：
+2026-09-22 合并到本地 `dev` 后记录的验证结果：
 
 - 后端定向测试通过：`CodeParserTest`、`HtmlArtifactValidatorTest`、`ArtifactPublicationServiceTest`、`SeleniumHtmlSmokeTesterTest`、`AiCodeGeneratorFacadeTest`、`InternalAiToolsControllerTest`、`AppServiceGenerationCancellationTest`、`AppControllerSseTest`。
 - Redis 工具幂等本轮定向 Java 测试通过：`InternalAiToolsControllerTest`、`InternalAiToolContractTest`、`ToolInvocationIdempotencyServiceTest` 共 36 项，0 failures/errors/skips。
@@ -192,6 +193,13 @@ Python checkpoint Redis: redis://localhost:6379/2
 本轮没有以真实模型完成新的三类型端到端生成，因此不能据此声称真实 DeepSeek、真实 Redis 恢复或完整跨服务生成已经通过。
 
 本轮也没有运行真实 Redis 多 Spring 实例的工具幂等集成验证；跨实例共享、锁竞争和 Redis/文件系统故障窗口仍需在集成环境覆盖。
+
+### 会话关闭现场
+
+- 当前后端分支为本地 `dev`，Redis 工具幂等功能集成基线为 `915cd0f docs: 对齐最终网关验证基线`；功能分支已快速前进合并并删除，对应隔离 worktree 已清理。
+- 包含本次交接文档提交后，本地 `dev` 比 `github/dev` 超前 19 个提交，尚未推送远端。下一轮不得把“已合并到本地 `dev`”误写成“远端已发布”，推送前应先征得用户确认。
+- 主工作树仍有用户未提交内容：`.gitignore` 新增 `/ai-service/.env`、`ai-service/src/ai_service/orchestration/workflow.py` 新增注释 `# 工作流的一个状态`，以及未跟踪的 `projects/graduation_defense_yu_ai_code_mother_ppt169_20260628/`。这些内容未包含在 Redis 幂等提交中，不得回滚、删除或混入无关提交。
+- `ai-service/.env` 仅在本地存在，其中只补充过中文注释，真实配置值未改动且不得提交。
 
 ## 8. 关键提交
 
@@ -216,6 +224,12 @@ b397192 fix: 加固工具幂等作用域与类型语义
 4231df0 fix: 收紧 Spring 工具错误白名单
 069d1e9 docs: 明确 Spring 工具业务错误重试语义
 d28d329 fix: 收紧旧版 Spring 响应兼容
+```
+
+本地 `dev` 当前集成终点：
+
+```text
+915cd0f docs: 对齐最终网关验证基线
 ```
 
 此前后端与文档基线：
@@ -246,6 +260,7 @@ caeb0cb fix: 保持预览加载图为正圆
 
 1. **真实三类型端到端仍缺少最新验收。** 需要在真实 Spring、Python、Redis、模型和文件系统环境中分别生成 HTML、MULTI_FILE、VUE_PROJECT，并验证发布、预览、停止和二次优化。
 2. **内部工具 Redis 幂等仍缺少真实多实例验证。** 单元测试覆盖作用域、冲突、锁等待、回放和不确定态，但真实 Redis 下的多 Spring 实例竞争、进程中止及 action 成功后状态写回失败仍需集成测试；该机制不等同于文件系统/Redis 严格 exactly-once。
+3. **Spring/Python 真实 HTTP 契约仍缺少集成测试。** 当前使用 MockTransport 覆盖 `BaseResponse` 非零业务码、畸形响应、脱敏和稳定错误码传播，但尚未通过真实 Spring MVC、`GlobalExceptionHandler`、网络连接和 Python 客户端串联验证。
 
 ### P1：稳定性与契约问题
 
@@ -270,18 +285,22 @@ caeb0cb fix: 保持预览加载图为正圆
 
 ## 10. 下一阶段建议顺序
 
-1. 在真实 Redis 上验证多 Spring 实例的工具幂等共享、锁竞争和不确定态故障窗口。
-2. 在独立测试应用上完成 HTML、MULTI_FILE、VUE_PROJECT 的真实生成和二次优化验收，不复用事故应用。
-3. 压测大流式响应、客户端停止、网络中断和提交竞争，验证 2000 字符窗口与取消状态门。
-4. 修正灰度稳定性、路由降级和多实例取消状态。
-5. 按 `docs/superpowers/specs/2026-09-21-redis-idempotency-multi-agent-observability-design.md` 引入 CloseAI 单模型多 Agent，先保持现有单工作流为默认回滚路径。
-6. 接入 LangSmith Trace、指标和评估数据集，完成隐私与降级验证。
-7. 补齐可观测性和安全加固后，再提高 LangGraph 多 Agent 灰度比例。
+1. 先确认是否将本地 `dev` 的 19 个提交推送到 `github/dev`；推送不属于自动交接动作，必须由用户决定。
+2. 增加真实 Spring MVC -> `GlobalExceptionHandler` -> Python `SpringToolGateway` 的 HTTP 契约测试，验证非零业务码、鉴权、字段绑定、协议错误和脱敏。
+3. 在真实 Redis 上验证多 Spring 实例的工具幂等共享、锁竞争、进程中止和 action 成功后状态写回失败窗口。
+4. 在独立测试应用上完成 HTML、MULTI_FILE、VUE_PROJECT 的真实生成和二次优化验收，不复用事故应用。
+5. 压测大流式响应、客户端停止、网络中断和提交竞争，验证 2000 字符窗口与取消状态门。
+6. 修正灰度稳定性、路由降级和多实例取消状态。
+7. 按 `docs/superpowers/specs/2026-09-21-redis-idempotency-multi-agent-observability-design.md` 引入 CloseAI 单模型多 Agent，第一版所有 Agent 共用当前 `.env` 中的同一模型配置，并保留现有单工作流为默认回滚路径。
+8. 接入 LangSmith Trace、指标和评估数据集，完成隐私、采样和故障降级验证；LangSmith 不得参与业务终态判定。
+9. 补齐可观测性和安全加固后，再提高 LangGraph 多 Agent 灰度比例。
 
 ## 11. 下一轮开始前检查清单
 
 - [ ] 阅读本文和根目录 `AGENTS.md`。
 - [ ] 分别检查后端和前端仓库的 `git status --short`。
+- [ ] 确认本地 `dev` 与 `github/dev` 的 ahead/behind 状态；未经用户确认不要推送当前 19 个本地提交。
+- [ ] 保留 `.gitignore`、`workflow.py` 注释和 `projects/graduation_defense_yu_ai_code_mother_ppt169_20260628/` 的现有用户修改。
 - [ ] 保留 `projects/`、本地 `.env`、前端既有 `package-lock.json` 等用户文件。
 - [ ] 不自动启动 Python AI 服务；真实验收前确认用户是否已从 IDE 启动。
 - [ ] 使用 `rg` 重新确认 Java、Python 和 Vue 实际调用链。
