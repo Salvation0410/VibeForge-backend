@@ -15,6 +15,7 @@ public enum InternalAiTool {
     FILE_WRITE("file_write", true, "writeFile", "write_file"),
     FILE_MODIFY("file_modify", true, "modifyFile", "modify_file"),
     FILE_DELETE("file_delete", true, "deleteFile", "delete_file"),
+    ARTIFACT_CONTEXT("artifact_context", false),
     ARTIFACT_VALIDATE("artifact_validate", false, "artifact_validation"),
     ARTIFACT_PUBLISH("artifact_publish", false),
     PROJECT_BUILD("project_build", false);

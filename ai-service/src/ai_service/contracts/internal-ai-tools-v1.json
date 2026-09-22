@@ -37,6 +37,13 @@
       "description": "Delete a non-protected file at a project-relative path."
     },
     {
+      "name": "artifact_context",
+      "aliases": [],
+      "modelCallable": false,
+      "modelArguments": [],
+      "description": "Read the current active artifact context inside the workflow."
+    },
+    {
       "name": "artifact_validate",
       "aliases": ["artifact_validation"],
       "modelCallable": false,

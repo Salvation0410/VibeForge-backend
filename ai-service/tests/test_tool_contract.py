@@ -44,7 +44,10 @@ def test_valid_vue_tool_call_returns_a_defensive_argument_copy():
     assert validated is not arguments
 
 
-@pytest.mark.parametrize("tool_name", ["artifact_validate", "artifact_publish", "project_build"])
+@pytest.mark.parametrize(
+    "tool_name",
+    ["artifact_context", "artifact_validate", "artifact_publish", "project_build"],
+)
 def test_internal_workflow_tools_are_rejected_for_model_calls(tool_name: str):
     with pytest.raises(InvalidVueToolCall, match="not available to the Vue model"):
         validate_vue_tool_call(tool_name, {})

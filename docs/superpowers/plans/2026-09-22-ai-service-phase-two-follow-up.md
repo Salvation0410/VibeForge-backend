@@ -29,7 +29,7 @@
 - Modify: `src/test/java/com/yupi/yuaicodemother/controller/InternalAiToolsControllerTest.java`
 - Modify: `ai-service/tests/test_tool_contract.py`
 
-- [ ] **Step 1: 写失败测试，锁定上下文形状和安全边界**
+- [x] **Step 1: 写失败测试，锁定上下文形状和安全边界**
 
 Java 测试使用 `@TempDir` 创建 HTML、MULTI_FILE 和 Vue 活动目录，断言：
 
@@ -45,13 +45,13 @@ assertTrue(((String) html.get("artifact")).startsWith("```html"));
 
 MULTI_FILE 必须按 `index.html`、`style.css`、`script.js` 重建现有三代码块协议；Vue 只返回排序后的项目相对文件列表和 `exists`，不把整套源码塞进上下文。`.releases`、`.current`、`dist`、`node_modules` 和隐藏提交元数据不得出现在 Vue 列表中。
 
-- [ ] **Step 2: 运行测试并确认失败**
+- [x] **Step 2: 运行测试并确认失败**
 
 Run: `.\mvnw.cmd test -Dtest=ArtifactContextReaderTest,InternalAiToolsControllerTest`
 
 Expected: `ArtifactContextReader` 和 `ARTIFACT_CONTEXT` 尚不存在，测试编译失败。
 
-- [ ] **Step 3: 实现只读上下文工具**
+- [x] **Step 3: 实现只读上下文工具**
 
 在唯一的版本化 JSON 契约中加入非模型工具；Java 的 `InternalAiToolContractTest` 继续直接读取该文件并与枚举比对：
 
@@ -75,7 +75,7 @@ case ARTIFACT_CONTEXT -> artifactContextReader.read(artifactType(args), appId);
 
 该工具只接受工作流注入的 `codeGenType`，不加入模型可调用白名单。
 
-- [ ] **Step 4: 运行跨语言契约与控制器测试**
+- [x] **Step 4: 运行跨语言契约与控制器测试**
 
 Run: `.\mvnw.cmd test -Dtest=ArtifactContextReaderTest,InternalAiToolsControllerTest,InternalAiToolContractTest`
 
@@ -83,7 +83,7 @@ Run: `Set-Location ai-service; uv run pytest tests/test_tool_contract.py -q`
 
 Expected: Java 和 Python 都识别 `artifact_context`，但 `vue_model_tool_specs()` 不包含它。
 
-- [ ] **Step 5: 提交阶段 1**
+- [x] **Step 5: 提交阶段 1**
 
 ```powershell
 git add -- ai-service/src/ai_service/contracts/internal-ai-tools-v1.json src/main/java/com/yupi/yuaicodemother/ai/gateway/InternalAiTool.java src/main/java/com/yupi/yuaicodemother/core/artifact/ArtifactContextReader.java src/main/java/com/yupi/yuaicodemother/controller/InternalAiToolsController.java src/test/java/com/yupi/yuaicodemother/core/artifact/ArtifactContextReaderTest.java src/test/java/com/yupi/yuaicodemother/controller/InternalAiToolsControllerTest.java ai-service/tests/test_tool_contract.py

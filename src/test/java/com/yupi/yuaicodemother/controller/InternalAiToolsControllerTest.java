@@ -5,6 +5,7 @@ import com.yupi.yuaicodemother.ai.gateway.InternalAiTool;
 import com.yupi.yuaicodemother.ai.gateway.ToolInvocationIdempotencyService;
 import com.yupi.yuaicodemother.config.AiEngineProperties;
 import com.yupi.yuaicodemother.core.artifact.ArtifactPathResolver;
+import com.yupi.yuaicodemother.core.artifact.ArtifactContextReader;
 import com.yupi.yuaicodemother.core.artifact.ArtifactPublicationService;
 import com.yupi.yuaicodemother.core.artifact.ArtifactPublishResult;
 import com.yupi.yuaicodemother.core.artifact.ArtifactValidationException;
@@ -227,6 +228,46 @@ class InternalAiToolsControllerTest {
                 Map.of("codeGenType", type, "artifact", artifact))).getData();
     }
 
+    @Test
+    void readsArtifactContextThroughTheWorkflowOnlyTool() {
+        var reader = mock(ArtifactContextReader.class);
+        when(reader.read(CodeGenTypeEnum.HTML, 42L))
+                .thenReturn(Map.of("exists", true, "codeGenType", "HTML", "artifact", HTML));
+        var properties = new AiEngineProperties();
+        properties.setToken("test-token");
+        var controller = new InternalAiToolsController(properties, mock(VueProjectBuilder.class),
+                mock(ArtifactPathResolver.class), reader, mock(ArtifactPublicationService.class),
+                mock(MultiFileArtifactValidator.class), new HtmlArtifactValidator(),
+                passThroughIdempotencyService());
+
+        Map<String, Object> result = controller.invoke("Bearer test-token",
+                new InternalAiToolsController.ToolRequest(42L, "req-context", "call-context",
+                        "artifact_context", Map.of("codeGenType", "HTML"))).getData();
+
+        assertEquals(true, result.get("exists"));
+        assertEquals(HTML, result.get("artifact"));
+        verify(reader).read(CodeGenTypeEnum.HTML, 42L);
+    }
+
+    @Test
+    void rejectsArtifactContextWithoutSupportedGenerationType() {
+        var reader = mock(ArtifactContextReader.class);
+        var properties = new AiEngineProperties();
+        properties.setToken("test-token");
+        var controller = new InternalAiToolsController(properties, mock(VueProjectBuilder.class),
+                mock(ArtifactPathResolver.class), reader, mock(ArtifactPublicationService.class),
+                mock(MultiFileArtifactValidator.class), new HtmlArtifactValidator(),
+                passThroughIdempotencyService());
+
+        BusinessException error = assertThrows(BusinessException.class, () -> controller.invoke(
+                "Bearer test-token", new InternalAiToolsController.ToolRequest(
+                        42L, "req-context", "call-context", "artifact_context", Map.of())));
+
+        assertEquals(ErrorCode.PARAMS_ERROR.getCode(), error.getCode());
+        assertEquals("artifact_context requires a supported codeGenType", error.getMessage());
+        verifyNoInteractions(reader);
+    }
+
     private InternalAiToolsController controller(ArtifactPublicationService publisher) {
         return controller(publisher, mock(ArtifactPathResolver.class), passThroughIdempotencyService());
     }
@@ -237,7 +278,8 @@ class InternalAiToolsControllerTest {
             ToolInvocationIdempotencyService idempotencyService) {
         var properties = new AiEngineProperties();
         properties.setToken("test-token");
-        return new InternalAiToolsController(properties, mock(VueProjectBuilder.class), resolver, publisher,
+        return new InternalAiToolsController(properties, mock(VueProjectBuilder.class), resolver,
+                mock(ArtifactContextReader.class), publisher,
                 mock(MultiFileArtifactValidator.class), new HtmlArtifactValidator(), idempotencyService);
     }
 

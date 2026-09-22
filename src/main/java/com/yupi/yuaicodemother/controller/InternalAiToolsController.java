@@ -6,6 +6,7 @@ import com.yupi.yuaicodemother.ai.gateway.InternalAiTool;
 import com.yupi.yuaicodemother.ai.gateway.ToolInvocationIdempotencyService;
 import com.yupi.yuaicodemother.config.AiEngineProperties;
 import com.yupi.yuaicodemother.core.builder.VueProjectBuilder;
+import com.yupi.yuaicodemother.core.artifact.ArtifactContextReader;
 import com.yupi.yuaicodemother.core.artifact.ArtifactPathResolver;
 import com.yupi.yuaicodemother.core.artifact.ArtifactPublicationService;
 import com.yupi.yuaicodemother.core.artifact.ArtifactValidationException;
@@ -51,6 +52,7 @@ public class InternalAiToolsController {
     private final AiEngineProperties properties;
     private final VueProjectBuilder projectBuilder;
     private final ArtifactPathResolver artifactPathResolver;
+    private final ArtifactContextReader artifactContextReader;
     private final ArtifactPublicationService artifactPublicationService;
     private final MultiFileArtifactValidator artifactValidator;
     private final HtmlArtifactValidator htmlArtifactValidator;
@@ -109,6 +111,7 @@ public class InternalAiToolsController {
             case FILE_WRITE -> writeFile(appId, args);
             case FILE_MODIFY -> modifyFile(appId, args);
             case FILE_DELETE -> deleteFile(appId, args);
+            case ARTIFACT_CONTEXT -> artifactContextReader.read(artifactContextType(args), appId);
             case ARTIFACT_VALIDATE -> validateArtifact(args);
             case ARTIFACT_PUBLISH -> publishArtifact(appId, requestId, args);
             case PROJECT_BUILD -> buildProject(appId, args);
@@ -226,6 +229,18 @@ public class InternalAiToolsController {
             case "html" -> CodeGenTypeEnum.HTML;
             case "multi_file", "multifile" -> CodeGenTypeEnum.MULTI_FILE;
             default -> CodeGenTypeEnum.VUE_PROJECT;
+        };
+    }
+
+    /** 活动上下文只接受工作流显式注入的三种标准生成类型，不对缺失或未知值做隐式回退。 */
+    private CodeGenTypeEnum artifactContextType(Map<String, Object> args) {
+        String type = text(args.get("codeGenType")).toLowerCase().replace('-', '_');
+        return switch (type) {
+            case "html" -> CodeGenTypeEnum.HTML;
+            case "multi_file", "multifile" -> CodeGenTypeEnum.MULTI_FILE;
+            case "vue_project", "vueproject" -> CodeGenTypeEnum.VUE_PROJECT;
+            default -> throw new BusinessException(ErrorCode.PARAMS_ERROR,
+                    "artifact_context requires a supported codeGenType");
         };
     }
 

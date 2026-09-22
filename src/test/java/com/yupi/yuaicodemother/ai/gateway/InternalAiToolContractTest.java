@@ -33,6 +33,7 @@ class InternalAiToolContractTest {
                 Map.entry("delete_file", InternalAiTool.FILE_DELETE),
                 Map.entry("artifact_validate", InternalAiTool.ARTIFACT_VALIDATE),
                 Map.entry("artifact_validation", InternalAiTool.ARTIFACT_VALIDATE),
+                Map.entry("artifact_context", InternalAiTool.ARTIFACT_CONTEXT),
                 Map.entry("artifact_publish", InternalAiTool.ARTIFACT_PUBLISH),
                 Map.entry("project_build", InternalAiTool.PROJECT_BUILD)
         );
