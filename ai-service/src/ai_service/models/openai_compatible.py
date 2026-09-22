@@ -9,6 +9,12 @@ from langchain_openai import ChatOpenAI
 from ai_service.config import Settings
 from ai_service.models.base import ModelTurn, ToolCall
 from ai_service.models.tool_contract import vue_tool_prompt
+from ai_service.prompts import (
+    QUALITY_REVIEW_SYSTEM_PROMPT,
+    REPAIR_SYSTEM_PROMPT,
+    ROUTING_SYSTEM_PROMPT,
+    generation_system_prompt,
+)
 
 
 class OpenAICompatibleModel:
@@ -26,12 +32,7 @@ class OpenAICompatibleModel:
         """要求模型返回唯一的生成类型标识。"""
         response = await self._client.ainvoke(
             [
-                SystemMessage(
-                    content=(
-                        "Classify the requested output. Reply with exactly one of: "
-                        "HTML, MULTI_FILE, VUE_PROJECT."
-                    )
-                ),
+                SystemMessage(content=ROUTING_SYSTEM_PROMPT),
                 HumanMessage(content=prompt),
             ]
         )
@@ -39,14 +40,12 @@ class OpenAICompatibleModel:
 
     async def generate(self, branch: str, context: dict[str, Any]) -> ModelTurn:
         """生成代码产物，并解析 Vue 分支返回的结构化工具调用。"""
-        generation_instructions = (
-            vue_tool_prompt()
-            if branch == "VUE_PROJECT"
-            else "Return only the complete artifact content."
-        )
+        generation_instructions = generation_system_prompt(branch)
+        if branch == "VUE_PROJECT":
+            generation_instructions = f"{generation_instructions}\n\n{vue_tool_prompt()}"
         response = await self._client.ainvoke(
             [
-                SystemMessage(content=f"Generate a {branch} application. {generation_instructions}"),
+                SystemMessage(content=generation_instructions),
                 HumanMessage(content=json.dumps(context, ensure_ascii=False)),
             ]
         )
@@ -67,7 +66,7 @@ class OpenAICompatibleModel:
         """让模型以 PASS 或 REPAIR 判断产物是否通过质量检查。"""
         response = await self._client.ainvoke(
             [
-                SystemMessage(content="Review the artifact. Reply only PASS or REPAIR."),
+                SystemMessage(content=QUALITY_REVIEW_SYSTEM_PROMPT),
                 HumanMessage(content=json.dumps({"artifact": artifact, **context}, ensure_ascii=False)),
             ]
         )
@@ -77,7 +76,7 @@ class OpenAICompatibleModel:
         """结合验证和构建上下文生成修复后的完整产物。"""
         response = await self._client.ainvoke(
             [
-                SystemMessage(content="Repair the artifact using the review context. Return only the artifact."),
+                SystemMessage(content=REPAIR_SYSTEM_PROMPT),
                 HumanMessage(content=json.dumps({"artifact": artifact, **context}, ensure_ascii=False)),
             ]
         )
