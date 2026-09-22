@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -9,7 +9,7 @@ from langgraph.graph import END, START, StateGraph
 from ai_service.api.schemas import EventError, GenerationEvent, GenerationRequest
 from ai_service.config import Settings
 from ai_service.infrastructure.checkpoint import CheckpointStore
-from ai_service.models.base import GenerationModel
+from ai_service.models.base import GenerationModel, ModelTurn
 from ai_service.models.tool_contract import validate_vue_tool_call
 from ai_service.orchestration.cancellation import CancellationRegistry, GenerationCancelled
 from ai_service.orchestration.events import EventEmitter
@@ -201,47 +201,15 @@ class GenerationWorkflow:
             return {"artifact": turn.content, "finish_reason": turn.finish_reason, "token_usage": turn.token_usage}
 
         async def vue_agent(state: WorkflowState) -> dict[str, Any]:
-            context = dict(state["context"])
-            artifact_parts: list[str] = []
-            tool_count = 0
-            while True:
-                self._raise_if_cancelled(thread_id)
-                turn = await self.model.generate("VUE_PROJECT", context)
-                if turn.content:
-                    artifact_parts.append(turn.content)
-                    await emitter.emit("content_delta", "vue_agent", data={"content": turn.content})
-                if not turn.tool_calls or tool_count >= self.settings.vue_max_tool_calls:
-                    break
-                for call in turn.tool_calls:
-                    if tool_count >= self.settings.vue_max_tool_calls:
-                        break
-                    arguments = validate_vue_tool_call(call.name, call.arguments)
-                    tool_count += 1
-                    tool_call_id = f"{state['request_id']}:vue:{tool_count}"
-                    await emitter.emit(
-                        "tool_started",
-                        "vue_agent",
-                        data={"tool": call.name, "toolCallId": tool_call_id},
-                    )
-                    result = await self.tool_gateway.invoke(
-                        call.name,
-                        {
-                            **arguments,
-                            "codeGenType": state["code_gen_type"],
-                        },
-                        app_id=state["app_id"],
-                        request_id=state["request_id"],
-                        tool_call_id=tool_call_id,
-                    )
-                    await emitter.emit(
-                        "tool_finished",
-                        "vue_agent",
-                        data={"tool": call.name, "toolCallId": tool_call_id, "result": result},
-                    )
-                    context.setdefault("toolResults", []).append(
-                        {"toolCallId": tool_call_id, "tool": call.name, "result": result}
-                    )
-            return {"artifact": "\n".join(artifact_parts), "context": context, "tool_call_count": tool_count}
+            result = await self._run_vue_tool_loop(
+                state=state,
+                emitter=emitter,
+                thread_id=thread_id,
+                node="vue_agent",
+                call_id_prefix=f"{state['request_id']}:vue-generate",
+                invoke_model=lambda context: self.model.generate("VUE_PROJECT", context),
+            )
+            return {"artifact": result.pop("content"), **result}
 
         async def artifact_validation(state: WorkflowState) -> dict[str, Any]:
             """先拒绝截断或被过滤的响应，再调用 Spring 执行产物硬校验。"""
@@ -284,9 +252,32 @@ class GenerationWorkflow:
         async def repair(state: WorkflowState) -> dict[str, Any]:
             """生成完整修复候选并更新结束元数据，供下一轮重新校验。"""
             count = state.get("repair_count", 0) + 1
+            repair_context = {
+                **state["context"],
+                "codeGenType": state["code_gen_type"],
+                "repairCount": count,
+                "validation": state.get("validation"),
+                "build": state.get("build"),
+            }
+            if state["code_gen_type"] == "VUE_PROJECT":
+                result = await self._run_vue_tool_loop(
+                    state={**state, "context": repair_context},
+                    emitter=emitter,
+                    thread_id=thread_id,
+                    node="repair",
+                    call_id_prefix=f"{state['request_id']}:vue-repair:{count}",
+                    invoke_model=lambda context: self.model.repair(state.get("artifact", ""), context),
+                )
+                return {
+                    "context": result["context"],
+                    "tool_call_count": result["tool_call_count"],
+                    "repair_count": count,
+                    "finish_reason": result["finish_reason"],
+                    "token_usage": result["token_usage"],
+                }
             turn = await self.model.repair(
                 state.get("artifact", ""),
-                {**state["context"], "repairCount": count, "validation": state.get("validation"), "build": state.get("build")},
+                repair_context,
             )
             await emitter.emit("content_delta", "repair", data={"content": turn.content, "repairCount": count})
             return {
@@ -403,6 +394,70 @@ class GenerationWorkflow:
         builder.add_edge("finalize", END)
         graph_saver = getattr(self.checkpoint, "get_graph_saver", lambda: None)()
         return builder.compile(checkpointer=graph_saver)
+
+    async def _run_vue_tool_loop(
+        self,
+        *,
+        state: WorkflowState,
+        emitter: EventEmitter,
+        thread_id: str,
+        node: str,
+        call_id_prefix: str,
+        invoke_model: Callable[[dict[str, Any]], Awaitable[ModelTurn]],
+    ) -> dict[str, Any]:
+        """运行生成与修复共享的 Vue 工具循环，并维护跨阶段总预算。"""
+        context = {
+            **state["context"],
+            "toolResults": list(state["context"].get("toolResults", [])),
+        }
+        content_parts: list[str] = []
+        tool_count = state.get("tool_call_count", 0)
+        ordinal = 0
+        finish_reason: str | None = None
+        token_usage: dict[str, int] = {}
+
+        while True:
+            self._raise_if_cancelled(thread_id)
+            model_context = {**context, "toolResults": list(context["toolResults"])}
+            turn = await invoke_model(model_context)
+            _raise_for_incomplete_model_turn(turn.finish_reason)
+            finish_reason = turn.finish_reason
+            for key, value in turn.token_usage.items():
+                token_usage[key] = token_usage.get(key, 0) + value
+            if turn.content:
+                content_parts.append(turn.content)
+                await emitter.emit("content_delta", node, data={"content": turn.content})
+            if not turn.tool_calls or tool_count >= self.settings.vue_max_tool_calls:
+                break
+
+            for call in turn.tool_calls:
+                if tool_count >= self.settings.vue_max_tool_calls:
+                    break
+                self._raise_if_cancelled(thread_id)
+                arguments = validate_vue_tool_call(call.name, call.arguments)
+                tool_count += 1
+                ordinal += 1
+                tool_call_id = f"{call_id_prefix}:{ordinal}"
+                result = await self._invoke_tool(
+                    emitter,
+                    node,
+                    call.name,
+                    {**arguments, "codeGenType": state["code_gen_type"]},
+                    state["app_id"],
+                    state["request_id"],
+                    tool_call_id,
+                )
+                context["toolResults"].append(
+                    {"toolCallId": tool_call_id, "tool": call.name, "result": result}
+                )
+
+        return {
+            "content": "\n".join(content_parts),
+            "context": context,
+            "tool_call_count": tool_count,
+            "finish_reason": finish_reason,
+            "token_usage": token_usage,
+        }
 
     async def _complete_committed_publication(
         self, emitter: EventEmitter, terminal: dict[str, Any]

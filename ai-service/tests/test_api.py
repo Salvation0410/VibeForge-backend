@@ -1,6 +1,7 @@
 import json
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 
@@ -373,7 +374,7 @@ def test_vue_agent_tool_calls_are_bounded_and_identified(app_factory, auth_heade
     )
     vue_calls = [call for call in gateway.calls if call["name"] == "file_read"]
     assert len(vue_calls) == 4
-    assert all(call["toolCallId"].startswith("req-1:vue:") for call in vue_calls)
+    assert all(call["toolCallId"].startswith("req-1:vue-generate:") for call in vue_calls)
     assert len({call["toolCallId"] for call in vue_calls}) == 4
     assert all(call["appId"] == "42" for call in vue_calls)
     assert all(call["requestId"] == "req-1" for call in vue_calls)
@@ -381,6 +382,337 @@ def test_vue_agent_tool_calls_are_bounded_and_identified(app_factory, auth_heade
     assert all(call["arguments"]["codeGenType"] == "VUE_PROJECT" for call in vue_calls)
     assert len([event for event in events if event["type"] == "tool_started" and event["node"] == "vue_agent"]) == 4
     assert len([event for event in events if event["type"] == "tool_finished" and event["node"] == "vue_agent"]) == 4
+
+
+@pytest.mark.parametrize(
+    ("finish_reason", "error_code"),
+    [
+        ("LENGTH", "MODEL_OUTPUT_TRUNCATED"),
+        ("CONTENT_FILTER", "MODEL_OUTPUT_BLOCKED"),
+        ("CONTENT_FILTERED", "MODEL_OUTPUT_BLOCKED"),
+    ],
+)
+def test_incomplete_first_vue_turn_fails_before_executing_model_tool(
+    app_factory, auth_headers, ndjson_parser, finish_reason, error_code
+):
+    class IncompleteVueModel(FakeModel):
+        async def generate(self, branch, context):
+            return ModelTurn(
+                content="partial",
+                tool_calls=[ToolCall(name="file_read", arguments={"relativeFilePath": "src/App.vue"})],
+                finish_reason=finish_reason,
+            )
+
+    gateway = FakeToolGateway()
+    events = ndjson_parser(TestClient(app_factory(model=IncompleteVueModel(), gateway=gateway)).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    assert not [call for call in gateway.calls if call["name"] == "file_read"]
+    assert events[-1]["type"] == "failed"
+    assert events[-1]["error"]["code"] == error_code
+
+
+@pytest.mark.parametrize(
+    ("finish_reason", "error_code"),
+    [
+        ("LENGTH", "MODEL_OUTPUT_TRUNCATED"),
+        ("CONTENT_FILTER", "MODEL_OUTPUT_BLOCKED"),
+    ],
+)
+def test_incomplete_later_vue_turn_emits_no_content_or_tool_call(
+    app_factory, auth_headers, ndjson_parser, finish_reason, error_code
+):
+    class IncompleteSecondTurnModel(FakeModel):
+        async def generate(self, branch, context):
+            if not context.get("toolResults"):
+                return ModelTurn(
+                    content="first turn",
+                    tool_calls=[ToolCall(
+                        name="file_read",
+                        arguments={"relativeFilePath": "src/App.vue"},
+                    )],
+                )
+            return ModelTurn(
+                content="must-not-be-emitted",
+                tool_calls=[ToolCall(
+                    name="file_modify",
+                    arguments={
+                        "relativeFilePath": "src/App.vue",
+                        "oldContent": "broken",
+                        "newContent": "fixed",
+                    },
+                )],
+                finish_reason=finish_reason,
+            )
+
+    gateway = FakeToolGateway()
+    events = ndjson_parser(TestClient(app_factory(
+        model=IncompleteSecondTurnModel(),
+        gateway=gateway,
+    )).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    vue_calls = [call for call in gateway.calls if ":vue-generate:" in call["toolCallId"]]
+    assert [call["name"] for call in vue_calls] == ["file_read"]
+    emitted_content = [
+        event["data"]["content"]
+        for event in events
+        if event["type"] == "content_delta" and event["node"] == "vue_agent"
+    ]
+    assert emitted_content == ["first turn"]
+    assert events[-1]["type"] == "failed"
+    assert events[-1]["error"]["code"] == error_code
+
+
+@pytest.mark.asyncio
+async def test_vue_tool_loop_sums_token_usage_across_model_turns(app_factory):
+    class TokenUsageModel(FakeModel):
+        async def generate(self, branch, context):
+            self.calls.append(("generate", {"branch": branch, "context": context}))
+            if len(context.get("toolResults", [])) == 0:
+                return ModelTurn(
+                    content="inspect",
+                    tool_calls=[ToolCall(name="file_read", arguments={"relativeFilePath": "src/App.vue"})],
+                    token_usage={"input_tokens": 2, "output_tokens": 3},
+                )
+            return ModelTurn(
+                content="done",
+                finish_reason="STOP",
+                token_usage={"input_tokens": 5, "output_tokens": 7},
+            )
+
+    app = app_factory(model=TokenUsageModel(), gateway=FakeToolGateway())
+    result = await app.state.workflow._run_vue_tool_loop(
+        state={
+            "app_id": "42",
+            "request_id": "req-1",
+            "code_gen_type": "VUE_PROJECT",
+            "context": {},
+            "tool_call_count": 0,
+        },
+        emitter=EventEmitter("req-1"),
+        thread_id="42:req-1",
+        node="vue_agent",
+        call_id_prefix="req-1:vue-generate",
+        invoke_model=lambda context: app.state.model.generate("VUE_PROJECT", context),
+    )
+
+    assert result["token_usage"] == {"input_tokens": 7, "output_tokens": 10}
+
+
+def test_vue_repair_executes_file_tools_through_spring(app_factory, auth_headers, ndjson_parser):
+    class VueRepairModel(FakeModel):
+        def __init__(self):
+            super().__init__(reviews=[False, True])
+            self.repair_turn = 0
+
+        async def repair(self, artifact, context):
+            self.calls.append(("repair", {"artifact": artifact, "context": context}))
+            self.repair_turn += 1
+            if self.repair_turn == 1:
+                return ModelTurn(
+                    content="read current component",
+                    tool_calls=[ToolCall(name="file_read", arguments={"relativeFilePath": "src/App.vue"})],
+                )
+            if self.repair_turn == 2:
+                return ModelTurn(
+                    content="apply targeted fix",
+                    tool_calls=[ToolCall(
+                        name="file_modify",
+                        arguments={
+                            "relativeFilePath": "src/App.vue",
+                            "oldContent": "broken",
+                            "newContent": "fixed",
+                        },
+                    )],
+                )
+            return ModelTurn(content="repair completed", finish_reason="STOP")
+
+    model = VueRepairModel()
+    gateway = FakeToolGateway()
+    events = ndjson_parser(TestClient(app_factory(model=model, gateway=gateway)).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    repair_calls = [
+        call for call in gateway.calls
+        if call["toolCallId"].startswith("req-1:vue-repair:1:")
+    ]
+    assert [call["name"] for call in repair_calls] == ["file_read", "file_modify"]
+    assert all(call["arguments"]["codeGenType"] == "VUE_PROJECT" for call in repair_calls)
+    repair_model_calls = [data for name, data in model.calls if name == "repair"]
+    assert repair_model_calls[1]["context"]["toolResults"][0]["tool"] == "file_read"
+    assert repair_model_calls[2]["context"]["toolResults"][1]["tool"] == "file_modify"
+    assert len([call for call in gateway.calls if call["name"] == "artifact_validate"]) == 2
+    assert len([call for call in gateway.calls if call["name"] == "project_build"]) == 2
+    assert events[-1]["type"] == "completed"
+    assert events[-1]["data"]["artifact"] == "artifact:VUE_PROJECT"
+
+
+def test_invalid_vue_repair_tool_is_rejected_before_spring_gateway(
+    app_factory, auth_headers, ndjson_parser
+):
+    class InvalidRepairModel(FakeModel):
+        def __init__(self):
+            super().__init__(reviews=[False])
+
+        async def repair(self, artifact, context):
+            return ModelTurn(
+                content="",
+                tool_calls=[ToolCall(name="search_reference", arguments={"q": "layout"})],
+            )
+
+    gateway = FakeToolGateway()
+    events = ndjson_parser(TestClient(app_factory(model=InvalidRepairModel(), gateway=gateway)).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    assert not [call for call in gateway.calls if call["name"] == "search_reference"]
+    assert events[-1]["type"] == "failed"
+    assert events[-1]["error"]["code"] == "INVALID_VUE_TOOL_CALL"
+
+
+@pytest.mark.parametrize(
+    ("controlled_name", "controlled_value"),
+    [("appId", "other-app"), ("codeGenType", "HTML")],
+)
+def test_vue_repair_rejects_model_controlled_arguments_before_spring(
+    app_factory, auth_headers, ndjson_parser, controlled_name, controlled_value
+):
+    class ControlledArgumentModel(FakeModel):
+        def __init__(self):
+            super().__init__(reviews=[False])
+
+        async def repair(self, artifact, context):
+            return ModelTurn(
+                content="",
+                tool_calls=[ToolCall(
+                    name="file_read",
+                    arguments={
+                        "relativeFilePath": "src/App.vue",
+                        controlled_name: controlled_value,
+                    },
+                )],
+            )
+
+    gateway = FakeToolGateway()
+    events = ndjson_parser(TestClient(app_factory(model=ControlledArgumentModel(), gateway=gateway)).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    repair_calls = [
+        call for call in gateway.calls
+        if call["toolCallId"].startswith("req-1:vue-repair:")
+    ]
+    assert repair_calls == []
+    assert events[-1]["type"] == "failed"
+    assert events[-1]["error"]["code"] == "INVALID_VUE_TOOL_CALL"
+    assert controlled_name in events[-1]["error"]["message"]
+
+
+def test_vue_generation_and_repair_share_total_tool_budget(
+    app_factory, auth_headers, ndjson_parser
+):
+    class BudgetedRepairModel(FakeModel):
+        def __init__(self):
+            super().__init__(reviews=[False, True], vue_tool_calls=3)
+
+        async def repair(self, artifact, context):
+            self.calls.append(("repair", {"artifact": artifact, "context": context}))
+            if len(context.get("toolResults", [])) == 4:
+                return ModelTurn(content="repair completed", finish_reason="STOP")
+            return ModelTurn(
+                content="continue repair",
+                tool_calls=[ToolCall(name="file_read", arguments={"relativeFilePath": "src/App.vue"})],
+            )
+
+    model = BudgetedRepairModel()
+    gateway = FakeToolGateway()
+    events = ndjson_parser(TestClient(app_factory(model=model, gateway=gateway)).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    vue_file_calls = [call for call in gateway.calls if call["name"] == "file_read"]
+    assert len(vue_file_calls) == 4
+    assert len([call for call in vue_file_calls if ":vue-generate:" in call["toolCallId"]]) == 3
+    assert len([call for call in vue_file_calls if ":vue-repair:1:" in call["toolCallId"]]) == 1
+    repair_model_calls = [data for name, data in model.calls if name == "repair"]
+    assert len(repair_model_calls) == 2
+    assert len(repair_model_calls[1]["context"]["toolResults"]) == 4
+    assert repair_model_calls[1]["context"]["toolResults"][-1]["toolCallId"] == (
+        "req-1:vue-repair:1:1"
+    )
+    assert events[-1]["type"] == "completed"
+
+
+def test_vue_repair_checks_cancellation_before_each_tool_call(
+    app_factory, auth_headers, ndjson_parser
+):
+    class TwoToolRepairModel(FakeModel):
+        def __init__(self):
+            super().__init__(reviews=[False])
+
+        async def repair(self, artifact, context):
+            return ModelTurn(
+                content="",
+                tool_calls=[
+                    ToolCall(name="file_read", arguments={"relativeFilePath": "src/App.vue"}),
+                    ToolCall(
+                        name="file_modify",
+                        arguments={
+                            "relativeFilePath": "src/App.vue",
+                            "oldContent": "broken",
+                            "newContent": "fixed",
+                        },
+                    ),
+                ],
+            )
+
+    class CancellingGateway(FakeToolGateway):
+        cancellations = None
+
+        async def invoke(self, name, arguments, *, app_id, request_id, tool_call_id):
+            result = await super().invoke(
+                name,
+                arguments,
+                app_id=app_id,
+                request_id=request_id,
+                tool_call_id=tool_call_id,
+            )
+            if tool_call_id.startswith("req-1:vue-repair:1:1"):
+                self.cancellations.cancel("42:req-1")
+            return result
+
+    gateway = CancellingGateway()
+    app = app_factory(model=TwoToolRepairModel(), gateway=gateway)
+    gateway.cancellations = app.state.cancellations
+    events = ndjson_parser(TestClient(app).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    repair_calls = [
+        call for call in gateway.calls
+        if call["toolCallId"].startswith("req-1:vue-repair:1:")
+    ]
+    assert [call["name"] for call in repair_calls] == ["file_read"]
+    assert events[-1]["type"] == "failed"
+    assert events[-1]["error"]["code"] == "cancelled"
 
 
 def test_invalid_vue_tool_is_rejected_before_spring_gateway(app_factory, auth_headers, ndjson_parser):

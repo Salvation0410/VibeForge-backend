@@ -161,7 +161,7 @@ git commit -m "feat: 注入当前活动产物上下文"
 - Modify: `ai-service/tests/test_api.py`
 - Modify: `ai-service/tests/conftest.py`
 
-- [ ] **Step 1: 写失败测试，证明 Vue 修复必须真实执行文件工具**
+- [x] **Step 1: 写失败测试，证明 Vue 修复必须真实执行文件工具**
 
 构造第一次构建失败、修复模型返回 `file_read` 后再返回 `file_modify` 的场景，断言：
 
@@ -173,7 +173,7 @@ assert all(call["arguments"]["codeGenType"] == "VUE_PROJECT" for call in repair_
 
 同时覆盖非法工具、模型提供受控参数、工具上限耗尽和取消；任何失败都不得绕过 `validate_vue_tool_call()` 或 Spring 网关。
 
-- [ ] **Step 2: 让 `repair()` 解析 Vue JSON 工具调用**
+- [x] **Step 2: 让 `repair()` 解析 Vue JSON 工具调用**
 
 从 `generate()` 提取共享解析器：
 
@@ -191,7 +191,7 @@ def _vue_model_turn(response: Any) -> ModelTurn:
 
 当修复上下文的 `codeGenType` 为 `VUE_PROJECT` 时，`repair()` 使用该解析器；静态产物修复行为保持原样。
 
-- [ ] **Step 3: 提取受限 Vue 工具循环**
+- [x] **Step 3: 提取受限 Vue 工具循环**
 
 在 `GenerationWorkflow` 内提取 `_run_vue_tool_loop(...)` 或等价私有方法，由初次生成传入 `model.generate`，由修复传入 `model.repair`。工具调用 ID 分别使用：
 
@@ -202,11 +202,11 @@ def _vue_model_turn(response: Any) -> ModelTurn:
 
 总工具预算仍由 `AI_SERVICE_VUE_MAX_TOOL_CALLS` 控制；每轮上下文追加结构化 `toolResults`，每次调用前检查取消状态。
 
-- [ ] **Step 4: 修复完成后重新进入确定性校验和构建**
+- [x] **Step 4: 修复完成后重新进入确定性校验和构建**
 
 Vue 修复节点不把简短完成文案当作源码产物。状态中保留工具执行摘要，随后回到 `artifact_validation -> project_build`；HTML/MULTI_FILE 仍使用完整文本候选。
 
-- [ ] **Step 5: 运行测试并提交**
+- [x] **Step 5: 运行测试并提交**
 
 Run: `Set-Location ai-service; uv run pytest tests/test_openai_compatible.py tests/test_api.py -q`
 

@@ -52,15 +52,7 @@ class OpenAICompatibleModel:
         raw = str(response.content)
         if branch != "VUE_PROJECT":
             return _model_turn(response, raw)
-        try:
-            payload = json.loads(_strip_json_fence(raw))
-            calls = [
-                ToolCall(name=item["name"], arguments=item.get("arguments", {}))
-                for item in payload.get("toolCalls", [])
-            ]
-            return _model_turn(response, payload.get("content", ""), calls)
-        except (json.JSONDecodeError, KeyError, TypeError):
-            return _model_turn(response, raw)
+        return _vue_model_turn(response)
 
     async def review(self, artifact: str, context: dict[str, Any]) -> bool:
         """让模型以 PASS 或 REPAIR 判断产物是否通过质量检查。"""
@@ -74,12 +66,17 @@ class OpenAICompatibleModel:
 
     async def repair(self, artifact: str, context: dict[str, Any]) -> ModelTurn:
         """结合验证和构建上下文生成修复后的完整产物。"""
+        repair_instructions = REPAIR_SYSTEM_PROMPT
+        if context.get("codeGenType") == "VUE_PROJECT":
+            repair_instructions = f"{repair_instructions}\n\n{vue_tool_prompt()}"
         response = await self._client.ainvoke(
             [
-                SystemMessage(content=REPAIR_SYSTEM_PROMPT),
+                SystemMessage(content=repair_instructions),
                 HumanMessage(content=json.dumps({"artifact": artifact, **context}, ensure_ascii=False)),
             ]
         )
+        if context.get("codeGenType") == "VUE_PROJECT":
+            return _vue_model_turn(response)
         return _model_turn(response, str(response.content))
 
 
@@ -95,6 +92,20 @@ def _model_turn(response: Any, content: str, tool_calls: list[ToolCall] | None =
         finish_reason=str(finish_reason).upper() if finish_reason is not None else None,
         token_usage=normalized_usage,
     )
+
+
+def _vue_model_turn(response: Any) -> ModelTurn:
+    """解析 Vue 模型的 JSON 文本与工具调用，格式异常时保留原始响应。"""
+    raw = str(response.content)
+    try:
+        payload = json.loads(_strip_json_fence(raw))
+        calls = [
+            ToolCall(name=item["name"], arguments=item.get("arguments", {}))
+            for item in payload.get("toolCalls", [])
+        ]
+        return _model_turn(response, payload.get("content", ""), calls)
+    except (json.JSONDecodeError, AttributeError, KeyError, TypeError):
+        return _model_turn(response, raw)
 
 
 def _strip_json_fence(value: str) -> str:

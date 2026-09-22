@@ -67,6 +67,16 @@ async def test_vue_generation_uses_the_versioned_tool_prompt():
 
 
 @pytest.mark.asyncio
+async def test_vue_generation_falls_back_when_json_top_level_is_not_an_object():
+    model = model_with_response("[]")
+
+    result = await model.generate("VUE_PROJECT", {"prompt": "build it"})
+
+    assert result.content == "[]"
+    assert result.tool_calls == []
+
+
+@pytest.mark.asyncio
 async def test_non_vue_generation_does_not_include_vue_tool_instructions():
     model = model_with_response("artifact")
 
@@ -89,3 +99,38 @@ async def test_review_and_repair_use_their_system_prompts():
     result = await repair_model.repair("artifact", {"validation": {"valid": False}})
     assert result.content == "fixed"
     assert repair_model._client.messages[0].content == REPAIR_SYSTEM_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_vue_repair_uses_tool_prompt_and_parses_tool_calls():
+    model = model_with_response(
+        '{"content":"inspected","toolCalls":['
+        '{"name":"file_read","arguments":{"relativeFilePath":"src/App.vue"}}]}'
+    )
+
+    result = await model.repair(
+        "existing artifact",
+        {"codeGenType": "VUE_PROJECT", "repairCount": 1},
+    )
+
+    system_prompt = str(model._client.messages[0].content)
+    assert REPAIR_SYSTEM_PROMPT in system_prompt
+    assert vue_tool_prompt() in system_prompt
+    assert result.content == "inspected"
+    assert len(result.tool_calls) == 1
+    assert result.tool_calls[0].name == "file_read"
+    assert result.tool_calls[0].arguments == {"relativeFilePath": "src/App.vue"}
+
+
+@pytest.mark.asyncio
+async def test_static_repair_remains_plain_text_with_strict_repair_prompt():
+    model = model_with_response('{"content":"fixed","toolCalls":[]}')
+
+    result = await model.repair(
+        "existing artifact",
+        {"codeGenType": "HTML", "repairCount": 1},
+    )
+
+    assert model._client.messages[0].content == REPAIR_SYSTEM_PROMPT
+    assert result.content == '{"content":"fixed","toolCalls":[]}'
+    assert result.tool_calls == []
