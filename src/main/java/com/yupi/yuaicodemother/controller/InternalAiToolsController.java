@@ -6,6 +6,7 @@ import com.yupi.yuaicodemother.ai.gateway.InternalAiTool;
 import com.yupi.yuaicodemother.ai.gateway.ToolInvocationIdempotencyService;
 import com.yupi.yuaicodemother.config.AiEngineProperties;
 import com.yupi.yuaicodemother.core.builder.VueProjectBuilder;
+import com.yupi.yuaicodemother.core.builder.VueBuildResult;
 import com.yupi.yuaicodemother.core.artifact.ArtifactContextReader;
 import com.yupi.yuaicodemother.core.artifact.ArtifactPathResolver;
 import com.yupi.yuaicodemother.core.artifact.ArtifactPublicationService;
@@ -249,11 +250,15 @@ public class InternalAiToolsController {
      *
      * @param appId 应用 ID，用于确定独立项目目录
      * @param args 包含代码生成类型的工具参数
-     * @return 构建状态和项目绝对路径
+     * @return 不包含项目路径的结构化构建结果
      */
     private Map<String, Object> buildProject(long appId, Map<String, Object> args) {
         Path root = projectRoot(appId, text(args.get("codeGenType")));
-        return Map.of("built", projectBuilder.ensureProjectBuilt(root.toString()), "path", root.toString());
+        VueBuildResult result = projectBuilder.buildProjectDetailed(root.toString());
+        return Map.of(
+                "built", result.built(),
+                "errorCode", result.errorCode(),
+                "message", result.message());
     }
 
     /**

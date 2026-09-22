@@ -75,6 +75,8 @@ class FakeToolGateway:
             return {"valid": True, "errors": []}
         if name == "artifact_publish":
             return {"published": True, "versionId": request_id, "hashes": {}}
+        if name == "project_build":
+            return {"built": True, "errorCode": "", "message": ""}
         return {"ok": True, "echo": call}
 
 

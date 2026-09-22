@@ -8,6 +8,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from ai_service.infrastructure.spring_tools import SpringToolGateway
 from ai_service.models.base import ModelTurn, ToolCall
 from ai_service.orchestration.events import EventEmitter
+from ai_service.orchestration.workflow import _after_build
 from conftest import FakeModel, FakeToolGateway, MemoryCheckpoint
 
 
@@ -138,6 +139,157 @@ def test_repair_is_capped_at_two_attempts(app_factory, auth_headers, ndjson_pars
     assert len([call for call in model.calls if call[0] == "repair"]) == 2
     assert events[-1]["type"] == "failed"
     assert len([call for call in model.calls if call[0] == "repair"]) == 2
+
+
+def test_vue_build_failure_is_repaired_and_rebuilt_before_review(
+    app_factory, auth_headers, ndjson_parser
+):
+    class BuildSequenceGateway(FakeToolGateway):
+        def __init__(self):
+            super().__init__()
+            self.build_results = [
+                {"built": False, "errorCode": "VUE_NPM_BUILD_FAILED", "message": "vite failed"},
+                {"built": True, "errorCode": "", "message": ""},
+            ]
+
+        async def invoke(self, name, arguments, *, app_id, request_id, tool_call_id):
+            if name == "project_build":
+                call = {
+                    "name": name,
+                    "arguments": arguments,
+                    "appId": app_id,
+                    "requestId": request_id,
+                    "toolCallId": tool_call_id,
+                }
+                self.calls.append(call)
+                return self.build_results.pop(0)
+            return await super().invoke(
+                name,
+                arguments,
+                app_id=app_id,
+                request_id=request_id,
+                tool_call_id=tool_call_id,
+            )
+
+    model = FakeModel()
+    gateway = BuildSequenceGateway()
+    events = ndjson_parser(TestClient(app_factory(model=model, gateway=gateway)).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    assert len([call for call in gateway.calls if call["name"] == "project_build"]) == 2
+    repair_calls = [data for name, data in model.calls if name == "repair"]
+    assert len(repair_calls) == 1
+    assert repair_calls[0]["context"]["build"] == {
+        "built": False,
+        "errorCode": "VUE_NPM_BUILD_FAILED",
+        "message": "vite failed",
+    }
+    assert len([call for call in model.calls if call[0] == "review"]) == 1
+    assert events[-1]["type"] == "completed"
+
+
+def test_vue_build_failure_exhausts_two_repairs_without_review_or_completion(
+    app_factory, auth_headers, ndjson_parser
+):
+    class AlwaysFailingBuildGateway(FakeToolGateway):
+        async def invoke(self, name, arguments, *, app_id, request_id, tool_call_id):
+            if name == "project_build":
+                call = {
+                    "name": name,
+                    "arguments": arguments,
+                    "appId": app_id,
+                    "requestId": request_id,
+                    "toolCallId": tool_call_id,
+                }
+                self.calls.append(call)
+                return {
+                    "built": False,
+                    "errorCode": "VUE_NPM_BUILD_FAILED",
+                    "message": "vite failed repeatedly",
+                }
+            return await super().invoke(
+                name,
+                arguments,
+                app_id=app_id,
+                request_id=request_id,
+                tool_call_id=tool_call_id,
+            )
+
+    model = FakeModel()
+    gateway = AlwaysFailingBuildGateway()
+    events = ndjson_parser(TestClient(app_factory(model=model, gateway=gateway)).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    assert len([call for call in gateway.calls if call["name"] == "project_build"]) == 3
+    assert len([call for call in model.calls if call[0] == "repair"]) == 2
+    assert not [call for call in model.calls if call[0] == "review"]
+    assert events[-1]["type"] == "failed"
+    assert not [event for event in events if event["type"] == "completed"]
+
+
+def test_after_build_requires_literal_boolean_true():
+    assert _after_build(
+        {"build": {"built": "false"}, "repair_count": 0},
+        max_attempts=2,
+    ) == "repair"
+
+
+def test_validation_failure_after_build_repair_does_not_reuse_old_build_error(
+    app_factory, auth_headers, ndjson_parser
+):
+    class BuildThenValidationFailureGateway(FakeToolGateway):
+        def __init__(self):
+            super().__init__()
+            self.validation_results = [
+                {"valid": True, "errors": []},
+                {"valid": False, "errors": [{"code": "VALIDATION_AFTER_BUILD_REPAIR"}]},
+                {"valid": False, "errors": [{"code": "VALIDATION_AFTER_BUILD_REPAIR"}]},
+            ]
+
+        async def invoke(self, name, arguments, *, app_id, request_id, tool_call_id):
+            if name in {"artifact_validate", "project_build"}:
+                self.calls.append({
+                    "name": name,
+                    "arguments": arguments,
+                    "appId": app_id,
+                    "requestId": request_id,
+                    "toolCallId": tool_call_id,
+                })
+                if name == "artifact_validate":
+                    return self.validation_results.pop(0)
+                return {
+                    "built": False,
+                    "errorCode": "VUE_NPM_BUILD_FAILED",
+                    "message": "old build failure",
+                }
+            return await super().invoke(
+                name,
+                arguments,
+                app_id=app_id,
+                request_id=request_id,
+                tool_call_id=tool_call_id,
+            )
+
+    model = FakeModel()
+    gateway = BuildThenValidationFailureGateway()
+    events = ndjson_parser(TestClient(app_factory(model=model, gateway=gateway)).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    assert len([call for call in model.calls if call[0] == "repair"]) == 2
+    assert not [call for call in model.calls if call[0] == "review"]
+    assert events[-1]["type"] == "failed"
+    assert events[-1]["error"]["code"] != "VUE_NPM_BUILD_FAILED"
+    assert "VALIDATION_AFTER_BUILD_REPAIR" in events[-1]["error"]["message"]
+    assert not [event for event in events if event["type"] == "completed"]
 
 
 def test_truncated_multi_file_response_fails_before_publication(app_factory, auth_headers, ndjson_parser):

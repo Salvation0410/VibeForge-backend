@@ -228,7 +228,7 @@ git commit -m "refactor: 统一 Vue 生成与修复工具循环"
 - Modify: `ai-service/src/ai_service/orchestration/workflow.py`
 - Modify: `ai-service/tests/test_api.py`
 
-- [ ] **Step 1: 写 Java 失败测试，要求结构化且有界的构建结果**
+- [x] **Step 1: 写 Java 失败测试，要求结构化且有界的构建结果**
 
 引入结果类型：
 
@@ -243,7 +243,7 @@ public record VueBuildResult(boolean built, String errorCode, String message) {
 
 测试缺少 `package.json`、`npm install` 失败、`npm run build` 失败和缺少 `dist/index.html` 的稳定错误码。`message` 最多 4000 字符，不包含绝对项目根路径或环境变量。
 
-- [ ] **Step 2: 保留旧布尔 API并增加详细构建 API**
+- [x] **Step 2: 保留旧布尔 API并增加详细构建 API**
 
 `ensureProjectBuilt()` 和 `buildProject()` 继续返回 boolean 供现有调用者使用；新增 `ensureProjectBuiltDetailed()` 返回 `VueBuildResult`。控制器的 `project_build` 返回：
 
@@ -253,7 +253,7 @@ public record VueBuildResult(boolean built, String errorCode, String message) {
 
 成功时返回 `{"built": true, "errorCode": "", "message": ""}`，不再向 Python暴露绝对路径。
 
-- [ ] **Step 3: 写 Python 失败测试，阻止 `built=false` 完成**
+- [x] **Step 3: 写 Python 失败测试，阻止 `built=false` 完成**
 
 增加路由函数：
 
@@ -266,11 +266,11 @@ def _after_build(state: WorkflowState, max_attempts: int) -> str:
 
 测试第一次失败后执行修复并重新构建；连续失败达到两次修复上限后只发送 `failed`，不得发送 `completed`。
 
-- [ ] **Step 4: 接入 LangGraph 条件边**
+- [x] **Step 4: 接入 LangGraph 条件边**
 
 将固定的 `project_build -> quality_review` 改为 `_after_build` 条件边。修复上下文必须包含 Spring 返回的 `errorCode` 和 `message`；质量检查只在构建成功后运行。
 
-- [ ] **Step 5: 运行 Java/Python 验证并提交**
+- [x] **Step 5: 运行 Java/Python 验证并提交**
 
 Run: `.\mvnw.cmd test -Dtest=VueProjectBuilderTest,InternalAiToolsControllerTest`
 

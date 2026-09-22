@@ -5,6 +5,14 @@ from typing import Any
 import httpx
 
 
+_DEFAULT_TOOL_TIMEOUT = httpx.Timeout(30.0)
+_PROJECT_BUILD_TIMEOUT = httpx.Timeout(
+    connect=30.0,
+    read=1100.0,
+    write=30.0,
+    pool=30.0,
+)
+
 _STABLE_SPRING_TOOL_ERROR_CODES = frozenset(
     {
         "TOOL_IDEMPOTENCY_CONFLICT",
@@ -55,7 +63,7 @@ class SpringToolGateway:
             base_url=str(base_url).rstrip("/"),
             headers={"Authorization": f"Bearer {bearer_token}"},
             transport=transport,
-            timeout=httpx.Timeout(30.0),
+            timeout=_DEFAULT_TOOL_TIMEOUT,
         )
 
     async def invoke(
@@ -78,7 +86,16 @@ class SpringToolGateway:
         max_attempts = 2 if name == "artifact_publish" else 1
         for attempt in range(max_attempts):
             try:
-                response = await self._client.post("/invoke", json=request_body)
+                timeout = (
+                    _PROJECT_BUILD_TIMEOUT
+                    if name == "project_build"
+                    else _DEFAULT_TOOL_TIMEOUT
+                )
+                response = await self._client.post(
+                    "/invoke",
+                    json=request_body,
+                    timeout=timeout,
+                )
                 response.raise_for_status()
                 try:
                     payload = response.json()

@@ -51,6 +51,13 @@ def _after_validation(state: WorkflowState, max_attempts: int) -> str:
     return "build" if state["code_gen_type"] == "VUE_PROJECT" else "review"
 
 
+def _after_build(state: WorkflowState, max_attempts: int) -> str:
+    """构建成功后才能质量审查，否则修复并重建，耗尽次数后失败。"""
+    if state.get("build", {}).get("built") is True:
+        return "review"
+    return "fail" if state.get("repair_count", 0) >= max_attempts else "repair"
+
+
 def _after_review(state: WorkflowState, max_attempts: int) -> str:
     """质量通过后将 HTML 和多文件交给 Spring 原子发布，Vue 保持原构建终态。"""
     if state.get("quality_passed", False):
@@ -270,6 +277,7 @@ class GenerationWorkflow:
                 )
                 return {
                     "context": result["context"],
+                    "build": {},
                     "tool_call_count": result["tool_call_count"],
                     "repair_count": count,
                     "finish_reason": result["finish_reason"],
@@ -282,6 +290,7 @@ class GenerationWorkflow:
             await emitter.emit("content_delta", "repair", data={"content": turn.content, "repairCount": count})
             return {
                 "artifact": turn.content,
+                "build": {},
                 "repair_count": count,
                 "finish_reason": turn.finish_reason,
                 "token_usage": turn.token_usage,
@@ -332,6 +341,11 @@ class GenerationWorkflow:
 
         async def fail_quality(state: WorkflowState) -> dict[str, Any]:
             """在硬校验或质量检查耗尽修复次数后生成明确失败终态。"""
+            build = state.get("build", {})
+            if not build.get("built", True):
+                code = build.get("errorCode") or "VUE_BUILD_FAILED"
+                message = build.get("message") or "Vue project build failed"
+                raise ValueError(f"{code}: {message}")
             errors = state.get("validation", {}).get("errors", [])
             raise ValueError(f"Artifact did not pass validation or quality review: {errors}")
 
@@ -383,7 +397,11 @@ class GenerationWorkflow:
             lambda state: _after_validation(state, self.settings.max_repair_attempts),
             {"repair": "repair", "fail": "fail_quality", "build": "project_build", "review": "quality_review"},
         )
-        builder.add_edge("project_build", "quality_review")
+        builder.add_conditional_edges(
+            "project_build",
+            lambda state: _after_build(state, self.settings.max_repair_attempts),
+            {"repair": "repair", "fail": "fail_quality", "review": "quality_review"},
+        )
         builder.add_conditional_edges(
             "quality_review",
             lambda state: _after_review(state, self.settings.max_repair_attempts),

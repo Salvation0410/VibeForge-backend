@@ -12,6 +12,7 @@ import com.yupi.yuaicodemother.core.artifact.ArtifactValidationException;
 import com.yupi.yuaicodemother.core.artifact.HtmlArtifactValidator;
 import com.yupi.yuaicodemother.core.artifact.MultiFileArtifactValidator;
 import com.yupi.yuaicodemother.core.builder.VueProjectBuilder;
+import com.yupi.yuaicodemother.core.builder.VueBuildResult;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.exception.ErrorCode;
@@ -226,6 +227,37 @@ class InternalAiToolsControllerTest {
         return controller.invoke("Bearer test-token", new InternalAiToolsController.ToolRequest(
                 42L, "req-" + UUID.randomUUID(), UUID.randomUUID().toString(), tool,
                 Map.of("codeGenType", type, "artifact", artifact))).getData();
+    }
+
+    @Test
+    void projectBuildReturnsOnlyStructuredResultWithoutPath() {
+        var builder = mock(VueProjectBuilder.class);
+        var resolver = mock(ArtifactPathResolver.class);
+        when(resolver.resolveActiveRoot(CodeGenTypeEnum.VUE_PROJECT, 42L)).thenReturn(tempDir);
+        when(builder.buildProjectDetailed(tempDir.toString()))
+                .thenReturn(VueBuildResult.failure("VUE_NPM_BUILD_FAILED", "vite failed"));
+        var properties = new AiEngineProperties();
+        properties.setToken("test-token");
+        var controller = new InternalAiToolsController(properties, builder, resolver,
+                mock(ArtifactContextReader.class), mock(ArtifactPublicationService.class),
+                mock(MultiFileArtifactValidator.class), new HtmlArtifactValidator(),
+                passThroughIdempotencyService());
+
+        Map<String, Object> result = controller.invoke("Bearer test-token",
+                new InternalAiToolsController.ToolRequest(42L, "req-build", "call-build",
+                        "project_build", Map.of("codeGenType", "VUE_PROJECT"))).getData();
+
+        assertEquals(Map.of(
+                "built", false,
+                "errorCode", "VUE_NPM_BUILD_FAILED",
+                "message", "vite failed"), result);
+        verify(builder).buildProjectDetailed(tempDir.toString());
+
+        when(builder.buildProjectDetailed(tempDir.toString())).thenReturn(VueBuildResult.success());
+        Map<String, Object> success = controller.invoke("Bearer test-token",
+                new InternalAiToolsController.ToolRequest(42L, "req-build", "call-build-success",
+                        "project_build", Map.of("codeGenType", "VUE_PROJECT"))).getData();
+        assertEquals(Map.of("built", true, "errorCode", "", "message", ""), success);
     }
 
     @Test

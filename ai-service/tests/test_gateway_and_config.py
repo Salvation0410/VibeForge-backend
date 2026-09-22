@@ -47,6 +47,42 @@ async def test_spring_gateway_uses_bearer_and_scoped_tool_request():
 
 
 @pytest.mark.asyncio
+async def test_project_build_uses_extended_read_timeout_only_for_build_tool():
+    timeouts = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.read())
+        timeouts[body["toolName"]] = request.extensions["timeout"]
+        return httpx.Response(200, json={"code": 0, "data": {}, "message": "ok"})
+
+    gateway = SpringToolGateway(
+        base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="gateway-token",
+        transport=httpx.MockTransport(handler),
+    )
+    for name in ("project_build", "file_read"):
+        await gateway.invoke(
+            name,
+            {"codeGenType": "VUE_PROJECT"},
+            app_id="42",
+            request_id="req-timeout",
+            tool_call_id=f"req-timeout:{name}",
+        )
+
+    assert timeouts["project_build"]["read"] > 1020
+    assert timeouts["project_build"]["connect"] == 30
+    assert timeouts["project_build"]["write"] == 30
+    assert timeouts["project_build"]["pool"] == 30
+    assert timeouts["file_read"] == {
+        "connect": 30.0,
+        "read": 30.0,
+        "write": 30.0,
+        "pool": 30.0,
+    }
+    await gateway.close()
+
+
+@pytest.mark.asyncio
 async def test_artifact_publish_retries_lost_response_with_same_tool_call_id():
     requests: list[dict] = []
 
