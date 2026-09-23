@@ -82,7 +82,9 @@ START
 
 Vue 分支允许模型请求 Spring 工具，但工具调用次数受 `AI_SERVICE_VUE_MAX_TOOL_CALLS` 限制。每次工具调用都带有确定性的 `toolCallId`，供 Spring 执行幂等控制。
 
-工具名称与参数由 `src/ai_service/contracts/internal-ai-tools-v1.json` 统一约束。模型只能调用 `dir_read`、`file_read`、`file_write`、`file_modify` 和 `file_delete`；Python 在请求 Spring 前校验工具名和参数，并注入可信的 `appId` 与 `codeGenType`。`artifact_validate`、`artifact_publish` 和 `project_build` 只允许工作流调用。Spring 继续兼容已存在的 camelCase 和旧 snake_case 别名，但模型提示只使用标准名称。
+内部工具统一契约为 `src/ai_service/contracts/internal-ai-tools-v1.json`。该文件使用 JSON Schema Draft 2020-12，同时约束工具标准名称和历史别名、模型调用权限、请求参数以及成功响应。模型只能调用 `dir_read`、`file_read`、`file_write`、`file_modify` 和 `file_delete`；`artifact_context`、`artifact_validate`、`artifact_publish` 和 `project_build` 只允许工作流调用。Spring 继续兼容已存在的 camelCase 和旧 snake_case 别名，但模型提示只使用标准名称。
+
+Python 在向 Spring 发送 HTTP 请求前，按对应 `requestSchema` 严格校验完整参数，并注入可信的 `appId` 与 `codeGenType`；未知工具、未知参数和额外字段都会在本地被拒绝，不会到达 Spring。Spring 成功响应中的 `data` 按对应 `responseSchema` 校验后才交给工作流。请求 Schema 使用 `additionalProperties: false` 防止协议漂移；响应 Schema 允许新增字段，以支持 Spring/Python 滚动升级。Schema 校验错误只暴露稳定的脱敏错误，不包含源码、文件路径、参数值或响应正文。Spring 生产代码仍负责应用范围、路径安全、字段语义、权限和其他业务校验，JSON Schema 不替代这些检查。
 
 ### 多文件安全发布约束
 
