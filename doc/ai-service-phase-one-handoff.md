@@ -202,21 +202,19 @@ Python checkpoint Redis: redis://localhost:6379/2
 - 浏览器确认简短优化提示包含图片保护要求，冗余生成提示已移除，加载图编译样式为固定 1:1 比例。
 - 事故应用旧产物被确认含自然语言前缀并缺少 `</script>`、`</html>`；未对该产物执行覆盖或新生成。
 
-本轮没有启动真实 Spring/Python 网络链路、MySQL、Redis、多 Spring 实例或真实模型，也没有执行 HTML、MULTI_FILE、VUE_PROJECT 三类型端到端生成，因此不能据此声称这些真实环境验收已经通过。
-
-本轮也没有运行真实 Redis 恢复或多 Spring 实例的工具幂等集成验证；跨实例共享、锁竞争和 Redis/文件系统故障窗口仍需在集成环境覆盖。
+本次 Schema 阶段只完成离线验证，没有启动真实 Spring/Python 网络链路、MySQL、Redis、多 Spring 实例或真实模型，也没有执行 HTML、MULTI_FILE、VUE_PROJECT 三类型端到端生成。真实 Redis 恢复、跨实例共享、锁竞争和 Redis/文件系统故障窗口仍需在集成环境覆盖，不能据此声称上述真实环境验收已经通过。
 
 ### 稳定灰度与验收门实施记录
 
-后续实现使用 `graySalt + 稳定业务主体`（`userId` -> `appId` -> `requestId`）计算 SHA-256 灰度桶，并让 `route`、`generate`、`cancel` 复用同一引擎选择。仓库提供双引擎摘要对比、Spring/Python HTTP 和三类型端到端验收脚本；脚本默认 dry-run，必须传入隔离测试应用 ID 和 `-Execute` 才会发送真实请求。
+稳定灰度阶段使用 `graySalt + 稳定业务主体`（`userId` -> `appId` -> `requestId`）计算 SHA-256 灰度桶，并让 `route`、`generate`、`cancel` 复用同一引擎选择。仓库提供双引擎摘要对比、Spring/Python HTTP 和三类型端到端验收脚本；脚本默认 dry-run，必须传入隔离测试应用 ID 和 `-Execute` 才会发送真实请求。
 
-本轮实施与离线验证不启动 Spring、Python、MySQL、Redis 或前端，不调用真实模型，不提高灰度比例。真实 HTTP、Redis 多实例、DeepSeek 和 HTML/MULTI_FILE/VUE_PROJECT 首次生成及二次修改仍是下一步人工验收项。
+稳定灰度阶段的实施与离线验证当时未启动外部服务，也未提高灰度比例。
 
 ### 会话关闭现场
 
 - 当前工作位于 `codex/internal-tool-json-schema` 隔离分支，基于 `dev` 的 `8466214 refactor: 缩减 LangGraph 完成事件`；本功能分支尚未合并到 `dev`、尚未推送，也未删除或清理。
 - 本地 `dev` 与 `github/dev` 当前都指向 `8466214`，ahead/behind 为 `0/0`。合并本功能分支后是否推送远端仍需用户决定。
-- 主工作树仍有用户未提交内容：`.gitignore` 新增 `/ai-service/.env`、`ai-service/src/ai_service/orchestration/workflow.py` 新增注释 `# 工作流的一个状态`，以及未跟踪的 `projects/graduation_defense_yu_ai_code_mother_ppt169_20260628/`。这些内容未包含在本功能分支提交中，不得回滚、删除或混入无关提交。
+- 2026-09-23 主工作树状态快照包含用户未提交内容：`.gitignore`、`ai-service/src/ai_service/orchestration/workflow.py` 注释、`doc/ai-service-phase-one-handoff.md` 用户既有编辑，以及未跟踪的 `docs/superpowers/plans/2026-09-22-spring-python-http-contract-tests.md` 和 `projects/`。后续必须以主工作树实时 `git status --short` 为准；这些内容均不得覆盖、回滚或混入本功能分支提交。
 - `ai-service/.env` 仅在本地存在，其中只补充过中文注释，真实配置值未改动且不得提交。
 
 ## 8. 关键提交
