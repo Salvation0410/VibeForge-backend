@@ -214,9 +214,9 @@ Python checkpoint Redis: redis://localhost:6379/2
 
 ### 会话关闭现场
 
-- 当前后端分支为本地 `dev`，Redis 工具幂等功能集成基线为 `915cd0f docs: 对齐最终网关验证基线`；功能分支已快速前进合并并删除，对应隔离 worktree 已清理。
-- 包含本次交接文档提交后，本地 `dev` 比 `github/dev` 超前 19 个提交，尚未推送远端。下一轮不得把“已合并到本地 `dev`”误写成“远端已发布”，推送前应先征得用户确认。
-- 主工作树仍有用户未提交内容：`.gitignore` 新增 `/ai-service/.env`、`ai-service/src/ai_service/orchestration/workflow.py` 新增注释 `# 工作流的一个状态`，以及未跟踪的 `projects/graduation_defense_yu_ai_code_mother_ppt169_20260628/`。这些内容未包含在 Redis 幂等提交中，不得回滚、删除或混入无关提交。
+- 当前工作位于 `codex/internal-tool-json-schema` 隔离分支，基于 `dev` 的 `8466214 refactor: 缩减 LangGraph 完成事件`；本功能分支尚未合并到 `dev`、尚未推送，也未删除或清理。
+- 本地 `dev` 与 `github/dev` 当前都指向 `8466214`，ahead/behind 为 `0/0`。合并本功能分支后是否推送远端仍需用户决定。
+- 主工作树仍有用户未提交内容：`.gitignore` 新增 `/ai-service/.env`、`ai-service/src/ai_service/orchestration/workflow.py` 新增注释 `# 工作流的一个状态`，以及未跟踪的 `projects/graduation_defense_yu_ai_code_mother_ppt169_20260628/`。这些内容未包含在本功能分支提交中，不得回滚、删除或混入无关提交。
 - `ai-service/.env` 仅在本地存在，其中只补充过中文注释，真实配置值未改动且不得提交。
 
 ## 8. 关键提交
@@ -247,7 +247,19 @@ d28d329 fix: 收紧旧版 Spring 响应兼容
 本地 `dev` 当前集成终点：
 
 ```text
-915cd0f docs: 对齐最终网关验证基线
+8466214 refactor: 缩减 LangGraph 完成事件
+```
+
+本轮内部工具 JSON Schema 已完成提交：
+
+```text
+a386ce9 docs: 设计内部工具 JSON Schema 契约
+3d44a67 docs: 制定内部工具 Schema 实施计划
+1d9c6ed feat: 定义内部工具 JSON Schema 契约
+76459a2 feat: 校验 Spring 工具请求与响应
+8125cae test: 校验 Java 内部工具共享契约
+99bea78 test: 收紧内部工具 Schema 断言
+b84fc73 docs: 记录内部工具 Schema 校验边界
 ```
 
 此前后端与文档基线：
@@ -302,7 +314,7 @@ caeb0cb fix: 保持预览加载图为正圆
 
 ## 10. 下一阶段建议顺序
 
-1. 先确认是否将本地 `dev` 的 19 个提交推送到 `github/dev`；推送不属于自动交接动作，必须由用户决定。
+1. 先将 `codex/internal-tool-json-schema` 功能分支合并到 `dev`；是否推送远端仍需用户决定。
 2. 增加真实 Spring MVC -> `GlobalExceptionHandler` -> Python `SpringToolGateway` 的 HTTP 契约测试，验证非零业务码、鉴权、字段绑定、协议错误和脱敏。
 3. 在真实 Redis 上验证多 Spring 实例的工具幂等共享、锁竞争、进程中止和 action 成功后状态写回失败窗口。
 4. 在独立测试应用上完成 HTML、MULTI_FILE、VUE_PROJECT 的真实生成和二次优化验收，不复用事故应用。
@@ -316,7 +328,7 @@ caeb0cb fix: 保持预览加载图为正圆
 
 - [ ] 阅读本文和根目录 `AGENTS.md`。
 - [ ] 分别检查后端和前端仓库的 `git status --short`。
-- [ ] 确认本地 `dev` 与 `github/dev` 的 ahead/behind 状态；未经用户确认不要推送当前 19 个本地提交。
+- [ ] 确认本地 `dev` 与 `github/dev` 的 ahead/behind 状态；合并功能分支后未经用户确认不要推送远端。
 - [ ] 保留 `.gitignore`、`workflow.py` 注释和 `projects/graduation_defense_yu_ai_code_mother_ppt169_20260628/` 的现有用户修改。
 - [ ] 保留 `projects/`、本地 `.env`、前端既有 `package-lock.json` 等用户文件。
 - [ ] 不自动启动 Python AI 服务；真实验收前确认用户是否已从 IDE 启动。
