@@ -6,14 +6,22 @@ from functools import lru_cache
 from importlib.resources import files
 from typing import Any
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError, ValidationError
+
 
 _CONTRACT_PACKAGE = "ai_service.contracts"
 _CONTRACT_FILE = "internal-ai-tools-v1.json"
 _CONTROLLED_ARGUMENTS = ("appId", "codeGenType")
+_DIALECT = "https://json-schema.org/draft/2020-12/schema"
 
 
 class InvalidVueToolCall(ValueError):
     """The model requested a tool call outside the Spring-owned contract."""
+
+
+class ToolContractValidationError(ValueError):
+    """An internal tool name, request, or result violates the shared contract."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +31,68 @@ class ToolSpec:
     model_callable: bool
     model_arguments: tuple[str, ...]
     description: str
+    request_schema: dict[str, Any]
+    response_schema: dict[str, Any]
+
+
+def _parse_contract(payload: dict[str, Any]) -> tuple[ToolSpec, ...]:
+    if not isinstance(payload, dict):
+        raise RuntimeError("Internal AI tool contract is malformed")
+    if type(payload.get("version")) is not int or payload["version"] != 1:
+        raise RuntimeError("Unsupported internal AI tool contract version")
+    if payload.get("schemaDialect") != _DIALECT:
+        raise RuntimeError("Unsupported internal AI tool schema dialect")
+    tools = payload.get("tools", [])
+    if not isinstance(tools, list):
+        raise RuntimeError("Internal AI tool contract is malformed")
+    try:
+        specs = tuple(_parse_tool_spec(item) for item in tools)
+    except (KeyError, TypeError) as error:
+        raise RuntimeError("Internal AI tool contract is malformed") from error
+    external_names = [value for spec in specs for value in (spec.name, *spec.aliases)]
+    if not specs or len(external_names) != len(set(external_names)):
+        raise RuntimeError("Internal AI tool contract contains missing or duplicate names")
+    try:
+        for spec in specs:
+            Draft202012Validator.check_schema(spec.request_schema)
+            Draft202012Validator.check_schema(spec.response_schema)
+    except SchemaError as error:
+        raise RuntimeError("Internal AI tool contract contains an invalid schema") from error
+    return specs
+
+
+def _parse_tool_spec(item: Any) -> ToolSpec:
+    if not isinstance(item, dict):
+        raise RuntimeError("Internal AI tool contract is malformed")
+    name = item["name"]
+    aliases = item.get("aliases", [])
+    model_callable = item["modelCallable"]
+    model_arguments = item.get("modelArguments", [])
+    description = item["description"]
+    request_schema = item["requestSchema"]
+    response_schema = item["responseSchema"]
+    if (
+        not isinstance(name, str)
+        or not name
+        or not isinstance(aliases, list)
+        or any(not isinstance(alias, str) or not alias for alias in aliases)
+        or type(model_callable) is not bool
+        or not isinstance(model_arguments, list)
+        or any(not isinstance(argument, str) or not argument for argument in model_arguments)
+        or not isinstance(description, str)
+        or not isinstance(request_schema, dict)
+        or not isinstance(response_schema, dict)
+    ):
+        raise RuntimeError("Internal AI tool contract is malformed")
+    return ToolSpec(
+        name=name,
+        aliases=tuple(aliases),
+        model_callable=model_callable,
+        model_arguments=tuple(model_arguments),
+        description=description,
+        request_schema=request_schema,
+        response_schema=response_schema,
+    )
 
 
 @lru_cache(maxsize=1)
@@ -30,22 +100,37 @@ def all_tool_specs() -> tuple[ToolSpec, ...]:
     """Load the packaged cross-service tool contract once per process."""
     contract_path = files(_CONTRACT_PACKAGE).joinpath(_CONTRACT_FILE)
     payload = json.loads(contract_path.read_text(encoding="utf-8"))
-    if payload.get("version") != 1:
-        raise RuntimeError("Unsupported internal AI tool contract version")
-    specs = tuple(
-        ToolSpec(
-            name=item["name"],
-            aliases=tuple(item.get("aliases", [])),
-            model_callable=bool(item["modelCallable"]),
-            model_arguments=tuple(item.get("modelArguments", [])),
-            description=item["description"],
-        )
-        for item in payload.get("tools", [])
-    )
-    names = [spec.name for spec in specs]
-    if not specs or len(names) != len(set(names)):
-        raise RuntimeError("Internal AI tool contract contains missing or duplicate names")
-    return specs
+    return _parse_contract(payload)
+
+
+def resolve_tool_spec(name: str) -> ToolSpec:
+    """Resolve a canonical tool name or a supported historical alias."""
+    for spec in all_tool_specs():
+        if name == spec.name or name in spec.aliases:
+            return spec
+    raise ToolContractValidationError("Unknown internal AI tool")
+
+
+def _validate(name: str, value: dict[str, Any], *, response: bool) -> dict[str, Any]:
+    spec = resolve_tool_spec(name)
+    schema = spec.response_schema if response else spec.request_schema
+    try:
+        Draft202012Validator(schema).validate(value)
+    except ValidationError as error:
+        raise ToolContractValidationError(
+            "Internal AI tool payload did not match expected schema"
+        ) from error
+    return value
+
+
+def validate_tool_arguments(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Validate complete workflow-owned arguments without modifying them."""
+    return _validate(name, arguments, response=False)
+
+
+def validate_tool_result(name: str, result: dict[str, Any]) -> dict[str, Any]:
+    """Validate a successful Spring tool result without modifying it."""
+    return _validate(name, result, response=True)
 
 
 def vue_model_tool_specs() -> tuple[ToolSpec, ...]:
@@ -71,9 +156,11 @@ def vue_tool_prompt() -> str:
 
 def validate_vue_tool_call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Validate a model-selected tool before trusted workflow fields are injected."""
-    specs = {spec.name: spec for spec in all_tool_specs()}
-    spec = specs.get(name)
-    if spec is None:
+    try:
+        spec = resolve_tool_spec(name)
+    except ToolContractValidationError:
+        raise _invalid_call(f"Unsupported Vue tool: {name}")
+    if name != spec.name:
         raise _invalid_call(f"Unsupported Vue tool: {name}")
     if not spec.model_callable:
         raise _invalid_call(f"Tool {name} is not available to the Vue model")

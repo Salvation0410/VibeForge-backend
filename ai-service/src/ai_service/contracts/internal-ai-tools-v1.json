@@ -1,68 +1,277 @@
 {
   "version": 1,
+  "schemaDialect": "https://json-schema.org/draft/2020-12/schema",
   "tools": [
     {
       "name": "dir_read",
       "aliases": ["readDir", "read_dir"],
       "modelCallable": true,
       "modelArguments": ["relativeDirPath"],
-      "description": "List files under a project-relative directory; use an empty path for the project root."
+      "description": "List files under a project-relative directory; use an empty path for the project root.",
+      "requestSchema": {
+        "type": "object",
+        "properties": {
+          "relativeDirPath": {"type": "string"},
+          "codeGenType": {"type": "string", "enum": ["HTML", "MULTI_FILE", "VUE_PROJECT"]}
+        },
+        "required": ["relativeDirPath", "codeGenType"],
+        "additionalProperties": false
+      },
+      "responseSchema": {
+        "type": "object",
+        "properties": {
+          "entries": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": ["entries"],
+        "additionalProperties": true
+      }
     },
     {
       "name": "file_read",
       "aliases": ["readFile", "read_file"],
       "modelCallable": true,
       "modelArguments": ["relativeFilePath"],
-      "description": "Read a UTF-8 file from a project-relative path."
+      "description": "Read a UTF-8 file from a project-relative path.",
+      "requestSchema": {
+        "type": "object",
+        "properties": {
+          "relativeFilePath": {"type": "string"},
+          "codeGenType": {"type": "string", "enum": ["HTML", "MULTI_FILE", "VUE_PROJECT"]}
+        },
+        "required": ["relativeFilePath", "codeGenType"],
+        "additionalProperties": false
+      },
+      "responseSchema": {
+        "type": "object",
+        "properties": {"content": {"type": "string"}},
+        "required": ["content"],
+        "additionalProperties": true
+      }
     },
     {
       "name": "file_write",
       "aliases": ["writeFile", "write_file"],
       "modelCallable": true,
       "modelArguments": ["relativeFilePath", "content"],
-      "description": "Create or replace a UTF-8 file at a project-relative path."
+      "description": "Create or replace a UTF-8 file at a project-relative path.",
+      "requestSchema": {
+        "type": "object",
+        "properties": {
+          "relativeFilePath": {"type": "string"},
+          "content": {"type": "string"},
+          "codeGenType": {"type": "string", "enum": ["HTML", "MULTI_FILE", "VUE_PROJECT"]}
+        },
+        "required": ["relativeFilePath", "content", "codeGenType"],
+        "additionalProperties": false
+      },
+      "responseSchema": {
+        "type": "object",
+        "properties": {
+          "ok": {"type": "boolean"},
+          "path": {"type": "string"}
+        },
+        "required": ["ok"],
+        "additionalProperties": true
+      }
     },
     {
       "name": "file_modify",
       "aliases": ["modifyFile", "modify_file"],
       "modelCallable": true,
       "modelArguments": ["relativeFilePath", "oldContent", "newContent"],
-      "description": "Replace an exact text fragment in an existing project file."
+      "description": "Replace an exact text fragment in an existing project file.",
+      "requestSchema": {
+        "type": "object",
+        "properties": {
+          "relativeFilePath": {"type": "string"},
+          "oldContent": {"type": "string"},
+          "newContent": {"type": "string"},
+          "codeGenType": {"type": "string", "enum": ["HTML", "MULTI_FILE", "VUE_PROJECT"]}
+        },
+        "required": ["relativeFilePath", "oldContent", "newContent", "codeGenType"],
+        "additionalProperties": false
+      },
+      "responseSchema": {
+        "type": "object",
+        "properties": {
+          "ok": {"type": "boolean"},
+          "message": {"type": "string"}
+        },
+        "required": ["ok"],
+        "additionalProperties": true
+      }
     },
     {
       "name": "file_delete",
       "aliases": ["deleteFile", "delete_file"],
       "modelCallable": true,
       "modelArguments": ["relativeFilePath"],
-      "description": "Delete a non-protected file at a project-relative path."
+      "description": "Delete a non-protected file at a project-relative path.",
+      "requestSchema": {
+        "type": "object",
+        "properties": {
+          "relativeFilePath": {"type": "string"},
+          "codeGenType": {"type": "string", "enum": ["HTML", "MULTI_FILE", "VUE_PROJECT"]}
+        },
+        "required": ["relativeFilePath", "codeGenType"],
+        "additionalProperties": false
+      },
+      "responseSchema": {
+        "type": "object",
+        "properties": {"ok": {"type": "boolean"}},
+        "required": ["ok"],
+        "additionalProperties": true
+      }
     },
     {
       "name": "artifact_context",
       "aliases": [],
       "modelCallable": false,
       "modelArguments": [],
-      "description": "Read the current active artifact context inside the workflow."
+      "description": "Read the current active artifact context inside the workflow.",
+      "requestSchema": {
+        "type": "object",
+        "properties": {
+          "codeGenType": {"type": "string", "enum": ["HTML", "MULTI_FILE", "VUE_PROJECT"]}
+        },
+        "required": ["codeGenType"],
+        "additionalProperties": false
+      },
+      "responseSchema": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "exists": {"const": false},
+              "codeGenType": {"enum": ["HTML", "MULTI_FILE", "VUE_PROJECT"]}
+            },
+            "required": ["exists", "codeGenType"],
+            "additionalProperties": true
+          },
+          {
+            "type": "object",
+            "properties": {
+              "exists": {"const": true},
+              "codeGenType": {"const": "HTML"},
+              "entry": {"type": "string"},
+              "artifact": {"type": "string"}
+            },
+            "required": ["exists", "codeGenType", "artifact"],
+            "additionalProperties": true
+          },
+          {
+            "type": "object",
+            "properties": {
+              "exists": {"const": true},
+              "codeGenType": {"const": "MULTI_FILE"},
+              "artifact": {"type": "string"}
+            },
+            "required": ["exists", "codeGenType", "artifact"],
+            "additionalProperties": true
+          },
+          {
+            "type": "object",
+            "properties": {
+              "exists": {"const": true},
+              "codeGenType": {"const": "VUE_PROJECT"},
+              "entries": {"type": "array", "items": {"type": "string"}},
+              "truncated": {"type": "boolean"}
+            },
+            "required": ["exists", "codeGenType", "entries", "truncated"],
+            "additionalProperties": true
+          }
+        ]
+      }
     },
     {
       "name": "artifact_validate",
       "aliases": ["artifact_validation"],
       "modelCallable": false,
       "modelArguments": [],
-      "description": "Validate a generated artifact inside the workflow."
+      "description": "Validate a generated artifact inside the workflow.",
+      "requestSchema": {
+        "type": "object",
+        "properties": {
+          "artifact": {"type": "string"},
+          "codeGenType": {"type": "string", "enum": ["HTML", "MULTI_FILE", "VUE_PROJECT"]}
+        },
+        "required": ["artifact", "codeGenType"],
+        "additionalProperties": false
+      },
+      "responseSchema": {
+        "type": "object",
+        "properties": {
+          "valid": {"type": "boolean"},
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {"type": "string"},
+                "message": {"type": "string"},
+                "file": {"type": "string"}
+              },
+              "required": ["code", "message"],
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": ["valid", "errors"],
+        "additionalProperties": true
+      }
     },
     {
       "name": "artifact_publish",
       "aliases": [],
       "modelCallable": false,
       "modelArguments": [],
-      "description": "Publish an immutable artifact release inside the workflow."
+      "description": "Publish an immutable artifact release inside the workflow.",
+      "requestSchema": {
+        "type": "object",
+        "properties": {
+          "artifact": {"type": "string"},
+          "codeGenType": {"type": "string", "enum": ["HTML", "MULTI_FILE", "VUE_PROJECT"]},
+          "engine": {"type": "string"},
+          "finishReason": {"type": "string"}
+        },
+        "required": ["artifact", "codeGenType", "engine", "finishReason"],
+        "additionalProperties": false
+      },
+      "responseSchema": {
+        "type": "object",
+        "properties": {
+          "published": {"type": "boolean"},
+          "versionId": {"type": "string"},
+          "hashes": {"type": "object", "additionalProperties": {"type": "string"}}
+        },
+        "required": ["published", "versionId", "hashes"],
+        "additionalProperties": true
+      }
     },
     {
       "name": "project_build",
       "aliases": [],
       "modelCallable": false,
       "modelArguments": [],
-      "description": "Build a generated project inside the workflow."
+      "description": "Build a generated project inside the workflow.",
+      "requestSchema": {
+        "type": "object",
+        "properties": {
+          "codeGenType": {"type": "string", "enum": ["HTML", "MULTI_FILE", "VUE_PROJECT"]}
+        },
+        "required": ["codeGenType"],
+        "additionalProperties": false
+      },
+      "responseSchema": {
+        "type": "object",
+        "properties": {
+          "built": {"type": "boolean"},
+          "errorCode": {"type": "string"},
+          "message": {"type": "string"}
+        },
+        "required": ["built", "errorCode", "message"],
+        "additionalProperties": true
+      }
     }
   ]
 }
