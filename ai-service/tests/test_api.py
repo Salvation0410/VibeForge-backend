@@ -393,7 +393,11 @@ def test_spring_business_error_code_reaches_failed_event(app_factory, auth_heade
         if body["toolName"] == "artifact_context":
             return httpx.Response(
                 200,
-                json={"code": 0, "data": {"exists": False}, "message": "ok"},
+                json={
+                    "code": 0,
+                    "data": {"exists": False, "codeGenType": "HTML"},
+                    "message": "ok",
+                },
             )
         if body["toolName"] == "artifact_validate":
             return httpx.Response(

@@ -4,6 +4,12 @@ from typing import Any
 
 import httpx
 
+from ai_service.models.tool_contract import (
+    ToolContractValidationError,
+    validate_tool_arguments,
+    validate_tool_result,
+)
+
 
 _DEFAULT_TOOL_TIMEOUT = httpx.Timeout(30.0)
 _PROJECT_BUILD_TIMEOUT = httpx.Timeout(
@@ -32,6 +38,15 @@ class SpringToolProtocolError(RuntimeError):
         )
 
 
+class InvalidSpringToolRequest(ValueError):
+    """Spring 工具请求不符合共享契约。"""
+
+    def __init__(self):
+        super().__init__(
+            "INVALID_SPRING_TOOL_REQUEST: Spring tool request did not match expected schema"
+        )
+
+
 class SpringToolError(RuntimeError):
     """Spring 工具网关返回的明确业务错误。"""
 
@@ -47,6 +62,13 @@ class SpringToolError(RuntimeError):
         super().__init__(
             f"{stable_code}: Spring tool request failed (code={self.spring_code})"
         )
+
+
+def _validated_result(name: str, data: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return validate_tool_result(name, data)
+    except ToolContractValidationError as error:
+        raise SpringToolProtocolError() from error
 
 
 class SpringToolGateway:
@@ -76,6 +98,10 @@ class SpringToolGateway:
         tool_call_id: str,
     ) -> dict[str, Any]:
         """携带幂等调用 ID 执行工具；发布响应不确定时使用原 ID 有界重试。"""
+        try:
+            validate_tool_arguments(name, arguments)
+        except ToolContractValidationError as error:
+            raise InvalidSpringToolRequest() from error
         request_body = {
             "appId": app_id,
             "requestId": request_id,
@@ -116,10 +142,10 @@ class SpringToolGateway:
                         )
                     if "data" not in payload or not isinstance(payload["data"], dict):
                         raise SpringToolProtocolError()
-                    return payload["data"]
+                    return _validated_result(name, payload["data"])
                 if set(payload) != {"data"} or not isinstance(payload["data"], dict):
                     raise SpringToolProtocolError()
-                return payload["data"]
+                return _validated_result(name, payload["data"])
             except httpx.HTTPStatusError as error:
                 if error.response.status_code < 500 or attempt + 1 >= max_attempts:
                     raise

@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from ai_service.config import Settings
 from ai_service.infrastructure.checkpoint import RedisCheckpoint
 from ai_service.infrastructure.spring_tools import (
+    InvalidSpringToolRequest,
     SpringToolError,
     SpringToolGateway,
     SpringToolProtocolError,
@@ -20,7 +21,14 @@ async def test_spring_gateway_uses_bearer_and_scoped_tool_request():
     def handler(request: httpx.Request) -> httpx.Response:
         captured["authorization"] = request.headers["Authorization"]
         captured["body"] = request.read().decode()
-        return httpx.Response(200, json={"code": 0, "data": {"result": "ok"}, "message": "ok"})
+        return httpx.Response(
+            200,
+            json={
+                "code": 0,
+                "data": {"built": True, "errorCode": "", "message": ""},
+                "message": "ok",
+            },
+        )
 
     gateway = SpringToolGateway(
         base_url="http://spring.test/api/internal/ai-tools",
@@ -42,7 +50,7 @@ async def test_spring_gateway_uses_bearer_and_scoped_tool_request():
         "toolName": "project_build",
         "arguments": {"codeGenType": "VUE_PROJECT"},
     }
-    assert result == {"result": "ok"}
+    assert result == {"built": True, "errorCode": "", "message": ""}
     await gateway.close()
 
 
@@ -53,17 +61,29 @@ async def test_project_build_uses_extended_read_timeout_only_for_build_tool():
     def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.read())
         timeouts[body["toolName"]] = request.extensions["timeout"]
-        return httpx.Response(200, json={"code": 0, "data": {}, "message": "ok"})
+        data = (
+            {"built": True, "errorCode": "", "message": ""}
+            if body["toolName"] == "project_build"
+            else {"content": "<template />"}
+        )
+        return httpx.Response(200, json={"code": 0, "data": data, "message": "ok"})
 
     gateway = SpringToolGateway(
         base_url="http://spring.test/api/internal/ai-tools",
         bearer_token="gateway-token",
         transport=httpx.MockTransport(handler),
     )
+    arguments_by_name = {
+        "project_build": {"codeGenType": "VUE_PROJECT"},
+        "file_read": {
+            "relativeFilePath": "src/App.vue",
+            "codeGenType": "VUE_PROJECT",
+        },
+    }
     for name in ("project_build", "file_read"):
         await gateway.invoke(
             name,
-            {"codeGenType": "VUE_PROJECT"},
+            arguments_by_name[name],
             app_id="42",
             request_id="req-timeout",
             tool_call_id=f"req-timeout:{name}",
@@ -94,7 +114,11 @@ async def test_artifact_publish_retries_lost_response_with_same_tool_call_id():
             200,
             json={
                 "code": 0,
-                "data": {"published": True, "versionId": "req-1"},
+                "data": {
+                    "published": True,
+                    "versionId": "req-1",
+                    "hashes": {"index.html": "abc"},
+                },
                 "message": "ok",
             },
         )
@@ -107,7 +131,12 @@ async def test_artifact_publish_retries_lost_response_with_same_tool_call_id():
 
     result = await gateway.invoke(
         "artifact_publish",
-        {"codeGenType": "MULTI_FILE"},
+        {
+            "artifact": "candidate",
+            "codeGenType": "MULTI_FILE",
+            "engine": "langgraph",
+            "finishReason": "STOP",
+        },
         app_id="42",
         request_id="req-1",
         tool_call_id="req-1:artifact_publish",
@@ -147,7 +176,12 @@ async def test_artifact_publish_does_not_retry_explicit_spring_business_error():
     with pytest.raises(SpringToolError) as exc_info:
         await gateway.invoke(
             "artifact_publish",
-            {"codeGenType": "MULTI_FILE"},
+            {
+                "artifact": "candidate",
+                "codeGenType": "MULTI_FILE",
+                "engine": "langgraph",
+                "finishReason": "STOP",
+            },
             app_id="42",
             request_id="req-1",
             tool_call_id="req-1:artifact_publish",
@@ -211,7 +245,12 @@ async def test_spring_gateway_keeps_exact_legacy_data_envelope_compatibility():
         base_url="http://spring.test/api/internal/ai-tools",
         bearer_token="gateway-token",
         transport=httpx.MockTransport(
-            lambda _: httpx.Response(200, json={"data": {"result": "legacy-ok"}})
+            lambda _: httpx.Response(
+                200,
+                json={
+                    "data": {"built": True, "errorCode": "", "message": ""}
+                },
+            )
         ),
     )
 
@@ -223,7 +262,7 @@ async def test_spring_gateway_keeps_exact_legacy_data_envelope_compatibility():
         tool_call_id="req-1:build:1",
     )
 
-    assert result == {"result": "legacy-ok"}
+    assert result == {"built": True, "errorCode": "", "message": ""}
     await gateway.close()
 
 
@@ -306,7 +345,16 @@ async def test_invalid_json_becomes_protocol_error_after_bounded_retry(
     with pytest.raises(SpringToolProtocolError) as exc_info:
         await gateway.invoke(
             tool_name,
-            {"codeGenType": "MULTI_FILE"},
+            (
+                {
+                    "artifact": "candidate",
+                    "codeGenType": "MULTI_FILE",
+                    "engine": "langgraph",
+                    "finishReason": "STOP",
+                }
+                if tool_name == "artifact_publish"
+                else {"codeGenType": "MULTI_FILE"}
+            ),
             app_id="42",
             request_id="req-1",
             tool_call_id=f"req-1:{tool_name}",
@@ -318,6 +366,181 @@ async def test_invalid_json_becomes_protocol_error_after_bounded_retry(
     )
     assert "private" not in str(exc_info.value)
     assert isinstance(exc_info.value.__cause__, ValueError)
+    await gateway.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_name", "arguments"),
+    [
+        (
+            "file_read",
+            {
+                "relativeFilePath": "src/private.vue",
+                "codeGenType": "VUE_PROJECT",
+                "appId": "forged-secret-app",
+            },
+        ),
+        ("file_read", {"codeGenType": "VUE_PROJECT"}),
+        (
+            "file_read",
+            {"relativeFilePath": 42, "codeGenType": "VUE_PROJECT"},
+        ),
+        ("unknown_private_tool", {}),
+        ("artifact_publish", {"codeGenType": "MULTI_FILE"}),
+    ],
+)
+async def test_invalid_tool_request_fails_before_http_with_sanitized_error(
+    tool_name, arguments
+):
+    request_count = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(200, json={})
+
+    gateway = SpringToolGateway(
+        base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="gateway-token",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(InvalidSpringToolRequest) as exc_info:
+        await gateway.invoke(
+            tool_name,
+            arguments,
+            app_id="42",
+            request_id="req-secret",
+            tool_call_id="req-secret:tool",
+        )
+
+    assert request_count == 0
+    assert str(exc_info.value) == (
+        "INVALID_SPRING_TOOL_REQUEST: Spring tool request did not match expected schema"
+    )
+    assert "private" not in str(exc_info.value)
+    assert "secret" not in str(exc_info.value)
+    assert exc_info.value.__cause__ is not None
+    await gateway.close()
+
+
+@pytest.mark.asyncio
+async def test_project_build_result_allows_unknown_extension_fields():
+    data = {"built": True, "errorCode": "", "message": "", "durationMs": 125}
+    gateway = SpringToolGateway(
+        base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="gateway-token",
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, json={"code": 0, "data": data})
+        ),
+    )
+
+    result = await gateway.invoke(
+        "project_build",
+        {"codeGenType": "VUE_PROJECT"},
+        app_id="42",
+        request_id="req-1",
+        tool_call_id="req-1:build:1",
+    )
+
+    assert result == data
+    await gateway.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"built": "yes-private", "errorCode": "", "message": "secret"},
+        {"built": True, "errorCode": "private"},
+    ],
+)
+async def test_invalid_success_result_becomes_sanitized_protocol_error(data):
+    gateway = SpringToolGateway(
+        base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="gateway-token",
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, json={"code": 0, "data": data})
+        ),
+    )
+
+    with pytest.raises(SpringToolProtocolError) as exc_info:
+        await gateway.invoke(
+            "project_build",
+            {"codeGenType": "VUE_PROJECT"},
+            app_id="42",
+            request_id="req-1",
+            tool_call_id="req-1:build:1",
+        )
+
+    assert str(exc_info.value) == (
+        "SPRING_TOOL_PROTOCOL_ERROR: Spring tool response did not match expected schema"
+    )
+    assert "private" not in str(exc_info.value)
+    assert "secret" not in str(exc_info.value)
+    assert "yes" not in str(exc_info.value)
+    assert exc_info.value.__cause__ is not None
+    await gateway.close()
+
+
+@pytest.mark.asyncio
+async def test_invalid_legacy_envelope_result_is_still_validated():
+    gateway = SpringToolGateway(
+        base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="gateway-token",
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, json={"data": {"built": "private"}})
+        ),
+    )
+
+    with pytest.raises(SpringToolProtocolError):
+        await gateway.invoke(
+            "project_build",
+            {"codeGenType": "VUE_PROJECT"},
+            app_id="42",
+            request_id="req-1",
+            tool_call_id="req-1:build:1",
+        )
+    await gateway.close()
+
+
+@pytest.mark.asyncio
+async def test_invalid_artifact_publish_result_is_not_retried():
+    request_count = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(
+            200,
+            json={
+                "code": 0,
+                "data": {"published": True, "versionId": "release-private"},
+            },
+        )
+
+    gateway = SpringToolGateway(
+        base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="gateway-token",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(SpringToolProtocolError):
+        await gateway.invoke(
+            "artifact_publish",
+            {
+                "artifact": "secret source",
+                "codeGenType": "MULTI_FILE",
+                "engine": "langgraph",
+                "finishReason": "STOP",
+            },
+            app_id="42",
+            request_id="req-1",
+            tool_call_id="req-1:artifact_publish",
+        )
+
+    assert request_count == 1
     await gateway.close()
 
 
