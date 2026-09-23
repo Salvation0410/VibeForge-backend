@@ -146,6 +146,28 @@ Spring 工具幂等状态和成功结果保存在现有 Spring Redis 配置中�
 
 ## 7. 测试与排查
 
+### 稳定灰度与第二阶段验收
+
+灰度模式使用 `graySalt + 稳定业务主体` 计算 SHA-256 桶：优先使用 `userId`，其次使用 `appId`，最后使用 `requestId`。`route`、`generate` 和 `cancel` 使用同一选择逻辑。不要仅凭配置存在提高灰度比例。
+
+本轮提供默认 dry-run 的验收入口。真实执行必须明确传入测试应用、测试账号和 `-Execute`，并且不得使用事故应用或生产应用：
+
+```powershell
+.\scripts\compare-ai-generation-engines.ps1 -LegacyAppId 101 -LangGraphAppId 102 -Execute
+.\scripts\test-ai-service.ps1 -ReadOnlyAppId 101 -Execute
+.\scripts\test-ai-phase-two-e2e.ps1 -HtmlAppId 101 -MultiFileAppId 102 -VueAppId 103 -Execute
+```
+
+真实 Redis 幂等验收为 opt-in，不设置变量时测试必须跳过：
+
+```powershell
+$env:AI_REDIS_INTEGRATION = "true"
+$env:AI_REDIS_URL = "redis://127.0.0.1:6379/1"
+mvn "-Dtest=ToolInvocationIdempotencyRedisIT" test
+```
+
+本轮只实现代码、离线测试和验收入口；没有启动真实服务、连接真实 Redis、调用真实模型或执行三类型端到端生成。
+
 ```powershell
 cd ai-service
 uv run pytest

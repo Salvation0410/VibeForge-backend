@@ -285,6 +285,20 @@ Spring 内部工具幂等使用现有 Spring Redis 配置（本地默认 databas
 
 工具调用 Redis 幂等与 `VersionedArtifactStore` 的不可变版本发布幂等是两套独立机制，不能相互替代。本轮单元和契约验证不包含真实 Redis 多 Spring 实例场景，该场景仍需集成测试验证。
 
+## 稳定灰度与真实验收入口
+
+Spring 灰度路由使用 `graySalt` 和稳定主体（`userId` -> `appId` -> `requestId`）计算 SHA-256 桶，`route`、`generate`、`cancel` 会选择同一引擎。仓库提供 `scripts/compare-ai-generation-engines.ps1`、`scripts/test-ai-service.ps1` 和 `scripts/test-ai-phase-two-e2e.ps1`，脚本默认只显示检查清单，必须显式使用 `-Execute` 和隔离测试应用 ID 才会发送请求。
+
+真实 Redis 多实例测试通过以下命令 opt-in：
+
+```powershell
+$env:AI_REDIS_INTEGRATION = "true"
+$env:AI_REDIS_URL = "redis://127.0.0.1:6379/1"
+mvn "-Dtest=ToolInvocationIdempotencyRedisIT" test
+```
+
+本轮没有执行真实 Spring/Python HTTP、真实 Redis、真实模型或三类型端到端验收；这些结果必须由下一阶段在隔离环境中补充记录。
+
 ## 测试与校验
 
 测试使用 Fake Model 和内存工具网关，不调用真实模型：

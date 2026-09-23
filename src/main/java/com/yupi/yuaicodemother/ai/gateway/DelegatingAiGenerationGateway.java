@@ -7,6 +7,10 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Objects;
 
 /**
@@ -31,7 +35,7 @@ public class DelegatingAiGenerationGateway implements AiGenerationGateway {
      */
     @Override
     public CodeGenTypeEnum route(String prompt, Long appId, Long userId, String requestId) {
-        return delegate(userId, requestId).route(prompt, appId, userId, requestId);
+        return delegate(appId, userId, requestId).route(prompt, appId, userId, requestId);
     }
 
     /**
@@ -46,36 +50,48 @@ public class DelegatingAiGenerationGateway implements AiGenerationGateway {
      */
     @Override
     public Flux<String> generate(String prompt, CodeGenTypeEnum codeGenType, Long appId, Long userId, String requestId) {
-        return delegate(userId, requestId).generate(prompt, codeGenType, appId, userId, requestId);
+        return delegate(appId, userId, requestId).generate(prompt, codeGenType, appId, userId, requestId);
     }
 
     /** 将取消请求发送给本次请求确定性选中的同一生成引擎。 */
     @Override
     public void cancel(Long appId, Long userId, String requestId) {
-        delegate(userId, requestId).cancel(appId, userId, requestId);
+        delegate(appId, userId, requestId).cancel(appId, userId, requestId);
     }
 
     /**
      * 根据引擎配置选择具体网关。
      * <p>
      * {@code langgraph} 表示全量使用新引擎；{@code gray} 或 {@code auto} 先匹配用户白名单，
-     * 再通过用户 ID 与请求 ID 计算灰度桶；其他配置均回退到 Legacy 引擎。
+     * 再通过稳定业务主体与灰度盐计算灰度桶；其他配置均回退到 Legacy 引擎。
      *
+     * @param appId 当前应用 ID，可为空
      * @param userId 当前用户 ID，可为空
      * @param requestId 本次请求唯一标识
      * @return 本次请求实际使用的 AI 生成网关
      */
-    private AiGenerationGateway delegate(Long userId, String requestId) {
+    private AiGenerationGateway delegate(Long appId, Long userId, String requestId) {
         String engine = Objects.toString(properties.getEngine(), "legacy").toLowerCase();
         if ("langgraph".equals(engine)) return langGraph;
         if ("gray".equals(engine) || "auto".equals(engine)) {
             if (userId != null && properties.getGrayWhitelist().contains(userId)) return langGraph;
             int percentage = Math.max(0, Math.min(100, properties.getGrayPercentage()));
-            if (percentage > 0) {
-                int bucket = Math.floorMod(Objects.hash(userId, requestId), 100);
-                if (bucket < percentage) return langGraph;
-            }
+            if (percentage > 0 && stableBucket(appId, userId, requestId) < percentage) return langGraph;
         }
         return legacy;
+    }
+
+    private int stableBucket(Long appId, Long userId, String requestId) {
+        String subject = userId != null ? "user:" + userId
+                : appId != null ? "app:" + appId
+                : "request:" + Objects.toString(requestId, "");
+        String value = Objects.toString(properties.getGraySalt(), "") + ":" + subject;
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8));
+            return (ByteBuffer.wrap(digest, 0, Integer.BYTES).getInt() & Integer.MAX_VALUE) % 100;
+        } catch (NoSuchAlgorithmException error) {
+            throw new IllegalStateException("SHA-256 is unavailable", error);
+        }
     }
 }

@@ -207,7 +207,9 @@ Python AI_SERVICE_INTERNAL_BEARER_TOKEN
 
 `InternalAiToolsController` 当前提供文件读取、目录读取、写入、修改、删除、产物非空校验和项目构建。所有调用必须通过 Bearer 认证，携带 `toolCallId` 和 `appId`，使用固定应用沙箱和相对路径，并禁止绝对路径、目录穿越和删除受保护文件。
 
-当前工具幂等结果保存在 Spring 进程内 `ConcurrentHashMap`，服务重启后丢失，也不支持多实例共享。原方案中的 Redis 幂等尚未实现，不要误称已经实现。
+内部工具幂等状态和成功结果通过 Spring Redisson 保存在 Redis，作用域为
+`appId + requestId + toolCallId`，支持跨 Spring 实例共享；文件系统操作与 Redis
+状态写入并非同一事务，因此 `RUNNING` 和写回失败仍按不确定状态处理，不承诺严格 exactly-once。
 
 HTML 和 MULTI_FILE 发布使用 `VersionedArtifactStore` 保存不可变 release、manifest、请求墓碑和活动指针；它与上述内部工具调用结果缓存不是同一套幂等机制。不要把版本发布幂等误写成工具网关已经实现 Redis 幂等。
 

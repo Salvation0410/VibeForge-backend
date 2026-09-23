@@ -194,6 +194,12 @@ Python checkpoint Redis: redis://localhost:6379/2
 
 本轮也没有运行真实 Redis 多 Spring 实例的工具幂等集成验证；跨实例共享、锁竞争和 Redis/文件系统故障窗口仍需在集成环境覆盖。
 
+### 稳定灰度与验收门实施记录
+
+后续实现使用 `graySalt + 稳定业务主体`（`userId` -> `appId` -> `requestId`）计算 SHA-256 灰度桶，并让 `route`、`generate`、`cancel` 复用同一引擎选择。仓库提供双引擎摘要对比、Spring/Python HTTP 和三类型端到端验收脚本；脚本默认 dry-run，必须传入隔离测试应用 ID 和 `-Execute` 才会发送真实请求。
+
+本轮实施与离线验证不启动 Spring、Python、MySQL、Redis 或前端，不调用真实模型，不提高灰度比例。真实 HTTP、Redis 多实例、DeepSeek 和 HTML/MULTI_FILE/VUE_PROJECT 首次生成及二次修改仍是下一步人工验收项。
+
 ### 会话关闭现场
 
 - 当前后端分支为本地 `dev`，Redis 工具幂等功能集成基线为 `915cd0f docs: 对齐最终网关验证基线`；功能分支已快速前进合并并删除，对应隔离 worktree 已清理。
