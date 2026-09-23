@@ -277,6 +277,8 @@ Python 与 Spring 之间使用 NDJSON；Spring 对前端的内容事件仍为 `d
 
 `completed.data` 只携带生成类型、质量、修复/工具计数以及发布或构建摘要，不重复携带完整源码。HTML/MULTI_FILE 的最终候选仍来自最后一个 `content_delta`，且只有 Spring 发布成功后 Java 才向现有下游提交该候选。
 
+业务 checkpoint 不保存完整源码，业务快照保留 `node`、`requestId`、`appId`、`codeGenType`、`qualityPassed`、`repairCount` 和 `toolCallCount` 等状态与审计摘要；执行期节点恢复由 LangGraph 自动 checkpoint 承担，该 checkpoint 在请求执行期间仍可能包含完整产物。请求在成功、失败或取消进入终态后会立即清理对应 thread，TTL 仅作为异常退出时的兜底。若终态清理失败，只会使 checkpoint 就绪状态降级，不会反转已经确定的生成结果。
+
 ## Redis 与故障降级
 
 Redis key 使用 `yu-ai:langgraph:*` 命名空间，LangGraph `thread_id` 为 `{appId}:{requestId}`，所有 key 默认在 24 小时后过期。

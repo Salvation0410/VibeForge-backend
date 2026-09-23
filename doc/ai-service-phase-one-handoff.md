@@ -199,7 +199,7 @@ Python checkpoint Redis: redis://localhost:6379/2
 2026-09-23 内部工具 JSON Schema 契约分支的 fresh 离线验证结果：
 
 - `cd ai-service && uv run python -m compileall -q src`：通过。
-- `cd ai-service && uv run pytest`：144 项通过，0 failures；有 2 条来自 Starlette 和 LangGraph checkpoint 的第三方弃用警告。
+- `cd ai-service && uv run pytest`：151 项通过，0 failures；有 2 条来自 Starlette 和 LangGraph checkpoint 的第三方弃用警告。
 - `cd ai-service && uv lock --check`：通过，锁文件解析 67 个包。
 - `mvn "-Dtest=InternalAiToolContractTest,InternalAiToolsControllerTest" test`：24 项通过，0 failures/errors/skips（契约测试 4 项、控制器测试 20 项）；日志包含既有 SLF4J 多 provider 和 Mockito 动态 agent 警告。
 - `mvn clean -DskipTests compile`：通过，编译 236 个源文件；日志包含既有 varargs、弃用 API 和 unchecked 操作警告。
@@ -255,7 +255,8 @@ Python checkpoint Redis: redis://localhost:6379/2
 7. **HTTP 验收入口已补齐。** `scripts/test-ai-service.ps1` 已增加 Python 健康检查、Spring 成功调用、缺少/错误令牌、缺少字段、构建可选开关、幂等错误和脱敏覆盖标签；默认 dry-run，只有显式 `-Execute` 才发送请求。真实 HTTP 仍待用户启动服务后执行。
 8. **Redis 故障验收入口已补齐。** 真实 Redis 集成测试现已覆盖陈旧 `RUNNING` 和 action 成功后状态写回失败两个不确定窗口；重试必须拒绝再次执行 action。测试默认跳过，只有显式设置 `AI_REDIS_INTEGRATION=true` 才连接 `AI_REDIS_URL`。
 9. **三类型人工验收入口已加固。** 三个应用 ID 必须为正数且互不相同，成功场景出现 `business-error` 或终态数量异常时立即失败；六个提示词、人工检查项和操作提示均使用中文。脚本默认 dry-run，不保存流式源码、账号、密码或 Cookie。
-10. **离线验证完成。** Python 144 项测试、Java 24 项 Schema/Controller 定向测试、幂等单元测试 18 项、Python 编译与锁文件检查、Java 236 个生产源码干净编译、HTTP/E2E 脚本静态检查、dry-run、PowerShell 解析以及 `git diff --check` 均已通过。真实 Redis 集成测试 3 项在未设置开关时按设计跳过；真实网络、多实例、真实模型和三类型端到端仍属于下一轮验收。
+10. **离线验证完成。** Python 151 项测试、Java 24 项 Schema/Controller 定向测试、幂等单元测试 18 项、Python 编译与锁文件检查、Java 236 个生产源码干净编译、HTTP/E2E 脚本静态检查、dry-run、PowerShell 解析以及 `git diff --check` 均已通过。真实 Redis 集成测试 3 项在未设置开关时按设计跳过；真实网络、多实例、真实模型和三类型端到端仍属于下一轮验收。
+11. **Checkpoint 产物留存边界已收敛。** 业务快照不再保存完整 artifact，保留 `node`、`requestId`、`appId`、`codeGenType`、`qualityPassed`、`repairCount` 和 `toolCallCount` 等状态与审计摘要；执行期节点恢复由 LangGraph 自动 checkpoint 承担，该 checkpoint 在请求执行期间仍可能保留完整产物，成功、失败或取消进入终态后清理对应 thread，并使用 Redis 固定前缀避免误删。终态清理失败只使 checkpoint 就绪状态降级，不反转生成结果；TTL 作为异常退出兜底。本轮未执行真实 Redis、真实模型及 Spring/Python 真实服务依赖的自动化或接口验收；前端三类型生成、预览和交互由用户人工验证并反馈错误。
 
 ## 8. 关键提交
 
@@ -353,7 +354,7 @@ caeb0cb fix: 保持预览加载图为正圆
 
 ### P1：可靠性、质量与资源优化
 
-1. **瘦身 checkpoint 中的完整 artifact。** `completed` 事件已只返回摘要，但工作流状态和 LangGraph saver 仍可能持久化完整源码。需要先定义恢复所需的最小字段，再改为保存发布版本标识、摘要和必要的有限上下文。原因是完整产物会放大 Redis 内存、序列化耗时和源码暴露范围；错误瘦身又会破坏中断恢复，因此必须在 P0 验证后单独设计和回归恢复语义。
+1. **瘦身 checkpoint 中的完整 artifact（已完成）。** 本次实际边界是：业务快照去除完整 artifact，保留 `node`、`requestId`、`appId`、`codeGenType`、`qualityPassed`、`repairCount` 和 `toolCallCount` 等状态与审计摘要；执行期节点恢复由 LangGraph 自动 checkpoint 承担，运行期 checkpoint 仍可保留完整产物，终态立即清理对应 thread，Redis 使用固定前缀防止误删，清理失败只降级 checkpoint 就绪状态、不反转终态。TTL 作为异常退出兜底；真实服务依赖的 Redis、模型和 Spring/Python 接口验收尚未执行，前端三类型生成、预览和交互由用户人工验证。
 2. **让 Vue 修复后的质量检查读取修复后源码视图。** 当前质量检查主要依赖原 artifact、结构化 `toolResults` 和构建结果。应在修复工具循环结束后重新读取受影响文件或生成有界变更摘要，再交给 Reviewer。原因是“构建成功”不等于“满足用户需求”，Reviewer 如果看不到最终源码，可能对旧内容做出错误通过判断。
 3. **明确应用创建阶段的灰度身份键。** 当路由发生在 appId 创建前，需要固定使用 userId，创建后再按既定优先级使用 appId，并增加跨阶段一致性测试。原因是身份键切换如果没有明确契约，同一次创建流程可能在 Legacy 和 LangGraph 之间漂移。若现有调用链证明创建阶段始终有稳定 appId，则记录证据后关闭此项，不为假设增加代码。
 4. **压测 Java HTTP 客户端与长构建。** 验证 JDK HttpClient 连接复用、虚拟线程、读写超时、大 NDJSON 流、客户端断开和长时间 npm 构建下的资源释放。原因是功能测试覆盖正确性，但无法暴露连接耗尽、线程/进程残留、背压和超时边界问题。
@@ -382,7 +383,7 @@ caeb0cb fix: 保持预览加载图为正圆
 3. 使用三个隔离应用完成三类型首次生成和二次修改。
 4. 执行停止、断线、大流式响应和长构建压力验证。
 5. 对比 Legacy/LangGraph 摘要并演练回滚；全部通过后才能讨论提高灰度比例。
-6. P0 通过后，从 checkpoint artifact 瘦身开始逐项实施 P1；每项单独设计、测试和提交。
+6. P1 的 checkpoint artifact 瘦身已完成；后续从读取修复后源码视图开始逐项实施剩余 P1，每项单独设计、测试和提交。
 7. P2 只在真实运行数据证明有必要时进入实施，不与 P0/P1 混合提交。
 
 ## 11. 下一轮开始前检查清单
