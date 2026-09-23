@@ -2,6 +2,7 @@ package com.yupi.yuaicodemother.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yupi.yuaicodemother.ai.gateway.InternalAiTool;
+import com.yupi.yuaicodemother.ai.gateway.InternalAiToolSchemaAssertions;
 import com.yupi.yuaicodemother.ai.gateway.ToolInvocationIdempotencyService;
 import com.yupi.yuaicodemother.config.AiEngineProperties;
 import com.yupi.yuaicodemother.core.artifact.ArtifactPathResolver;
@@ -52,8 +53,10 @@ class InternalAiToolsControllerTest {
         var publisher = mock(ArtifactPublicationService.class);
         var controller = controller(publisher);
         var valid = invoke(controller, "artifact_validate", "HTML", HTML);
+        InternalAiToolSchemaAssertions.assertResponseValid("artifact_validate", valid);
         assertEquals(true, valid.get("valid"));
         var invalid = invoke(controller, "artifact_validate", "HTML", "以下是代码：\n```html\n<html><body><script>${escapeText");
+        InternalAiToolSchemaAssertions.assertResponseValid("artifact_validate", invalid);
         assertEquals(false, invalid.get("valid"));
         assertEquals("HTML_FORMAT_INVALID", ((Map<?, ?>) ((java.util.List<?>) invalid.get("errors")).getFirst()).get("code"));
         verifyNoInteractions(publisher);
@@ -69,7 +72,9 @@ class InternalAiToolsControllerTest {
                 "engine", "langgraph", "finishReason", "STOP");
         var request = new InternalAiToolsController.ToolRequest(42L, "req-html", "call-html",
                 "artifact_publish", arguments);
-        assertEquals("v1", controller.invoke("Bearer test-token", request).getData().get("versionId"));
+        Map<String, Object> result = controller.invoke("Bearer test-token", request).getData();
+        InternalAiToolSchemaAssertions.assertResponseValid("artifact_publish", result);
+        assertEquals("v1", result.get("versionId"));
         verify(publisher).publishHtml(42L, "req-html", HTML, "langgraph", "STOP");
 
         when(publisher.publishHtml(42L, "req-fail", HTML, "langgraph", "STOP"))
@@ -247,6 +252,7 @@ class InternalAiToolsControllerTest {
                 new InternalAiToolsController.ToolRequest(42L, "req-build", "call-build",
                         "project_build", Map.of("codeGenType", "VUE_PROJECT"))).getData();
 
+        InternalAiToolSchemaAssertions.assertResponseValid("project_build", result);
         assertEquals(Map.of(
                 "built", false,
                 "errorCode", "VUE_NPM_BUILD_FAILED",
@@ -257,6 +263,7 @@ class InternalAiToolsControllerTest {
         Map<String, Object> success = controller.invoke("Bearer test-token",
                 new InternalAiToolsController.ToolRequest(42L, "req-build", "call-build-success",
                         "project_build", Map.of("codeGenType", "VUE_PROJECT"))).getData();
+        InternalAiToolSchemaAssertions.assertResponseValid("project_build", success);
         assertEquals(Map.of("built", true, "errorCode", "", "message", ""), success);
     }
 
@@ -276,6 +283,7 @@ class InternalAiToolsControllerTest {
                 new InternalAiToolsController.ToolRequest(42L, "req-context", "call-context",
                         "artifact_context", Map.of("codeGenType", "HTML"))).getData();
 
+        InternalAiToolSchemaAssertions.assertResponseValid("artifact_context", result);
         assertEquals(true, result.get("exists"));
         assertEquals(HTML, result.get("artifact"));
         verify(reader).read(CodeGenTypeEnum.HTML, 42L);
@@ -298,6 +306,47 @@ class InternalAiToolsControllerTest {
         assertEquals(ErrorCode.PARAMS_ERROR.getCode(), error.getCode());
         assertEquals("artifact_context requires a supported codeGenType", error.getMessage());
         verifyNoInteractions(reader);
+    }
+
+    @Test
+    void fileToolsReturnResponsesMatchingTheSharedContract() throws Exception {
+        var resolver = mock(ArtifactPathResolver.class);
+        when(resolver.resolveActiveRoot(CodeGenTypeEnum.VUE_PROJECT, 42L)).thenReturn(tempDir);
+        var controller = controller(mock(ArtifactPublicationService.class), resolver,
+                passThroughIdempotencyService());
+        Files.createDirectories(tempDir.resolve("src"));
+        Files.writeString(tempDir.resolve("src/Old.vue"), "obsolete");
+
+        Map<String, Object> dirResult = invokeTool(controller, "dir_read",
+                Map.of("relativeDirPath", "", "codeGenType", "VUE_PROJECT"));
+        InternalAiToolSchemaAssertions.assertResponseValid("dir_read", dirResult);
+
+        Map<String, Object> writeResult = invokeTool(controller, "file_write", Map.of(
+                "relativeFilePath", "src/App.vue", "content", "before", "codeGenType", "VUE_PROJECT"));
+        InternalAiToolSchemaAssertions.assertResponseValid("file_write", writeResult);
+
+        Map<String, Object> readResult = invokeTool(controller, "file_read",
+                Map.of("relativeFilePath", "src/App.vue", "codeGenType", "VUE_PROJECT"));
+        InternalAiToolSchemaAssertions.assertResponseValid("file_read", readResult);
+
+        Map<String, Object> modifyResult = invokeTool(controller, "file_modify", Map.of(
+                "relativeFilePath", "src/App.vue", "oldContent", "before", "newContent", "after",
+                "codeGenType", "VUE_PROJECT"));
+        InternalAiToolSchemaAssertions.assertResponseValid("file_modify", modifyResult);
+
+        Map<String, Object> deleteResult = invokeTool(controller, "file_delete",
+                Map.of("relativeFilePath", "src/Old.vue", "codeGenType", "VUE_PROJECT"));
+        InternalAiToolSchemaAssertions.assertResponseValid("file_delete", deleteResult);
+
+        assertEquals("before", readResult.get("content"));
+        assertEquals("after", Files.readString(tempDir.resolve("src/App.vue")));
+        assertFalse(Files.exists(tempDir.resolve("src/Old.vue")));
+    }
+
+    private Map<String, Object> invokeTool(
+            InternalAiToolsController controller, String toolName, Map<String, Object> arguments) {
+        return controller.invoke("Bearer test-token", new InternalAiToolsController.ToolRequest(
+                42L, "req-" + UUID.randomUUID(), UUID.randomUUID().toString(), toolName, arguments)).getData();
     }
 
     private InternalAiToolsController controller(ArtifactPublicationService publisher) {
