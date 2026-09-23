@@ -65,6 +65,19 @@ def test_all_generation_branches_complete_in_order(app_factory, auth_headers, nd
         events = ndjson_parser(response)
         assert [event["sequence"] for event in events] == list(range(1, len(events) + 1))
         assert events[-1]["type"] == "completed"
+        completed = events[-1]["data"]
+        assert "artifact" not in completed
+        assert completed["threadId"] == "42:req-1"
+        assert completed["codeGenType"] == branch
+        assert completed["qualityPassed"] is True
+        assert completed["repairCount"] == 0
+        assert completed["toolCallCount"] >= 0
+        if branch in {"HTML", "MULTI_FILE"}:
+            assert completed["published"] is True
+            assert completed["versionId"] == "req-1"
+            assert completed["artifactHashes"] == {}
+        else:
+            assert completed["built"] is True
         assert all(event["requestId"] == "req-1" for event in events)
         generation_calls = [payload for name, payload in model.calls if name == "generate"]
         assert generation_calls[0]["branch"] == branch
@@ -443,7 +456,12 @@ def test_html_remains_completed_when_graph_checkpoint_fails_after_publication(
         json=generation_payload("HTML"),
         headers=auth_headers,
     ))
-    assert len([event for event in events if event["type"] == "completed"]) == 1
+    completed_events = [event for event in events if event["type"] == "completed"]
+    assert len(completed_events) == 1
+    assert "artifact" not in completed_events[0]["data"]
+    assert completed_events[0]["data"]["published"] is True
+    assert completed_events[0]["data"]["versionId"] == "req-1"
+    assert completed_events[0]["data"]["artifactHashes"] == {}
     assert not [event for event in events if event["type"] == "failed"]
 
 
@@ -477,7 +495,12 @@ def test_multi_file_remains_completed_when_graph_checkpoint_fails_after_publicat
         headers=auth_headers,
     ))
 
-    assert len([event for event in events if event["type"] == "completed"]) == 1
+    completed_events = [event for event in events if event["type"] == "completed"]
+    assert len(completed_events) == 1
+    assert "artifact" not in completed_events[0]["data"]
+    assert completed_events[0]["data"]["published"] is True
+    assert completed_events[0]["data"]["versionId"] == "req-1"
+    assert completed_events[0]["data"]["artifactHashes"] == {}
     assert not [event for event in events if event["type"] == "failed"]
     assert any(call["name"] == "artifact_publish" for call in gateway.calls)
 
@@ -508,7 +531,12 @@ def test_multi_file_records_publication_before_tool_finished_event(
         headers=auth_headers,
     ))
 
-    assert len([event for event in events if event["type"] == "completed"]) == 1
+    completed_events = [event for event in events if event["type"] == "completed"]
+    assert len(completed_events) == 1
+    assert "artifact" not in completed_events[0]["data"]
+    assert completed_events[0]["data"]["published"] is True
+    assert completed_events[0]["data"]["versionId"] == "req-1"
+    assert completed_events[0]["data"]["artifactHashes"] == {}
     assert not [event for event in events if event["type"] == "failed"]
     assert any(call["name"] == "artifact_publish" for call in gateway.calls)
 
@@ -706,7 +734,9 @@ def test_vue_repair_executes_file_tools_through_spring(app_factory, auth_headers
     assert len([call for call in gateway.calls if call["name"] == "artifact_validate"]) == 2
     assert len([call for call in gateway.calls if call["name"] == "project_build"]) == 2
     assert events[-1]["type"] == "completed"
-    assert events[-1]["data"]["artifact"] == "artifact:VUE_PROJECT"
+    assert "artifact" not in events[-1]["data"]
+    assert events[-1]["data"]["built"] is True
+    assert events[-1]["data"]["toolCallCount"] == 2
 
 
 def test_invalid_vue_repair_tool_is_rejected_before_spring_gateway(

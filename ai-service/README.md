@@ -273,6 +273,8 @@ Authorization: Bearer <AI_SERVICE_INTERNAL_BEARER_TOKEN>
 
 Python 与 Spring 之间使用 NDJSON；Spring 对前端的内容事件仍为 `data: {"d":"..."}`。只有产物成功发布后才发送命名 `done` 事件；模型截断、校验失败或发布失败会发送一个命名 `error` 事件，其中包含数字 `code`、稳定的 `errorCode`、`message` 和 `requestId`，且不会再发送 `done`。
 
+`completed.data` 只携带生成类型、质量、修复/工具计数以及发布或构建摘要，不重复携带完整源码。HTML/MULTI_FILE 的最终候选仍来自最后一个 `content_delta`，且只有 Spring 发布成功后 Java 才向现有下游提交该候选。
+
 ## Redis 与故障降级
 
 Redis key 使用 `yu-ai:langgraph:*` 命名空间，LangGraph `thread_id` 为 `{appId}:{requestId}`，所有 key 默认在 24 小时后过期。

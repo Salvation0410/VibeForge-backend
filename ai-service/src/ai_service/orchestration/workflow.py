@@ -160,6 +160,26 @@ class GenerationWorkflow:
         """构建带 checkpoint、工具循环和最多两次修复回环的状态图。"""
         builder = StateGraph(WorkflowState)
 
+        def completion_data(state: WorkflowState) -> dict[str, Any]:
+            """构造不含源码的成功摘要，避免 completed 重复传输完整产物。"""
+            data: dict[str, Any] = {
+                "threadId": state["thread_id"],
+                "codeGenType": state["code_gen_type"],
+                "qualityPassed": state.get("quality_passed", False),
+                "repairCount": state.get("repair_count", 0),
+                "toolCallCount": state.get("tool_call_count", 0),
+            }
+            if state["code_gen_type"] in {"HTML", "MULTI_FILE"}:
+                publication = state.get("publish", {})
+                data.update(
+                    published=publication.get("published") is True,
+                    versionId=publication.get("versionId"),
+                    artifactHashes=publication.get("hashes", {}),
+                )
+            else:
+                data["built"] = state.get("build", {}).get("built") is True
+            return data
+
         def guarded(name: str, function):
             # 统一处理取消检查、节点状态事件与业务 checkpoint。
             async def node(state: WorkflowState) -> dict[str, Any]:
@@ -308,9 +328,12 @@ class GenerationWorkflow:
                 terminal["data"] = {
                     "threadId": state["thread_id"],
                     "codeGenType": state["code_gen_type"],
-                    "artifact": state.get("artifact", ""),
                     "qualityPassed": state.get("quality_passed", False),
                     "repairCount": state.get("repair_count", 0),
+                    "toolCallCount": state.get("tool_call_count", 0),
+                    "published": True,
+                    "versionId": result.get("versionId"),
+                    "artifactHashes": result.get("hashes", {}),
                 }
 
             result = await self._invoke_tool(
@@ -359,13 +382,7 @@ class GenerationWorkflow:
             await emitter.emit(
                 "completed",
                 "finalize",
-                data={
-                    "threadId": state["thread_id"],
-                    "codeGenType": state["code_gen_type"],
-                    "artifact": state.get("artifact", ""),
-                    "qualityPassed": state.get("quality_passed", False),
-                    "repairCount": state.get("repair_count", 0),
-                },
+                data=completion_data(state),
             )
             terminal["completed"] = True
             return {}

@@ -275,7 +275,7 @@ caeb0cb fix: 保持预览加载图为正圆
 3. Python 路由接口在应用创建阶段可能拿不到 appId，需要统一白名单按 appId 还是 userId。
 4. `LangGraphAiGenerationGateway` 使用 JDK HttpClient 和虚拟线程，连接池、超时和断连传播仍需真实压力验证。
 5. Python `CancellationRegistry` 是单进程状态，多 worker 或多实例不共享。
-6. `completed` 仍可能携带完整 artifact，存在大事件和重复数据风险。
+6. `completed` 已移除完整 artifact，改为发布/构建摘要；业务 checkpoint 与 LangGraph saver 仍可能持久化完整工作流 artifact，后续瘦身必须结合恢复语义单独设计。
 7. 工具参数和返回值仍主要依赖运行时 Map，没有共享 OpenAPI/JSON Schema 契约。
 
 ### P2：生产化工作

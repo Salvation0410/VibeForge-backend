@@ -26,13 +26,26 @@ class LangGraphAiGenerationGatewayTest {
                 + event("tool_started", "{\"tool\":\"artifact_validate\",\"toolCallId\":\"t1\"}")
                 + event("content_delta", "{\"content\":\"repaired\"}")
                 + event("tool_finished", "{\"tool\":\"artifact_publish\",\"toolCallId\":\"t2\",\"result\":{}}")
-                + event("completed", "{}");
+                + event("completed", "{\"threadId\":\"42:req-1\",\"codeGenType\":\"MULTI_FILE\","
+                + "\"qualityPassed\":true,\"repairCount\":1,\"toolCallCount\":0,"
+                + "\"published\":true,\"versionId\":\"req-1\",\"artifactHashes\":{}}");
         var gateway = gatewayReturning(body);
 
         var chunks = gateway.generate("build", CodeGenTypeEnum.MULTI_FILE, 42L, 7L, "req-1")
                 .collectList().block();
 
         assertEquals(java.util.List.of("repaired"), chunks);
+    }
+
+    @Test
+    void completedWithoutStaticCandidateDoesNotInventContent() throws Exception {
+        var gateway = gatewayReturning(event("completed",
+                "{\"threadId\":\"42:req-empty\",\"codeGenType\":\"HTML\",\"published\":true}"));
+
+        var chunks = gateway.generate("build", CodeGenTypeEnum.HTML, 42L, 7L, "req-empty")
+                .collectList().block();
+
+        assertEquals(java.util.List.of(), chunks);
     }
 
     @Test
