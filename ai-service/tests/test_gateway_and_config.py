@@ -1,3 +1,4 @@
+import fnmatch
 import json
 
 import httpx
@@ -5,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from ai_service.config import Settings
-from ai_service.infrastructure.checkpoint import RedisCheckpoint
+from ai_service.infrastructure.checkpoint import RedisCheckpoint, RedisGraphSaver
 from ai_service.infrastructure.spring_tools import (
     InvalidSpringToolRequest,
     SpringToolError,
@@ -584,3 +585,67 @@ async def test_required_redis_fails_startup(monkeypatch):
     monkeypatch.setattr(checkpoint._client, "ping", unavailable)
     with pytest.raises(RuntimeError, match="Redis checkpoint is required"):
         await checkpoint.start()
+
+
+@pytest.mark.asyncio
+async def test_redis_graph_saver_deletes_only_target_thread_artifacts():
+    all_keys = {
+        "yu-ai:langgraph:checkpoint:NDI6cmVxLTE:_:cp-1",
+        "yu-ai:langgraph:latest:NDI6cmVxLTE:_",
+        "yu-ai:langgraph:writes:NDI6cmVxLTE:_:cp-1:task-0",
+        "yu-ai:langgraph:checkpoint:NDI6b3RoZXI:_:cp-2",
+        "yu-ai:langgraph:latest:OTHER:NDI6cmVxLTE:N",
+    }
+    deleted: list[str] = []
+
+    class FakeRedis:
+        async def scan_iter(self, *, match: str):
+            for key in all_keys:
+                if fnmatch.fnmatch(key, match):
+                    yield key
+
+        async def delete(self, *keys: str):
+            deleted.extend(keys)
+
+    saver = RedisGraphSaver(FakeRedis(), ttl_seconds=60)
+    await saver.adelete_thread("42:req-1")
+
+    assert set(deleted) == {
+        "yu-ai:langgraph:checkpoint:NDI6cmVxLTE:_:cp-1",
+        "yu-ai:langgraph:latest:NDI6cmVxLTE:_",
+        "yu-ai:langgraph:writes:NDI6cmVxLTE:_:cp-1:task-0",
+    }
+    assert "yu-ai:langgraph:checkpoint:NDI6b3RoZXI:_:cp-2" not in deleted
+    assert "yu-ai:langgraph:latest:OTHER:NDI6cmVxLTE:N" not in deleted
+
+
+@pytest.mark.asyncio
+async def test_redis_checkpoint_cleanup_delegates_when_available(monkeypatch):
+    checkpoint = RedisCheckpoint("redis://localhost:6379/0", required=False, ttl_seconds=60)
+    checkpoint.available = True
+    cleaned: list[str] = []
+
+    async def cleanup(thread_id: str):
+        cleaned.append(thread_id)
+
+    monkeypatch.setattr(checkpoint._graph_saver, "adelete_thread", cleanup)
+    await checkpoint.cleanup_graph("42:req-1")
+
+    assert cleaned == ["42:req-1"]
+    assert checkpoint.available is True
+
+
+@pytest.mark.asyncio
+async def test_required_redis_cleanup_failure_degrades_without_raising(monkeypatch, caplog):
+    checkpoint = RedisCheckpoint("redis://localhost:6379/0", required=True, ttl_seconds=60)
+    checkpoint.available = True
+
+    async def cleanup(_: str):
+        raise OSError("cleanup unavailable")
+
+    monkeypatch.setattr(checkpoint._graph_saver, "adelete_thread", cleanup)
+    with caplog.at_level("WARNING"):
+        await checkpoint.cleanup_graph("42:req-1")
+
+    assert checkpoint.available is False
+    assert "LangGraph checkpoint cleanup failed for 42:req-1" in caplog.text

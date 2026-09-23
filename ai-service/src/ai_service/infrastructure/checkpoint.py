@@ -183,7 +183,15 @@ class RedisGraphSaver(BaseCheckpointSaver):
 
     async def adelete_thread(self, thread_id: str) -> None:
         """删除指定 thread 下由本服务创建的全部 LangGraph 数据。"""
-        keys = [key async for key in self._client.scan_iter(match=f"yu-ai:langgraph:*:{_component(thread_id)}:*")]
+        encoded_thread = _component(thread_id)
+        patterns = (
+            f"yu-ai:langgraph:checkpoint:{encoded_thread}:*",
+            f"yu-ai:langgraph:latest:{encoded_thread}:*",
+            f"yu-ai:langgraph:writes:{encoded_thread}:*",
+        )
+        keys: list[str] = []
+        for pattern in patterns:
+            keys.extend([key async for key in self._client.scan_iter(match=pattern)])
         if keys:
             await self._client.delete(*keys)
 
@@ -298,7 +306,7 @@ class RedisCheckpoint:
         except Exception as exc:
             self.available = False
             logger.warning(
-                "Redis graph checkpoint cleanup failed for thread %s; degrading: %s",
+                "LangGraph checkpoint cleanup failed for %s; degrading: %s",
                 thread_id,
                 exc,
             )
