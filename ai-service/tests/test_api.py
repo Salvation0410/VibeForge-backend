@@ -85,6 +85,12 @@ def test_all_generation_branches_complete_in_order(app_factory, auth_headers, nd
         assert "context_prepare" in [event["node"] for event in events]
         assert "quality_review" in [event["node"] for event in events]
         assert "42:req-1" in checkpoint.saved
+        saved_states = checkpoint.saved["42:req-1"]
+        assert saved_states
+        assert all("artifact" not in state for state in saved_states)
+        assert all("prompt" not in state for state in saved_states)
+        assert all("conversation" not in state for state in saved_states)
+        assert all("context" not in state for state in saved_states)
         build_calls = [call for call in gateway.calls if call["name"] == "project_build"]
         assert bool(build_calls) is (branch == "VUE_PROJECT")
 

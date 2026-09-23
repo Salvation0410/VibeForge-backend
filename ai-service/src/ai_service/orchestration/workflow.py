@@ -547,7 +547,6 @@ class GenerationWorkflow:
             "requestId": state.get("request_id"),
             "appId": state.get("app_id"),
             "codeGenType": state.get("code_gen_type"),
-            "artifact": state.get("artifact"),
             "qualityPassed": state.get("quality_passed"),
             "repairCount": state.get("repair_count", 0),
             "toolCallCount": state.get("tool_call_count", 0),
