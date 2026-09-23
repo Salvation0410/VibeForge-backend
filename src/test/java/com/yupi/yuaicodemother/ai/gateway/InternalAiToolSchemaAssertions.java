@@ -8,7 +8,10 @@ import com.networknt.schema.SpecVersion;
 import com.networknt.schema.ValidationMessage;
 
 import java.io.IOException;
+import java.net.URISyntaxException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -16,6 +19,8 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.fail;
 
 public final class InternalAiToolSchemaAssertions {
+    private static final Path CONTRACT_RELATIVE_PATH = Path.of(
+            "ai-service", "src", "ai_service", "contracts", "internal-ai-tools-v1.json");
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final JsonSchemaFactory SCHEMA_FACTORY =
             JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012);
@@ -30,7 +35,7 @@ public final class InternalAiToolSchemaAssertions {
 
     public static JsonNode tool(String name) {
         for (JsonNode tool : CONTRACT.path("tools")) {
-            if (name.equals(tool.path("name").asText())) {
+            if (tool.path("name").asText().equals(name)) {
                 return tool;
             }
         }
@@ -38,11 +43,11 @@ public final class InternalAiToolSchemaAssertions {
     }
 
     public static void assertRequestValid(String name, Map<String, Object> request) {
-        assertValid(name, "request", tool(name).path("requestSchema"), request);
+        assertValidSchemaNode(name, "requestSchema", tool(name).get("requestSchema"), request);
     }
 
     public static void assertResponseValid(String name, Map<String, Object> response) {
-        assertValid(name, "response", tool(name).path("responseSchema"), response);
+        assertValidSchemaNode(name, "responseSchema", tool(name).get("responseSchema"), response);
     }
 
     public static Map<String, Object> validRequestExample(String name) {
@@ -79,7 +84,12 @@ public final class InternalAiToolSchemaAssertions {
         };
     }
 
-    private static void assertValid(String name, String field, JsonNode schemaNode, Map<String, Object> value) {
+    static void assertValidSchemaNode(
+            String name, String field, JsonNode schemaNode, Map<String, Object> value) {
+        if (schemaNode == null || schemaNode.isMissingNode() || schemaNode.isNull()
+                || (!schemaNode.isObject() && !schemaNode.isBoolean())) {
+            throw new AssertionError("Invalid JSON Schema node for tool " + name + " field " + field);
+        }
         JsonSchema schema = SCHEMA_FACTORY.getSchema(schemaNode);
         Set<ValidationMessage> errors = schema.validate(OBJECT_MAPPER.valueToTree(value));
         if (!errors.isEmpty()) {
@@ -88,11 +98,52 @@ public final class InternalAiToolSchemaAssertions {
     }
 
     private static JsonNode loadContract() {
-        Path path = Path.of("ai-service", "src", "ai_service", "contracts", "internal-ai-tools-v1.json");
         try {
-            return OBJECT_MAPPER.readTree(path.toFile());
-        } catch (IOException exception) {
+            return OBJECT_MAPPER.readTree(locateContractPath().toFile());
+        } catch (IOException | RuntimeException exception) {
             throw new ExceptionInInitializerError(exception);
+        }
+    }
+
+    private static Path locateContractPath() {
+        Set<Path> roots = new LinkedHashSet<>();
+        addAncestors(roots, Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize());
+        Path contractPath = findContract(roots);
+        if (contractPath != null) {
+            return contractPath;
+        }
+
+        try {
+            Path codeSource = Path.of(InternalAiToolSchemaAssertions.class.getProtectionDomain()
+                    .getCodeSource().getLocation().toURI()).toAbsolutePath().normalize();
+            addAncestors(roots, codeSource);
+        } catch (URISyntaxException | NullPointerException exception) {
+            throw new IllegalStateException(
+                    "Unable to resolve internal AI tool contract code source; attempted roots: " + roots,
+                    exception);
+        }
+
+        contractPath = findContract(roots);
+        if (contractPath != null) {
+            return contractPath;
+        }
+        throw new IllegalStateException(
+                "Internal AI tool contract not found; attempted roots: " + roots);
+    }
+
+    private static Path findContract(Set<Path> roots) {
+        for (Path root : roots) {
+            Path candidate = root.resolve(CONTRACT_RELATIVE_PATH).normalize();
+            if (Files.isRegularFile(candidate)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private static void addAncestors(Set<Path> roots, Path start) {
+        for (Path current = start; current != null; current = current.getParent()) {
+            roots.add(current);
         }
     }
 }

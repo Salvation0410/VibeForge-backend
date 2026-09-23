@@ -1,5 +1,7 @@
 package com.yupi.yuaicodemother.ai.gateway;
 
+import com.fasterxml.jackson.databind.node.MissingNode;
+import com.fasterxml.jackson.databind.node.NullNode;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
@@ -98,5 +100,24 @@ class InternalAiToolContractTest {
                 InternalAiToolSchemaAssertions.validResponseExample("project_build"));
         response.put("durationMs", 123L);
         InternalAiToolSchemaAssertions.assertResponseValid("project_build", response);
+    }
+
+    @Test
+    void rejectsMissingSchemasAndUnknownToolsInsteadOfSilentlyPassing() {
+        AssertionError missingSchema = assertThrows(AssertionError.class,
+                () -> InternalAiToolSchemaAssertions.assertValidSchemaNode(
+                        "project_build", "requestSchema", MissingNode.getInstance(), Map.of()));
+        assertTrue(missingSchema.getMessage().contains("project_build"));
+        assertTrue(missingSchema.getMessage().contains("requestSchema"));
+
+        AssertionError nullSchema = assertThrows(AssertionError.class,
+                () -> InternalAiToolSchemaAssertions.assertValidSchemaNode(
+                        "project_build", "responseSchema", NullNode.getInstance(), Map.of()));
+        assertTrue(nullSchema.getMessage().contains("project_build"));
+        assertTrue(nullSchema.getMessage().contains("responseSchema"));
+
+        AssertionError unknownTool = assertThrows(AssertionError.class,
+                () -> InternalAiToolSchemaAssertions.tool("unknown_tool"));
+        assertTrue(unknownTool.getMessage().contains("unknown_tool"));
     }
 }
