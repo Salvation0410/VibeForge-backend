@@ -1,14 +1,18 @@
+import asyncio
 import json
+import logging
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 
+from ai_service.api.schemas import CodeGenType, GenerationRequest
 from ai_service.infrastructure.spring_tools import SpringToolGateway
 from ai_service.models.base import ModelTurn, ToolCall
+from ai_service.orchestration.cancellation import CancellationRegistry
 from ai_service.orchestration.events import EventEmitter
-from ai_service.orchestration.workflow import _after_build
+from ai_service.orchestration.workflow import GenerationWorkflow, _after_build
 from conftest import FakeModel, FakeToolGateway, MemoryCheckpoint
 
 
@@ -91,8 +95,141 @@ def test_all_generation_branches_complete_in_order(app_factory, auth_headers, nd
         assert all("prompt" not in state for state in saved_states)
         assert all("conversation" not in state for state in saved_states)
         assert all("context" not in state for state in saved_states)
+        assert checkpoint.cleaned_graph_threads == ["42:req-1"]
         build_calls = [call for call in gateway.calls if call["name"] == "project_build"]
         assert bool(build_calls) is (branch == "VUE_PROJECT")
+
+
+def test_generation_failure_cleans_graph_checkpoint(app_factory, auth_headers, ndjson_parser):
+    class FailingModel(FakeModel):
+        async def generate(self, branch, context):
+            raise RuntimeError("model generation failed")
+
+    checkpoint = MemoryCheckpoint()
+    client = TestClient(app_factory(model=FailingModel(), checkpoint=checkpoint))
+
+    events = ndjson_parser(client.post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("HTML"),
+        headers=auth_headers,
+    ))
+
+    assert events[-1]["type"] == "failed"
+    assert not [event for event in events if event["type"] == "completed"]
+    assert checkpoint.cleaned_graph_threads == ["42:req-1"]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_failure_does_not_override_completed_terminal_event(settings, caplog):
+    class CleanupFailCheckpoint(MemoryCheckpoint):
+        async def cleanup_graph(self, thread_id: str) -> None:
+            raise RuntimeError("cleanup failed")
+
+    workflow = GenerationWorkflow(
+        model=FakeModel(),
+        tool_gateway=FakeToolGateway(),
+        checkpoint=CleanupFailCheckpoint(),
+        cancellations=CancellationRegistry(),
+        settings=settings,
+    )
+    request = GenerationRequest(
+        requestId="req-cleanup-fail",
+        appId="42",
+        prompt="build it",
+        codeGenType=CodeGenType.HTML,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        events = await workflow.run(request)
+
+    assert events[-1].type == "completed"
+    assert not [event for event in events if event.type == "failed"]
+    assert "42:req-cleanup-fail" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_task_cancellation_cleans_graph_checkpoint(settings):
+    class BlockingModel(FakeModel):
+        def __init__(self):
+            super().__init__()
+            self.started = asyncio.Event()
+
+        async def generate(self, branch, context):
+            self.started.set()
+            await asyncio.Event().wait()
+            raise AssertionError("阻塞模型不应正常返回")
+
+    model = BlockingModel()
+    checkpoint = MemoryCheckpoint()
+    workflow = GenerationWorkflow(
+        model=model,
+        tool_gateway=FakeToolGateway(),
+        checkpoint=checkpoint,
+        cancellations=CancellationRegistry(),
+        settings=settings,
+    )
+    request = GenerationRequest(
+        requestId="req-task-cancel",
+        appId="42",
+        prompt="build it",
+        codeGenType=CodeGenType.HTML,
+    )
+    task = asyncio.create_task(workflow.run(request))
+    await asyncio.wait_for(model.started.wait(), timeout=1)
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert checkpoint.cleaned_graph_threads == ["42:req-task-cancel"]
+
+
+@pytest.mark.asyncio
+async def test_stream_consumer_cancellation_waits_for_checkpoint_cleanup(settings):
+    class BlockingModel(FakeModel):
+        def __init__(self):
+            super().__init__()
+            self.started = asyncio.Event()
+
+        async def generate(self, branch, context):
+            self.started.set()
+            await asyncio.Event().wait()
+            raise AssertionError("阻塞模型不应正常返回")
+
+    class DelayedCheckpoint(MemoryCheckpoint):
+        async def cleanup_graph(self, thread_id: str) -> None:
+            await asyncio.sleep(0)
+            await super().cleanup_graph(thread_id)
+
+    model = BlockingModel()
+    checkpoint = DelayedCheckpoint()
+    workflow = GenerationWorkflow(
+        model=model,
+        tool_gateway=FakeToolGateway(),
+        checkpoint=checkpoint,
+        cancellations=CancellationRegistry(),
+        settings=settings,
+    )
+    request = GenerationRequest(
+        requestId="req-stream-cancel",
+        appId="42",
+        prompt="build it",
+        codeGenType=CodeGenType.HTML,
+    )
+    stream = workflow.stream(request)
+
+    async def consume() -> None:
+        async for _event in stream:
+            pass
+
+    consumer = asyncio.create_task(consume())
+    await asyncio.wait_for(model.started.wait(), timeout=1)
+    consumer.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await consumer
+    await stream.aclose()
+
+    assert checkpoint.cleaned_graph_threads == ["42:req-stream-cancel"]
 
 
 def test_existing_artifact_context_is_loaded_before_generation(app_factory, auth_headers, ndjson_parser):
@@ -943,7 +1080,8 @@ def test_cancel_endpoint_marks_generation_cancelled(app_factory, auth_headers):
 
 
 def test_cancelled_generation_has_explicit_terminal_event(app_factory, auth_headers, ndjson_parser):
-    app = app_factory()
+    checkpoint = MemoryCheckpoint()
+    app = app_factory(checkpoint=checkpoint)
     client = TestClient(app)
     client.post(
         "/internal/v1/generations/req-cancel:cancel",
@@ -959,6 +1097,7 @@ def test_cancelled_generation_has_explicit_terminal_event(app_factory, auth_head
     assert events[-1]["data"]["status"] == "cancelled"
     assert events[-1]["error"]["code"] == "cancelled"
     assert not app.state.cancellations.is_cancelled("42:req-cancel")
+    assert checkpoint.cleaned_graph_threads == ["42:req-cancel"]
 
 
 def test_health_ready_reports_checkpoint_failure(app_factory):

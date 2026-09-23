@@ -85,6 +85,7 @@ class MemoryCheckpoint:
 
     def __init__(self):
         self.saved: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        self.cleaned_graph_threads: list[str] = []
 
     async def start(self) -> None:
         return None
@@ -94,6 +95,10 @@ class MemoryCheckpoint:
 
     async def save(self, thread_id: str, state: dict[str, Any]) -> None:
         self.saved[thread_id].append(dict(state))
+
+    async def cleanup_graph(self, thread_id: str) -> None:
+        """只记录自动 checkpoint 清理，不删除测试需要检查的业务摘要。"""
+        self.cleaned_graph_threads.append(thread_id)
 
     async def ping(self) -> bool:
         return self.available

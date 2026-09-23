@@ -30,6 +30,8 @@ class CheckpointStore(Protocol):
 
     async def save(self, thread_id: str, state: dict[str, Any]) -> None: ...
 
+    async def cleanup_graph(self, thread_id: str) -> None: ...
+
     async def ping(self) -> bool: ...
 
     def get_graph_saver(self) -> BaseCheckpointSaver | None: ...
@@ -47,6 +49,10 @@ class DisabledCheckpoint:
         return None
 
     async def save(self, thread_id: str, state: dict[str, Any]) -> None:
+        return None
+
+    async def cleanup_graph(self, thread_id: str) -> None:
+        """禁用 checkpoint 时无需清理 LangGraph thread。"""
         return None
 
     async def ping(self) -> bool:
@@ -282,6 +288,20 @@ class RedisCheckpoint:
             if self._required:
                 raise RuntimeError("Redis checkpoint write failed") from exc
             logger.warning("Redis checkpoint write failed; degrading: %s", exc)
+
+    async def cleanup_graph(self, thread_id: str) -> None:
+        """清理终态 thread；失败时降级且不覆盖业务终态。"""
+        if not self.available:
+            return
+        try:
+            await self._graph_saver.adelete_thread(thread_id)
+        except Exception as exc:
+            self.available = False
+            logger.warning(
+                "Redis graph checkpoint cleanup failed for thread %s; degrading: %s",
+                thread_id,
+                exc,
+            )
 
     async def ping(self) -> bool:
         """返回当前 Redis 连接的实时可用状态。"""

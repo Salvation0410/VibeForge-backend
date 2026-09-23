@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, TypedDict
 
@@ -13,6 +14,8 @@ from ai_service.models.base import GenerationModel, ModelTurn
 from ai_service.models.tool_contract import validate_vue_tool_call
 from ai_service.orchestration.cancellation import CancellationRegistry, GenerationCancelled
 from ai_service.orchestration.events import EventEmitter
+
+logger = logging.getLogger(__name__)
 
 
 class WorkflowState(TypedDict, total=False):
@@ -118,6 +121,10 @@ class GenerationWorkflow:
         finally:
             if not task.done():
                 task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     async def _execute(self, request: GenerationRequest, emitter: EventEmitter) -> None:
         """构造初始状态并执行图，将取消和异常转换为终止事件。"""
@@ -153,6 +160,11 @@ class GenerationWorkflow:
                     error=EventError(code=_stable_error_code(exc), message=str(exc)),
                 )
         finally:
+            # checkpoint 清理属于终态维护动作，失败不能覆盖业务终态。
+            try:
+                await self.checkpoint.cleanup_graph(thread_id)
+            except Exception as exc:
+                logger.warning("Failed to clean graph checkpoint for thread %s: %s", thread_id, exc)
             # 请求进入明确终态或任务被取消后立即释放注册表标记，避免唯一 requestId 长期累积。
             self.cancellations.clear(thread_id)
 
