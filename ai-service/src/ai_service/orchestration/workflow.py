@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, TypedDict
@@ -74,6 +75,21 @@ def _stable_error_code(exc: Exception) -> str:
     if prefix and prefix == prefix.upper() and prefix.replace("_", "").isalnum():
         return prefix
     return "GENERATION_FAILED"
+
+
+def _vue_snapshot_artifact(snapshot: dict[str, Any]) -> str:
+    """将 Vue 源码快照序列化为键顺序稳定、无多余空白的确定性 JSON。"""
+    return json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _vue_snapshot_event_result(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """仅暴露 Vue 快照统计元数据，避免源码进入工作流事件。"""
+    return {
+        "eligibleFileCount": snapshot["eligibleFileCount"],
+        "includedFileCount": snapshot["includedFileCount"],
+        "omittedFileCount": snapshot["omittedFileCount"],
+        "truncated": snapshot["truncated"],
+    }
 
 
 class GenerationWorkflow:
@@ -282,8 +298,26 @@ class GenerationWorkflow:
             """仅对已通过确定性硬校验的候选执行模型质量检查。"""
             if not state.get("validation", {}).get("valid", False):
                 return {"quality_passed": False}
+            review_artifact = state.get("artifact", "")
+            repair_count = state.get("repair_count", 0)
+            if (
+                state["code_gen_type"] == "VUE_PROJECT"
+                and repair_count > 0
+                and state.get("build", {}).get("built") is True
+            ):
+                snapshot = await self._invoke_tool(
+                    emitter,
+                    "quality_review",
+                    "vue_source_snapshot",
+                    {"codeGenType": "VUE_PROJECT"},
+                    state["app_id"],
+                    state["request_id"],
+                    f"{state['request_id']}:vue-source-snapshot:{repair_count}",
+                    event_result=_vue_snapshot_event_result,
+                )
+                review_artifact = _vue_snapshot_artifact(snapshot)
             passed = await self.model.review(
-                state.get("artifact", ""),
+                review_artifact,
                 {**state["context"], "validation": state.get("validation"), "build": state.get("build")},
             )
             return {"quality_passed": passed}
@@ -527,8 +561,9 @@ class GenerationWorkflow:
         request_id: str,
         tool_call_id: str,
         on_result: Callable[[dict[str, Any]], None] | None = None,
+        event_result: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        """调用 Spring 工具网关，并在完成事件前执行可选的权威结果记录。"""
+        """调用 Spring 工具网关，并支持记录权威结果及映射事件可见结果。"""
         await emitter.emit("tool_started", node, data={"tool": name, "toolCallId": tool_call_id})
         result = await self.tool_gateway.invoke(
             name,
@@ -542,7 +577,11 @@ class GenerationWorkflow:
         await emitter.emit(
             "tool_finished",
             node,
-            data={"tool": name, "toolCallId": tool_call_id, "result": result},
+            data={
+                "tool": name,
+                "toolCallId": tool_call_id,
+                "result": event_result(result) if event_result is not None else result,
+            },
         )
         return result
 

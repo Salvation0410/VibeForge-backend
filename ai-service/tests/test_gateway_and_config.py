@@ -56,6 +56,80 @@ async def test_spring_gateway_uses_bearer_and_scoped_tool_request():
 
 
 @pytest.mark.asyncio
+async def test_spring_gateway_validates_vue_source_snapshot_response():
+    snapshot = {
+        "files": [{"path": "src/App.vue", "content": "<template>fixed</template>", "truncated": False}],
+        "eligibleFileCount": 1,
+        "includedFileCount": 1,
+        "omittedFileCount": 0,
+        "truncated": False,
+    }
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.read()))
+        return httpx.Response(200, json={"code": 0, "data": snapshot, "message": "ok"})
+
+    gateway = SpringToolGateway(
+        base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="gateway-token",
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await gateway.invoke(
+        "vue_source_snapshot",
+        {"codeGenType": "VUE_PROJECT"},
+        app_id="42",
+        request_id="req-1",
+        tool_call_id="req-1:vue-source-snapshot:1",
+    )
+
+    assert captured["toolName"] == "vue_source_snapshot"
+    assert captured["arguments"] == {"codeGenType": "VUE_PROJECT"}
+    assert result == snapshot
+    await gateway.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "snapshot",
+    [
+        {
+            "files": [{"path": "src/App.vue", "content": "x" * 12_001, "truncated": True}],
+            "eligibleFileCount": 1,
+            "includedFileCount": 1,
+            "omittedFileCount": 0,
+            "truncated": True,
+        },
+        {
+            "files": [{"path": "src/App.vue", "content": "fixed", "truncated": False}],
+            "eligibleFileCount": 1,
+            "includedFileCount": 1,
+            "truncated": False,
+        },
+    ],
+)
+async def test_spring_gateway_rejects_invalid_vue_source_snapshot_response(snapshot):
+    gateway = SpringToolGateway(
+        base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="gateway-token",
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, json={"code": 0, "data": snapshot, "message": "ok"})
+        ),
+    )
+
+    with pytest.raises(SpringToolProtocolError):
+        await gateway.invoke(
+            "vue_source_snapshot",
+            {"codeGenType": "VUE_PROJECT"},
+            app_id="42",
+            request_id="req-1",
+            tool_call_id="req-1:vue-source-snapshot:1",
+        )
+    await gateway.close()
+
+
+@pytest.mark.asyncio
 async def test_project_build_uses_extended_read_timeout_only_for_build_tool():
     timeouts = {}
 
