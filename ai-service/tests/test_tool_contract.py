@@ -337,3 +337,16 @@ def test_model_cannot_supply_workflow_controlled_arguments(controlled_name: str)
 def test_vue_source_snapshot_rejects_non_vue_project_code_gen_type(code_gen_type: str):
     with pytest.raises(ToolContractValidationError):
         validate_tool_arguments("vue_source_snapshot", {"codeGenType": code_gen_type})
+
+
+def test_vue_source_snapshot_rejects_file_content_over_limit():
+    result = {
+        "files": [{"path": "src/App.vue", "content": "x" * 12_001, "truncated": True}],
+        "eligibleFileCount": 1,
+        "includedFileCount": 1,
+        "omittedFileCount": 0,
+        "truncated": True,
+    }
+
+    with pytest.raises(ToolContractValidationError):
+        validate_tool_result("vue_source_snapshot", result)

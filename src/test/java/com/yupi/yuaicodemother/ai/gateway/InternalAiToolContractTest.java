@@ -104,6 +104,20 @@ class InternalAiToolContractTest {
     }
 
     @Test
+    void rejectsVueSourceSnapshotFileContentOverLimit() {
+        Map<String, Object> response = Map.of(
+                "files", java.util.List.of(Map.of(
+                        "path", "src/App.vue", "content", "x".repeat(12_001), "truncated", true)),
+                "eligibleFileCount", 1,
+                "includedFileCount", 1,
+                "omittedFileCount", 0,
+                "truncated", true);
+
+        assertThrows(AssertionError.class,
+                () -> InternalAiToolSchemaAssertions.assertResponseValid("vue_source_snapshot", response));
+    }
+
+    @Test
     void rejectsMissingSchemasAndUnknownToolsInsteadOfSilentlyPassing() {
         AssertionError missingSchema = assertThrows(AssertionError.class,
                 () -> InternalAiToolSchemaAssertions.assertValidSchemaNode(
