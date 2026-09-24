@@ -10,7 +10,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -44,7 +43,6 @@ class VueSourceSnapshotReaderTest {
         write("pnpm-lock.yaml", "lock");
         write("yarn.lock", "lock");
         Files.write(tempDir.resolve("image.png"), new byte[]{0, 1, 2});
-        Files.write(tempDir.resolve("src/binary.ts"), new byte[]{'a', 0, 'b'});
         createSymbolicLinkIfSupported(tempDir.resolve("src/Linked.vue"), tempDir.resolve("src/App.vue"));
 
         Map<String, Object> snapshot = reader(tempDir).read(42L);
@@ -59,10 +57,11 @@ class VueSourceSnapshotReaderTest {
     }
 
     @Test
-    void limitsSnapshotToTwentyFourFiles() throws Exception {
-        for (int index = 0; index < 25; index++) {
+    void limitsSnapshotToBestTwentyFourFilesWithoutReadingOmittedCandidate() throws Exception {
+        for (int index = 0; index < 24; index++) {
             write("src/file-%02d.ts".formatted(index), "export default " + index);
         }
+        Files.write(tempDir.resolve("src/file-24.ts"), new byte[]{(byte) 0xC3, (byte) 0x28});
 
         Map<String, Object> snapshot = reader(tempDir).read(42L);
 
@@ -106,47 +105,55 @@ class VueSourceSnapshotReaderTest {
     }
 
     @Test
-    void boundsLargeFileReadsToTheConfiguredHeadAndTailProbe() throws Exception {
-        Path file = tempDir.resolve("src/Large.ts");
+    void rejectsSourceFileLargerThanOneMibibyte() throws Exception {
+        Path file = tempDir.resolve("src/TooLarge.ts");
         Files.createDirectories(file.getParent());
-        int size = VueSourceSnapshotReader.MAX_FILE_PROBE_BYTES + 10_000;
-        byte[] contentBytes = new byte[size];
-        Arrays.fill(contentBytes, (byte) 'x');
-        System.arraycopy("head-".getBytes(StandardCharsets.UTF_8), 0, contentBytes, 0, 5);
-        System.arraycopy("-tail".getBytes(StandardCharsets.UTF_8), 0, contentBytes, size - 5, 5);
-        Files.write(file, contentBytes);
+        Files.write(file, new byte[VueSourceSnapshotReader.MAX_SOURCE_FILE_BYTES + 1]);
 
-        Map<String, Object> source = files(reader(tempDir).read(42L)).getFirst();
-        String content = (String) source.get("content");
+        BusinessException error = assertThrows(BusinessException.class, () -> reader(tempDir).read(42L));
 
-        assertEquals(VueSourceSnapshotReader.MAX_FILE_CHARS, content.length());
-        assertTrue(content.startsWith("head-"));
-        assertTrue(content.endsWith("-tail"));
-        assertEquals(true, source.get("truncated"));
+        assertTrue(error.getMessage().startsWith("VUE_SOURCE_SNAPSHOT_READ_FAILED"));
+        assertTrue(error.getMessage().contains("source file too large"));
     }
 
     @Test
-    void decodesLargeFileWhenUtf8CharactersCrossBothProbeBoundaries() throws Exception {
-        Path file = tempDir.resolve("src/Large.vue");
+    void failsWhenNulAppearsInTheMiddleOfSourceUnderLimit() throws Exception {
+        Path file = tempDir.resolve("src/Nul.ts");
         Files.createDirectories(file.getParent());
-        int size = VueSourceSnapshotReader.MAX_FILE_PROBE_BYTES + 10_000;
-        int side = VueSourceSnapshotReader.MAX_FILE_PROBE_BYTES / 2;
-        byte[] contentBytes = new byte[size];
-        Arrays.fill(contentBytes, (byte) 'x');
-        byte[] emoji = "😀".getBytes(StandardCharsets.UTF_8);
-        System.arraycopy(emoji, 0, contentBytes, side - 2, emoji.length);
-        System.arraycopy(emoji, 0, contentBytes, size - side - 2, emoji.length);
-        System.arraycopy("head-".getBytes(StandardCharsets.UTF_8), 0, contentBytes, 0, 5);
-        System.arraycopy("-tail😀".getBytes(StandardCharsets.UTF_8), 0,
-                contentBytes, size - "-tail😀".getBytes(StandardCharsets.UTF_8).length,
-                "-tail😀".getBytes(StandardCharsets.UTF_8).length);
-        Files.write(file, contentBytes);
+        byte[] content = "a".repeat(20_000).getBytes(StandardCharsets.UTF_8);
+        content[10_000] = 0;
+        Files.write(file, content);
 
-        String content = (String) files(reader(tempDir).read(42L)).getFirst().get("content");
+        BusinessException error = assertThrows(BusinessException.class, () -> reader(tempDir).read(42L));
 
-        assertTrue(content.startsWith("head-"));
-        assertTrue(content.endsWith("-tail😀"));
-        assertFalse(hasUnpairedSurrogate(content));
+        assertTrue(error.getMessage().startsWith("VUE_SOURCE_SNAPSHOT_READ_FAILED"));
+    }
+
+    @Test
+    void failsWhenMalformedUtf8AppearsInTheMiddleOfSourceUnderLimit() throws Exception {
+        Path file = tempDir.resolve("src/Malformed.ts");
+        Files.createDirectories(file.getParent());
+        byte[] content = "a".repeat(20_000).getBytes(StandardCharsets.UTF_8);
+        content[10_000] = (byte) 0xC3;
+        content[10_001] = (byte) 0x28;
+        Files.write(file, content);
+
+        BusinessException error = assertThrows(BusinessException.class, () -> reader(tempDir).read(42L));
+
+        assertTrue(error.getMessage().startsWith("VUE_SOURCE_SNAPSHOT_READ_FAILED"));
+    }
+
+    @Test
+    void rejectsMoreThanTenThousandEligibleCandidates() {
+        VueSourceSnapshotReader.CandidateCollector collector = new VueSourceSnapshotReader.CandidateCollector();
+        for (int index = 0; index < VueSourceSnapshotReader.MAX_ELIGIBLE_FILES; index++) {
+            collector.add(Path.of("src/file-%05d.ts".formatted(index)));
+        }
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> collector.add(Path.of("src/overflow.ts")));
+
+        assertEquals("VUE_SOURCE_SNAPSHOT_READ_FAILED: too many eligible files", error.getMessage());
     }
 
     @Test
