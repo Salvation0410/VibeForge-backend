@@ -57,6 +57,46 @@ class VueSourceSnapshotReaderTest {
     }
 
     @Test
+    void excludesDirectoryAndLockFileNamesCaseInsensitively() throws Exception {
+        write("src/App.vue", "app");
+        write("Node_Modules/pkg/index.js", "dependency");
+        write("DIST/app.js", "bundle");
+        write("BUILD/app.js", "build");
+        write("PACKAGE-LOCK.JSON", "lock");
+        write("PNPM-LOCK.YAML", "lock");
+        write("YARN.LOCK", "lock");
+
+        Map<String, Object> snapshot = reader(tempDir).read(42L);
+
+        assertEquals(List.of("src/App.vue"), files(snapshot).stream().map(file -> file.get("path")).toList());
+        assertEquals(1, snapshot.get("eligibleFileCount"));
+    }
+
+    @Test
+    void rejectsMoreThanTwentyThousandVisitedProjectEntries() {
+        VueSourceSnapshotReader.EntryBudget budget = new VueSourceSnapshotReader.EntryBudget();
+        for (int index = 0; index < VueSourceSnapshotReader.MAX_VISITED_ENTRIES; index++) budget.consume();
+
+        BusinessException error = assertThrows(BusinessException.class, budget::consume);
+
+        assertEquals("VUE_SOURCE_SNAPSHOT_READ_FAILED: too many project entries", error.getMessage());
+    }
+
+    @Test
+    void traversalBudgetCountsDirectoriesAndUnrelatedFiles() throws Exception {
+        Files.createDirectories(tempDir.resolve("assets"));
+        Files.write(tempDir.resolve("assets/image.png"), new byte[]{1, 2, 3});
+        write("src/App.vue", "app");
+        VueSourceSnapshotReader reader = reader(tempDir);
+        VueSourceSnapshotReader.EntryBudget budget = new VueSourceSnapshotReader.EntryBudget(2);
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> reader.collectEligiblePaths(tempDir, budget));
+
+        assertEquals("VUE_SOURCE_SNAPSHOT_READ_FAILED: too many project entries", error.getMessage());
+    }
+
+    @Test
     void limitsSnapshotToBestTwentyFourFilesWithoutReadingOmittedCandidate() throws Exception {
         for (int index = 0; index < 24; index++) {
             write("src/file-%02d.ts".formatted(index), "export default " + index);
@@ -277,6 +317,8 @@ class VueSourceSnapshotReaderTest {
         writeAt(empty, "image.png", "not source");
         BusinessException emptyError = assertThrows(BusinessException.class, () -> reader(empty).read(42L));
         assertTrue(emptyError.getMessage().startsWith("VUE_SOURCE_SNAPSHOT_EMPTY"));
+        assertFalse(missingError.getMessage().contains(missing.toString()));
+        assertFalse(emptyError.getMessage().contains(empty.toString()));
     }
 
     @Test
@@ -288,6 +330,8 @@ class VueSourceSnapshotReaderTest {
         BusinessException error = assertThrows(BusinessException.class, () -> reader(tempDir).read(42L));
 
         assertTrue(error.getMessage().startsWith("VUE_SOURCE_SNAPSHOT_READ_FAILED"));
+        assertFalse(error.getMessage().contains(tempDir.toString()));
+        assertFalse(error.getMessage().contains(malformed.toString()));
     }
 
     @Test

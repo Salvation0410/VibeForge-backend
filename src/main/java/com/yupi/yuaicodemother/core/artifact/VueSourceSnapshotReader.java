@@ -42,6 +42,7 @@ public class VueSourceSnapshotReader {
     static final int MAX_FILE_CHARS = 12_000;
     static final int MAX_TOTAL_CHARS = 60_000;
     static final int MAX_ELIGIBLE_FILES = 10_000;
+    static final int MAX_VISITED_ENTRIES = 20_000;
     static final int MAX_SOURCE_FILE_BYTES = 1024 * 1024;
     static final String TRUNCATION_MARKER = "\n...[truncated]...\n";
 
@@ -65,7 +66,7 @@ public class VueSourceSnapshotReader {
             throw failure("VUE_SOURCE_SNAPSHOT_MISSING", "active Vue project directory is missing");
         }
 
-        CandidateSelection selection = collectEligiblePaths(root);
+        CandidateSelection selection = collectEligiblePaths(root, new EntryBudget());
         if (selection.eligibleFileCount() == 0) {
             throw failure("VUE_SOURCE_SNAPSHOT_EMPTY", "active Vue project contains no eligible source files");
         }
@@ -77,13 +78,14 @@ public class VueSourceSnapshotReader {
         return buildSnapshot(sources, selection.eligibleFileCount());
     }
 
-    private CandidateSelection collectEligiblePaths(Path root) {
+    CandidateSelection collectEligiblePaths(Path root, EntryBudget entryBudget) {
         CandidateCollector collector = new CandidateCollector();
         try {
             Files.walkFileTree(root, EnumSet.noneOf(FileVisitOption.class), Integer.MAX_VALUE,
                     new SimpleFileVisitor<>() {
                         @Override
                         public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) {
+                            if (!directory.equals(root)) entryBudget.consume();
                             if (!directory.equals(root) && isExcludedDirectory(directory.getFileName().toString())) {
                                 return FileVisitResult.SKIP_SUBTREE;
                             }
@@ -92,6 +94,7 @@ public class VueSourceSnapshotReader {
 
                         @Override
                         public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) {
+                            entryBudget.consume();
                             if (attributes.isRegularFile() && !attributes.isSymbolicLink() && isEligibleFile(file)) {
                                 collector.add(root.relativize(file));
                             }
@@ -100,6 +103,7 @@ public class VueSourceSnapshotReader {
 
                         @Override
                         public FileVisitResult visitFileFailed(Path file, IOException exception) throws IOException {
+                            entryBudget.consume();
                             throw exception;
                         }
 
@@ -113,7 +117,7 @@ public class VueSourceSnapshotReader {
         } catch (BusinessException exception) {
             throw exception;
         } catch (Exception exception) {
-            throw readFailure(root);
+            throw readFailure();
         }
     }
 
@@ -129,7 +133,7 @@ public class VueSourceSnapshotReader {
         } catch (BusinessException exception) {
             throw exception;
         } catch (Exception exception) {
-            throw readFailure(file);
+            throw readFailure();
         }
     }
 
@@ -213,15 +217,16 @@ public class VueSourceSnapshotReader {
     }
 
     private boolean isExcludedDirectory(String name) {
-        return name.startsWith(".") || EXCLUDED_DIRECTORIES.contains(name);
+        return name.startsWith(".") || EXCLUDED_DIRECTORIES.contains(name.toLowerCase(Locale.ROOT));
     }
 
     private boolean isEligibleFile(Path file) {
         String name = file.getFileName().toString();
-        if (name.startsWith(".") || EXCLUDED_FILES.contains(name)) return false;
+        String normalizedName = name.toLowerCase(Locale.ROOT);
+        if (name.startsWith(".") || EXCLUDED_FILES.contains(normalizedName)) return false;
         int separator = name.lastIndexOf('.');
         return separator >= 0 && separator < name.length() - 1
-                && ALLOWED_EXTENSIONS.contains(name.substring(separator + 1).toLowerCase(Locale.ROOT));
+                && ALLOWED_EXTENSIONS.contains(normalizedName.substring(separator + 1));
     }
 
     /** 截断标记计入额度，并尽量均衡保留文件头尾。 */
@@ -264,8 +269,8 @@ public class VueSourceSnapshotReader {
         return path.toString().replace('\\', '/');
     }
 
-    private BusinessException readFailure(Path target) {
-        return failure("VUE_SOURCE_SNAPSHOT_READ_FAILED", "failed to read " + target);
+    private BusinessException readFailure() {
+        return failure("VUE_SOURCE_SNAPSHOT_READ_FAILED", "failed to read project source");
     }
 
     private BusinessException failure(String prefix, String detail) {
@@ -279,6 +284,27 @@ public class VueSourceSnapshotReader {
     }
 
     private record RetainedText(String content, boolean truncated) {
+    }
+
+    /** 对根目录以外的所有遍历条目施加统一硬上限。 */
+    static final class EntryBudget {
+        private final int limit;
+        private int visitedEntries;
+
+        EntryBudget() {
+            this(MAX_VISITED_ENTRIES);
+        }
+
+        EntryBudget(int limit) {
+            if (limit <= 0) throw new IllegalArgumentException("limit must be positive");
+            this.limit = limit;
+        }
+
+        void consume() {
+            if (++visitedEntries > limit) {
+                throw failureStatic("VUE_SOURCE_SNAPSHOT_READ_FAILED", "too many project entries");
+            }
+        }
     }
 
     /** 遍历期间只保存排序最佳的 24 个候选，并硬限制合格文件总数。 */
