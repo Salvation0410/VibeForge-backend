@@ -131,12 +131,14 @@ public class VueSourceSnapshotReader {
         for (SourceFile source : sources) {
             if (files.size() >= MAX_FILES) break;
             int remaining = MAX_TOTAL_CHARS - totalChars;
-            if (remaining <= TRUNCATION_MARKER.length()) {
+            boolean exceedsRemainingBudget = source.content().length() > remaining;
+            // 完整内容可放入时不需要为截断标记预留预算。
+            if (exceedsRemainingBudget && remaining <= TRUNCATION_MARKER.length()) {
                 truncated = true;
                 break;
             }
-            boolean fileTruncated = source.truncated() || source.content().length() > remaining;
-            String content = source.content().length() > remaining
+            boolean fileTruncated = source.truncated() || exceedsRemainingBudget;
+            String content = exceedsRemainingBudget
                     ? truncate(source.content(), remaining)
                     : source.content();
             Map<String, Object> file = new LinkedHashMap<>();

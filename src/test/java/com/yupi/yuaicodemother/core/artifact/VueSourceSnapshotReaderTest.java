@@ -105,6 +105,26 @@ class VueSourceSnapshotReaderTest {
     }
 
     @Test
+    void includesSmallFileThatFitsWhenRemainingBudgetCannotHoldTruncationMarker() throws Exception {
+        for (int index = 0; index < 4; index++) {
+            write("src/file-%02d.ts".formatted(index), String.valueOf(index).repeat(12_000));
+        }
+        write("src/file-04.ts", "e".repeat(11_985));
+        write("src/file-05.ts", "small-file");
+
+        Map<String, Object> snapshot = reader(tempDir).read(42L);
+        List<Map<String, Object>> files = files(snapshot);
+        int totalChars = files.stream().mapToInt(file -> ((String) file.get("content")).length()).sum();
+
+        assertEquals(6, snapshot.get("eligibleFileCount"));
+        assertEquals(6, snapshot.get("includedFileCount"));
+        assertEquals(0, snapshot.get("omittedFileCount"));
+        assertEquals(false, snapshot.get("truncated"));
+        assertEquals("small-file", files.getLast().get("content"));
+        assertEquals(59_995, totalChars);
+    }
+
+    @Test
     void reportsMissingAndEmptyProjectsWithStableErrors() throws Exception {
         Path missing = tempDir.resolve("missing");
         BusinessException missingError = assertThrows(BusinessException.class, () -> reader(missing).read(42L));
