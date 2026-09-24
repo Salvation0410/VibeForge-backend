@@ -300,11 +300,12 @@ class GenerationWorkflow:
                 return {"quality_passed": False}
             review_artifact = state.get("artifact", "")
             repair_count = state.get("repair_count", 0)
-            if (
+            uses_vue_snapshot = (
                 state["code_gen_type"] == "VUE_PROJECT"
                 and repair_count > 0
                 and state.get("build", {}).get("built") is True
-            ):
+            )
+            if uses_vue_snapshot:
                 snapshot = await self._invoke_tool(
                     emitter,
                     "quality_review",
@@ -316,10 +317,18 @@ class GenerationWorkflow:
                     event_result=_vue_snapshot_event_result,
                 )
                 review_artifact = _vue_snapshot_artifact(snapshot)
-            passed = await self.model.review(
-                review_artifact,
-                {**state["context"], "validation": state.get("validation"), "build": state.get("build")},
-            )
+            review_context = {
+                **state["context"],
+                "validation": state.get("validation"),
+                "build": state.get("build"),
+            }
+            if uses_vue_snapshot:
+                try:
+                    passed = await self.model.review(review_artifact, review_context)
+                except Exception as exc:
+                    raise RuntimeError("Vue source snapshot review failed") from exc
+            else:
+                passed = await self.model.review(review_artifact, review_context)
             return {"quality_passed": passed}
 
         async def repair(state: WorkflowState) -> dict[str, Any]:

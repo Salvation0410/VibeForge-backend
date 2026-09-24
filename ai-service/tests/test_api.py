@@ -455,8 +455,42 @@ def test_truncated_vue_snapshot_is_reviewed_after_repair(
 def test_failed_repaired_vue_snapshot_review_triggers_second_repair(
     app_factory, auth_headers, ndjson_parser
 ):
+    snapshots = [
+        {
+            "files": [{"path": "src/App.vue", "content": "snapshot-v1", "truncated": False}],
+            "eligibleFileCount": 1,
+            "includedFileCount": 1,
+            "omittedFileCount": 0,
+            "truncated": False,
+        },
+        {
+            "files": [{"path": "src/App.vue", "content": "snapshot-v2", "truncated": False}],
+            "eligibleFileCount": 1,
+            "includedFileCount": 1,
+            "omittedFileCount": 0,
+            "truncated": False,
+        },
+    ]
+
+    class SequencedSnapshotGateway(FakeToolGateway):
+        def __init__(self):
+            super().__init__()
+            self.snapshots = list(snapshots)
+
+        async def invoke(self, name, arguments, *, app_id, request_id, tool_call_id):
+            result = await super().invoke(
+                name,
+                arguments,
+                app_id=app_id,
+                request_id=request_id,
+                tool_call_id=tool_call_id,
+            )
+            if name == "vue_source_snapshot":
+                return self.snapshots.pop(0)
+            return result
+
     model = FakeModel(reviews=[False, False, True])
-    gateway = FakeToolGateway()
+    gateway = SequencedSnapshotGateway()
     events = ndjson_parser(TestClient(app_factory(model=model, gateway=gateway)).post(
         "/internal/v1/generations:stream",
         json=generation_payload("VUE_PROJECT"),
@@ -471,9 +505,49 @@ def test_failed_repaired_vue_snapshot_review_triggers_second_repair(
     ]
     review_calls = [data for name, data in model.calls if name == "review"]
     assert review_calls[0]["artifact"] == "artifact:VUE_PROJECT"
-    assert all("fixed" in review["artifact"] for review in review_calls[1:])
+    assert "snapshot-v1" in review_calls[1]["artifact"]
+    assert "snapshot-v2" not in review_calls[1]["artifact"]
+    assert "snapshot-v2" in review_calls[2]["artifact"]
+    assert "snapshot-v1" not in review_calls[2]["artifact"]
     assert events[-1]["type"] == "completed"
     assert events[-1]["data"]["repairCount"] == 2
+
+
+def test_vue_snapshot_review_failure_does_not_leak_source_to_events(
+    app_factory, auth_headers, ndjson_parser
+):
+    secret = "TOP_SECRET_SOURCE"
+    snapshot = {
+        "files": [{"path": "src/App.vue", "content": secret, "truncated": False}],
+        "eligibleFileCount": 1,
+        "includedFileCount": 1,
+        "omittedFileCount": 0,
+        "truncated": False,
+    }
+
+    class LeakingReviewModel(FakeModel):
+        async def review(self, artifact, context):
+            self.calls.append(("review", {"artifact": artifact, "context": context}))
+            if artifact == "artifact:VUE_PROJECT":
+                return False
+            raise RuntimeError(f"provider rejected artifact: {artifact}")
+
+    model = LeakingReviewModel()
+    events = ndjson_parser(TestClient(app_factory(
+        model=model,
+        gateway=FakeToolGateway(vue_source_snapshot=snapshot),
+    )).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    assert events[-1]["type"] == "failed"
+    assert events[-1]["error"]["message"] == "Vue source snapshot review failed"
+    serialized_events = json.dumps(events, ensure_ascii=False)
+    assert secret not in serialized_events
+    assert "src/App.vue" not in serialized_events
+    assert len([call for call in model.calls if call[0] == "review"]) == 2
 
 
 def test_vue_build_failure_exhausts_two_repairs_without_review_or_completion(
