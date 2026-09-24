@@ -98,6 +98,16 @@ VALID_CASES = {
             "message": "vite failed",
         },
     ),
+    "vue_source_snapshot": (
+        {"codeGenType": "VUE_PROJECT"},
+        {
+            "files": [{"path": "src/App.vue", "content": "<template />", "truncated": False}],
+            "eligibleFileCount": 1,
+            "includedFileCount": 1,
+            "omittedFileCount": 0,
+            "truncated": False,
+        },
+    ),
 }
 
 
@@ -291,7 +301,13 @@ def test_valid_vue_tool_call_returns_a_defensive_argument_copy():
 
 @pytest.mark.parametrize(
     "tool_name",
-    ["artifact_context", "artifact_validate", "artifact_publish", "project_build"],
+    [
+        "artifact_context",
+        "artifact_validate",
+        "artifact_publish",
+        "project_build",
+        "vue_source_snapshot",
+    ],
 )
 def test_internal_workflow_tools_are_rejected_for_model_calls(tool_name: str):
     with pytest.raises(InvalidVueToolCall, match="not available to the Vue model"):
@@ -315,3 +331,22 @@ def test_model_cannot_supply_workflow_controlled_arguments(controlled_name: str)
             "file_read",
             {"relativeFilePath": "src/App.vue", controlled_name: "forged"},
         )
+
+
+@pytest.mark.parametrize("code_gen_type", ["HTML", "MULTI_FILE", "vue_project"])
+def test_vue_source_snapshot_rejects_non_vue_project_code_gen_type(code_gen_type: str):
+    with pytest.raises(ToolContractValidationError):
+        validate_tool_arguments("vue_source_snapshot", {"codeGenType": code_gen_type})
+
+
+def test_vue_source_snapshot_rejects_file_content_over_limit():
+    result = {
+        "files": [{"path": "src/App.vue", "content": "x" * 12_001, "truncated": True}],
+        "eligibleFileCount": 1,
+        "includedFileCount": 1,
+        "omittedFileCount": 0,
+        "truncated": True,
+    }
+
+    with pytest.raises(ToolContractValidationError):
+        validate_tool_result("vue_source_snapshot", result)

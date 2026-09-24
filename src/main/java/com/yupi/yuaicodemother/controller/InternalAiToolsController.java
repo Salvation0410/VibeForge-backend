@@ -14,6 +14,7 @@ import com.yupi.yuaicodemother.core.artifact.ArtifactValidationException;
 import com.yupi.yuaicodemother.core.artifact.HtmlArtifactParser;
 import com.yupi.yuaicodemother.core.artifact.HtmlArtifactValidator;
 import com.yupi.yuaicodemother.core.artifact.MultiFileArtifactValidator;
+import com.yupi.yuaicodemother.core.artifact.VueSourceSnapshotReader;
 import com.yupi.yuaicodemother.core.paser.MultiFileCodeParser;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
 import com.yupi.yuaicodemother.exception.BusinessException;
@@ -57,6 +58,7 @@ public class InternalAiToolsController {
     private final ArtifactPublicationService artifactPublicationService;
     private final MultiFileArtifactValidator artifactValidator;
     private final HtmlArtifactValidator htmlArtifactValidator;
+    private final VueSourceSnapshotReader vueSourceSnapshotReader;
     private final ToolInvocationIdempotencyService idempotencyService;
 
     /**
@@ -81,6 +83,11 @@ public class InternalAiToolsController {
         }
         InternalAiTool tool = parseTool(request.toolName());
         Map<String, Object> arguments = request.arguments() == null ? Map.of() : request.arguments();
+        if (tool == InternalAiTool.VUE_SOURCE_SNAPSHOT) {
+            validateVueSourceSnapshotArguments(arguments);
+            // 源码快照只瞬时读取，避免把大段源码写入 Redis 成功结果缓存。
+            return ResultUtils.success(execute(tool, request.appId(), request.requestId(), arguments));
+        }
         Map<String, Object> result = idempotencyService.execute(
                 request.appId(),
                 request.requestId(),
@@ -116,7 +123,27 @@ public class InternalAiToolsController {
             case ARTIFACT_VALIDATE -> validateArtifact(args);
             case ARTIFACT_PUBLISH -> publishArtifact(appId, requestId, args);
             case PROJECT_BUILD -> buildProject(appId, args);
+            case VUE_SOURCE_SNAPSHOT -> vueSourceSnapshot(appId, args);
         };
+    }
+
+    private Map<String, Object> vueSourceSnapshot(long appId, Map<String, Object> args) {
+        if (!"VUE_PROJECT".equals(text(args.get("codeGenType")))) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR,
+                    "vue_source_snapshot requires VUE_PROJECT");
+        }
+        return vueSourceSnapshotReader.read(appId);
+    }
+
+    private void validateVueSourceSnapshotArguments(Map<String, Object> args) {
+        if (!"VUE_PROJECT".equals(text(args.get("codeGenType")))) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR,
+                    "vue_source_snapshot requires VUE_PROJECT");
+        }
+        if (args.size() != 1 || !args.containsKey("codeGenType")) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR,
+                    "vue_source_snapshot accepts only codeGenType");
+        }
     }
 
     /**

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from collections import defaultdict
 from typing import Any
 
@@ -48,9 +49,31 @@ class FakeModel:
 
 
 class FakeToolGateway:
-    def __init__(self, *, artifact_context: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        *,
+        artifact_context: dict[str, Any] | None = None,
+        vue_source_snapshot: dict[str, Any] | None = None,
+    ):
         self.calls: list[dict[str, Any]] = []
         self.artifact_context = artifact_context or {"exists": False}
+        self.vue_source_snapshot = (
+            vue_source_snapshot
+            if vue_source_snapshot is not None
+            else {
+                "files": [
+                    {
+                        "path": "src/App.vue",
+                        "content": "<template><main>fixed</main></template>",
+                        "truncated": False,
+                    }
+                ],
+                "eligibleFileCount": 1,
+                "includedFileCount": 1,
+                "omittedFileCount": 0,
+                "truncated": False,
+            }
+        )
 
     async def invoke(
         self,
@@ -77,6 +100,8 @@ class FakeToolGateway:
             return {"published": True, "versionId": request_id, "hashes": {}}
         if name == "project_build":
             return {"built": True, "errorCode": "", "message": ""}
+        if name == "vue_source_snapshot":
+            return deepcopy(self.vue_source_snapshot)
         return {"ok": True, "echo": call}
 
 

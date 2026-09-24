@@ -98,6 +98,7 @@ def test_all_generation_branches_complete_in_order(app_factory, auth_headers, nd
         assert checkpoint.cleaned_graph_threads == ["42:req-1"]
         build_calls = [call for call in gateway.calls if call["name"] == "project_build"]
         assert bool(build_calls) is (branch == "VUE_PROJECT")
+        assert not [call for call in gateway.calls if call["name"] == "vue_source_snapshot"]
 
 
 def test_generation_failure_cleans_graph_checkpoint(app_factory, auth_headers, ndjson_parser):
@@ -283,18 +284,22 @@ def test_artifact_context_failure_stops_before_model_generation(app_factory, aut
     assert not [call for call in model.calls if call[0] == "generate"]
 
 
-def test_repair_is_capped_at_two_attempts(app_factory, auth_headers, ndjson_parser):
+@pytest.mark.parametrize("code_gen_type", ["HTML", "MULTI_FILE"])
+def test_non_vue_repair_is_capped_without_source_snapshot(
+    app_factory, auth_headers, ndjson_parser, code_gen_type
+):
     model = FakeModel(reviews=[False, False, False, False])
-    client = TestClient(app_factory(model=model))
+    gateway = FakeToolGateway()
+    client = TestClient(app_factory(model=model, gateway=gateway))
     response = client.post(
         "/internal/v1/generations:stream",
-        json=generation_payload("HTML"),
+        json=generation_payload(code_gen_type),
         headers=auth_headers,
     )
     events = ndjson_parser(response)
     assert len([call for call in model.calls if call[0] == "repair"]) == 2
     assert events[-1]["type"] == "failed"
-    assert len([call for call in model.calls if call[0] == "repair"]) == 2
+    assert not [call for call in gateway.calls if call["name"] == "vue_source_snapshot"]
 
 
 def test_vue_build_failure_is_repaired_and_rebuilt_before_review(
@@ -344,7 +349,205 @@ def test_vue_build_failure_is_repaired_and_rebuilt_before_review(
         "message": "vite failed",
     }
     assert len([call for call in model.calls if call[0] == "review"]) == 1
+    snapshot_calls = [call for call in gateway.calls if call["name"] == "vue_source_snapshot"]
+    assert len(snapshot_calls) == 1
+    assert snapshot_calls[0]["toolCallId"] == "req-1:vue-source-snapshot:1"
+    assert snapshot_calls[0]["arguments"] == {"codeGenType": "VUE_PROJECT"}
+    review = next(data for name, data in model.calls if name == "review")
+    assert review["artifact"] == (
+        '{"eligibleFileCount":1,"files":[{"content":"<template><main>fixed</main></template>",'
+        '"path":"src/App.vue","truncated":false}],"includedFileCount":1,'
+        '"omittedFileCount":0,"truncated":false}'
+    )
+    assert "vueSourceSnapshot" not in review["context"]
+    finished = next(
+        event for event in events
+        if event["type"] == "tool_finished" and event["data"]["tool"] == "vue_source_snapshot"
+    )
+    assert finished["data"]["result"] == {
+        "eligibleFileCount": 1,
+        "includedFileCount": 1,
+        "omittedFileCount": 0,
+        "truncated": False,
+    }
+    assert "fixed" not in json.dumps(finished, ensure_ascii=False)
     assert events[-1]["type"] == "completed"
+
+
+def test_vue_snapshot_failure_stops_before_review_without_fallback(
+    app_factory, auth_headers, ndjson_parser
+):
+    class SnapshotFailureGateway(FakeToolGateway):
+        def __init__(self):
+            super().__init__()
+            self.build_count = 0
+
+        async def invoke(self, name, arguments, *, app_id, request_id, tool_call_id):
+            if name == "project_build":
+                self.build_count += 1
+                if self.build_count == 1:
+                    return {"built": False, "errorCode": "VUE_NPM_BUILD_FAILED", "message": "broken"}
+            if name == "vue_source_snapshot":
+                raise RuntimeError("VUE_SOURCE_SNAPSHOT_FAILED: snapshot unavailable")
+            return await super().invoke(
+                name,
+                arguments,
+                app_id=app_id,
+                request_id=request_id,
+                tool_call_id=tool_call_id,
+            )
+
+    model = FakeModel()
+    events = ndjson_parser(TestClient(app_factory(model=model, gateway=SnapshotFailureGateway())).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    assert events[-1]["type"] == "failed"
+    assert events[-1]["error"]["code"] == "VUE_SOURCE_SNAPSHOT_FAILED"
+    assert not [call for call in model.calls if call[0] == "review"]
+    assert not [event for event in events if event["type"] == "completed"]
+
+
+def test_truncated_vue_snapshot_is_reviewed_after_repair(
+    app_factory, auth_headers, ndjson_parser
+):
+    snapshot = {
+        "files": [{"path": "src/App.vue", "content": "fixed partial", "truncated": True}],
+        "eligibleFileCount": 2,
+        "includedFileCount": 1,
+        "omittedFileCount": 1,
+        "truncated": True,
+    }
+
+    class RepairingGateway(FakeToolGateway):
+        def __init__(self):
+            super().__init__(vue_source_snapshot=snapshot)
+            self.build_count = 0
+
+        async def invoke(self, name, arguments, *, app_id, request_id, tool_call_id):
+            if name == "project_build":
+                self.build_count += 1
+                if self.build_count == 1:
+                    return {"built": False, "errorCode": "VUE_NPM_BUILD_FAILED", "message": "broken"}
+            return await super().invoke(
+                name,
+                arguments,
+                app_id=app_id,
+                request_id=request_id,
+                tool_call_id=tool_call_id,
+            )
+
+    model = FakeModel()
+    events = ndjson_parser(TestClient(app_factory(model=model, gateway=RepairingGateway())).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    review = next(data for name, data in model.calls if name == "review")
+    assert json.loads(review["artifact"])["truncated"] is True
+    assert json.loads(review["artifact"])["files"][0]["truncated"] is True
+    assert events[-1]["type"] == "completed"
+
+
+def test_failed_repaired_vue_snapshot_review_triggers_second_repair(
+    app_factory, auth_headers, ndjson_parser
+):
+    snapshots = [
+        {
+            "files": [{"path": "src/App.vue", "content": "snapshot-v1", "truncated": False}],
+            "eligibleFileCount": 1,
+            "includedFileCount": 1,
+            "omittedFileCount": 0,
+            "truncated": False,
+        },
+        {
+            "files": [{"path": "src/App.vue", "content": "snapshot-v2", "truncated": False}],
+            "eligibleFileCount": 1,
+            "includedFileCount": 1,
+            "omittedFileCount": 0,
+            "truncated": False,
+        },
+    ]
+
+    class SequencedSnapshotGateway(FakeToolGateway):
+        def __init__(self):
+            super().__init__()
+            self.snapshots = list(snapshots)
+
+        async def invoke(self, name, arguments, *, app_id, request_id, tool_call_id):
+            result = await super().invoke(
+                name,
+                arguments,
+                app_id=app_id,
+                request_id=request_id,
+                tool_call_id=tool_call_id,
+            )
+            if name == "vue_source_snapshot":
+                return self.snapshots.pop(0)
+            return result
+
+    model = FakeModel(reviews=[False, False, True])
+    gateway = SequencedSnapshotGateway()
+    events = ndjson_parser(TestClient(app_factory(model=model, gateway=gateway)).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    assert len([call for call in model.calls if call[0] == "repair"]) == 2
+    snapshot_calls = [call for call in gateway.calls if call["name"] == "vue_source_snapshot"]
+    assert [call["toolCallId"] for call in snapshot_calls] == [
+        "req-1:vue-source-snapshot:1",
+        "req-1:vue-source-snapshot:2",
+    ]
+    review_calls = [data for name, data in model.calls if name == "review"]
+    assert review_calls[0]["artifact"] == "artifact:VUE_PROJECT"
+    assert "snapshot-v1" in review_calls[1]["artifact"]
+    assert "snapshot-v2" not in review_calls[1]["artifact"]
+    assert "snapshot-v2" in review_calls[2]["artifact"]
+    assert "snapshot-v1" not in review_calls[2]["artifact"]
+    assert events[-1]["type"] == "completed"
+    assert events[-1]["data"]["repairCount"] == 2
+
+
+def test_vue_snapshot_review_failure_does_not_leak_source_to_events(
+    app_factory, auth_headers, ndjson_parser
+):
+    secret = "TOP_SECRET_SOURCE"
+    snapshot = {
+        "files": [{"path": "src/App.vue", "content": secret, "truncated": False}],
+        "eligibleFileCount": 1,
+        "includedFileCount": 1,
+        "omittedFileCount": 0,
+        "truncated": False,
+    }
+
+    class LeakingReviewModel(FakeModel):
+        async def review(self, artifact, context):
+            self.calls.append(("review", {"artifact": artifact, "context": context}))
+            if artifact == "artifact:VUE_PROJECT":
+                return False
+            raise RuntimeError(f"provider rejected artifact: {artifact}")
+
+    model = LeakingReviewModel()
+    events = ndjson_parser(TestClient(app_factory(
+        model=model,
+        gateway=FakeToolGateway(vue_source_snapshot=snapshot),
+    )).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    assert events[-1]["type"] == "failed"
+    assert events[-1]["error"]["message"] == "Vue source snapshot review failed"
+    serialized_events = json.dumps(events, ensure_ascii=False)
+    assert secret not in serialized_events
+    assert "src/App.vue" not in serialized_events
+    assert len([call for call in model.calls if call[0] == "review"]) == 2
 
 
 def test_vue_build_failure_exhausts_two_repairs_without_review_or_completion(

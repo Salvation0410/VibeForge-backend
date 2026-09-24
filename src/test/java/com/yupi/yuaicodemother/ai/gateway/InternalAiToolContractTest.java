@@ -39,7 +39,8 @@ class InternalAiToolContractTest {
                 Map.entry("artifact_validation", InternalAiTool.ARTIFACT_VALIDATE),
                 Map.entry("artifact_context", InternalAiTool.ARTIFACT_CONTEXT),
                 Map.entry("artifact_publish", InternalAiTool.ARTIFACT_PUBLISH),
-                Map.entry("project_build", InternalAiTool.PROJECT_BUILD)
+                Map.entry("project_build", InternalAiTool.PROJECT_BUILD),
+                Map.entry("vue_source_snapshot", InternalAiTool.VUE_SOURCE_SNAPSHOT)
         );
 
         expected.forEach((name, tool) -> assertEquals(tool, InternalAiTool.fromExternalName(name)));
@@ -100,6 +101,20 @@ class InternalAiToolContractTest {
                 InternalAiToolSchemaAssertions.validResponseExample("project_build"));
         response.put("durationMs", 123L);
         InternalAiToolSchemaAssertions.assertResponseValid("project_build", response);
+    }
+
+    @Test
+    void rejectsVueSourceSnapshotFileContentOverLimit() {
+        Map<String, Object> response = Map.of(
+                "files", java.util.List.of(Map.of(
+                        "path", "src/App.vue", "content", "x".repeat(12_001), "truncated", true)),
+                "eligibleFileCount", 1,
+                "includedFileCount", 1,
+                "omittedFileCount", 0,
+                "truncated", true);
+
+        assertThrows(AssertionError.class,
+                () -> InternalAiToolSchemaAssertions.assertResponseValid("vue_source_snapshot", response));
     }
 
     @Test

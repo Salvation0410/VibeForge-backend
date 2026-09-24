@@ -65,6 +65,7 @@ public final class InternalAiToolSchemaAssertions {
             case "artifact_publish" -> Map.of(
                     "artifact", "<html></html>", "codeGenType", "HTML", "engine", "langgraph",
                     "finishReason", "STOP");
+            case "vue_source_snapshot" -> Map.of("codeGenType", "VUE_PROJECT");
             default -> throw new AssertionError("Missing request example for internal AI tool: " + name);
         };
     }
@@ -80,6 +81,12 @@ public final class InternalAiToolSchemaAssertions {
             case "artifact_publish" -> Map.of(
                     "published", true, "versionId", "v1", "hashes", Map.of("index.html", "sha256"));
             case "project_build" -> Map.of("built", true, "errorCode", "", "message", "");
+            case "vue_source_snapshot" -> Map.of(
+                    "files", List.of(Map.of("path", "src/App.vue", "content", "<template />", "truncated", false)),
+                    "eligibleFileCount", 1,
+                    "includedFileCount", 1,
+                    "omittedFileCount", 0,
+                    "truncated", false);
             default -> throw new AssertionError("Missing response example for internal AI tool: " + name);
         };
     }
