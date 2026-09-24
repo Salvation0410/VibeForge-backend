@@ -157,6 +157,64 @@ class VueSourceSnapshotReaderTest {
     }
 
     @Test
+    void candidateCollectorLetsLateHighPriorityEntriesReplaceLowPriorityOnes() {
+        VueSourceSnapshotReader.CandidateCollector collector = new VueSourceSnapshotReader.CandidateCollector();
+        for (int index = 0; index < VueSourceSnapshotReader.MAX_FILES; index++) {
+            collector.add(Path.of("src/components/Z%02d.vue".formatted(index)));
+        }
+
+        collector.add(Path.of("src/main.ts"));
+        collector.add(Path.of("package.json"));
+
+        assertEquals("package.json", portable(collector.selectedPaths().get(0)));
+        assertEquals("src/main.ts", portable(collector.selectedPaths().get(1)));
+        assertEquals(VueSourceSnapshotReader.MAX_FILES, collector.selectedPaths().size());
+        assertFalse(collector.selectedPaths().contains(Path.of("src/components/Z23.vue")));
+    }
+
+    @Test
+    void fixedTailBufferReturnsLastCharactersInOriginalOrder() {
+        VueSourceSnapshotReader.CharRingBuffer buffer = new VueSourceSnapshotReader.CharRingBuffer(5);
+
+        "0123456789".chars().forEach(value -> buffer.append((char) value));
+
+        assertEquals("56789", buffer.content());
+    }
+
+    @Test
+    void decodesUtf8CharacterSplitAcrossReadBufferBoundary() throws Exception {
+        byte[] prefix = "a".repeat(8_191).getBytes(StandardCharsets.UTF_8);
+        byte[] emoji = "😀".getBytes(StandardCharsets.UTF_8);
+        byte[] bytes = new byte[prefix.length + emoji.length + 4];
+        System.arraycopy(prefix, 0, bytes, 0, prefix.length);
+        System.arraycopy(emoji, 0, bytes, prefix.length, emoji.length);
+        System.arraycopy("tail".getBytes(StandardCharsets.UTF_8), 0, bytes, prefix.length + emoji.length, 4);
+        Path file = tempDir.resolve("src/Boundary.ts");
+        Files.createDirectories(file.getParent());
+        Files.write(file, bytes);
+
+        String content = (String) files(reader(tempDir).read(42L)).getFirst().get("content");
+
+        assertTrue(content.contains("😀tail"));
+        assertFalse(hasUnpairedSurrogate(content));
+    }
+
+    @Test
+    void rejectsIncompleteUtf8SequenceAtEndOfFile() throws Exception {
+        Path file = tempDir.resolve("src/Incomplete.ts");
+        Files.createDirectories(file.getParent());
+        byte[] prefix = "valid".getBytes(StandardCharsets.UTF_8);
+        byte[] bytes = java.util.Arrays.copyOf(prefix, prefix.length + 2);
+        bytes[prefix.length] = (byte) 0xF0;
+        bytes[prefix.length + 1] = (byte) 0x9F;
+        Files.write(file, bytes);
+
+        BusinessException error = assertThrows(BusinessException.class, () -> reader(tempDir).read(42L));
+
+        assertTrue(error.getMessage().startsWith("VUE_SOURCE_SNAPSHOT_READ_FAILED"));
+    }
+
+    @Test
     void excludesRealSymbolicLinksWithoutFollowingThem() throws Exception {
         write("src/App.vue", "<template />");
         Path link = tempDir.resolve("src/Linked.vue");
@@ -285,5 +343,9 @@ class VueSourceSnapshotReaderTest {
             }
         }
         return false;
+    }
+
+    private String portable(Path path) {
+        return path.toString().replace('\\', '/');
     }
 }

@@ -303,6 +303,10 @@ public class VueSourceSnapshotReader {
             return new CandidateSelection(List.copyOf(paths), eligibleFileCount);
         }
 
+        List<Path> selectedPaths() {
+            return List.copyOf(paths);
+        }
+
         private static String portable(Path path) {
             return path.toString().replace('\\', '/');
         }
@@ -311,7 +315,7 @@ public class VueSourceSnapshotReader {
     /** 固定保留完整短文本，或长文本所需的首尾字符。 */
     private static final class TextAccumulator {
         private final StringBuilder prefix = new StringBuilder(MAX_FILE_CHARS + 1);
-        private final StringBuilder tail = new StringBuilder(RETAINED_TAIL_CHARS + 2);
+        private final CharRingBuffer tail = new CharRingBuffer(RETAINED_TAIL_CHARS + 2);
         private long charCount;
 
         void append(CharBuffer characters) {
@@ -320,19 +324,46 @@ public class VueSourceSnapshotReader {
                 charCount++;
                 if (prefix.length() < MAX_FILE_CHARS + 2) prefix.append(value);
                 tail.append(value);
-                while (tail.length() > RETAINED_TAIL_CHARS + 2) {
-                    int removed = tail.length() > 1 && Character.isHighSurrogate(tail.charAt(0))
-                            && Character.isLowSurrogate(tail.charAt(1)) ? 2 : 1;
-                    tail.delete(0, removed);
-                }
             }
         }
 
         RetainedText finish() {
             if (charCount <= MAX_FILE_CHARS) return new RetainedText(prefix.toString(), false);
             String content = safePrefixStatic(prefix.toString(), RETAINED_HEAD_CHARS)
-                    + TRUNCATION_MARKER + safeSuffixStatic(tail.toString(), RETAINED_TAIL_CHARS);
+                    + TRUNCATION_MARKER + safeSuffixStatic(tail.content(), RETAINED_TAIL_CHARS);
             return new RetainedText(content, true);
+        }
+    }
+
+    /** 固定容量字符环形缓冲，追加 O(1)，仅输出时线性展开。 */
+    static final class CharRingBuffer {
+        private final char[] values;
+        private int start;
+        private int size;
+
+        CharRingBuffer(int capacity) {
+            if (capacity <= 0) throw new IllegalArgumentException("capacity must be positive");
+            values = new char[capacity];
+        }
+
+        void append(char value) {
+            if (size < values.length) {
+                values[(start + size) % values.length] = value;
+                size++;
+                return;
+            }
+            values[start] = value;
+            start = (start + 1) % values.length;
+        }
+
+        String content() {
+            char[] ordered = new char[size];
+            int firstLength = Math.min(size, values.length - start);
+            System.arraycopy(values, start, ordered, 0, firstLength);
+            if (firstLength < size) {
+                System.arraycopy(values, 0, ordered, firstLength, size - firstLength);
+            }
+            return new String(ordered);
         }
     }
 
