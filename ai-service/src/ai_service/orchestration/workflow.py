@@ -18,6 +18,7 @@ from ai_service.orchestration.events import EventEmitter
 logger = logging.getLogger(__name__)
 
 
+# 工作流的一个状态
 class WorkflowState(TypedDict, total=False):
     app_id: str
     request_id: str
