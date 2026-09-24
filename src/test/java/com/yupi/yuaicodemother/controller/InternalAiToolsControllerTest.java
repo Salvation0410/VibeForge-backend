@@ -12,6 +12,7 @@ import com.yupi.yuaicodemother.core.artifact.ArtifactPublishResult;
 import com.yupi.yuaicodemother.core.artifact.ArtifactValidationException;
 import com.yupi.yuaicodemother.core.artifact.HtmlArtifactValidator;
 import com.yupi.yuaicodemother.core.artifact.MultiFileArtifactValidator;
+import com.yupi.yuaicodemother.core.artifact.VueSourceSnapshotReader;
 import com.yupi.yuaicodemother.core.builder.VueProjectBuilder;
 import com.yupi.yuaicodemother.core.builder.VueBuildResult;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
@@ -246,6 +247,7 @@ class InternalAiToolsControllerTest {
         var controller = new InternalAiToolsController(properties, builder, resolver,
                 mock(ArtifactContextReader.class), mock(ArtifactPublicationService.class),
                 mock(MultiFileArtifactValidator.class), new HtmlArtifactValidator(),
+                mock(VueSourceSnapshotReader.class),
                 passThroughIdempotencyService());
 
         Map<String, Object> result = controller.invoke("Bearer test-token",
@@ -277,6 +279,7 @@ class InternalAiToolsControllerTest {
         var controller = new InternalAiToolsController(properties, mock(VueProjectBuilder.class),
                 mock(ArtifactPathResolver.class), reader, mock(ArtifactPublicationService.class),
                 mock(MultiFileArtifactValidator.class), new HtmlArtifactValidator(),
+                mock(VueSourceSnapshotReader.class),
                 passThroughIdempotencyService());
 
         Map<String, Object> result = controller.invoke("Bearer test-token",
@@ -297,6 +300,7 @@ class InternalAiToolsControllerTest {
         var controller = new InternalAiToolsController(properties, mock(VueProjectBuilder.class),
                 mock(ArtifactPathResolver.class), reader, mock(ArtifactPublicationService.class),
                 mock(MultiFileArtifactValidator.class), new HtmlArtifactValidator(),
+                mock(VueSourceSnapshotReader.class),
                 passThroughIdempotencyService());
 
         BusinessException error = assertThrows(BusinessException.class, () -> controller.invoke(
@@ -343,6 +347,81 @@ class InternalAiToolsControllerTest {
         assertFalse(Files.exists(tempDir.resolve("src/Old.vue")));
     }
 
+    @Test
+    void readsVueSourceSnapshotWithoutCachingSourceInIdempotencyRedis() {
+        var snapshotReader = mock(VueSourceSnapshotReader.class);
+        var idempotencyService = mock(ToolInvocationIdempotencyService.class);
+        Map<String, Object> snapshot = InternalAiToolSchemaAssertions.validResponseExample("vue_source_snapshot");
+        when(snapshotReader.read(42L)).thenReturn(snapshot);
+        var controller = controller(mock(ArtifactPublicationService.class),
+                mock(ArtifactPathResolver.class), mock(ArtifactContextReader.class),
+                snapshotReader, idempotencyService);
+
+        Map<String, Object> result = controller.invoke("Bearer test-token",
+                new InternalAiToolsController.ToolRequest(
+                        42L, "req-snapshot", "call-snapshot", "vue_source_snapshot",
+                        Map.of("codeGenType", "VUE_PROJECT"))).getData();
+
+        assertEquals(snapshot, result);
+        InternalAiToolSchemaAssertions.assertResponseValid("vue_source_snapshot", result);
+        verify(snapshotReader).read(42L);
+        verifyNoInteractions(idempotencyService);
+    }
+
+    @Test
+    void rejectsVueSourceSnapshotForNonVueGenerationTypeBeforeReadingOrCaching() {
+        var snapshotReader = mock(VueSourceSnapshotReader.class);
+        var idempotencyService = mock(ToolInvocationIdempotencyService.class);
+        var controller = controller(mock(ArtifactPublicationService.class),
+                mock(ArtifactPathResolver.class), mock(ArtifactContextReader.class),
+                snapshotReader, idempotencyService);
+
+        BusinessException error = assertThrows(BusinessException.class, () -> controller.invoke(
+                "Bearer test-token", new InternalAiToolsController.ToolRequest(
+                        42L, "req-snapshot", "call-snapshot", "vue_source_snapshot",
+                        Map.of("codeGenType", "HTML"))));
+
+        assertEquals(ErrorCode.PARAMS_ERROR.getCode(), error.getCode());
+        assertEquals("vue_source_snapshot requires VUE_PROJECT", error.getMessage());
+        verifyNoInteractions(snapshotReader, idempotencyService);
+    }
+
+    @Test
+    void rejectsVueSourceSnapshotArgumentsOutsideSharedContractBeforeReadingOrCaching() {
+        var snapshotReader = mock(VueSourceSnapshotReader.class);
+        var idempotencyService = mock(ToolInvocationIdempotencyService.class);
+        var controller = controller(mock(ArtifactPublicationService.class),
+                mock(ArtifactPathResolver.class), mock(ArtifactContextReader.class),
+                snapshotReader, idempotencyService);
+
+        BusinessException error = assertThrows(BusinessException.class, () -> controller.invoke(
+                "Bearer test-token", new InternalAiToolsController.ToolRequest(
+                        42L, "req-snapshot", "call-snapshot", "vue_source_snapshot",
+                        Map.of("codeGenType", "VUE_PROJECT", "relativeFilePath", "src/App.vue"))));
+
+        assertEquals(ErrorCode.PARAMS_ERROR.getCode(), error.getCode());
+        assertEquals("vue_source_snapshot accepts only codeGenType", error.getMessage());
+        verifyNoInteractions(snapshotReader, idempotencyService);
+    }
+
+    @Test
+    void authenticatesVueSourceSnapshotBeforeReadingOrCaching() {
+        var snapshotReader = mock(VueSourceSnapshotReader.class);
+        var idempotencyService = mock(ToolInvocationIdempotencyService.class);
+        var controller = controller(mock(ArtifactPublicationService.class),
+                mock(ArtifactPathResolver.class), mock(ArtifactContextReader.class),
+                snapshotReader, idempotencyService);
+
+        BusinessException error = assertThrows(BusinessException.class, () -> controller.invoke(
+                "Bearer wrong-token", new InternalAiToolsController.ToolRequest(
+                        42L, "req-snapshot", "call-snapshot", "vue_source_snapshot",
+                        Map.of("codeGenType", "VUE_PROJECT"))));
+
+        assertEquals(ErrorCode.NO_AUTH_ERROR.getCode(), error.getCode());
+        assertEquals("Invalid internal bearer token", error.getMessage());
+        verifyNoInteractions(snapshotReader, idempotencyService);
+    }
+
     private Map<String, Object> invokeTool(
             InternalAiToolsController controller, String toolName, Map<String, Object> arguments) {
         return controller.invoke("Bearer test-token", new InternalAiToolsController.ToolRequest(
@@ -357,11 +436,21 @@ class InternalAiToolsControllerTest {
             ArtifactPublicationService publisher,
             ArtifactPathResolver resolver,
             ToolInvocationIdempotencyService idempotencyService) {
+        return controller(publisher, resolver, mock(ArtifactContextReader.class),
+                mock(VueSourceSnapshotReader.class), idempotencyService);
+    }
+
+    private InternalAiToolsController controller(
+            ArtifactPublicationService publisher,
+            ArtifactPathResolver resolver,
+            ArtifactContextReader contextReader,
+            VueSourceSnapshotReader snapshotReader,
+            ToolInvocationIdempotencyService idempotencyService) {
         var properties = new AiEngineProperties();
         properties.setToken("test-token");
         return new InternalAiToolsController(properties, mock(VueProjectBuilder.class), resolver,
-                mock(ArtifactContextReader.class), publisher,
-                mock(MultiFileArtifactValidator.class), new HtmlArtifactValidator(), idempotencyService);
+                contextReader, publisher, mock(MultiFileArtifactValidator.class), new HtmlArtifactValidator(),
+                snapshotReader, idempotencyService);
     }
 
     private ToolInvocationIdempotencyService passThroughIdempotencyService() {
