@@ -39,7 +39,8 @@ class InternalAiToolContractTest {
                 Map.entry("artifact_validation", InternalAiTool.ARTIFACT_VALIDATE),
                 Map.entry("artifact_context", InternalAiTool.ARTIFACT_CONTEXT),
                 Map.entry("artifact_publish", InternalAiTool.ARTIFACT_PUBLISH),
-                Map.entry("project_build", InternalAiTool.PROJECT_BUILD)
+                Map.entry("project_build", InternalAiTool.PROJECT_BUILD),
+                Map.entry("vue_source_snapshot", InternalAiTool.VUE_SOURCE_SNAPSHOT)
         );
 
         expected.forEach((name, tool) -> assertEquals(tool, InternalAiTool.fromExternalName(name)));

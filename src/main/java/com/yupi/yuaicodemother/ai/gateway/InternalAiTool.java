@@ -18,7 +18,8 @@ public enum InternalAiTool {
     ARTIFACT_CONTEXT("artifact_context", false),
     ARTIFACT_VALIDATE("artifact_validate", false, "artifact_validation"),
     ARTIFACT_PUBLISH("artifact_publish", false),
-    PROJECT_BUILD("project_build", false);
+    PROJECT_BUILD("project_build", false),
+    VUE_SOURCE_SNAPSHOT("vue_source_snapshot", false);
 
     private static final Map<String, InternalAiTool> BY_EXTERNAL_NAME;
 

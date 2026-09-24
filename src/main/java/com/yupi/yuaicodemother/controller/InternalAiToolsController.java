@@ -116,6 +116,8 @@ public class InternalAiToolsController {
             case ARTIFACT_VALIDATE -> validateArtifact(args);
             case ARTIFACT_PUBLISH -> publishArtifact(appId, requestId, args);
             case PROJECT_BUILD -> buildProject(appId, args);
+            case VUE_SOURCE_SNAPSHOT -> throw new BusinessException(
+                    ErrorCode.OPERATION_ERROR, "vue_source_snapshot is not available yet");
         };
     }
 
