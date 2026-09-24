@@ -3,12 +3,14 @@ package com.yupi.yuaicodemother.core.artifact;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -73,16 +75,91 @@ class VueSourceSnapshotReaderTest {
 
     @Test
     void truncatesSingleFileWithinPerFileBudget() throws Exception {
-        write("src/App.vue", "x".repeat(VueSourceSnapshotReader.MAX_FILE_CHARS + 1));
+        String original = "head-" + "x".repeat(VueSourceSnapshotReader.MAX_FILE_CHARS) + "-tail";
+        write("src/App.vue", original);
 
         Map<String, Object> snapshot = reader(tempDir).read(42L);
         Map<String, Object> file = files(snapshot).getFirst();
         String content = (String) file.get("content");
 
-        assertTrue(content.length() <= VueSourceSnapshotReader.MAX_FILE_CHARS);
+        assertEquals(VueSourceSnapshotReader.MAX_FILE_CHARS, content.length());
         assertTrue(content.contains(VueSourceSnapshotReader.TRUNCATION_MARKER));
+        assertTrue(content.startsWith("head-"));
+        assertTrue(content.endsWith("-tail"));
         assertEquals(true, file.get("truncated"));
         assertEquals(true, snapshot.get("truncated"));
+    }
+
+    @Test
+    void truncatesWithoutSplittingUtf16SurrogatePairs() throws Exception {
+        int retained = VueSourceSnapshotReader.MAX_FILE_CHARS - VueSourceSnapshotReader.TRUNCATION_MARKER.length();
+        int headChars = (retained + 1) / 2;
+        String original = "a".repeat(headChars - 1) + "😀" + "b".repeat(7_000) + "-tail😀";
+        write("src/App.vue", original);
+
+        String content = (String) files(reader(tempDir).read(42L)).getFirst().get("content");
+
+        assertTrue(content.length() <= VueSourceSnapshotReader.MAX_FILE_CHARS);
+        assertTrue(content.contains(VueSourceSnapshotReader.TRUNCATION_MARKER));
+        assertTrue(content.endsWith("-tail😀"));
+        assertFalse(hasUnpairedSurrogate(content));
+    }
+
+    @Test
+    void boundsLargeFileReadsToTheConfiguredHeadAndTailProbe() throws Exception {
+        Path file = tempDir.resolve("src/Large.ts");
+        Files.createDirectories(file.getParent());
+        int size = VueSourceSnapshotReader.MAX_FILE_PROBE_BYTES + 10_000;
+        byte[] contentBytes = new byte[size];
+        Arrays.fill(contentBytes, (byte) 'x');
+        System.arraycopy("head-".getBytes(StandardCharsets.UTF_8), 0, contentBytes, 0, 5);
+        System.arraycopy("-tail".getBytes(StandardCharsets.UTF_8), 0, contentBytes, size - 5, 5);
+        Files.write(file, contentBytes);
+
+        Map<String, Object> source = files(reader(tempDir).read(42L)).getFirst();
+        String content = (String) source.get("content");
+
+        assertEquals(VueSourceSnapshotReader.MAX_FILE_CHARS, content.length());
+        assertTrue(content.startsWith("head-"));
+        assertTrue(content.endsWith("-tail"));
+        assertEquals(true, source.get("truncated"));
+    }
+
+    @Test
+    void decodesLargeFileWhenUtf8CharactersCrossBothProbeBoundaries() throws Exception {
+        Path file = tempDir.resolve("src/Large.vue");
+        Files.createDirectories(file.getParent());
+        int size = VueSourceSnapshotReader.MAX_FILE_PROBE_BYTES + 10_000;
+        int side = VueSourceSnapshotReader.MAX_FILE_PROBE_BYTES / 2;
+        byte[] contentBytes = new byte[size];
+        Arrays.fill(contentBytes, (byte) 'x');
+        byte[] emoji = "😀".getBytes(StandardCharsets.UTF_8);
+        System.arraycopy(emoji, 0, contentBytes, side - 2, emoji.length);
+        System.arraycopy(emoji, 0, contentBytes, size - side - 2, emoji.length);
+        System.arraycopy("head-".getBytes(StandardCharsets.UTF_8), 0, contentBytes, 0, 5);
+        System.arraycopy("-tail😀".getBytes(StandardCharsets.UTF_8), 0,
+                contentBytes, size - "-tail😀".getBytes(StandardCharsets.UTF_8).length,
+                "-tail😀".getBytes(StandardCharsets.UTF_8).length);
+        Files.write(file, contentBytes);
+
+        String content = (String) files(reader(tempDir).read(42L)).getFirst().get("content");
+
+        assertTrue(content.startsWith("head-"));
+        assertTrue(content.endsWith("-tail😀"));
+        assertFalse(hasUnpairedSurrogate(content));
+    }
+
+    @Test
+    void excludesRealSymbolicLinksWithoutFollowingThem() throws Exception {
+        write("src/App.vue", "<template />");
+        Path link = tempDir.resolve("src/Linked.vue");
+        boolean created = createSymbolicLinkIfSupported(link, tempDir.resolve("src/App.vue"));
+        Assumptions.assumeTrue(created, "当前系统不允许创建符号链接");
+
+        Map<String, Object> snapshot = reader(tempDir).read(42L);
+
+        assertEquals(List.of("src/App.vue"), files(snapshot).stream().map(file -> file.get("path")).toList());
+        assertEquals(1, snapshot.get("eligibleFileCount"));
     }
 
     @Test
@@ -181,12 +258,25 @@ class VueSourceSnapshotReaderTest {
         Files.writeString(file, content, StandardCharsets.UTF_8);
     }
 
-    private void createSymbolicLinkIfSupported(Path link, Path target) {
+    private boolean createSymbolicLinkIfSupported(Path link, Path target) {
         try {
             Files.createSymbolicLink(link, target);
             assertTrue(Files.isSymbolicLink(link));
+            return true;
         } catch (IOException | UnsupportedOperationException | SecurityException ignored) {
-            // Windows 未启用开发者模式时通常无法创建符号链接，不影响其余过滤断言。
+            return false;
         }
+    }
+
+    private boolean hasUnpairedSurrogate(String value) {
+        for (int index = 0; index < value.length(); index++) {
+            char current = value.charAt(index);
+            if (Character.isHighSurrogate(current)) {
+                if (index + 1 >= value.length() || !Character.isLowSurrogate(value.charAt(++index))) return true;
+            } else if (Character.isLowSurrogate(current)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

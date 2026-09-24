@@ -10,14 +10,18 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CoderResult;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.file.FileVisitOption;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -36,6 +40,10 @@ public class VueSourceSnapshotReader {
     static final int MAX_FILE_CHARS = 12_000;
     static final int MAX_TOTAL_CHARS = 60_000;
     static final String TRUNCATION_MARKER = "\n...[truncated]...\n";
+    /** 单文件最多读取 64 KiB；大文件各探测真实首尾 32 KiB。 */
+    static final int MAX_FILE_PROBE_BYTES = 64 * 1024;
+
+    private static final int PROBE_SIDE_BYTES = MAX_FILE_PROBE_BYTES / 2;
 
     private static final Set<String> EXCLUDED_DIRECTORIES = Set.of("node_modules", "dist", "build");
     private static final Set<String> EXCLUDED_FILES = Set.of("package-lock.json", "pnpm-lock.yaml", "yarn.lock");
@@ -109,19 +117,36 @@ public class VueSourceSnapshotReader {
     }
 
     private SourceFile readSource(Path root, Path file) {
-        try {
-            if (Files.isSymbolicLink(file) || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
-                return null;
-            }
-            byte[] bytes = Files.readAllBytes(file);
-            if (containsNulByte(bytes)) return null;
-            String content = decodeStrictUtf8(bytes);
+        Set<OpenOption> options = Set.of(StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS);
+        try (SeekableByteChannel channel = Files.newByteChannel(file, options)) {
+            long size = channel.size();
             String path = portablePath(root.relativize(file));
-            boolean truncated = content.length() > MAX_FILE_CHARS;
-            return new SourceFile(path, truncated ? truncate(content, MAX_FILE_CHARS) : content, truncated);
+            if (size <= MAX_FILE_PROBE_BYTES) {
+                byte[] bytes = readBytes(channel, 0, Math.toIntExact(size));
+                if (containsNulByte(bytes)) return null;
+                String content = decodeStrictUtf8(bytes);
+                boolean truncated = content.length() > MAX_FILE_CHARS;
+                return new SourceFile(path, truncated ? truncate(content, MAX_FILE_CHARS) : content, truncated);
+            }
+
+            byte[] headBytes = readBytes(channel, 0, PROBE_SIDE_BYTES);
+            byte[] tailBytes = readBytes(channel, size - PROBE_SIDE_BYTES, PROBE_SIDE_BYTES);
+            if (containsNulByte(headBytes) || containsNulByte(tailBytes)) return null;
+            String head = decodeHeadProbe(headBytes);
+            String tail = decodeTailProbe(tailBytes);
+            return new SourceFile(path, truncate(head, tail, MAX_FILE_CHARS), true);
         } catch (Exception exception) {
             throw readFailure(file);
         }
+    }
+
+    private byte[] readBytes(SeekableByteChannel channel, long position, int length) throws IOException {
+        channel.position(position);
+        ByteBuffer buffer = ByteBuffer.allocate(length);
+        while (buffer.hasRemaining()) {
+            if (channel.read(buffer) < 0) throw new IOException("unexpected end of file");
+        }
+        return buffer.array();
     }
 
     private Map<String, Object> buildSnapshot(List<SourceFile> sources) {
@@ -187,13 +212,65 @@ public class VueSourceSnapshotReader {
         return decoded.toString();
     }
 
+    /** 首部探测只允许忽略末端最多三个 UTF-8 边界字节。 */
+    private String decodeHeadProbe(byte[] bytes) throws CharacterCodingException {
+        var decoder = StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT);
+        ByteBuffer input = ByteBuffer.wrap(bytes);
+        CharBuffer output = CharBuffer.allocate(bytes.length);
+        CoderResult result = decoder.decode(input, output, false);
+        if (result.isError()) result.throwException();
+        if (input.remaining() > 3) throw new CharacterCodingException();
+        output.flip();
+        return output.toString();
+    }
+
+    /** 尾部探测只允许忽略开端最多三个 UTF-8 边界字节。 */
+    private String decodeTailProbe(byte[] bytes) throws CharacterCodingException {
+        int start = 0;
+        while (start < bytes.length && start < 3 && isUtf8Continuation(bytes[start])) start++;
+        return decodeStrictUtf8(java.util.Arrays.copyOfRange(bytes, start, bytes.length));
+    }
+
+    private boolean isUtf8Continuation(byte value) {
+        return (value & 0xC0) == 0x80;
+    }
+
     /** 截断标记计入额度，并尽量均衡保留文件头尾。 */
     private String truncate(String content, int limit) {
         if (content.length() <= limit) return content;
         int retained = limit - TRUNCATION_MARKER.length();
         int head = (retained + 1) / 2;
         int tail = retained - head;
-        return content.substring(0, head) + TRUNCATION_MARKER + content.substring(content.length() - tail);
+        return safePrefix(content, head) + TRUNCATION_MARKER + safeSuffix(content, tail);
+    }
+
+    private String truncate(String headContent, String tailContent, int limit) {
+        int retained = limit - TRUNCATION_MARKER.length();
+        int head = (retained + 1) / 2;
+        int tail = retained - head;
+        return safePrefix(headContent, head) + TRUNCATION_MARKER + safeSuffix(tailContent, tail);
+    }
+
+    private String safePrefix(String content, int limit) {
+        int end = Math.min(content.length(), limit);
+        if (end > 0 && end < content.length()
+                && Character.isHighSurrogate(content.charAt(end - 1))
+                && Character.isLowSurrogate(content.charAt(end))) {
+            end--;
+        }
+        return content.substring(0, end);
+    }
+
+    private String safeSuffix(String content, int limit) {
+        int start = Math.max(0, content.length() - limit);
+        if (start > 0 && start < content.length()
+                && Character.isHighSurrogate(content.charAt(start - 1))
+                && Character.isLowSurrogate(content.charAt(start))) {
+            start++;
+        }
+        return content.substring(start);
     }
 
     private int priority(String path) {
