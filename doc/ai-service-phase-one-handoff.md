@@ -29,8 +29,8 @@
 - 工作流在模型生成前调用仅工作流可用的 `artifact_context`：HTML/MULTI_FILE 返回完整活动产物且上限为 100000 字符，Vue 返回排序后的有界文件清单且最多 200 项；读取失败直接进入失败终态，不伪装成首次生成。
 - Vue 首次生成和修复共用同一套受限工具循环，生成与修复共享 `AI_SERVICE_VUE_MAX_TOOL_CALLS` 总预算；工具调用 ID 分别使用 `vue-generate` 和 `vue-repair:<repairCount>` 前缀，非法工具、受控参数、取消和模型截断均在调用 Spring 前被阻止。
 - Vue `project_build` 已返回 `built/errorCode/message` 结构化结果；`built=false` 会进入最多两次修复并重新校验、重新构建，达到上限后只能失败，质量检查只在构建成功后执行。
-- Vue 至少完成一次修复、重新通过硬校验并重新构建成功后，质量检查通过 Spring 工作流专用且模型不可调用的 `vue_source_snapshot` 获取最终源码；首次未修复 Vue、HTML 和 MULTI_FILE 不调用。快照最多 24 个文件、单文件 12000 字符、总计 60000 字符；扫描最多接受 10000 个合格文件，只读取按优先级和路径稳定排序后的最佳 24 个，每个源文件最大 1 MiB。
-- 快照排除依赖/构建产物、隐藏目录、符号链接、锁文件和非文本扩展名，并严格拒绝非法 UTF-8 或 NUL。完整内容仅瞬时传给当前 Reviewer，不进入 Spring 工具幂等 Redis、业务 checkpoint、LangGraph state/checkpoint 或事件；失败时可能产生的 pending checkpoint 也只保留稳定外层异常，不含源码。事件只公开 `eligibleFileCount`、`includedFileCount`、`omittedFileCount`、`truncated` 四个字段。读取或 Reviewer 失败不回退旧 artifact，而是以脱敏错误进入失败终态。
+- Vue 至少完成一次修复、重新通过硬校验并重新构建成功后，质量检查通过 Spring 工作流专用且模型不可调用的 `vue_source_snapshot` 获取最终源码；首次未修复 Vue、HTML 和 MULTI_FILE 不调用。快照最多 24 个文件、单文件 12000 字符、总计 60000 字符；项目总访问条目（根目录之外的目录、文件和访问失败条目）最多 20000 个，其中合格源码候选最多 10000 个，只读取按优先级和路径稳定排序后的最佳 24 个，每个源文件最大 1 MiB。
+- 快照排除依赖/构建产物、隐藏目录、符号链接、锁文件和非文本扩展名，依赖/构建目录及锁文件的大小写变体同样排除，并严格拒绝非法 UTF-8 或 NUL。完整内容仅瞬时传给当前 Reviewer，不进入 Spring 工具幂等 Redis、业务 checkpoint、LangGraph state/checkpoint 或事件；失败时可能产生的 pending checkpoint 也只保留稳定外层异常，不含源码。事件只公开 `eligibleFileCount`、`includedFileCount`、`omittedFileCount`、`truncated` 四个字段。读取失败使用稳定脱敏消息，错误响应不含绝对项目路径；读取或 Reviewer 失败不回退旧 artifact，而是进入失败终态。
 - 内部 `project_build` 强制执行本轮构建，不以旧 `dist` 或上一轮并发构建结果冒充成功；旧预览仍保留。npm 输出、路径和环境值经过有界脱敏，进程树和输出读取使用有界终止策略。
 - Redis checkpoint 默认使用数据库 2；不可用时按当前配置和实现降级。
 - Spring 内部工具幂等状态和成功结果使用现有 Spring Redis 配置（本地默认 database 1），可跨 Spring 实例共享。作用域为 `appId + requestId + toolCallId`；同一作用域的 canonical 工具名或参数指纹不一致时拒绝执行。
@@ -204,12 +204,12 @@ Python checkpoint Redis: redis://localhost:6379/2
 - `cd ai-service && uv run python -m compileall -q src`：通过。
 - `cd ai-service && uv run pytest`：165 项通过，0 failures；有 2 条来自 Starlette 和 LangGraph checkpoint 的第三方弃用警告。
 - `cd ai-service && uv lock --check`：通过，锁文件解析 67 个包。
-- `mvn "-Dtest=InternalAiToolContractTest,VueSourceSnapshotReaderTest,InternalAiToolsControllerTest,InternalAiToolsHttpContractTest" test`：共 51 项，0 failures、0 errors、1 skipped（Windows 符号链接权限条件测试按环境跳过）；其余 50 项通过。日志包含既有 SLF4J 多 provider、Mockito 动态 agent、Bean Validation provider 缺失提示及预期业务异常日志。
+- `mvn "-Dtest=InternalAiToolContractTest,VueSourceSnapshotReaderTest,InternalAiToolsControllerTest,InternalAiToolsHttpContractTest" test`：共 54 项，0 failures、0 errors、1 skipped（Windows 符号链接权限条件测试按环境跳过），其余 53 项通过；其中 `VueSourceSnapshotReaderTest` 共 21 项、1 skipped。日志包含既有 SLF4J 多 provider、Mockito 动态 agent、Bean Validation provider 缺失提示及预期业务异常日志。
 - `mvn clean -DskipTests compile`：通过，编译 237 个生产源文件；日志仅有既有 varargs、弃用 API 和 unchecked 操作警告，本轮只据此声明生产源码干净编译通过。
 
 以上验证覆盖快照选择与限额、严格文本读取、Spring HTTP/Controller 边界、共享 Schema、Python 网关校验、修复后快照审查、事件脱敏、失败不回退及 checkpoint/state 不留存源码。Java 的 JSON Schema 依赖仍为 `test` scope，生产路径继续执行原有业务校验。
 
-本分支全量 `mvn test` 新鲜证据为 185 项：0 failures、1 error、1 skipped，183 项通过。唯一 error 仍是既有的 `YuAiCodeMotherApplicationTests.contextLoads`，原因是测试上下文缺少 `openAiChatModel` bean；1 个 skipped 是 Windows 符号链接权限条件测试。本轮没有修复或重新声明全量测试通过，只声称上述定向测试和 `mvn clean -DskipTests compile` 通过。
+本分支全量 `mvn test` 新鲜证据为 188 项：0 failures、1 error、1 skipped，186 项通过。唯一 error 仍是既有的 `YuAiCodeMotherApplicationTests.contextLoads`，原因是测试上下文缺少 `openAiChatModel` bean；1 个 skipped 是 Windows 符号链接权限条件测试。本轮没有修复或重新声明全量测试通过，只声称上述定向测试和 `mvn clean -DskipTests compile` 通过。
 
 此前 2026-09-22 本地 `dev` 基线还记录了以下结果：
 
@@ -260,7 +260,7 @@ Python checkpoint Redis: redis://localhost:6379/2
 7. **HTTP 验收入口已补齐。** `scripts/test-ai-service.ps1` 已增加 Python 健康检查、Spring 成功调用、缺少/错误令牌、缺少字段、构建可选开关、幂等错误和脱敏覆盖标签；默认 dry-run，只有显式 `-Execute` 才发送请求。真实 HTTP 仍待用户启动服务后执行。
 8. **Redis 故障验收入口已补齐。** 真实 Redis 集成测试现已覆盖陈旧 `RUNNING` 和 action 成功后状态写回失败两个不确定窗口；重试必须拒绝再次执行 action。测试默认跳过，只有显式设置 `AI_REDIS_INTEGRATION=true` 才连接 `AI_REDIS_URL`。
 9. **三类型人工验收入口已加固。** 三个应用 ID 必须为正数且互不相同，成功场景出现 `business-error` 或终态数量异常时立即失败；六个提示词、人工检查项和操作提示均使用中文。脚本默认 dry-run，不保存流式源码、账号、密码或 Cookie。
-10. **离线验证完成。** 本轮 Python 165 项测试全部通过；Java 快照、契约、Controller 和 HTTP 定向测试共 51 项，0 failures/errors、1 项按 Windows 符号链接权限条件跳过；Python 编译、锁文件检查和 Java clean compile（237 个生产源文件）均通过。本分支全量 `mvn test` 共 185 项，其中 183 项通过、0 failures、1 error、1 skipped；唯一 error 是既有 `contextLoads` 因缺少 `openAiChatModel` bean，skipped 是 Windows 符号链接权限条件测试，因此本轮不声称全量测试通过。真实 Redis、真实 Spring/Python HTTP、真实模型和前端三类型首次生成/二次修改仍属于后续验收。
+10. **离线验证完成。** 本轮 Python 165 项测试全部通过；Java 快照、契约、Controller 和 HTTP 定向测试共 54 项，0 failures/errors、1 项按 Windows 符号链接权限条件跳过；Python 编译、锁文件检查和 Java clean compile（237 个生产源文件）均通过。本分支全量 `mvn test` 共 188 项，其中 186 项通过、0 failures、1 error、1 skipped；唯一 error 是既有 `contextLoads` 因缺少 `openAiChatModel` bean，skipped 是 Windows 符号链接权限条件测试，因此本轮不声称全量测试通过。真实 Redis、真实 Spring/Python HTTP、真实模型和前端三类型首次生成/二次修改仍属于后续验收。
 11. **Checkpoint 产物留存边界已收敛。** 业务快照不再保存完整 artifact，保留 `node`、`requestId`、`appId`、`codeGenType`、`qualityPassed`、`repairCount` 和 `toolCallCount` 等状态与审计摘要；执行期节点恢复由 LangGraph 自动 checkpoint 承担，该 checkpoint 在请求执行期间仍可能保留完整产物，成功、失败或取消进入终态后清理对应 thread，并使用 Redis 固定前缀避免误删。终态清理失败只使 checkpoint 就绪状态降级，不反转生成结果；TTL 作为异常退出兜底。本轮未执行真实 Redis、真实模型及 Spring/Python 真实服务依赖的自动化或接口验收；前端三类型生成、预览和交互由用户人工验证并反馈错误。
 12. **Vue 修复后最终源码审查已完成。** 至少一次修复、硬校验和重新构建成功后，Reviewer 读取 Spring 瞬时生成的有界最终源码快照；扫描、选择、字符和文件大小均有硬上限，完整源码不进入幂等 Redis、业务或 LangGraph checkpoint/state/事件。读取或审查失败不回退旧 artifact，事件和异常保持脱敏。
 
@@ -361,7 +361,7 @@ caeb0cb fix: 保持预览加载图为正圆
 ### P1：可靠性、质量与资源优化
 
 1. **瘦身 checkpoint 中的完整 artifact（已完成）。** 本次实际边界是：业务快照去除完整 artifact，保留 `node`、`requestId`、`appId`、`codeGenType`、`qualityPassed`、`repairCount` 和 `toolCallCount` 等状态与审计摘要；执行期节点恢复由 LangGraph 自动 checkpoint 承担，运行期 checkpoint 仍可保留完整产物，终态立即清理对应 thread，Redis 使用固定前缀防止误删，清理失败只降级 checkpoint 就绪状态、不反转终态。TTL 作为异常退出兜底；真实服务依赖的 Redis、模型和 Spring/Python 接口验收尚未执行，前端三类型生成、预览和交互由用户人工验证。
-2. **让 Vue 修复后的质量检查读取修复后源码视图（已完成）。** 当前边界是：至少一次修复、硬校验和重新构建成功后才调用 `vue_source_snapshot`；最多 24 文件、单文件 12000 字符、总计 60000 字符，扫描最多 10000 个合格文件并只读取排序最佳 24 个，每文件最大 1 MiB。依赖/构建产物、隐藏目录、符号链接、锁文件、非文本、非法 UTF-8 和 NUL 均被排除或拒绝。完整快照仅瞬时传给当前 Reviewer，不进入幂等 Redis、业务 checkpoint、LangGraph state/checkpoint 或事件；事件仅含四个统计字段，失败 pending checkpoint 只稳定外层异常。读取或 Reviewer 失败不回退旧 artifact；首次未修复 Vue、HTML、MULTI_FILE 不调用。
+2. **让 Vue 修复后的质量检查读取修复后源码视图（已完成）。** 当前边界是：至少一次修复、硬校验和重新构建成功后才调用 `vue_source_snapshot`；最多 24 文件、单文件 12000 字符、总计 60000 字符，项目总访问条目最多 20000 个，其中合格源码候选最多 10000 个，并只读取排序最佳 24 个，每文件最大 1 MiB。依赖/构建产物、隐藏目录、符号链接、锁文件、非文本、非法 UTF-8 和 NUL 均被排除或拒绝，依赖/构建目录和锁文件按大小写不敏感处理。完整快照仅瞬时传给当前 Reviewer，不进入幂等 Redis、业务 checkpoint、LangGraph state/checkpoint 或事件；事件仅含四个统计字段，失败 pending checkpoint 只稳定外层异常。读取失败使用稳定脱敏消息且不暴露绝对项目路径；读取或 Reviewer 失败不回退旧 artifact；首次未修复 Vue、HTML、MULTI_FILE 不调用。
 3. **明确应用创建阶段的灰度身份键（下一项 P1）。** 当路由发生在 appId 创建前，需要固定使用 userId，创建后再按既定优先级使用 appId，并增加跨阶段一致性测试。原因是身份键切换如果没有明确契约，同一次创建流程可能在 Legacy 和 LangGraph 之间漂移。若现有调用链证明创建阶段始终有稳定 appId，则记录证据后关闭此项，不为假设增加代码。
 4. **压测 Java HTTP 客户端与长构建。** 验证 JDK HttpClient 连接复用、虚拟线程、读写超时、大 NDJSON 流、客户端断开和长时间 npm 构建下的资源释放。原因是功能测试覆盖正确性，但无法暴露连接耗尽、线程/进程残留、背压和超时边界问题。
 5. **按证据决定是否升级构建进程治理。** 当前 npm 后代进程通过 100ms 轮询捕获并有界清理；只有压力测试复现漏进程时，才引入 Windows Job Object 或 Unix process group。原因是现有方案存在理论窗口，但直接引入平台相关进程管理会提高复杂度，应由可复现问题驱动。

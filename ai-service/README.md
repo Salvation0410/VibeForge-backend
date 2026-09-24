@@ -82,9 +82,9 @@ START
 
 Vue 分支允许模型请求 Spring 工具，但工具调用次数受 `AI_SERVICE_VUE_MAX_TOOL_CALLS` 限制。每次工具调用都带有确定性的 `toolCallId`，供 Spring 执行幂等控制。
 
-Vue 至少完成一次修复、重新通过硬校验并重新构建成功后，质量检查会调用 Spring 工作流专用且模型不可调用的 `vue_source_snapshot`，以最终项目源码而不是旧 artifact 作为当前 Reviewer 的审查输入。首次未发生修复的 Vue，以及 HTML、MULTI_FILE 分支均不调用该工具。快照最多返回 24 个文件，单文件内容最多 12000 个字符，总内容最多 60000 个字符；Spring 遍历时最多接受 10000 个合格文件，并只保留按 `package.json`、入口文件、`src/App.vue`、其余路径稳定排序后的最佳 24 个候选，每个源文件最大 1 MiB。
+Vue 至少完成一次修复、重新通过硬校验并重新构建成功后，质量检查会调用 Spring 工作流专用且模型不可调用的 `vue_source_snapshot`，以最终项目源码而不是旧 artifact 作为当前 Reviewer 的审查输入。首次未发生修复的 Vue，以及 HTML、MULTI_FILE 分支均不调用该工具。快照最多返回 24 个文件，单文件内容最多 12000 个字符，总内容最多 60000 个字符；Spring 遍历的项目总访问条目（根目录之外的目录、文件和访问失败条目）最多 20000 个，其中合格源码候选最多 10000 个，并只读取按 `package.json`、入口文件、`src/App.vue`、其余路径稳定排序后的最佳 24 个候选，每个源文件最大 1 MiB。
 
-快照排除依赖和构建产物目录、隐藏目录、符号链接、锁文件及非文本扩展名，并对入选文件执行严格 UTF-8 与 NUL 检查。完整快照只在本次质量检查调用栈内传给当前 Reviewer，不写入 Spring 工具幂等 Redis、业务 checkpoint、LangGraph state/checkpoint 或 NDJSON 事件；质量检查失败时可能产生的 pending checkpoint 也只包含稳定的外层异常，不包含源码。`tool_finished` 事件只公开 `eligibleFileCount`、`includedFileCount`、`omittedFileCount` 和 `truncated` 四个统计字段。快照读取或 Reviewer 调用失败时不回退到旧 artifact，而是以脱敏错误进入失败终态。
+快照排除依赖和构建产物目录、隐藏目录、符号链接、锁文件及非文本扩展名，依赖/构建目录和锁文件的大小写变体同样排除；入选文件执行严格 UTF-8 与 NUL 检查。完整快照只在本次质量检查调用栈内传给当前 Reviewer，不写入 Spring 工具幂等 Redis、业务 checkpoint、LangGraph state/checkpoint 或 NDJSON 事件；质量检查失败时可能产生的 pending checkpoint 也只包含稳定的外层异常，不包含源码。`tool_finished` 事件只公开 `eligibleFileCount`、`includedFileCount`、`omittedFileCount` 和 `truncated` 四个统计字段。快照读取失败使用稳定的脱敏消息，错误响应不包含绝对项目路径；快照读取或 Reviewer 调用失败时不回退到旧 artifact，而是进入失败终态。
 
 内部工具统一契约为 `src/ai_service/contracts/internal-ai-tools-v1.json`。该文件使用 JSON Schema Draft 2020-12，同时约束工具标准名称和历史别名、模型调用权限、请求参数以及成功响应。模型只能调用 `dir_read`、`file_read`、`file_write`、`file_modify` 和 `file_delete`；`artifact_context`、`artifact_validate`、`artifact_publish`、`project_build` 和 `vue_source_snapshot` 只允许工作流调用。Spring 继续兼容已存在的 camelCase 和旧 snake_case 别名，但模型提示只使用标准名称。
 
