@@ -2,7 +2,7 @@
 
 ## 1. 文档用途与当前基线
 
-本文供下一轮 AI Agent 或开发者继续维护代码生成链路。内容更新至 2026-09-23 本地 `dev` 的内部工具 JSON Schema 契约实现基线，覆盖第一阶段 LangChain + LangGraph 重构，以及后续接入的 HTML 安全发布、生成取消治理、前端流式性能修复、Spring 工具响应契约加固、Python 提示词语义迁移、第二阶段 Task 1-4、稳定灰度和跨服务工具 Schema 校验。
+本文供下一轮 AI Agent 或开发者继续维护代码生成链路。内容更新至 2026-09-24 Vue 修复后最终源码审查实现基线，覆盖第一阶段 LangChain + LangGraph 重构，以及后续接入的 HTML 安全发布、生成取消治理、前端流式性能修复、Spring 工具响应契约加固、Python 提示词语义迁移、第二阶段 Task 1-4、稳定灰度、跨服务工具 Schema 校验和修复后 Vue 源码快照审查。
 
 开始工作前依次阅读：
 
@@ -23,12 +23,14 @@
 - Legacy Java 的路由、HTML、MULTI_FILE、Vue、质量检查语义已迁移到 `ai-service/src/ai_service/prompts/`，并由 `OpenAICompatibleModel` 实际加载；修复提示词按静态产物和 Vue 工具协议区分行为。
 - Spring 通过 `AiGenerationGateway` 统一接入 Legacy、LangGraph 和灰度路由，并保持原有外部 SSE 协议。
 - Python 不连接业务 MySQL，也不直接访问生成项目目录；文件、校验、发布和构建操作通过 Spring 内部工具网关完成。
-- Java/Python 共享 `ai-service/src/ai_service/contracts/internal-ai-tools-v1.json`，以 JSON Schema Draft 2020-12 统一九个内部工具的名称、历史别名、模型调用权限、请求参数和成功响应。
+- Java/Python 共享 `ai-service/src/ai_service/contracts/internal-ai-tools-v1.json`，以 JSON Schema Draft 2020-12 统一十个内部工具的名称、历史别名、模型调用权限、请求参数和成功响应。
 - Vue 模型工具已收敛为五个标准文件工具。Python 在出站前按 `requestSchema` 严格校验完整参数，未知工具、未知参数和额外字段不会到达 Spring；成功 `data` 按对应 `responseSchema` 校验后才进入工作流。请求拒绝额外字段，响应允许新增字段以支持滚动升级。
 - Schema 错误使用稳定的脱敏信息，不包含源码、文件路径、参数值或响应正文。Spring 生产代码继续负责应用范围、路径安全、字段语义、权限等业务校验；Java JSON Schema 校验器和共享契约断言仅位于测试范围，不进入生产请求链路。
 - 工作流在模型生成前调用仅工作流可用的 `artifact_context`：HTML/MULTI_FILE 返回完整活动产物且上限为 100000 字符，Vue 返回排序后的有界文件清单且最多 200 项；读取失败直接进入失败终态，不伪装成首次生成。
 - Vue 首次生成和修复共用同一套受限工具循环，生成与修复共享 `AI_SERVICE_VUE_MAX_TOOL_CALLS` 总预算；工具调用 ID 分别使用 `vue-generate` 和 `vue-repair:<repairCount>` 前缀，非法工具、受控参数、取消和模型截断均在调用 Spring 前被阻止。
 - Vue `project_build` 已返回 `built/errorCode/message` 结构化结果；`built=false` 会进入最多两次修复并重新校验、重新构建，达到上限后只能失败，质量检查只在构建成功后执行。
+- Vue 至少完成一次修复、重新通过硬校验并重新构建成功后，质量检查通过 Spring 工作流专用且模型不可调用的 `vue_source_snapshot` 获取最终源码；首次未修复 Vue、HTML 和 MULTI_FILE 不调用。快照最多 24 个文件、单文件 12000 字符、总计 60000 字符；扫描最多接受 10000 个合格文件，只读取按优先级和路径稳定排序后的最佳 24 个，每个源文件最大 1 MiB。
+- 快照排除依赖/构建产物、隐藏目录、符号链接、锁文件和非文本扩展名，并严格拒绝非法 UTF-8 或 NUL。完整内容仅瞬时传给当前 Reviewer，不进入 Spring 工具幂等 Redis、业务 checkpoint、LangGraph state/checkpoint 或事件；失败时可能产生的 pending checkpoint 也只保留稳定外层异常，不含源码。事件只公开 `eligibleFileCount`、`includedFileCount`、`omittedFileCount`、`truncated` 四个字段。读取或 Reviewer 失败不回退旧 artifact，而是以脱敏错误进入失败终态。
 - 内部 `project_build` 强制执行本轮构建，不以旧 `dist` 或上一轮并发构建结果冒充成功；旧预览仍保留。npm 输出、路径和环境值经过有界脱敏，进程树和输出读取使用有界终止策略。
 - Redis checkpoint 默认使用数据库 2；不可用时按当前配置和实现降级。
 - Spring 内部工具幂等状态和成功结果使用现有 Spring Redis 配置（本地默认 database 1），可跨 Spring 实例共享。作用域为 `appId + requestId + toolCallId`；同一作用域的 canonical 工具名或参数指纹不一致时拒绝执行。
@@ -102,6 +104,7 @@ Spring 是业务数据、项目文件和活动发布版本的唯一所有者。P
 | `ai/gateway/ToolInvocationIdempotencyService.java` | Redis 工具幂等作用域、冲突检测与不确定态保护 |
 | `controller/InternalAiToolsController.java` | 内部文件、校验、发布和构建工具边界 |
 | `core/artifact/ArtifactContextReader.java` | 读取有界活动产物或 Vue 文件清单 |
+| `core/artifact/VueSourceSnapshotReader.java` | 瞬时读取修复后 Vue 最终源码的有界快照 |
 | `core/artifact/HtmlArtifactParser.java` | 严格解析单文件 HTML |
 | `core/artifact/HtmlArtifactValidator.java` | HTML/CSS/JavaScript 确定性校验 |
 | `core/artifact/SeleniumHtmlSmokeTester.java` | HTML 浏览器烟测 |
@@ -196,15 +199,17 @@ Python checkpoint Redis: redis://localhost:6379/2
 
 ## 7. 当前验证基线
 
-2026-09-23 内部工具 JSON Schema 契约分支的 fresh 离线验证结果：
+2026-09-24 Vue 修复后最终源码审查分支的 fresh 离线验证结果：
 
 - `cd ai-service && uv run python -m compileall -q src`：通过。
-- `cd ai-service && uv run pytest`：151 项通过，0 failures；有 2 条来自 Starlette 和 LangGraph checkpoint 的第三方弃用警告。
+- `cd ai-service && uv run pytest`：165 项通过，0 failures；有 2 条来自 Starlette 和 LangGraph checkpoint 的第三方弃用警告。
 - `cd ai-service && uv lock --check`：通过，锁文件解析 67 个包。
-- `mvn "-Dtest=InternalAiToolContractTest,InternalAiToolsControllerTest" test`：24 项通过，0 failures/errors/skips（契约测试 4 项、控制器测试 20 项）；日志包含既有 SLF4J 多 provider 和 Mockito 动态 agent 警告。
-- `mvn clean -DskipTests compile`：通过，编译 236 个源文件；日志包含既有 varargs、弃用 API 和 unchecked 操作警告。
+- `mvn "-Dtest=InternalAiToolContractTest,VueSourceSnapshotReaderTest,InternalAiToolsControllerTest,InternalAiToolsHttpContractTest" test`：共 51 项，0 failures、0 errors、1 skipped（Windows 符号链接权限条件测试按环境跳过）；其余 50 项通过。日志包含既有 SLF4J 多 provider、Mockito 动态 agent、Bean Validation provider 缺失提示及预期业务异常日志。
+- `mvn clean -DskipTests compile`：通过，编译 237 个生产源文件；日志仅有既有 varargs、弃用 API 和 unchecked 操作警告，本轮只据此声明生产源码干净编译通过。
 
-以上验证覆盖 Python 运行时请求/成功响应 Schema 校验，以及 Java 使用同一契约对请求样例和控制器成功结果进行测试。Java 的 JSON Schema 依赖为 `test` scope，生产路径继续执行原有业务校验。
+以上验证覆盖快照选择与限额、严格文本读取、Spring HTTP/Controller 边界、共享 Schema、Python 网关校验、修复后快照审查、事件脱敏、失败不回退及 checkpoint/state 不留存源码。Java 的 JSON Schema 依赖仍为 `test` scope，生产路径继续执行原有业务校验。
+
+Spring 全量基线 `mvn test` 仍存在既有的 `YuAiCodeMotherApplicationTests.contextLoads` 失败：测试上下文缺少 `openAiChatModel` bean；其余 157 项基线通过。本轮没有修复或重新声明该既有全量基线为通过，只声称上述定向测试和 `mvn clean -DskipTests compile` 通过。
 
 此前 2026-09-22 本地 `dev` 基线还记录了以下结果：
 
@@ -222,7 +227,7 @@ Python checkpoint Redis: redis://localhost:6379/2
 - 浏览器确认简短优化提示包含图片保护要求，冗余生成提示已移除，加载图编译样式为固定 1:1 比例。
 - 事故应用旧产物被确认含自然语言前缀并缺少 `</script>`、`</html>`；未对该产物执行覆盖或新生成。
 
-本次 Schema 阶段只完成离线验证，没有启动真实 Spring/Python 网络链路、MySQL、Redis、多 Spring 实例或真实模型，也没有执行 HTML、MULTI_FILE、VUE_PROJECT 三类型端到端生成。真实 Redis 恢复、跨实例共享、锁竞争和 Redis/文件系统故障窗口仍需在集成环境覆盖，不能据此声称上述真实环境验收已经通过。
+本次最终源码审查阶段只完成离线验证，没有启动真实 Spring/Python HTTP、MySQL、Redis、多 Spring 实例或真实模型，也没有执行前端 HTML、MULTI_FILE、VUE_PROJECT 首次生成和二次修改。真实 Redis 恢复、跨实例共享、锁竞争和 Redis/文件系统故障窗口仍需在集成环境覆盖，不能据此声称上述真实环境验收已经通过。
 
 ### 稳定灰度与验收门实施记录
 
@@ -249,14 +254,15 @@ Python checkpoint Redis: redis://localhost:6379/2
 1. **Python 提示词与工作流语义迁移。** 路由、HTML、MULTI_FILE、Vue、质量检查和修复提示词已由 Python 模型适配器加载；生成前会读取当前活动产物，Vue 首次生成和修复共用同一受限工具循环。
 2. **Java/Python 职责边界落地。** Python 负责模型调用、工具决策、参数协议、调用预算和修复编排；Java 继续独占鉴权、应用范围、文件沙箱、真实读写、确定性校验、构建、发布、聊天记录和业务数据。
 3. **工具幂等与生成终态加固。** Spring 已接入 Redis 工具幂等边界和生成租约；HTML/MULTI_FILE 只有在严格解析、校验和不可变版本发布成功后才能完成，Vue 构建失败会进入有限修复而不是误报完成。
-4. **跨服务工具契约统一。** 九个内部工具已共享 Draft 2020-12 JSON Schema。Python 在请求发出前和成功响应返回后执行运行时校验；Java 测试使用同一 Schema 验证 Controller 请求样例和成功响应，生产业务校验不被 Schema 替代。
+4. **跨服务工具契约统一。** 十个内部工具已共享 Draft 2020-12 JSON Schema。Python 在请求发出前和成功响应返回后执行运行时校验；Java 测试使用同一 Schema 验证 Controller 请求样例和成功响应，生产业务校验不被 Schema 替代。
 5. **稳定灰度路由实现。** `route`、`generate`、`cancel` 已统一使用 `graySalt + userId/appId/requestId` 的稳定业务桶，并提供双引擎摘要对比和真实环境验收脚本；当前尚未提高灰度比例。
 6. **流式和预览体验治理。** 前端只保留最近 2000 字符、最多每 80ms 更新一次响应式快照，终态回源聊天历史；旧预览在生成期间保持，仅在当前请求成功后刷新一次。
 7. **HTTP 验收入口已补齐。** `scripts/test-ai-service.ps1` 已增加 Python 健康检查、Spring 成功调用、缺少/错误令牌、缺少字段、构建可选开关、幂等错误和脱敏覆盖标签；默认 dry-run，只有显式 `-Execute` 才发送请求。真实 HTTP 仍待用户启动服务后执行。
 8. **Redis 故障验收入口已补齐。** 真实 Redis 集成测试现已覆盖陈旧 `RUNNING` 和 action 成功后状态写回失败两个不确定窗口；重试必须拒绝再次执行 action。测试默认跳过，只有显式设置 `AI_REDIS_INTEGRATION=true` 才连接 `AI_REDIS_URL`。
 9. **三类型人工验收入口已加固。** 三个应用 ID 必须为正数且互不相同，成功场景出现 `business-error` 或终态数量异常时立即失败；六个提示词、人工检查项和操作提示均使用中文。脚本默认 dry-run，不保存流式源码、账号、密码或 Cookie。
-10. **离线验证完成。** Python 151 项测试、Java 24 项 Schema/Controller 定向测试、幂等单元测试 18 项、Python 编译与锁文件检查、Java 236 个生产源码干净编译、HTTP/E2E 脚本静态检查、dry-run、PowerShell 解析以及 `git diff --check` 均已通过。真实 Redis 集成测试 3 项在未设置开关时按设计跳过；真实网络、多实例、真实模型和三类型端到端仍属于下一轮验收。
+10. **离线验证完成。** 本轮 Python 165 项测试全部通过；Java 快照、契约、Controller 和 HTTP 定向测试共 51 项，0 failures/errors、1 项按 Windows 符号链接权限条件跳过；Python 编译、锁文件检查和 Java clean compile（237 个生产源文件）均通过。Spring 全量 `mvn test` 仍有既有 `contextLoads` 因缺少 `openAiChatModel` bean 失败，其余 157 项基线通过，因此本轮不声称全量测试通过。真实 Redis、真实 Spring/Python HTTP、真实模型和前端三类型首次生成/二次修改仍属于后续验收。
 11. **Checkpoint 产物留存边界已收敛。** 业务快照不再保存完整 artifact，保留 `node`、`requestId`、`appId`、`codeGenType`、`qualityPassed`、`repairCount` 和 `toolCallCount` 等状态与审计摘要；执行期节点恢复由 LangGraph 自动 checkpoint 承担，该 checkpoint 在请求执行期间仍可能保留完整产物，成功、失败或取消进入终态后清理对应 thread，并使用 Redis 固定前缀避免误删。终态清理失败只使 checkpoint 就绪状态降级，不反转生成结果；TTL 作为异常退出兜底。本轮未执行真实 Redis、真实模型及 Spring/Python 真实服务依赖的自动化或接口验收；前端三类型生成、预览和交互由用户人工验证并反馈错误。
+12. **Vue 修复后最终源码审查已完成。** 至少一次修复、硬校验和重新构建成功后，Reviewer 读取 Spring 瞬时生成的有界最终源码快照；扫描、选择、字符和文件大小均有硬上限，完整源码不进入幂等 Redis、业务或 LangGraph checkpoint/state/事件。读取或审查失败不回退旧 artifact，事件和异常保持脱敏。
 
 ## 8. 关键提交
 
@@ -355,8 +361,8 @@ caeb0cb fix: 保持预览加载图为正圆
 ### P1：可靠性、质量与资源优化
 
 1. **瘦身 checkpoint 中的完整 artifact（已完成）。** 本次实际边界是：业务快照去除完整 artifact，保留 `node`、`requestId`、`appId`、`codeGenType`、`qualityPassed`、`repairCount` 和 `toolCallCount` 等状态与审计摘要；执行期节点恢复由 LangGraph 自动 checkpoint 承担，运行期 checkpoint 仍可保留完整产物，终态立即清理对应 thread，Redis 使用固定前缀防止误删，清理失败只降级 checkpoint 就绪状态、不反转终态。TTL 作为异常退出兜底；真实服务依赖的 Redis、模型和 Spring/Python 接口验收尚未执行，前端三类型生成、预览和交互由用户人工验证。
-2. **让 Vue 修复后的质量检查读取修复后源码视图。** 当前质量检查主要依赖原 artifact、结构化 `toolResults` 和构建结果。应在修复工具循环结束后重新读取受影响文件或生成有界变更摘要，再交给 Reviewer。原因是“构建成功”不等于“满足用户需求”，Reviewer 如果看不到最终源码，可能对旧内容做出错误通过判断。
-3. **明确应用创建阶段的灰度身份键。** 当路由发生在 appId 创建前，需要固定使用 userId，创建后再按既定优先级使用 appId，并增加跨阶段一致性测试。原因是身份键切换如果没有明确契约，同一次创建流程可能在 Legacy 和 LangGraph 之间漂移。若现有调用链证明创建阶段始终有稳定 appId，则记录证据后关闭此项，不为假设增加代码。
+2. **让 Vue 修复后的质量检查读取修复后源码视图（已完成）。** 当前边界是：至少一次修复、硬校验和重新构建成功后才调用 `vue_source_snapshot`；最多 24 文件、单文件 12000 字符、总计 60000 字符，扫描最多 10000 个合格文件并只读取排序最佳 24 个，每文件最大 1 MiB。依赖/构建产物、隐藏目录、符号链接、锁文件、非文本、非法 UTF-8 和 NUL 均被排除或拒绝。完整快照仅瞬时传给当前 Reviewer，不进入幂等 Redis、业务 checkpoint、LangGraph state/checkpoint 或事件；事件仅含四个统计字段，失败 pending checkpoint 只稳定外层异常。读取或 Reviewer 失败不回退旧 artifact；首次未修复 Vue、HTML、MULTI_FILE 不调用。
+3. **明确应用创建阶段的灰度身份键（下一项 P1）。** 当路由发生在 appId 创建前，需要固定使用 userId，创建后再按既定优先级使用 appId，并增加跨阶段一致性测试。原因是身份键切换如果没有明确契约，同一次创建流程可能在 Legacy 和 LangGraph 之间漂移。若现有调用链证明创建阶段始终有稳定 appId，则记录证据后关闭此项，不为假设增加代码。
 4. **压测 Java HTTP 客户端与长构建。** 验证 JDK HttpClient 连接复用、虚拟线程、读写超时、大 NDJSON 流、客户端断开和长时间 npm 构建下的资源释放。原因是功能测试覆盖正确性，但无法暴露连接耗尽、线程/进程残留、背压和超时边界问题。
 5. **按证据决定是否升级构建进程治理。** 当前 npm 后代进程通过 100ms 轮询捕获并有界清理；只有压力测试复现漏进程时，才引入 Windows Job Object 或 Unix process group。原因是现有方案存在理论窗口，但直接引入平台相关进程管理会提高复杂度，应由可复现问题驱动。
 
@@ -383,7 +389,7 @@ caeb0cb fix: 保持预览加载图为正圆
 3. 使用三个隔离应用完成三类型首次生成和二次修改。
 4. 执行停止、断线、大流式响应和长构建压力验证。
 5. 对比 Legacy/LangGraph 摘要并演练回滚；全部通过后才能讨论提高灰度比例。
-6. P1 的 checkpoint artifact 瘦身已完成；后续从读取修复后源码视图开始逐项实施剩余 P1，每项单独设计、测试和提交。
+6. P1 的 checkpoint artifact 瘦身和 Vue 修复后最终源码审查已完成；下一项是明确应用创建阶段的灰度身份键，每项单独设计、测试和提交。
 7. P2 只在真实运行数据证明有必要时进入实施，不与 P0/P1 混合提交。
 
 ## 11. 下一轮开始前检查清单
@@ -525,7 +531,8 @@ Legacy Java 的 `AiCodeGeneratorService`、`ToolManager` 和 `BaseTool` 中仍�
 - [x] 统一 Vue 首次生成与修复工具循环，保持 Spring 为唯一文件执行边界。
 - [x] 将 `project_build` 失败纳入确定性修复状态机，并提供结构化、有界、脱敏的构建结果。
 - [x] 在保留 Legacy 回滚路径的前提下，实现稳定用户灰度桶并提供双引擎摘要对比脚本。
-- [x] 使用共享 JSON Schema 统一九个内部工具的请求/成功响应协议，并在 Python 运行时和 Java 测试期校验。
+- [x] 使用共享 JSON Schema 统一十个内部工具的请求/成功响应协议，并在 Python 运行时和 Java 测试期校验。
+- [x] 在 Vue 至少修复一次、硬校验和重新构建成功后，通过 Spring 瞬时有界快照让 Reviewer 审查最终源码；失败不回退旧 artifact，源码不进入持久状态或事件。
 - [ ] 在真实环境执行双引擎摘要对比和 Legacy 回滚演练。
 - [ ] 完成真实 Spring HTTP、真实 Redis、多实例幂等、取消和三类型首次生成/二次修改验收后，再提高 LangGraph 灰度比例。
 
