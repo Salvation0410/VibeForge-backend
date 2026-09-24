@@ -209,7 +209,7 @@ Python checkpoint Redis: redis://localhost:6379/2
 
 以上验证覆盖快照选择与限额、严格文本读取、Spring HTTP/Controller 边界、共享 Schema、Python 网关校验、修复后快照审查、事件脱敏、失败不回退及 checkpoint/state 不留存源码。Java 的 JSON Schema 依赖仍为 `test` scope，生产路径继续执行原有业务校验。
 
-Spring 全量基线 `mvn test` 仍存在既有的 `YuAiCodeMotherApplicationTests.contextLoads` 失败：测试上下文缺少 `openAiChatModel` bean；其余 157 项基线通过。本轮没有修复或重新声明该既有全量基线为通过，只声称上述定向测试和 `mvn clean -DskipTests compile` 通过。
+本分支全量 `mvn test` 新鲜证据为 185 项：0 failures、1 error、1 skipped，183 项通过。唯一 error 仍是既有的 `YuAiCodeMotherApplicationTests.contextLoads`，原因是测试上下文缺少 `openAiChatModel` bean；1 个 skipped 是 Windows 符号链接权限条件测试。本轮没有修复或重新声明全量测试通过，只声称上述定向测试和 `mvn clean -DskipTests compile` 通过。
 
 此前 2026-09-22 本地 `dev` 基线还记录了以下结果：
 
@@ -260,7 +260,7 @@ Spring 全量基线 `mvn test` 仍存在既有的 `YuAiCodeMotherApplicationTest
 7. **HTTP 验收入口已补齐。** `scripts/test-ai-service.ps1` 已增加 Python 健康检查、Spring 成功调用、缺少/错误令牌、缺少字段、构建可选开关、幂等错误和脱敏覆盖标签；默认 dry-run，只有显式 `-Execute` 才发送请求。真实 HTTP 仍待用户启动服务后执行。
 8. **Redis 故障验收入口已补齐。** 真实 Redis 集成测试现已覆盖陈旧 `RUNNING` 和 action 成功后状态写回失败两个不确定窗口；重试必须拒绝再次执行 action。测试默认跳过，只有显式设置 `AI_REDIS_INTEGRATION=true` 才连接 `AI_REDIS_URL`。
 9. **三类型人工验收入口已加固。** 三个应用 ID 必须为正数且互不相同，成功场景出现 `business-error` 或终态数量异常时立即失败；六个提示词、人工检查项和操作提示均使用中文。脚本默认 dry-run，不保存流式源码、账号、密码或 Cookie。
-10. **离线验证完成。** 本轮 Python 165 项测试全部通过；Java 快照、契约、Controller 和 HTTP 定向测试共 51 项，0 failures/errors、1 项按 Windows 符号链接权限条件跳过；Python 编译、锁文件检查和 Java clean compile（237 个生产源文件）均通过。Spring 全量 `mvn test` 仍有既有 `contextLoads` 因缺少 `openAiChatModel` bean 失败，其余 157 项基线通过，因此本轮不声称全量测试通过。真实 Redis、真实 Spring/Python HTTP、真实模型和前端三类型首次生成/二次修改仍属于后续验收。
+10. **离线验证完成。** 本轮 Python 165 项测试全部通过；Java 快照、契约、Controller 和 HTTP 定向测试共 51 项，0 failures/errors、1 项按 Windows 符号链接权限条件跳过；Python 编译、锁文件检查和 Java clean compile（237 个生产源文件）均通过。本分支全量 `mvn test` 共 185 项，其中 183 项通过、0 failures、1 error、1 skipped；唯一 error 是既有 `contextLoads` 因缺少 `openAiChatModel` bean，skipped 是 Windows 符号链接权限条件测试，因此本轮不声称全量测试通过。真实 Redis、真实 Spring/Python HTTP、真实模型和前端三类型首次生成/二次修改仍属于后续验收。
 11. **Checkpoint 产物留存边界已收敛。** 业务快照不再保存完整 artifact，保留 `node`、`requestId`、`appId`、`codeGenType`、`qualityPassed`、`repairCount` 和 `toolCallCount` 等状态与审计摘要；执行期节点恢复由 LangGraph 自动 checkpoint 承担，该 checkpoint 在请求执行期间仍可能保留完整产物，成功、失败或取消进入终态后清理对应 thread，并使用 Redis 固定前缀避免误删。终态清理失败只使 checkpoint 就绪状态降级，不反转生成结果；TTL 作为异常退出兜底。本轮未执行真实 Redis、真实模型及 Spring/Python 真实服务依赖的自动化或接口验收；前端三类型生成、预览和交互由用户人工验证并反馈错误。
 12. **Vue 修复后最终源码审查已完成。** 至少一次修复、硬校验和重新构建成功后，Reviewer 读取 Spring 瞬时生成的有界最终源码快照；扫描、选择、字符和文件大小均有硬上限，完整源码不进入幂等 Redis、业务或 LangGraph checkpoint/state/事件。读取或审查失败不回退旧 artifact，事件和异常保持脱敏。
 
