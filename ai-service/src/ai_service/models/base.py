@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from ai_service.models.quality_review import ReviewerResult, ReviewerRole
+
 
 @dataclass(slots=True)
 class ToolCall:
@@ -35,6 +37,15 @@ class GenerationModel(Protocol):
 
     async def review(self, artifact: str, context: dict[str, Any]) -> bool:
         """检查生成产物是否达到结束工作流的质量要求。"""
+        ...
+
+    async def review_role(
+        self,
+        role: ReviewerRole,
+        artifact: str,
+        context: dict[str, Any],
+    ) -> ReviewerResult:
+        """以指定审查角色返回严格校验的结构化质量结论。"""
         ...
 
     async def repair(self, artifact: str, context: dict[str, Any]) -> ModelTurn:

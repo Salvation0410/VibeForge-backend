@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -7,12 +8,17 @@ import pytest
 from ai_service.config import Settings
 from ai_service.models import openai_compatible
 from ai_service.models.openai_compatible import OpenAICompatibleModel
+from ai_service.models.quality_review import (
+    QualityReviewOutputError,
+    ReviewerRole,
+)
 from ai_service.models.tool_contract import vue_tool_prompt
 from ai_service.prompts import (
     QUALITY_REVIEW_SYSTEM_PROMPT,
     REPAIR_SYSTEM_PROMPT,
     ROUTING_SYSTEM_PROMPT,
     generation_system_prompt,
+    quality_review_system_prompt,
 )
 
 
@@ -121,6 +127,92 @@ async def test_review_and_repair_use_their_system_prompts():
     result = await repair_model.repair("artifact", {"validation": {"valid": False}})
     assert result.content == "fixed"
     assert repair_model._client.messages[0].content == REPAIR_SYSTEM_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_role_review_parses_valid_json_and_preserves_human_payload_contract():
+    model = model_with_response(
+        '{"reviewer":"requirement","summary":"完成","issues":[]}'
+    )
+
+    result = await model.review_role(
+        ReviewerRole.REQUIREMENT,
+        "artifact",
+        {"prompt": "check", "buildSummary": "passed"},
+    )
+
+    assert result.reviewer is ReviewerRole.REQUIREMENT
+    assert result.summary == "完成"
+    assert model._client.messages[0].content == quality_review_system_prompt(
+        ReviewerRole.REQUIREMENT.value
+    )
+    assert json.loads(model._client.messages[1].content) == {
+        "artifact": "artifact",
+        "prompt": "check",
+        "buildSummary": "passed",
+    }
+
+
+@pytest.mark.asyncio
+async def test_role_review_accepts_markdown_json_fence():
+    model = model_with_response(
+        '```json\n{"reviewer":"function","summary":"完成","issues":[]}\n```'
+    )
+
+    result = await model.review_role(ReviewerRole.FUNCTION, "artifact", {})
+
+    assert result.reviewer is ReviewerRole.FUNCTION
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response_content",
+    [
+        '{"reviewer":"technical","summary":"完成","issues":[],"extra":true}',
+        '{"reviewer":"technical","summary":"' + "x" * 301 + '","issues":[]}',
+        (
+            '{"reviewer":"technical","summary":"完成","issues":['
+            '{"code":"X","category":"logic","summary":"problem",'
+            '"evidence":"evidence","repair_hint":"repair",'
+            '"severity":"unknown"}]}'
+        ),
+    ],
+)
+async def test_role_review_rejects_schema_violations(response_content):
+    model = model_with_response(response_content)
+
+    with pytest.raises(QualityReviewOutputError) as error:
+        await model.review_role(ReviewerRole.TECHNICAL, "artifact", {})
+
+    assert str(error.value) == "MULTI_AGENT_REVIEW_INVALID_OUTPUT: invalid JSON"
+    assert response_content not in str(error.value)
+
+
+@pytest.mark.asyncio
+async def test_role_review_rejects_invalid_json_without_leaking_raw_content():
+    raw = '{"privateSource":"<script>secret source</script>"'
+    model = model_with_response(raw)
+
+    with pytest.raises(QualityReviewOutputError) as error:
+        await model.review_role(ReviewerRole.REQUIREMENT, "artifact", {})
+
+    assert str(error.value) == "MULTI_AGENT_REVIEW_INVALID_OUTPUT: invalid JSON"
+    assert raw not in str(error.value)
+    assert "secret source" not in str(error.value)
+
+
+@pytest.mark.asyncio
+async def test_role_review_rejects_reviewer_identity_mismatch():
+    model = model_with_response(
+        '{"reviewer":"function","summary":"完成","issues":[]}'
+    )
+
+    with pytest.raises(QualityReviewOutputError) as error:
+        await model.review_role(ReviewerRole.REQUIREMENT, "artifact", {})
+
+    assert str(error.value) == (
+        "MULTI_AGENT_REVIEW_INVALID_OUTPUT: reviewer identity mismatch"
+    )
 
 
 @pytest.mark.asyncio

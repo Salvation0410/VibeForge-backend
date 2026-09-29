@@ -5,15 +5,22 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
+from pydantic import ValidationError
 
 from ai_service.config import Settings
 from ai_service.models.base import ModelTurn, ToolCall
+from ai_service.models.quality_review import (
+    QualityReviewOutputError,
+    ReviewerResult,
+    ReviewerRole,
+)
 from ai_service.models.tool_contract import vue_tool_prompt
 from ai_service.prompts import (
     QUALITY_REVIEW_SYSTEM_PROMPT,
     REPAIR_SYSTEM_PROMPT,
     ROUTING_SYSTEM_PROMPT,
     generation_system_prompt,
+    quality_review_system_prompt,
 )
 
 
@@ -64,6 +71,28 @@ class OpenAICompatibleModel:
             ]
         )
         return str(response.content).strip().upper() == "PASS"
+
+    async def review_role(
+        self,
+        role: ReviewerRole,
+        artifact: str,
+        context: dict[str, Any],
+    ) -> ReviewerResult:
+        """让指定角色返回严格校验的结构化质量审查结果。"""
+        response = await self._client.ainvoke(
+            [
+                SystemMessage(content=quality_review_system_prompt(role.value)),
+                HumanMessage(content=json.dumps({"artifact": artifact, **context}, ensure_ascii=False)),
+            ]
+        )
+        raw = str(response.content)
+        try:
+            result = ReviewerResult.model_validate_json(_strip_json_fence(raw))
+        except (ValidationError, json.JSONDecodeError) as exc:
+            raise QualityReviewOutputError("invalid_json") from exc
+        if result.reviewer is not role:
+            raise QualityReviewOutputError("identity_mismatch")
+        return result
 
     async def repair(self, artifact: str, context: dict[str, Any]) -> ModelTurn:
         """结合验证和构建上下文生成修复后的完整产物。"""

@@ -7,7 +7,9 @@ from ai_service.prompts import (
     REPAIR_SYSTEM_PROMPT,
     ROUTING_SYSTEM_PROMPT,
     generation_system_prompt,
+    quality_review_system_prompt,
 )
+from ai_service.models.quality_review import ReviewerRole
 
 
 def test_routing_prompt_preserves_supported_generation_types_and_strict_output():
@@ -52,6 +54,37 @@ def test_review_and_repair_prompts_define_the_python_workflow_contract():
     assert "完整的修复后产物" in REPAIR_SYSTEM_PROMPT
     assert "校验、构建和质量检查结果" in REPAIR_SYSTEM_PROMPT
     assert "补丁" in REPAIR_SYSTEM_PROMPT
+
+
+def test_role_review_prompts_define_distinct_responsibilities_and_shared_contract():
+    prompts = {
+        role: quality_review_system_prompt(role.value)
+        for role in ReviewerRole
+    }
+
+    assert "需求符合度" in prompts[ReviewerRole.REQUIREMENT]
+    assert "功能正确性" in prompts[ReviewerRole.FUNCTION]
+    assert "技术质量" in prompts[ReviewerRole.TECHNICAL]
+    assert len(set(prompts.values())) == 3
+
+    for role, prompt in prompts.items():
+        assert f'"reviewer":"{role.value}"' in prompt
+        assert "用户需求、构建摘要和源码快照" in prompt
+        assert "不得调用工具" in prompt
+        assert "不得建议无关重构" in prompt
+        assert "critical" in prompt
+        assert "major" in prompt
+        assert "minor" in prompt
+        assert "最多 5 条" in prompt
+        assert "只返回 JSON" in prompt
+        assert "Markdown" in prompt
+        assert '"summary"' in prompt
+        assert '"issues"' in prompt
+
+
+def test_unknown_review_role_is_rejected():
+    with pytest.raises(ValueError, match="Unsupported reviewer role"):
+        quality_review_system_prompt("security")
 
 
 def test_unknown_generation_branch_is_rejected():
