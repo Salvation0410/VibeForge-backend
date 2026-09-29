@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import traceback
 from types import SimpleNamespace
 
 import pytest
@@ -190,15 +191,20 @@ async def test_role_review_rejects_schema_violations(response_content):
 
 @pytest.mark.asyncio
 async def test_role_review_rejects_invalid_json_without_leaking_raw_content():
-    raw = '{"privateSource":"<script>secret source</script>"'
+    marker = "TRACEBACK_SECRET_SOURCE_MARKER"
+    raw = f'{{"privateSource":"<script>{marker}</script>"'
     model = model_with_response(raw)
 
     with pytest.raises(QualityReviewOutputError) as error:
         await model.review_role(ReviewerRole.REQUIREMENT, "artifact", {})
 
     assert str(error.value) == "MULTI_AGENT_REVIEW_INVALID_OUTPUT: invalid JSON"
+    assert error.value.__cause__ is None
     assert raw not in str(error.value)
-    assert "secret source" not in str(error.value)
+    formatted_traceback = "".join(
+        traceback.format_exception(error.type, error.value, error.tb)
+    )
+    assert marker not in formatted_traceback
 
 
 @pytest.mark.asyncio

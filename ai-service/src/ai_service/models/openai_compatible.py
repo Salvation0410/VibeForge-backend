@@ -88,8 +88,8 @@ class OpenAICompatibleModel:
         raw = str(response.content)
         try:
             result = ReviewerResult.model_validate_json(_strip_json_fence(raw))
-        except (ValidationError, json.JSONDecodeError) as exc:
-            raise QualityReviewOutputError("invalid_json") from exc
+        except (ValidationError, json.JSONDecodeError):
+            raise QualityReviewOutputError("invalid_json") from None
         if result.reviewer is not role:
             raise QualityReviewOutputError("identity_mismatch")
         return result
