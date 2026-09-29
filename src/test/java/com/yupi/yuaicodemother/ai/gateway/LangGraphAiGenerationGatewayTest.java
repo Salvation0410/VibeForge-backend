@@ -6,9 +6,13 @@ import com.yupi.yuaicodemother.config.AiEngineProperties;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import reactor.core.publisher.BaseSubscriber;
 
+import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -97,6 +101,56 @@ class LangGraphAiGenerationGatewayTest {
         assertEquals(CodeGenTypeEnum.HTML, gateway.route("build", null, 7L, "req-route"));
         assertEquals("HTTP/1.1", protocol.get());
         assertNull(upgrade.get(), "LangGraph requests must not attempt an h2c upgrade");
+    }
+
+    @Test
+    void cancellingSubscriberClosesNdjsonResponseBody() throws Exception {
+        CountDownLatch firstChunkReceived = new CountDownLatch(1);
+        CountDownLatch clientClosed = new CountDownLatch(1);
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/internal/v1/generations:stream", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            exchange.sendResponseHeaders(200, 0);
+            try {
+                int sequence = 0;
+                while (true) {
+                    String chunk = "{\"requestId\":\"req-cancel\",\"type\":\"content_delta\","
+                            + "\"sequence\":" + sequence++ + ",\"data\":{\"content\":\"chunk\"}}\n";
+                    exchange.getResponseBody().write(chunk.getBytes(StandardCharsets.UTF_8));
+                    exchange.getResponseBody().flush();
+                    Thread.sleep(10);
+                }
+            } catch (IOException expected) {
+                clientClosed.countDown();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            } finally {
+                exchange.close();
+            }
+        });
+        server.start();
+        AiEngineProperties properties = new AiEngineProperties();
+        properties.setServiceUrl("http://127.0.0.1:" + server.getAddress().getPort());
+        properties.setToken("test-token");
+        var gateway = new LangGraphAiGenerationGateway(properties, new ObjectMapper());
+
+        gateway.generate("build", CodeGenTypeEnum.VUE_PROJECT, 42L, 7L, "req-cancel")
+                .subscribe(new BaseSubscriber<>() {
+                    @Override
+                    protected void hookOnSubscribe(org.reactivestreams.Subscription subscription) {
+                        request(1);
+                    }
+
+                    @Override
+                    protected void hookOnNext(String value) {
+                        firstChunkReceived.countDown();
+                        cancel();
+                    }
+                });
+
+        assertTrue(firstChunkReceived.await(5, TimeUnit.SECONDS), "subscriber did not receive the first chunk");
+        assertTrue(clientClosed.await(5, TimeUnit.SECONDS),
+                "cancelling the downstream subscriber must close the NDJSON response body");
     }
 
     /** 启动一次性本地 NDJSON 服务，避免测试依赖真实 Python 进程。 */

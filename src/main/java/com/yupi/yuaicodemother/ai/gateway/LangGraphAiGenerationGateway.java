@@ -17,9 +17,13 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 独立 LangGraph AI 服务的 HTTP 适配器，将内部 NDJSON 事件转换为既有 SSE 处理链可消费的数据。
@@ -81,6 +85,13 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
     @Override
     public Flux<String> generate(String prompt, CodeGenTypeEnum codeGenType, Long appId, Long userId, String requestId) {
         return Flux.create(sink -> {
+            AtomicReference<CompletableFuture<HttpResponse<InputStream>>> requestFuture = new AtomicReference<>();
+            AtomicReference<InputStream> responseBody = new AtomicReference<>();
+            sink.onCancel(() -> {
+                closeQuietly(responseBody.getAndSet(null));
+                CompletableFuture<HttpResponse<InputStream>> pending = requestFuture.getAndSet(null);
+                if (pending != null) pending.cancel(true);
+            });
             try {
                 Map<String, Object> body = Map.of(
                         "requestId", requestId,
@@ -89,19 +100,34 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
                         "codeGenType", codeGenType.name(),
                         "metadata", Map.of("userId", userId == null ? "" : String.valueOf(userId)));
                 HttpRequest request = buildRequest("/internal/v1/generations:stream", body);
-                httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream())
+                CompletableFuture<HttpResponse<InputStream>> pending = httpClient.sendAsync(
+                        request, HttpResponse.BodyHandlers.ofInputStream());
+                requestFuture.set(pending);
+                if (sink.isCancelled()) pending.cancel(true);
+                pending
                         .whenComplete((response, error) -> {
-                            if (error != null) { sink.error(error); return; }
+                            requestFuture.compareAndSet(pending, null);
+                            if (error != null) {
+                                if (!sink.isCancelled()) sink.error(error);
+                                return;
+                            }
+                            InputStream bodyStream = response.body();
+                            responseBody.set(bodyStream);
+                            if (sink.isCancelled()) {
+                                closeQuietly(responseBody.getAndSet(null));
+                                return;
+                            }
                             if (response.statusCode() / 100 != 2) {
+                                closeQuietly(responseBody.getAndSet(null));
                                 sink.error(new IllegalStateException("LangGraph generation failed: HTTP " + response.statusCode()));
                                 return;
                             }
                             Thread.startVirtualThread(() -> {
-                                try (BufferedReader reader = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
+                                try (BufferedReader reader = new BufferedReader(new InputStreamReader(bodyStream, StandardCharsets.UTF_8))) {
                                     String line;
                                     String latestArtifact = null;
                                     boolean completed = false;
-                                    while ((line = reader.readLine()) != null) {
+                                    while (!sink.isCancelled() && (line = reader.readLine()) != null) {
                                         ParsedEvent event = parseEvent(line, codeGenType, requestId);
                                         if (event.artifact() != null) latestArtifact = event.artifact();
                                         if (!event.message().isBlank()) sink.next(event.message());
@@ -113,6 +139,7 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
                                             break;
                                         }
                                     }
+                                    if (sink.isCancelled()) return;
                                     if (!completed) {
                                         throw new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(),
                                                 "LANGGRAPH_STREAM_INCOMPLETE", requestId,
@@ -120,12 +147,24 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
                                     }
                                     sink.complete();
                                 } catch (Exception streamError) {
-                                    sink.error(streamError);
+                                    if (!sink.isCancelled()) sink.error(streamError);
+                                } finally {
+                                    responseBody.compareAndSet(bodyStream, null);
                                 }
                             });
                         });
             } catch (Exception e) { sink.error(e); }
         });
+    }
+
+    /** 取消或错误路径关闭响应体时不覆盖已经确定的业务终态。 */
+    private void closeQuietly(InputStream inputStream) {
+        if (inputStream == null) return;
+        try {
+            inputStream.close();
+        } catch (IOException error) {
+            log.debug("关闭 LangGraph 响应流失败", error);
+        }
     }
 
     /**
