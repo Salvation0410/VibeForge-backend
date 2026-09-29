@@ -32,6 +32,14 @@ def empty_reviewer_results() -> list[ReviewerResult]:
     ]
 
 
+def test_reviewer_result_accepts_enum_strings_from_json():
+    result = ReviewerResult.model_validate_json(
+        '{"reviewer":"requirement","summary":"ok","issues":[]}'
+    )
+
+    assert result.reviewer is ReviewerRole.REQUIREMENT
+
+
 def test_quality_review_result_rejects_non_strict_passed_value():
     with pytest.raises(ValidationError):
         QualityReviewResult(
@@ -98,6 +106,64 @@ def test_duplicate_issue_keeps_highest_severity():
     assert result.blocking_issues[0].severity is IssueSeverity.CRITICAL
 
 
+def test_aggregate_is_deterministic_for_result_and_issue_order():
+    shared_later = QualityIssue(
+        code="SHARED",
+        category="logic",
+        summary="Same problem",
+        evidence="z evidence",
+        repair_hint="a repair",
+        severity=IssueSeverity.MAJOR,
+    )
+    shared_first = shared_later.model_copy(
+        update={"evidence": "a evidence", "repair_hint": "z repair"}
+    )
+    requirement = ReviewerResult(
+        reviewer=ReviewerRole.REQUIREMENT,
+        summary="requirement summary",
+        issues=[
+            QualityIssue(
+                code="Z_MINOR",
+                category="visual",
+                summary="Minor problem",
+                evidence="minor evidence",
+                repair_hint="minor repair",
+                severity=IssueSeverity.MINOR,
+            ),
+            shared_later,
+        ],
+    )
+    function = ReviewerResult(
+        reviewer=ReviewerRole.FUNCTION,
+        summary="function summary",
+        issues=[
+            shared_first,
+            QualityIssue(
+                code="A_CRITICAL",
+                category="functionality",
+                summary="Critical problem",
+                evidence="critical evidence",
+                repair_hint="critical repair",
+                severity=IssueSeverity.CRITICAL,
+            ),
+        ],
+    )
+    technical = ReviewerResult(reviewer=ReviewerRole.TECHNICAL, summary="technical summary")
+
+    forward = aggregate_review_results([requirement, function, technical])
+    reversed_input = aggregate_review_results(
+        [
+            technical,
+            function.model_copy(update={"issues": list(reversed(function.issues))}),
+            requirement.model_copy(update={"issues": list(reversed(requirement.issues))}),
+        ]
+    )
+
+    assert forward.model_dump() == reversed_input.model_dump()
+    assert [item.reviewer for item in forward.reviewer_results] == list(ReviewerRole)
+    assert next(item for item in forward.blocking_issues if item.code == "SHARED").evidence == "a evidence"
+
+
 @pytest.mark.parametrize("roles", [
     [ReviewerRole.REQUIREMENT, ReviewerRole.FUNCTION],
     [ReviewerRole.REQUIREMENT, ReviewerRole.FUNCTION, ReviewerRole.FUNCTION],
@@ -105,6 +171,31 @@ def test_duplicate_issue_keeps_highest_severity():
 def test_missing_or_duplicate_role_fails(roles):
     with pytest.raises(QualityReviewOutputError, match="MULTI_AGENT_REVIEW_INVALID_OUTPUT"):
         aggregate_review_results([ReviewerResult(reviewer=role, summary="ok") for role in roles])
+
+
+@pytest.mark.parametrize(
+    ("reason", "message"),
+    [
+        ("invalid_output", "MULTI_AGENT_REVIEW_INVALID_OUTPUT"),
+        ("invalid_json", "MULTI_AGENT_REVIEW_INVALID_OUTPUT: invalid JSON"),
+        ("identity_mismatch", "MULTI_AGENT_REVIEW_INVALID_OUTPUT: reviewer identity mismatch"),
+        ("too_many_issues", "MULTI_AGENT_REVIEW_INVALID_OUTPUT: aggregated issues exceed 12"),
+        (
+            "feedback_too_long",
+            "MULTI_AGENT_REVIEW_INVALID_OUTPUT: repair feedback exceeds 4000 characters",
+        ),
+    ],
+)
+def test_output_error_uses_whitelisted_reason_messages(reason, message):
+    assert str(QualityReviewOutputError(reason)) == message
+
+
+def test_output_error_does_not_expose_unknown_reason():
+    source = "<script>private source code</script>"
+    message = str(QualityReviewOutputError(source))
+
+    assert message == "MULTI_AGENT_REVIEW_INVALID_OUTPUT"
+    assert source not in message
 
 
 def test_single_reviewer_more_than_five_issues_fails():
@@ -149,7 +240,7 @@ def test_more_than_twelve_unique_issues_fails():
     ]
     with pytest.raises(QualityReviewOutputError) as error:
         aggregate_review_results(results)
-    assert str(error.value) == "MULTI_AGENT_REVIEW_INVALID_OUTPUT"
+    assert str(error.value) == "MULTI_AGENT_REVIEW_INVALID_OUTPUT: aggregated issues exceed 12"
 
 
 def test_feedback_over_four_thousand_characters_fails():
@@ -160,4 +251,4 @@ def test_feedback_over_four_thousand_characters_fails():
     ]
     with pytest.raises(QualityReviewOutputError) as error:
         aggregate_review_results(results)
-    assert str(error.value) == "MULTI_AGENT_REVIEW_INVALID_OUTPUT"
+    assert str(error.value) == "MULTI_AGENT_REVIEW_INVALID_OUTPUT: repair feedback exceeds 4000 characters"

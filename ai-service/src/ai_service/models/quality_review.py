@@ -16,9 +16,18 @@ class IssueSeverity(StrEnum):
     MINOR = "minor"
 
 
+_OUTPUT_ERROR_MESSAGES = {
+    "invalid_output": "MULTI_AGENT_REVIEW_INVALID_OUTPUT",
+    "invalid_json": "MULTI_AGENT_REVIEW_INVALID_OUTPUT: invalid JSON",
+    "identity_mismatch": "MULTI_AGENT_REVIEW_INVALID_OUTPUT: reviewer identity mismatch",
+    "too_many_issues": "MULTI_AGENT_REVIEW_INVALID_OUTPUT: aggregated issues exceed 12",
+    "feedback_too_long": "MULTI_AGENT_REVIEW_INVALID_OUTPUT: repair feedback exceeds 4000 characters",
+}
+
+
 class QualityReviewOutputError(ValueError):
-    def __init__(self) -> None:
-        super().__init__("MULTI_AGENT_REVIEW_INVALID_OUTPUT")
+    def __init__(self, reason: str = "invalid_output") -> None:
+        super().__init__(_OUTPUT_ERROR_MESSAGES.get(reason, _OUTPUT_ERROR_MESSAGES["invalid_output"]))
 
 
 Trimmed = Annotated[str, StringConstraints(strip_whitespace=True)]
