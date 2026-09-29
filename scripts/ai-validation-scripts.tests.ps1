@@ -120,9 +120,12 @@ if ($sameInstanceExitCode -eq 0 -or "$sameInstanceResult" -notmatch 'must be dif
 
 $verification = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'verify-langgraph-real-gate.ps1')
 foreach ($marker in @(
-    '[switch]$Execute', '[switch]$IncludeRedis', 'mvn clean -DskipTests compile',
+    '[switch]$Execute', '[switch]$IncludeRedis', '[switch]$IncludePostgres',
+    'mvn clean -DskipTests compile',
     'LangGraphAiGenerationGatewayTest,DelegatingAiGenerationGatewayTest,AppServiceGenerationCancellationTest,VueProjectBuilderTest',
+    'uv run python -m compileall -q src', 'uv run pytest', 'uv lock --check',
     'ai-validation-scripts.tests.ps1', 'ToolInvocationIdempotencyRedisIT',
+    'tests/test_postgres_checkpoint_integration.py', 'AI_SERVICE_POSTGRES_INTEGRATION',
     'target/ai-validation/langgraph-real-gate.json', 'manualValidationRequired'
 )) {
     if ($verification -notmatch [regex]::Escape($marker)) {
@@ -139,8 +142,9 @@ Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $dryRunOutputPath
 $dryRunResult = & powershell -NoProfile -ExecutionPolicy Bypass `
     -File (Join-Path $PSScriptRoot 'verify-langgraph-real-gate.ps1') `
     -OutputPath $dryRunOutputPath 2>&1
-if ($LASTEXITCODE -ne 0 -or "$dryRunResult" -notmatch 'Dry run only' -or "$dryRunResult" -notmatch 'IncludeRedis') {
-    throw 'Unified verification script dry run must describe execution and optional Redis coverage'
+if ($LASTEXITCODE -ne 0 -or "$dryRunResult" -notmatch 'Dry run only' -or
+    "$dryRunResult" -notmatch 'IncludeRedis' -or "$dryRunResult" -notmatch 'IncludePostgres') {
+    throw 'Unified verification script dry run must describe execution and optional database coverage'
 }
 if (Test-Path -LiteralPath $dryRunOutputPath) {
     throw 'Unified verification script dry run must not write a report file'
@@ -157,25 +161,27 @@ foreach ($marker in @(
         throw "Manual validation record generator misses $marker"
     }
 }
-$recordPath = Join-Path $PSScriptRoot '../target/ai-validation/manual-record-static-test.json'
-Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $recordPath
-& powershell -NoProfile -ExecutionPolicy Bypass -File $recordScriptPath -Execute -OutputPath $recordPath | Out-Null
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $recordPath)) {
-    throw 'Manual validation record generator must create a record in execute mode'
-}
-$record = Get-Content -Raw -LiteralPath $recordPath | ConvertFrom-Json
-if ($record.recordVersion -ne 1 -or @($record.scenarios).Count -ne 13) {
-    throw 'Manual validation record must contain version 1 and all 13 P0 scenarios'
-}
-if (@($record.scenarios | Where-Object { $_.status -ne 'pending' }).Count -ne 0) {
-    throw 'Manual validation record scenarios must start as pending'
-}
-$recordJson = $record | ConvertTo-Json -Depth 10
-foreach ($forbidden in @('password', 'cookie', 'token', 'sourceCode', 'toolArguments', 'responseBody')) {
-    if ($recordJson -match [regex]::Escape($forbidden)) {
-        throw "Manual validation record contains forbidden field $forbidden"
+$recordPath = Join-Path $PSScriptRoot "../target/ai-validation/manual-record-static-test-$([guid]::NewGuid().ToString('N')).json"
+try {
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $recordScriptPath -Execute -OutputPath $recordPath | Out-Null
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $recordPath)) {
+        throw 'Manual validation record generator must create a record in execute mode'
     }
+    $record = Get-Content -Raw -LiteralPath $recordPath | ConvertFrom-Json
+    if ($record.recordVersion -ne 1 -or @($record.scenarios).Count -ne 13) {
+        throw 'Manual validation record must contain version 1 and all 13 P0 scenarios'
+    }
+    if (@($record.scenarios | Where-Object { $_.status -ne 'pending' }).Count -ne 0) {
+        throw 'Manual validation record scenarios must start as pending'
+    }
+    $recordJson = $record | ConvertTo-Json -Depth 10
+    foreach ($forbidden in @('password', 'cookie', 'token', 'sourceCode', 'toolArguments', 'responseBody')) {
+        if ($recordJson -match [regex]::Escape($forbidden)) {
+            throw "Manual validation record contains forbidden field $forbidden"
+        }
+    }
+} finally {
+    Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $recordPath
 }
-Remove-Item -Force -LiteralPath $recordPath
 
 'AI validation script static checks passed'

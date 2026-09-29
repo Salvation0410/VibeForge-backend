@@ -483,7 +483,9 @@ Document:
 - The repository does not manage the user's existing Docker container.
 - `AI_SERVICE_CHECKPOINT_POSTGRES_URL` contains a placeholder only.
 - `uv run python -m ai_service.infrastructure.checkpoint_setup` initializes tables.
-- `LANGGRAPH_STRICT_MSGPACK=true` is required.
+- The locked serializer has no `LANGGRAPH_STRICT_MSGPACK` switch. Document the explicit
+  `JsonPlusSerializer(allowed_json_modules=())` configuration, disabled pickle fallback,
+  and the requirement that only the AI service may write the checkpoint database.
 - `AUTO_SETUP=true` is for local use; production should initialize separately and run without DDL permission.
 
 - [ ] **Step 2: Add local database bootstrap examples without secrets**

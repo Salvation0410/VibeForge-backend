@@ -29,7 +29,7 @@ Spring 是业务数据和项目文件的唯一所有者。Python 不访问 MySQL
 - Python AI 服务：`http://localhost:8000`
 - MySQL：`jdbc:mysql://localhost:3306/yu_ai_code_mother`
 - Spring Redis：`localhost:6379/1`
-- Python checkpoint Redis：默认 `localhost:6379/2`
+- Python checkpoint PostgreSQL：默认数据库 `yu_ai_checkpoint`，本地 Docker 通常映射到 `localhost:5432`
 - Vue 前端：`http://localhost:5173`
 
 ## 常用命令
@@ -98,7 +98,7 @@ Python AI 服务：
 - `ai-service/src/ai_service/api`：鉴权依赖、内部路由和请求响应模型。
 - `ai-service/src/ai_service/orchestration`：LangGraph 工作流、事件和协作式取消。
 - `ai-service/src/ai_service/models`：模型协议与 OpenAI 兼容适配器。
-- `ai-service/src/ai_service/infrastructure`：Redis checkpoint 和 Spring 工具网关客户端。
+- `ai-service/src/ai_service/infrastructure`：PostgreSQL checkpoint、初始化命令和 Spring 工具网关客户端。
 - `ai-service/tests`：Fake Model 驱动的单元与契约测试，不访问真实模型。
 
 其他目录：
@@ -252,7 +252,9 @@ uv run pytest
 uv lock --check
 ```
 
-当前 Python 测试覆盖鉴权、健康检查、三类生成分支、事件顺序、最多两次修复、Vue 工具上限、取消、Redis 降级、Spring 工具网关和包导入。真实模型、真实 Redis、Spring 文件构建和完整 SSE 仍需要集成或端到端环境验证。
+当前 Python 测试覆盖鉴权、健康检查、三类生成分支、事件顺序、最多两次修复、Vue 工具上限、取消、PostgreSQL checkpoint 降级、Spring 工具网关和包导入。真实 PostgreSQL、真实模型、真实 Redis 工具幂等、Spring 文件构建和完整 SSE 仍需要集成或端到端环境验证。
+
+Python checkpoint 已使用独立 PostgreSQL 数据库；Spring 工具幂等仍使用 Redis database 1。长期记忆未启用，不要把 checkpoint 表当作 `PostgresStore` 或跨请求知识库使用。
 
 AI、截图、OSS、邮件、浏览器驱动和真实模型测试可能依赖本地环境、网络、密钥或 Chrome。无法运行时必须说明失败命令和直接原因。
 

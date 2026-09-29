@@ -16,13 +16,15 @@ flowchart LR
     LG --> LC[LangChain DeepSeek Adapter]
     LG -->|工具调用| TG[Spring Tool Gateway]
     TG --> FS[项目文件 / Vue Builder]
-    LG <--> REDIS[(Redis Checkpoint)]
+    LG <--> PG[(PostgreSQL Checkpoint)]
     SB --> MYSQL[(App / Chat History)]
 ```
 
 Python 使用 3.12，依赖版本锁定在 `ai-service/uv.lock`。DeepSeek 默认使用 `deepseek-chat`，复杂推理和质量检查可使用 `deepseek-reasoner`；模型适配遵循 LangChain 标准聊天模型接口，可替换为其他 OpenAI 兼容服务。Python 不访问 MySQL、项目目录或用户鉴权。
 
-Redis checkpoint 使用独立 `yu-ai:langgraph:*` 前缀，`thread_id={appId}:{requestId}`，默认 TTL 24 小时。Redis 不可用时由配置决定是报告未就绪还是显式失败。
+LangGraph checkpoint 使用独立 PostgreSQL 数据库 `yu_ai_checkpoint` 和官方 `AsyncPostgresSaver`，`thread_id={appId}:{requestId}`。终态立即删除完整图 checkpoint；异常退出由 `ai_workflow_status.expires_at` 和周期清理提供默认 24 小时兜底。PostgreSQL 不可用时由配置决定是报告未就绪还是显式失败。Spring 工具幂等仍使用 Redis database 1。
+
+当前不启用 `PostgresStore` 长期记忆。Spring 继续把聊天历史随请求传入；只有出现明确的跨应用偏好或跨 requestId 结构化决策，并完成查看、修改、删除和过期设计后才重新评估长期记忆。
 
 ## 3. 工作流
 
@@ -86,7 +88,7 @@ Python 内部接口：
 - Python：节点、条件边、三类分支、两次修复上限、checkpoint、取消和健康检查。
 - Spring：NDJSON 解析、SSE 兼容、灰度选择、工具认证、幂等、路径沙箱和构建。
 - 契约：路由、生成事件、工具调用、错误结构和事件顺序。
-- 故障：模型超时、Redis 不可用、Python 5xx、工具超时、构建失败、客户端断连。
+- 故障：模型超时、PostgreSQL checkpoint 不可用、Spring Redis 工具幂等不可用、Python 5xx、工具超时、构建失败、客户端断连。
 - 端到端：三种模式从 `/api/apps/chat/gen/code` 进入 LangGraph，生成项目可下载，Vue 可完成工具调用和真实构建。
 - 回归：用户、应用、聊天记录、部署和下载接口行为保持不变。
 

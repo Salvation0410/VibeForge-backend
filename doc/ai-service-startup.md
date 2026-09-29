@@ -13,7 +13,7 @@ ai_service/
 ├── api/                # HTTP 路由、鉴权依赖、请求响应模型
 ├── orchestration/      # LangGraph 工作流、事件流和取消控制
 ├── models/             # 模型协议与 OpenAI 兼容模型实现
-└── infrastructure/     # Redis checkpoint 与 Spring 工具网关
+└── infrastructure/     # PostgreSQL checkpoint、初始化命令与 Spring 工具网关
 ```
 
 `app.py` 是组合入口，启动命令仍使用 `ai_service.app:create_app`。Python 服务不直接访问项目目录，文件和构建操作统一经过 `infrastructure/spring_tools.py` 调用 Spring。
@@ -22,7 +22,7 @@ ai_service/
 
 - Python 3.12（必须使用 3.12，不建议使用 3.13）
 - `uv` 包管理器
-- Redis 5+（默认连接 database 2）
+- PostgreSQL 15+（Python checkpoint 使用独立数据库 `yu_ai_checkpoint`；本地可由 Docker 提供）
 - DeepSeek 或其他 OpenAI 兼容模型服务的 API Key
 - Spring Boot 后端已配置并可访问项目输出目录
 
@@ -50,9 +50,26 @@ uv run uvicorn ai_service.app:create_app --factory --host 0.0.0.0 --port 8000
 AI_SERVICE_INTERNAL_BEARER_TOKEN=与Spring配置一致的服务令牌
 AI_SERVICE_SPRING_GATEWAY_BEARER_TOKEN=与Spring配置一致的工具令牌
 AI_SERVICE_MODEL_API_KEY=模型服务API Key
+AI_SERVICE_CHECKPOINT_POSTGRES_URL=postgresql://yu_ai_checkpoint:<set-outside-git>@localhost:5432/yu_ai_checkpoint
 ```
 
 默认模型为 `deepseek-chat`，默认地址为 `https://api.deepseek.com/v1`。复杂推理节点可通过配置改用兼容服务提供的推理模型。
+
+Python checkpoint 使用独立数据库 `yu_ai_checkpoint`，不复用 Spring 业务 MySQL。当前仓库不创建或管理本机已有的 PostgreSQL Docker 容器；由本机数据库管理员在容器中执行以下 SQL，密码只保存在本地环境或密钥管理中：
+
+```sql
+CREATE ROLE yu_ai_checkpoint LOGIN PASSWORD '<set-outside-git>';
+CREATE DATABASE yu_ai_checkpoint OWNER yu_ai_checkpoint;
+```
+
+数据库和角色准备后，先初始化官方 LangGraph 表及脱敏状态表：
+
+```powershell
+cd ai-service
+uv run python -m ai_service.infrastructure.checkpoint_setup
+```
+
+`AI_SERVICE_CHECKPOINT_AUTO_SETUP=true` 适合本地开发。生产环境推荐先使用初始化命令完成 DDL，再将其设为 `false`，并让运行账号只保留所需的数据访问权限。当前不启用 `PostgresStore` 长期记忆；跨请求上下文仍由 Spring 聊天历史提供。
 
 ## 3. 启动 Spring Boot
 
@@ -98,7 +115,7 @@ Invoke-RestMethod http://localhost:8000/health/live
 Invoke-RestMethod http://localhost:8000/health/ready
 ```
 
-也兼容 `/internal/v1/health/live` 和 `/internal/v1/health/ready`。ready 检查会反映 Redis checkpoint 状态；Redis 未启动且 `AI_SERVICE_REDIS_REQUIRED=true` 时服务应视为不可用。
+也兼容 `/internal/v1/health/live` 和 `/internal/v1/health/ready`。ready 检查会反映 PostgreSQL checkpoint 状态；数据库不可用时返回 503，`AI_SERVICE_CHECKPOINT_REQUIRED=true` 时启动探测或运行期写入失败会显式失败。
 
 ## 5. Docker 启动
 
@@ -109,11 +126,11 @@ docker build -t yu-ai-service:local .
 docker run --rm --name yu-ai-service -p 8000:8000 --env-file .env yu-ai-service:local
 ```
 
-容器内访问宿主机 Spring 和 Redis 时，`.env` 中的地址使用：
+容器内访问宿主机 Spring 和 PostgreSQL 时，`.env` 中的地址使用：
 
 ```dotenv
 AI_SERVICE_SPRING_GATEWAY_BASE_URL=http://host.docker.internal:8123/api/internal/ai-tools
-AI_SERVICE_REDIS_URL=redis://host.docker.internal:6379/2
+AI_SERVICE_CHECKPOINT_POSTGRES_URL=postgresql://yu_ai_checkpoint:replace-with-password@host.docker.internal:5432/yu_ai_checkpoint
 ```
 
 Linux 环境如不支持 `host.docker.internal`，请改为宿主机可达地址或使用 Docker network。
@@ -166,7 +183,16 @@ $env:AI_REDIS_URL = "redis://127.0.0.1:6379/1"
 mvn "-Dtest=ToolInvocationIdempotencyRedisIT" test
 ```
 
-本轮只实现代码、离线测试和验收入口；没有启动真实服务、连接真实 Redis、调用真实模型或执行三类型端到端生成。
+真实 PostgreSQL checkpoint 集成测试同样为 opt-in。先创建独立数据库并在当前进程配置连接 URL；命令本身不得打印 URL：
+
+```powershell
+$env:AI_SERVICE_POSTGRES_INTEGRATION = "true"
+$env:AI_SERVICE_CHECKPOINT_POSTGRES_URL = "postgresql://<user>:<password>@localhost:5432/yu_ai_checkpoint"
+cd ai-service
+uv run pytest tests/test_postgres_checkpoint_integration.py
+```
+
+不设置 `AI_SERVICE_POSTGRES_INTEGRATION=true` 时，该测试会跳过且不会连接数据库。本轮已实现 PostgreSQL checkpoint 代码、离线测试和验收入口；独立数据库尚未创建，因此没有执行真实 PostgreSQL 集成、真实模型或三类型端到端生成。Spring Redis database 1 的工具幂等不在本次迁移范围内。
 
 ```powershell
 cd ai-service
@@ -177,7 +203,7 @@ uv lock --check
 常见问题：
 
 - `401 Invalid internal bearer token`：检查 Python 的 `AI_SERVICE_INTERNAL_BEARER_TOKEN` 与 Spring `AI_SERVICE_INTERNAL_BEARER_TOKEN` 是否完全一致。
-- ready 返回 503：检查 Redis 地址、端口、database 和 `AI_SERVICE_REDIS_REQUIRED` 配置。
+- ready 返回 503：检查 PostgreSQL 地址、端口、数据库、账号权限和 `AI_SERVICE_CHECKPOINT_REQUIRED` 配置。
 - 工具调用失败：确认 Python 的 Spring 网关地址包含 `/api/internal/ai-tools`，且工具令牌与 Spring `ai.token` 一致。
 - `GENERATION_IN_PROGRESS`：同一应用已有生成任务，等待当前请求完成或取消后重试。
 - `MODEL_OUTPUT_TRUNCATED`：模型达到 token 上限，本次候选未发布；可缩小需求或提高模型输出上限后重试。

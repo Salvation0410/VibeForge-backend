@@ -255,11 +255,11 @@ class LangGraphAiGenerationGatewayTest {
                     exchange.getResponseBody().flush();
                 }
             } catch (IOException expected) {
-                clientClosed.countDown();
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
             } finally {
                 activeStreams.decrementAndGet();
+                clientClosed.countDown();
                 exchange.close();
             }
         });

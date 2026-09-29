@@ -69,8 +69,9 @@ prepare_threshold=0
 row_factory=dict_row
 ```
 
-启用 `LANGGRAPH_STRICT_MSGPACK=true`，限制 checkpoint 反序列化类型。若现有工作流状态无法通过严格
-序列化，应缩减状态类型或配置最小允许模块列表，不得直接关闭安全限制作为长期方案。
+锁定版本的 `JsonPlusSerializer` 不提供 `LANGGRAPH_STRICT_MSGPACK` 环境开关，不能记录一个实际无效的
+安全配置。实现保持 pickle fallback 关闭，并使用 `allowed_json_modules=()` 不额外允许自定义 JSON constructor 模块；
+官方 msgpack checkpoint 仍必须视为可信内部数据，因此数据库账号、网络和写权限必须限制为 AI 服务专用。
 
 ## 6. 配置
 
@@ -92,7 +93,6 @@ AI_SERVICE_CHECKPOINT_AUTO_SETUP=true
 AI_SERVICE_CHECKPOINT_TTL_SECONDS=86400
 AI_SERVICE_CHECKPOINT_POOL_MIN_SIZE=1
 AI_SERVICE_CHECKPOINT_POOL_MAX_SIZE=5
-LANGGRAPH_STRICT_MSGPACK=true
 ```
 
 规则：

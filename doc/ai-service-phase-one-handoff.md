@@ -15,15 +15,15 @@
 - HTML 与 MULTI_FILE 只有在 Spring 严格解析、确定性校验和不可变版本发布成功后才能完成；HTML 还执行 Selenium 浏览器烟测。
 - 用户已于 2026-09-29 确认 P0 真实环境验收完成；本轮文档更新没有重复执行或重新生成验收证据。
 - Legacy LangChain4j 仍是生产回滚路径。稳定灰度数据和回滚窗口满足要求前不得删除 Legacy。
-- Python checkpoint 当前仍由 Redis database 2 提供；迁移到独立 PostgreSQL 数据库 `yu_ai_checkpoint` 的设计已批准，但代码尚未实施。
+- Python checkpoint 已迁移到独立 PostgreSQL 数据库 `yu_ai_checkpoint`，使用官方 `AsyncPostgresSaver` 和同池脱敏状态表 `ai_workflow_status`；Python 不再依赖 Redis database 2。
 - 本轮不启用长期记忆，不创建或注入 `PostgresStore`。
 
 ### 当前最高优先级
 
-1. 使用官方 `AsyncPostgresSaver` 将 Python checkpoint 从 Redis 迁移到独立 PostgreSQL 数据库 `yu_ai_checkpoint`。
-2. 保留终态删除完整图 checkpoint、异常退出 TTL 兜底和短期脱敏业务摘要语义。
-3. 增加本机 Docker PostgreSQL 的 opt-in 集成测试、初始化命令和运行文档。
-4. 明确长期记忆保持关闭；只有出现清晰的跨 thread 用户或应用记忆需求时才重新评估 `PostgresStore`。
+1. 在本机现有 PostgreSQL Docker 容器中由管理员创建独立角色和数据库 `yu_ai_checkpoint`，运行初始化命令后执行 opt-in 集成测试；当前代码与测试入口已就绪，但数据库尚未创建。
+2. 使用更新后的统一门禁复现 Java、Python 和脚本检查，并保留真实 PostgreSQL、真实模型和端到端未执行的边界说明。
+3. 继续 P1 真实 Uvicorn/代理压力和真实 npm 长构建压力，补充资源收敛证据。
+4. 长期记忆保持关闭；只有出现清晰的跨 thread 用户或应用记忆需求时才重新评估 `PostgresStore`。
 
 ### 已关闭的源码阻塞
 
@@ -32,6 +32,7 @@
 - LangGraph 响应流支持可配置空闲超时，默认 600 秒；该值按连续未收到完整 NDJSON 行计时，不是整轮总时长。
 - 灰度身份键已明确为 `userId -> appId -> requestId`，覆盖应用创建前后、生成和取消的一致性。
 - 连接复用、并发大流隔离、超时风暴恢复和重复父子进程回收已有自动化覆盖。
+- 超时风暴测试的关闭 latch 已移动到活动流计数清理之后，避免测试线程在最后一个处理器 `finally` 尚未完成时偶发误报连接未释放。
 
 ### 接手前先读
 
@@ -62,6 +63,7 @@ Vue EventSource
      -> LangGraphAiGenerationGateway
         -> POST Python /internal/v1/generations:stream
         -> LangGraph StateGraph
+        -> PostgreSQL AsyncPostgresSaver / ai_workflow_status
         -> OpenAICompatibleModel / DeepSeek
         -> SpringToolGateway
         -> POST Spring /api/internal/ai-tools/invoke
@@ -78,6 +80,7 @@ Vue EventSource
 - Python 不获得项目目录挂载、业务数据库连接或绕过 Spring 的文件权限。
 - 内部 Spring/Python 使用 NDJSON；对外 SSE 兼容性由 Java 网关维持。
 - `VersionedArtifactStore` 的发布幂等与内部工具 Redis 幂等是两套独立机制，不可混为一谈。
+- PostgreSQL checkpoint 只服务 Python 工作流恢复；Spring 业务 MySQL 和 Redis database 1 保持不变。
 
 ## 3. 当前已实现能力
 
@@ -142,7 +145,7 @@ START
 - 快照排除依赖、构建产物、隐藏目录、符号链接、锁文件、非文本、非法 UTF-8 和 NUL。
 - 完整快照只瞬时传给当前 Reviewer，不进入工具幂等 Redis、业务 checkpoint、LangGraph state/checkpoint 或事件。
 - npm 输出、路径和环境值有界且脱敏；父子进程树和输出读取使用有界终止策略。
-- `scripts/verify-langgraph-real-gate.ps1` 提供统一验证入口：默认 dry-run，显式 `-Execute` 后固定执行 Java clean compile、35 项定向测试和 PowerShell 脚本检查，`-IncludeRedis` 可追加真实 Redis 6 项。
+- `scripts/verify-langgraph-real-gate.ps1` 提供统一验证入口：默认 dry-run，显式 `-Execute` 后固定执行 Java clean compile、35 项定向测试、Python compileall/pytest/lock 检查和 PowerShell 脚本检查；`-IncludeRedis` 可追加 Spring 工具幂等真实 Redis 6 项，`-IncludePostgres` 可追加真实 checkpoint 集成测试。
 - 统一入口只向 `target/ai-validation/langgraph-real-gate.json` 写入步骤名、命令标签、状态、退出码、耗时和人工待验收项，不收集 Maven 原始日志、源码、令牌、Cookie 或响应正文。
 - `scripts/new-ai-validation-record.ps1` 可离线创建版本化人工验收记录，固定覆盖三类型首次生成/二次修改、停止、断线、模型超时、工具失败、长构建、双 Spring 竞争和 Legacy 回滚 13 个 P0 场景。
 - 人工记录为 requestId、终态、稳定错误码、旧预览、刷新次数、历史回源和证据引用提供统一字段，初始状态全部为 `pending`，不保存凭据、源码、工具参数或响应正文。
@@ -180,7 +183,9 @@ START
 | `ai-service/src/ai_service/models/openai_compatible.py` | OpenAI 兼容模型与 Vue 工具轮次解析 |
 | `ai-service/src/ai_service/models/tool_contract.py` | 模型工具提示和出站校验 |
 | `ai-service/src/ai_service/prompts/` | 路由、生成、审查和修复提示词 |
-| `ai-service/src/ai_service/infrastructure/checkpoint.py` | Redis checkpoint 和降级 |
+| `ai-service/src/ai_service/infrastructure/checkpoint.py` | checkpoint 协议与禁用实现 |
+| `ai-service/src/ai_service/infrastructure/postgres_checkpoint.py` | 官方 PostgreSQL saver、脱敏状态摘要和 TTL 清理 |
+| `ai-service/src/ai_service/infrastructure/checkpoint_setup.py` | 独立 schema 初始化命令 |
 | `ai-service/src/ai_service/infrastructure/spring_tools.py` | Spring 工具客户端与脱敏错误处理 |
 
 ### Vue 前端独立仓库
@@ -202,12 +207,21 @@ Spring: http://localhost:8123/api
 Python: http://localhost:8000
 Vue: http://localhost:5173
 Spring Redis: redis://localhost:6379/1
-Python checkpoint Redis: redis://localhost:6379/2
+Python checkpoint PostgreSQL: postgresql://<user>:<password>@localhost:5432/yu_ai_checkpoint
 ```
 
-以上是当前已实现配置。下一阶段会把 Python checkpoint 改为本机 Docker 中的独立 PostgreSQL
-数据库 `yu_ai_checkpoint`；迁移完成前不得提前删除 `AI_SERVICE_REDIS_*` 配置或把 PostgreSQL 写成
-已上线能力。Spring 工具幂等继续使用 Redis database 1，不属于本次迁移范围。
+Python 已删除 `AI_SERVICE_REDIS_*` checkpoint 配置，改用 `AI_SERVICE_CHECKPOINT_ENABLED`、
+`AI_SERVICE_CHECKPOINT_REQUIRED`、`AI_SERVICE_CHECKPOINT_POSTGRES_URL`、`AI_SERVICE_CHECKPOINT_AUTO_SETUP`、
+TTL 和连接池边界配置。Spring 工具幂等继续使用 Redis database 1，不属于本次迁移范围。
+
+仓库不管理本机已有 PostgreSQL Docker 容器，也不保存角色密码。准备数据库后运行：
+
+```powershell
+cd ai-service
+uv run python -m ai_service.infrastructure.checkpoint_setup
+```
+
+本地可使用 `AI_SERVICE_CHECKPOINT_AUTO_SETUP=true`；生产推荐独立初始化后关闭自动 DDL。序列化保持 pickle fallback 关闭，并通过 `allowed_json_modules=()` 不额外允许自定义 JSON constructor 模块；锁定版本不存在 `LANGGRAPH_STRICT_MSGPACK` 开关，数据库写权限必须只授予可信 AI 服务。
 
 当前两个调用方向仍共用静态令牌，本地联调时以下值必须一致：
 
@@ -226,6 +240,7 @@ Python AI_SERVICE_INTERNAL_BEARER_TOKEN
 - `AI_GENERATION_STREAM_IDLE_TIMEOUT_SECONDS=600`
 - `AI_SERVICE_VUE_MAX_TOOL_CALLS=<有限正整数>`
 - `AI_REDIS_INTEGRATION=true`：只在明确运行真实 Redis 集成测试时设置。
+- `AI_SERVICE_POSTGRES_INTEGRATION=true`：只在独立 `yu_ai_checkpoint` 已初始化且明确运行真实 checkpoint 集成测试时设置。
 
 本地真实验收前先确认服务和配置，不要把“端口当前可达”“当前终端有令牌”等临时现场写成长期事实。
 
@@ -235,11 +250,14 @@ Python AI_SERVICE_INTERNAL_BEARER_TOKEN
 # 仅显示计划，不执行构建或测试
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1
 
-# 执行干净编译、35 项定向测试和 PowerShell 脚本检查
+# 执行 Java、Python 和 PowerShell 自动化门禁
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1 -Execute
 
 # Redis database 1 可用于隔离验收时，额外执行真实 Redis 6 项
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1 -Execute -IncludeRedis
+
+# 独立 PostgreSQL checkpoint 数据库已初始化时，额外执行真实集成测试
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1 -Execute -IncludePostgres
 ```
 
 创建人工验收记录：
@@ -266,12 +284,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 | Java 生产编译 | `mvn clean -DskipTests compile` | 239 个生产源文件编译成功 | 当前生产源码可干净编译 |
 | Redis opt-in 集成 | `powershell -NoProfile -File scripts/verify-langgraph-real-gate.ps1 -Execute -IncludeRedis` | 最近真实环境 6 项通过 | 跨客户端回放、唯一执行、冲突与不确定态 |
 | PowerShell 脚本 | `powershell -NoProfile -File scripts/ai-validation-scripts.tests.ps1` | Windows PowerShell 5.1 与 PowerShell 7 检查通过 | 验收脚本参数、认证和脱敏约束 |
-| 统一非 Redis 门禁 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1 -Execute` | 2026-09-29 fresh 执行通过，JSON 中 3 个步骤均为 `passed` | 一条命令复现 clean compile、35 项定向测试和脚本检查 |
+| 统一非外部数据库门禁 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1 -Execute` | 2026-09-29 fresh 执行通过，JSON 中 6 个步骤均为 `passed` | 一条命令复现 Java clean compile、35 项定向测试、Python 173 项、锁文件和脚本检查 |
+| Python 全量 | `uv run pytest` | 2026-09-29 fresh：173 项通过、1 项真实 PostgreSQL 集成跳过 | Fake Model、三类工作流、降级、清理与 API 契约 |
+| PostgreSQL 默认门 | `uv run pytest tests/test_postgres_checkpoint_integration.py` | 默认 1 项跳过，不连接数据库 | opt-in 门禁不会误连本机数据库 |
 
 重要限制：
 
 - 全量 `mvn test` 存在历史实验代码和外部依赖相关失败，当前不能声明全量 Java 测试通过。
 - 本轮统一入口未使用 `-IncludeRedis`；表中的真实 Redis 6 项来自最近一次独立真实环境验证，不冒充本轮 fresh 结果。
+- 本机 PostgreSQL Docker 容器存在，但独立数据库 `yu_ai_checkpoint` 尚未创建；本轮没有运行 `-IncludePostgres`，不得声称真实 PostgreSQL 集成通过。
 - Python 大部分测试使用 Fake Model、内存网关或 MockTransport，不能替代真实模型、真实 Spring 和完整前端验收。
 - 受控本地 HTTP/进程测试不能证明真实 Uvicorn、代理、供应商限流、网络背压或 npm 包装层在所有平台上的行为。
 - 未实际运行的 Docker、真实模型、浏览器端到端和生产灰度，必须明确标记为未验证。
@@ -305,7 +326,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 
 ### 7.3 停止、断线和失败
 
-覆盖以下场景并同时观察浏览器、Spring、Python 和 Redis 状态：
+覆盖以下场景并同时观察浏览器、Spring、Python、PostgreSQL checkpoint 和 Spring Redis 状态：
 
 - 生成过程中点击停止。
 - 客户端主动断开 SSE。
@@ -348,17 +369,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 
 ## 8. 未完成优化清单
 
-### 下一阶段：PostgreSQL checkpoint 重构
+### P0：激活并验证 PostgreSQL checkpoint 运行环境
 
-设计已批准，代码尚未实施。实施范围：
+代码重构、配置迁移、初始化命令、optional/required/disabled 生命周期和 opt-in 集成测试已经实现。剩余人工环境步骤：
 
-1. 增加与当前 LangGraph 版本兼容的 `langgraph-checkpoint-postgres`、Psycopg 3 和连接池依赖。
-2. 使用 `AsyncPostgresSaver` 替换自定义 `RedisGraphSaver`，不自行复制官方 checkpoint SQL。
-3. 使用独立 PostgreSQL 数据库 `yu_ai_checkpoint`，与 Spring MySQL 和工具幂等 Redis 隔离。
-4. 使用同一 PostgreSQL 连接池维护短期脱敏业务摘要表 `ai_workflow_status`。
-5. 终态立即调用 `adelete_thread()`；异常退出通过 `expires_at` 和周期清理保持原 24 小时兜底语义。
-6. 增加独立初始化命令、optional/required/disabled 生命周期、ready 探测和真实 PostgreSQL opt-in 测试。
-7. 删除 Python Redis checkpoint 依赖和 `AI_SERVICE_REDIS_*` 配置，并同步更新全部启动、配置和交接文档。
+1. 在本机现有 PostgreSQL Docker 容器中创建独立角色和数据库 `yu_ai_checkpoint`，密码不进入仓库或命令输出。
+2. 运行 `uv run python -m ai_service.infrastructure.checkpoint_setup`，确认官方表和 `ai_workflow_status` 初始化成功。
+3. 设置 `AI_SERVICE_POSTGRES_INTEGRATION=true` 和当前进程连接 URL，运行真实集成测试；只记录通过/失败和脱敏原因。
+4. 启动 Python 服务检查 `/health/ready`，再覆盖 optional、required 和 disabled 三种部署模式。
+5. 验证终态删除图 checkpoint，强制过期时先删图、成功后再删状态；图删除失败必须保留状态行供下次重试。
 
 详细设计见 `docs/superpowers/specs/2026-09-29-postgres-checkpoint-design.md`。
 
@@ -388,7 +407,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 - 不把文件、数据库、构建或发布迁移到 Python。
 - 当前单 worker、单实例 Python 部署下，不实现跨进程共享取消；扩容到多 worker/实例时重新评估。
 - 业务约束未变化前，不额外实现同账号同应用的并发修改仲裁。
-- PostgreSQL checkpoint 迁移和稳定运行验证完成前，不删除 Legacy 或引入多 Agent。
+- PostgreSQL checkpoint 真实运行验证和稳定观察完成前，不删除 Legacy 或引入多 Agent。
 
 ## 9. 最近关键提交
 
@@ -402,6 +421,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 | `9358f18` | 增加双 Spring 工具竞争验收 |
 | `012f93b` | 覆盖 HTTP 连接复用与超时恢复 |
 | `2c91f21` | 压测长构建进程树回收 |
+| `553a8ca` | 迁移 AI checkpoint 到 PostgreSQL |
+| `ad4bbe9` | 增加 PostgreSQL checkpoint opt-in 集成测试 |
 
 这些提交都在 `codex/langgraph-real-gate`。未经用户明确要求，不自动推送、合并、删除分支或清理工作树。
 
@@ -412,7 +433,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 - [ ] 阅读 `AGENTS.md`、本交接文档和相关模块 README/设计文档。
 - [ ] 分别运行后端和前端仓库的 `git status --short --branch`。
 - [ ] 使用 `rg` 确认实际调用链、配置键和测试，不把规划能力当成已实现能力。
-- [ ] 确认真实验收需要的 Spring、Python、Redis、前端和模型环境由谁启动。
+- [ ] 确认真实验收需要的 Spring、Python、PostgreSQL、Redis、前端和模型环境由谁启动。
 - [ ] 确认内部令牌只存在于本地环境变量或密钥配置，不进入命令回显和报告。
 
 提交前：

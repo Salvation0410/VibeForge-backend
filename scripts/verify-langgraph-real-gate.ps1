@@ -1,6 +1,7 @@
 param(
     [switch]$Execute,
     [switch]$IncludeRedis,
+    [switch]$IncludePostgres,
     [string]$OutputPath
 )
 
@@ -21,20 +22,36 @@ function Resolve-MavenCommand {
     return $command.Source
 }
 
+function Resolve-UvCommand {
+    $command = Get-Command 'uv.exe' -ErrorAction SilentlyContinue
+    if ($null -eq $command) {
+        $command = Get-Command 'uv' -ErrorAction SilentlyContinue
+    }
+    if ($null -eq $command) {
+        throw 'uv command was not found on PATH.'
+    }
+    return $command.Source
+}
+
 function Invoke-ValidationStep(
     [string]$Name,
     [string]$CommandLabel,
     [string]$FilePath,
     [string[]]$ArgumentList,
-    [hashtable]$EnvironmentVariables = @{}
+    [hashtable]$EnvironmentVariables = @{},
+    [string]$WorkingDirectory
 ) {
     Write-Host "`n[$Name] $CommandLabel"
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     $previousValues = @{}
     $previousErrorActionPreference = $ErrorActionPreference
+    $previousLocation = Get-Location
     $exitCode = 1
 
     try {
+        if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+            Set-Location $WorkingDirectory
+        }
         foreach ($entry in $EnvironmentVariables.GetEnumerator()) {
             $previousValues[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, 'Process')
             [Environment]::SetEnvironmentVariable($entry.Key, [string]$entry.Value, 'Process')
@@ -49,6 +66,7 @@ function Invoke-ValidationStep(
         $exitCode = 1
     } finally {
         $ErrorActionPreference = $previousErrorActionPreference
+        Set-Location $previousLocation
         foreach ($entry in $EnvironmentVariables.GetEnumerator()) {
             [Environment]::SetEnvironmentVariable(
                 $entry.Key,
@@ -69,9 +87,10 @@ function Invoke-ValidationStep(
 }
 
 if (-not $Execute) {
-    Write-Host 'Dry run only. No build, tests, Redis connection, or report file will be created.'
-    Write-Host 'Rerun with -Execute to run: mvn clean -DskipTests compile; focused 35-test gate; PowerShell validation script checks.'
+    Write-Host 'Dry run only. No build, tests, database connection, or report file will be created.'
+    Write-Host 'Rerun with -Execute to run: Java compile/tests, Python compile/pytest/lock checks, and PowerShell validation script checks.'
     Write-Host 'Add -IncludeRedis only when a disposable Redis database 1 is reachable and AI_REDIS_URL is configured if needed.'
+    Write-Host 'Add -IncludePostgres only when the disposable yu_ai_checkpoint database is initialized and AI_SERVICE_CHECKPOINT_POSTGRES_URL is configured.'
     return
 }
 
@@ -80,7 +99,9 @@ if ([string]::IsNullOrWhiteSpace($OutputPath)) {
 }
 
 $maven = Resolve-MavenCommand
+$uv = Resolve-UvCommand
 $powerShell = (Get-Process -Id $PID).Path
+$aiServiceRoot = Join-Path $repositoryRoot 'ai-service'
 $steps = [System.Collections.Generic.List[object]]::new()
 $originalLocation = Get-Location
 
@@ -100,6 +121,27 @@ try {
         -ArgumentList @("-Dtest=$focusedTests", 'test')))
 
     $steps.Add((Invoke-ValidationStep `
+        -Name 'python-compileall' `
+        -CommandLabel 'uv run python -m compileall -q src' `
+        -FilePath $uv `
+        -ArgumentList @('run', 'python', '-m', 'compileall', '-q', 'src') `
+        -WorkingDirectory $aiServiceRoot))
+
+    $steps.Add((Invoke-ValidationStep `
+        -Name 'python-tests' `
+        -CommandLabel 'uv run pytest' `
+        -FilePath $uv `
+        -ArgumentList @('run', 'pytest') `
+        -WorkingDirectory $aiServiceRoot))
+
+    $steps.Add((Invoke-ValidationStep `
+        -Name 'python-lock-check' `
+        -CommandLabel 'uv lock --check' `
+        -FilePath $uv `
+        -ArgumentList @('lock', '--check') `
+        -WorkingDirectory $aiServiceRoot))
+
+    $steps.Add((Invoke-ValidationStep `
         -Name 'powershell-validation-scripts' `
         -CommandLabel 'scripts/ai-validation-scripts.tests.ps1' `
         -FilePath $powerShell `
@@ -114,6 +156,16 @@ try {
             -ArgumentList @('-Dtest=ToolInvocationIdempotencyRedisIT', 'test') `
             -EnvironmentVariables @{ AI_REDIS_INTEGRATION = 'true' }))
     }
+
+    if ($IncludePostgres) {
+        $steps.Add((Invoke-ValidationStep `
+            -Name 'postgres-checkpoint-integration' `
+            -CommandLabel 'uv run pytest tests/test_postgres_checkpoint_integration.py' `
+            -FilePath $uv `
+            -ArgumentList @('run', 'pytest', 'tests/test_postgres_checkpoint_integration.py') `
+            -EnvironmentVariables @{ AI_SERVICE_POSTGRES_INTEGRATION = 'true' } `
+            -WorkingDirectory $aiServiceRoot))
+    }
 } finally {
     Set-Location $originalLocation
 }
@@ -123,6 +175,7 @@ $report = [ordered]@{
     generatedAtUtc = [DateTime]::UtcNow.ToString('o')
     overallStatus = if ($failedSteps.Count -eq 0) { 'passed' } else { 'failed' }
     includeRedis = [bool]$IncludeRedis
+    includePostgres = [bool]$IncludePostgres
     steps = @($steps)
     manualValidationRequired = @(
         'HTML, MULTI_FILE, and VUE_PROJECT initial generation and follow-up edits',

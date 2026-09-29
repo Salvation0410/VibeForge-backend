@@ -13,14 +13,14 @@
             -> LangGraph 工作流
                 -> LangChain 模型适配器
                 -> Spring 工具网关
-                -> Redis checkpoint
+                -> PostgreSQL checkpoint
 ```
 
 | 组件 | 主要职责 |
 | --- | --- |
 | Spring Boot | 用户鉴权、应用权限、聊天记录、文件操作、项目构建、部署、下载和对外 SSE |
 | Python AI 服务 | 模型调用、生成类型路由、LangGraph 编排、质量检查、修复和工具调用决策 |
-| Redis | 保存 LangGraph checkpoint 和本次编排状态，默认 TTL 为 24 小时 |
+| PostgreSQL | 独立数据库 `yu_ai_checkpoint` 保存官方 LangGraph checkpoint 和短期脱敏状态，默认 TTL 为 24 小时 |
 | DeepSeek/OpenAI 兼容服务 | 提供路由、代码生成、质量检查和修复模型能力 |
 
 Python 只能通过带 Bearer 令牌的 Spring 工具网关读写项目文件或执行构建，不能绕过 Spring 直接操作项目目录。
@@ -44,7 +44,9 @@ ai-service/
 │   │   ├── base.py             # 模型协议和公共返回类型
 │   │   └── openai_compatible.py # DeepSeek/OpenAI 兼容适配器
 │   └── infrastructure/
-│       ├── checkpoint.py       # Redis checkpoint 和 LangGraph saver
+│       ├── checkpoint.py       # checkpoint 协议与禁用实现
+│       ├── postgres_checkpoint.py # PostgreSQL saver、状态摘要和 TTL 清理
+│       ├── checkpoint_setup.py # 独立 schema 初始化命令
 │       └── spring_tools.py     # Spring 文件与构建工具网关
 ├── tests/                      # 不访问真实模型的单元与契约测试
 ├── .env.example                # 环境变量示例
@@ -114,7 +116,7 @@ HTML 和多文件版本均写入 `<类型>_<appId>/.releases/<requestId>`，`.cu
 
 - Python `3.12`，项目不支持 Python 3.13
 - [`uv`](https://docs.astral.sh/uv/) 包和虚拟环境管理器
-- Redis 5 或更高版本
+- PostgreSQL 15 或更高版本；Python checkpoint 使用独立数据库 `yu_ai_checkpoint`
 - DeepSeek 或其他 OpenAI 兼容模型服务的 API Key
 - 可访问的 Spring Boot 后端
 - Docker，可选，仅在容器运行时需要
@@ -138,19 +140,37 @@ Copy-Item .env.example .env
 | `AI_SERVICE_MODEL_BASE_URL` | OpenAI 兼容接口地址 | `https://api.deepseek.com/v1` |
 | `AI_SERVICE_MODEL_NAME` | 默认聊天模型 | `deepseek-chat` |
 | `AI_SERVICE_MODEL_TEMPERATURE` | 模型温度 | `0.1` |
-| `AI_SERVICE_REDIS_ENABLED` | 是否启用 Redis checkpoint | `true` |
-| `AI_SERVICE_REDIS_REQUIRED` | Redis 不可用时是否阻止启动或中止写入 | `false` |
-| `AI_SERVICE_REDIS_URL` | Redis 连接地址 | 本地可使用 `redis://localhost:6379/2` |
+| `AI_SERVICE_CHECKPOINT_ENABLED` | 是否启用 PostgreSQL checkpoint | `true` |
+| `AI_SERVICE_CHECKPOINT_REQUIRED` | PostgreSQL 不可用时是否阻止启动或中止写入 | `false` |
+| `AI_SERVICE_CHECKPOINT_POSTGRES_URL` | 独立 checkpoint 数据库连接地址 | `postgresql://<user>:<password>@localhost:5432/yu_ai_checkpoint` |
+| `AI_SERVICE_CHECKPOINT_AUTO_SETUP` | 启动时是否自动初始化表；生产推荐关闭 | `true` |
 | `AI_SERVICE_CHECKPOINT_TTL_SECONDS` | checkpoint 过期时间，秒 | `86400` |
+| `AI_SERVICE_CHECKPOINT_POOL_MIN_SIZE` | PostgreSQL 连接池最小连接数 | `1` |
+| `AI_SERVICE_CHECKPOINT_POOL_MAX_SIZE` | PostgreSQL 连接池最大连接数 | `5` |
 | `AI_SERVICE_VUE_MAX_TOOL_CALLS` | 单次 Vue 工作流最大工具调用次数 | `4` |
 | `AI_SERVICE_MAX_REPAIR_ATTEMPTS` | 质量检查失败后的最大修复次数 | `2` |
 
-本机直接启动时，通常需要将 `.env` 中的 Spring 和 Redis 地址改为：
+本机直接启动时，通常需要将 `.env` 中的 Spring 和 PostgreSQL 地址改为：
 
 ```dotenv
 AI_SERVICE_SPRING_GATEWAY_BASE_URL=http://localhost:8123/api/internal/ai-tools
-AI_SERVICE_REDIS_URL=redis://localhost:6379/2
+AI_SERVICE_CHECKPOINT_POSTGRES_URL=postgresql://yu_ai_checkpoint:<set-outside-git>@localhost:5432/yu_ai_checkpoint
 ```
+
+仓库不创建或管理本机已有的 PostgreSQL Docker 容器。由数据库管理员在容器中执行以下 SQL，真实密码不得写入仓库：
+
+```sql
+CREATE ROLE yu_ai_checkpoint LOGIN PASSWORD '<set-outside-git>';
+CREATE DATABASE yu_ai_checkpoint OWNER yu_ai_checkpoint;
+```
+
+角色和数据库准备后，运行独立初始化命令：
+
+```powershell
+uv run python -m ai_service.infrastructure.checkpoint_setup
+```
+
+本地可保留 `AI_SERVICE_CHECKPOINT_AUTO_SETUP=true`。生产环境推荐先执行初始化命令，再以 `false` 启动并移除运行账号的 DDL 权限。
 
 ## 本地启动
 
@@ -230,11 +250,11 @@ docker build -t yu-ai-service:local .
 docker run --rm --name yu-ai-service -p 8000:8000 --env-file .env yu-ai-service:local
 ```
 
-容器访问宿主机 Spring 和 Redis 时可使用：
+容器访问宿主机 Spring 和 PostgreSQL 时可使用：
 
 ```dotenv
 AI_SERVICE_SPRING_GATEWAY_BASE_URL=http://host.docker.internal:8123/api/internal/ai-tools
-AI_SERVICE_REDIS_URL=redis://host.docker.internal:6379/2
+AI_SERVICE_CHECKPOINT_POSTGRES_URL=postgresql://yu_ai_checkpoint:replace-with-password@host.docker.internal:5432/yu_ai_checkpoint
 ```
 
 Linux 环境如果无法解析 `host.docker.internal`，需要改为宿主机可达地址或将服务放入同一个 Docker network。
@@ -266,7 +286,7 @@ Authorization: Bearer <AI_SERVICE_INTERNAL_BEARER_TOKEN>
 | `POST /internal/v1/generations:stream` | 启动工作流并返回 `application/x-ndjson` 事件流 |
 | `POST /internal/v1/generations/{requestId}:cancel` | 协作式取消指定请求 |
 | `GET /health/live` | 进程存活检查 |
-| `GET /health/ready` | Redis checkpoint 就绪检查 |
+| `GET /health/ready` | PostgreSQL checkpoint 就绪检查 |
 
 生成事件包含 `requestId`、递增的 `sequence`、`node`、`data` 和可选的 `error`。事件类型包括：
 
@@ -283,13 +303,18 @@ Python 与 Spring 之间使用 NDJSON；Spring 对前端的内容事件仍为 `d
 
 业务 checkpoint 不保存完整源码，业务快照保留 `node`、`requestId`、`appId`、`codeGenType`、`qualityPassed`、`repairCount` 和 `toolCallCount` 等状态与审计摘要；执行期节点恢复由 LangGraph 自动 checkpoint 承担，该 checkpoint 在请求执行期间仍可能包含完整产物。请求在成功、失败或取消进入终态后会立即清理对应 thread，TTL 仅作为异常退出时的兜底。若终态清理失败，只会使 checkpoint 就绪状态降级，不会反转已经确定的生成结果。
 
-## Redis 与故障降级
+## PostgreSQL checkpoint 与故障降级
 
-Redis key 使用 `yu-ai:langgraph:*` 命名空间，LangGraph `thread_id` 为 `{appId}:{requestId}`，所有 key 默认在 24 小时后过期。
+LangGraph 使用官方 `AsyncPostgresSaver`，`thread_id` 为 `{appId}:{requestId}`。同一连接池还维护 `ai_workflow_status`，该表只允许保存节点、请求/应用标识、生成类型、质量结果和有限计数，不保存完整源码。正常终态调用 `adelete_thread()` 删除官方图 checkpoint；异常退出先由 `expires_at` 找到过期 thread，成功删除图 checkpoint 后才删除状态行，图删除失败时保留状态行供下次重试。
 
-- `AI_SERVICE_REDIS_REQUIRED=false`：Redis 不可用时记录警告，服务继续运行但不具备 checkpoint 恢复能力，ready 返回 503。
-- `AI_SERVICE_REDIS_REQUIRED=true`：启动探测或 checkpoint 写入失败时显式失败。
-- `AI_SERVICE_REDIS_ENABLED=false`：完全关闭 checkpoint，仅建议用于测试或明确接受无恢复能力的本地环境。
+- `AI_SERVICE_CHECKPOINT_REQUIRED=false`：PostgreSQL 不可用时记录脱敏警告，服务继续运行但不具备 checkpoint 恢复能力，ready 返回 503。
+- `AI_SERVICE_CHECKPOINT_REQUIRED=true`：启动探测或 checkpoint 写入失败时显式失败。
+- `AI_SERVICE_CHECKPOINT_ENABLED=false`：完全关闭 checkpoint，仅建议用于测试或明确接受无恢复能力的本地环境。
+- `AI_SERVICE_CHECKPOINT_AUTO_SETUP=true`：启动时幂等初始化官方表和 `ai_workflow_status`，适合本地；生产推荐独立初始化后关闭。
+
+序列化保持 pickle fallback 关闭，并通过 `allowed_json_modules=()` 不额外允许自定义 JSON constructor 模块。锁定依赖版本不存在 `LANGGRAPH_STRICT_MSGPACK` 配置开关，因此数据库必须只允许可信 AI 服务写入，不能把无效环境变量当作安全边界。
+
+本轮不启用 `PostgresStore` 长期记忆。Spring 聊天历史仍是跨请求对话上下文；只有出现明确的跨应用偏好或跨 requestId 结构化决策，并定义查看、修改、删除和过期规则后才重新评估。
 
 Spring 内部工具幂等使用现有 Spring Redis 配置（本地默认 database 1），因此幂等状态和成功结果可跨 Spring 实例共享。作用域为 `appId + requestId + toolCallId`；同一作用域复用不同 canonical 工具名或参数指纹会被拒绝。已存在（包括陈旧）的 `RUNNING` 记录表示执行结果不确定，不会自动重放；action 已成功但完成状态写回 Redis 失败时同样返回 indeterminate。该机制不承诺文件系统与 Redis 之间的严格 exactly-once。
 
@@ -307,7 +332,15 @@ $env:AI_REDIS_URL = "redis://127.0.0.1:6379/1"
 mvn "-Dtest=ToolInvocationIdempotencyRedisIT" test
 ```
 
-本轮没有执行真实 Spring/Python HTTP、真实 Redis、真实模型或三类型端到端验收；这些结果必须由下一阶段在隔离环境中补充记录。
+真实 PostgreSQL checkpoint 测试通过以下命令 opt-in，连接 URL 只放在当前进程环境中，不得打印或提交：
+
+```powershell
+$env:AI_SERVICE_POSTGRES_INTEGRATION = "true"
+$env:AI_SERVICE_CHECKPOINT_POSTGRES_URL = "postgresql://<user>:<password>@localhost:5432/yu_ai_checkpoint"
+uv run pytest tests/test_postgres_checkpoint_integration.py
+```
+
+默认不设置 `AI_SERVICE_POSTGRES_INTEGRATION` 时，该测试跳过且不连接数据库。当前本机 Docker 容器中尚未创建独立 `yu_ai_checkpoint` 数据库，因此本轮不声称真实 PostgreSQL 集成通过；真实 Spring/Python HTTP、真实模型和三类型端到端结果仍需在隔离环境中记录。
 
 ## 测试与校验
 
@@ -323,6 +356,13 @@ uv run pytest
 uv run python -m compileall -q src
 uv run pytest
 uv lock --check
+```
+
+仓库根目录的统一门禁会执行上述 Python 检查；只有独立 checkpoint 数据库准备完毕时才追加 `-IncludePostgres`：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1 -Execute
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1 -Execute -IncludePostgres
 ```
 
 ## 安全要求
