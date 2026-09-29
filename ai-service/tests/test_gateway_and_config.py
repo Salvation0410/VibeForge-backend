@@ -670,8 +670,12 @@ def test_checkpoint_pool_max_must_not_be_smaller_than_min():
         )
 
 
-def test_multi_agent_review_defaults_to_disabled_with_sixty_second_timeout():
+def test_multi_agent_review_defaults_to_disabled_with_sixty_second_timeout(monkeypatch):
+    monkeypatch.delenv("AI_SERVICE_MULTI_AGENT_REVIEW_ENABLED", raising=False)
+    monkeypatch.delenv("AI_SERVICE_MULTI_AGENT_REVIEW_TIMEOUT_SECONDS", raising=False)
+
     settings = Settings(
+        _env_file=None,
         internal_bearer_token="internal-token",
         spring_gateway_base_url="http://spring.test",
         spring_gateway_bearer_token="gateway-token",
@@ -685,6 +689,7 @@ def test_multi_agent_review_defaults_to_disabled_with_sixty_second_timeout():
 def test_multi_agent_review_timeout_rejects_out_of_range_values(timeout):
     with pytest.raises(ValidationError, match="multi_agent_review_timeout_seconds"):
         Settings(
+            _env_file=None,
             internal_bearer_token="internal-token",
             spring_gateway_base_url="http://spring.test",
             spring_gateway_bearer_token="gateway-token",
@@ -695,6 +700,7 @@ def test_multi_agent_review_timeout_rejects_out_of_range_values(timeout):
 @pytest.mark.parametrize("timeout", [0.1, 300])
 def test_multi_agent_review_timeout_accepts_boundary_values(timeout):
     settings = Settings(
+        _env_file=None,
         internal_bearer_token="internal-token",
         spring_gateway_base_url="http://spring.test",
         spring_gateway_bearer_token="gateway-token",
@@ -706,6 +712,7 @@ def test_multi_agent_review_timeout_accepts_boundary_values(timeout):
 
 def test_multi_agent_review_config_parses_string_constructor_values():
     settings = Settings(
+        _env_file=None,
         internal_bearer_token="internal-token",
         spring_gateway_base_url="http://spring.test",
         spring_gateway_bearer_token="gateway-token",
@@ -722,6 +729,7 @@ def test_multi_agent_review_config_uses_ai_service_environment_prefix(monkeypatc
     monkeypatch.setenv("AI_SERVICE_MULTI_AGENT_REVIEW_TIMEOUT_SECONDS", "45.5")
 
     settings = Settings(
+        _env_file=None,
         internal_bearer_token="internal-token",
         spring_gateway_base_url="http://spring.test",
         spring_gateway_bearer_token="gateway-token",
