@@ -7,8 +7,14 @@ def test_public_modules_can_be_imported_from_new_packages():
     from ai_service.api import routes, schemas
     from ai_service.app import create_app
     from ai_service.infrastructure import checkpoint, postgres_checkpoint, spring_tools
-    from ai_service.models import GenerationModel, OpenAICompatibleModel
-    from ai_service.orchestration import active_generations, cancellation, events, workflow
+    from ai_service.models import GenerationModel, OpenAICompatibleModel, quality_review
+    from ai_service.orchestration import (
+        active_generations,
+        cancellation,
+        events,
+        multi_agent_review,
+        workflow,
+    )
 
     assert callable(create_app)
     assert routes.register_routes
@@ -18,7 +24,9 @@ def test_public_modules_can_be_imported_from_new_packages():
     assert spring_tools.SpringToolGateway
     assert GenerationModel
     assert OpenAICompatibleModel
+    assert quality_review.ReviewerRole
     assert cancellation.CancellationRegistry
     assert active_generations.ActiveGenerationRegistry
     assert events.EventEmitter
+    assert multi_agent_review.run_multi_agent_review
     assert workflow.GenerationWorkflow

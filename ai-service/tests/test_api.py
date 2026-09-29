@@ -332,6 +332,83 @@ async def test_active_registry_cancels_blocking_model_and_emits_cancelled_termin
     assert not active.is_active("42:req-active-cancel")
 
 
+@pytest.mark.asyncio
+async def test_active_registry_cancels_all_blocking_multi_agent_reviewers(settings):
+    settings.multi_agent_review_enabled = True
+    settings.multi_agent_review_timeout_seconds = 10
+
+    class BlockingReviewModel(FakeModel):
+        def __init__(self):
+            super().__init__()
+            self.all_started = asyncio.Event()
+            self.started: set[ReviewerRole] = set()
+            self.cancelled: set[ReviewerRole] = set()
+            self.reviewer_tasks: dict[ReviewerRole, asyncio.Task] = {}
+
+        async def review_role(self, role, artifact, context):
+            current_task = asyncio.current_task()
+            assert current_task is not None
+            self.reviewer_tasks[role] = current_task
+            self.calls.append((
+                "review_role",
+                {"role": role, "artifact": artifact, "context": context},
+            ))
+            self.started.add(role)
+            if self.started == set(ReviewerRole):
+                self.all_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelled.add(role)
+                raise
+
+    thread_id = "42:req-review-cancel"
+    model = BlockingReviewModel()
+    checkpoint = MemoryCheckpoint()
+    active = ActiveGenerationRegistry()
+    workflow = GenerationWorkflow(
+        model=model,
+        tool_gateway=FakeToolGateway(),
+        checkpoint=checkpoint,
+        cancellations=CancellationRegistry(),
+        active_generations=active,
+        settings=settings,
+    )
+    request = GenerationRequest(
+        requestId="req-review-cancel",
+        appId="42",
+        prompt="build it",
+        codeGenType=CodeGenType.VUE_PROJECT,
+    )
+    events = []
+
+    async def consume() -> None:
+        async for event in workflow.stream(request):
+            events.append(event)
+
+    consumer = asyncio.create_task(consume())
+    await asyncio.wait_for(model.all_started.wait(), timeout=1)
+    assert model.started == set(ReviewerRole)
+    assert active.is_active(thread_id)
+
+    assert active.cancel(thread_id) is True
+    await asyncio.wait_for(consumer, timeout=1)
+
+    reviewer_tasks = set(model.reviewer_tasks.values())
+    assert model.cancelled == set(ReviewerRole)
+    assert set(model.reviewer_tasks) == set(ReviewerRole)
+    assert all(task.done() for task in reviewer_tasks)
+    assert reviewer_tasks.isdisjoint(asyncio.all_tasks())
+    assert events[-1].type == "failed"
+    assert events[-1].error is not None
+    assert events[-1].error.code == "cancelled"
+    assert not [event for event in events if event.type == "completed"]
+    assert not [call for call in model.calls if call[0] == "repair"]
+    assert checkpoint.saved[thread_id]
+    assert checkpoint.cleaned_graph_threads == [thread_id]
+    assert not active.is_active(thread_id)
+
+
 def test_existing_artifact_context_is_loaded_before_generation(app_factory, auth_headers, ndjson_parser):
     current_artifact = {
         "exists": True,
