@@ -21,6 +21,19 @@ public class GenerationLeaseService {
     private static final String COMMITTED = "COMMITTED";
     private final RedissonClient redissonClient;
 
+    public enum PublicState {
+        IDLE,
+        RUNNING,
+        STOPPING,
+        COMMITTING
+    }
+
+    public record GenerationStateSnapshot(String requestId, PublicState state, boolean cancellationRequested) {
+        public static GenerationStateSnapshot idle() {
+            return new GenerationStateSnapshot(null, PublicState.IDLE, false);
+        }
+    }
+
     /**
      * 立即尝试获取应用级生成租约，不排队等待已有任务。
      *
@@ -59,6 +72,36 @@ public class GenerationLeaseService {
             if (!Objects.equals(bucket.get(), state(lease.requestId(), ACTIVE))) return false;
             bucket.set(state(lease.requestId(), CANCELLED));
             return true;
+        } finally {
+            transitionLock.unlock();
+        }
+    }
+
+    /**
+     * 按应用取消当前活动请求。重复取消保持 STOPPING；提交阶段不再允许取消胜出。
+     */
+    public GenerationStateSnapshot cancelActive(long appId) {
+        RLock transitionLock = transitionLock(appId);
+        transitionLock.lock();
+        try {
+            RBucket<String> bucket = stateBucket(appId);
+            GenerationStateSnapshot current = parseSnapshot(bucket.get());
+            if (current.state() == PublicState.RUNNING) {
+                bucket.set(state(current.requestId(), CANCELLED));
+                return new GenerationStateSnapshot(current.requestId(), PublicState.STOPPING, true);
+            }
+            return current;
+        } finally {
+            transitionLock.unlock();
+        }
+    }
+
+    /** 返回应用当前对外生命周期状态，不暴露 Redis 内部状态名。 */
+    public GenerationStateSnapshot getStatus(long appId) {
+        RLock transitionLock = transitionLock(appId);
+        transitionLock.lock();
+        try {
+            return parseSnapshot(stateBucket(appId).get());
         } finally {
             transitionLock.unlock();
         }
@@ -140,6 +183,26 @@ public class GenerationLeaseService {
     /** 组合请求 ID 与生命周期状态，防止旧请求操作新请求状态。 */
     private String state(String requestId, String status) {
         return requestId + ":" + status;
+    }
+
+    private GenerationStateSnapshot parseSnapshot(String value) {
+        if (value == null || value.isBlank()) return GenerationStateSnapshot.idle();
+        int separator = value.lastIndexOf(':');
+        if (separator <= 0 || separator == value.length() - 1) {
+            log.warn("忽略无法识别的生成状态: {}", value);
+            return GenerationStateSnapshot.idle();
+        }
+        String requestId = value.substring(0, separator);
+        String status = value.substring(separator + 1);
+        return switch (status) {
+            case ACTIVE -> new GenerationStateSnapshot(requestId, PublicState.RUNNING, false);
+            case CANCELLED -> new GenerationStateSnapshot(requestId, PublicState.STOPPING, false);
+            case COMMITTING, COMMITTED -> new GenerationStateSnapshot(requestId, PublicState.COMMITTING, false);
+            default -> {
+                log.warn("忽略未知生成状态: {}", status);
+                yield GenerationStateSnapshot.idle();
+            }
+        };
     }
 
     /** 允许提交临界区执行可抛出受检异常的发布动作。 */

@@ -26,6 +26,7 @@ class OpenAICompatibleModel:
             base_url=settings.model_base_url,
             model=settings.model_name,
             temperature=settings.model_temperature,
+            max_tokens=settings.model_max_tokens,
         )
 
     async def route(self, prompt: str) -> str:

@@ -4,6 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from ai_service.config import Settings
+from ai_service.models import openai_compatible
 from ai_service.models.openai_compatible import OpenAICompatibleModel
 from ai_service.models.tool_contract import vue_tool_prompt
 from ai_service.prompts import (
@@ -32,6 +34,26 @@ def model_with_response(response_content: str) -> OpenAICompatibleModel:
     model = OpenAICompatibleModel.__new__(OpenAICompatibleModel)
     model._client = CapturingClient(response_content)
     return model
+
+
+def test_model_client_receives_configured_max_tokens(monkeypatch):
+    captured = {}
+
+    def fake_chat_openai(**kwargs):
+        captured.update(kwargs)
+        return CapturingClient()
+
+    monkeypatch.setattr(openai_compatible, "ChatOpenAI", fake_chat_openai)
+    settings = Settings(
+        internal_bearer_token="internal-token",
+        spring_gateway_base_url="http://spring.test",
+        spring_gateway_bearer_token="gateway-token",
+        model_max_tokens=4096,
+    )
+
+    OpenAICompatibleModel(settings)
+
+    assert captured["max_tokens"] == 4096
 
 
 @pytest.mark.asyncio

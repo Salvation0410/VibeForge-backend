@@ -14,6 +14,7 @@ from ai_service.infrastructure.checkpoint import CheckpointStore
 from ai_service.models.base import GenerationModel, ModelTurn
 from ai_service.models.tool_contract import validate_vue_tool_call
 from ai_service.orchestration.cancellation import CancellationRegistry, GenerationCancelled
+from ai_service.orchestration.active_generations import ActiveGenerationRegistry
 from ai_service.orchestration.events import EventEmitter
 
 logger = logging.getLogger(__name__)
@@ -103,11 +104,13 @@ class GenerationWorkflow:
         checkpoint: CheckpointStore,
         cancellations: CancellationRegistry,
         settings: Settings,
+        active_generations: ActiveGenerationRegistry | None = None,
     ):
         self.model = model
         self.tool_gateway = tool_gateway
         self.checkpoint = checkpoint
         self.cancellations = cancellations
+        self.active_generations = active_generations or ActiveGenerationRegistry()
         self.settings = settings
 
     async def run(self, request: GenerationRequest) -> list[GenerationEvent]:
@@ -120,14 +123,16 @@ class GenerationWorkflow:
         """在后台执行工作流，并按产生顺序异步返回事件。"""
         queue: asyncio.Queue[GenerationEvent | None] = asyncio.Queue()
         emitter = EventEmitter(request.request_id, queue)
+        thread_id = f"{request.app_id}:{request.request_id}"
 
         async def execute() -> None:
             try:
-                await self._execute(request, emitter)
+                await self._execute(request, emitter, convert_task_cancel=True)
             finally:
                 await queue.put(None)
 
         task = asyncio.create_task(execute())
+        self.active_generations.register(thread_id, task)
         try:
             while True:
                 event = await queue.get()
@@ -142,8 +147,15 @@ class GenerationWorkflow:
                 await task
             except asyncio.CancelledError:
                 pass
+            self.active_generations.clear(thread_id, task)
 
-    async def _execute(self, request: GenerationRequest, emitter: EventEmitter) -> None:
+    async def _execute(
+        self,
+        request: GenerationRequest,
+        emitter: EventEmitter,
+        *,
+        convert_task_cancel: bool = False,
+    ) -> None:
         """构造初始状态并执行图，将取消和异常转换为终止事件。"""
         thread_id = f"{request.app_id}:{request.request_id}"
         terminal: dict[str, Any] = {"published": False, "completed": False}
@@ -162,6 +174,16 @@ class GenerationWorkflow:
         try:
             await graph.ainvoke(initial, config={"configurable": {"thread_id": thread_id}})
         except GenerationCancelled:
+            if not await self._complete_committed_publication(emitter, terminal):
+                await emitter.emit(
+                    "failed",
+                    "cancelled",
+                    data={"status": "cancelled", "threadId": thread_id},
+                    error=EventError(code="cancelled", message="Generation was cancelled"),
+                )
+        except asyncio.CancelledError:
+            if not convert_task_cancel:
+                raise
             if not await self._complete_committed_publication(emitter, terminal):
                 await emitter.emit(
                     "failed",

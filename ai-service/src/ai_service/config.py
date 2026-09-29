@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     model_base_url: str = "https://api.deepseek.com/v1"
     model_name: str = "deepseek-chat"
     model_temperature: float = 0.1
+    model_max_tokens: int = Field(default=8192, ge=1)
 
     redis_enabled: bool = True
     redis_required: bool = False

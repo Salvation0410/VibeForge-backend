@@ -26,6 +26,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Component
 public class VueProjectBuilder {
@@ -44,6 +45,7 @@ public class VueProjectBuilder {
     private static final String TRUNCATION_MARKER = System.lineSeparator() + "...[truncated]..." + System.lineSeparator();
 
     private final ConcurrentHashMap<String, CompletableFuture<VueBuildResult>> buildTaskMap = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, ActiveBuild> activeBuildMap = new ConcurrentHashMap<>();
     private final CommandRunner commandRunner;
 
     public VueProjectBuilder() {
@@ -123,8 +125,21 @@ public class VueProjectBuilder {
     }
 
     public VueBuildResult buildProjectDetailed(String projectPath) {
+        return buildProjectDetailed(projectPath, null);
+    }
+
+    public VueBuildResult buildProjectDetailed(String projectPath, String requestId) {
         String normalizedProjectPath = normalizeProjectPath(projectPath);
+        ActiveBuild activeBuild = requestId == null || requestId.isBlank()
+                ? new ActiveBuild()
+                : registerActiveBuild(requestId);
+        if (activeBuild == null) {
+            return VueBuildResult.failure("VUE_BUILD_IN_PROGRESS", "request already has an active Vue build");
+        }
+        activeBuild.bind(Thread.currentThread());
+        try {
         while (true) {
+            if (activeBuild.cancelled()) return cancelledBuild();
             CompletableFuture<VueBuildResult> buildFuture = new CompletableFuture<>();
             CompletableFuture<VueBuildResult> existingFuture = buildTaskMap.putIfAbsent(
                     normalizedProjectPath, buildFuture);
@@ -132,6 +147,7 @@ public class VueProjectBuilder {
                 log.info("检测到 Vue 项目正在构建，等待后执行本次强制构建: {}", normalizedProjectPath);
                 VueBuildResult waitFailure = waitForPriorBuild(existingFuture, normalizedProjectPath);
                 if (waitFailure != null) {
+                    if (activeBuild.cancelled()) return cancelledBuild();
                     return waitFailure;
                 }
                 buildTaskMap.remove(normalizedProjectPath, existingFuture);
@@ -139,7 +155,7 @@ public class VueProjectBuilder {
             }
 
             try {
-                VueBuildResult buildResult = doBuildProject(normalizedProjectPath);
+                VueBuildResult buildResult = doBuildProject(normalizedProjectPath, activeBuild);
                 buildFuture.complete(buildResult);
                 return buildResult;
             } catch (Exception e) {
@@ -151,9 +167,18 @@ public class VueProjectBuilder {
                 buildTaskMap.remove(normalizedProjectPath, buildFuture);
             }
         }
+        } finally {
+            if (requestId != null && !requestId.isBlank()) {
+                activeBuildMap.remove(requestId, activeBuild);
+            }
+        }
     }
 
     private VueBuildResult doBuildProject(String projectPath) {
+        return doBuildProject(projectPath, new ActiveBuild());
+    }
+
+    private VueBuildResult doBuildProject(String projectPath, ActiveBuild activeBuild) {
         File projectDir = new File(projectPath);
         if (!projectDir.isDirectory()) {
             log.error("项目目录不存在: {}", projectPath);
@@ -167,13 +192,16 @@ public class VueProjectBuilder {
         }
 
         log.info("开始构建 Vue 项目: {}", projectPath);
+        if (activeBuild.cancelled()) return cancelledBuild();
         normalizeGeneratedSourceFiles(projectDir);
-        CommandResult installResult = executeNpmInstall(projectDir);
+        CommandResult installResult = executeNpmInstall(projectDir, activeBuild);
+        if (activeBuild.cancelled()) return cancelledBuild();
         if (!installResult.succeeded()) {
             log.error("npm install 执行失败");
             return commandFailure("VUE_NPM_INSTALL_FAILED", "npm install", installResult, projectPath);
         }
-        CommandResult buildResult = executeNpmBuild(projectDir);
+        CommandResult buildResult = executeNpmBuild(projectDir, activeBuild);
+        if (activeBuild.cancelled()) return cancelledBuild();
         if (!buildResult.succeeded()) {
             log.error("npm run build 执行失败");
             return commandFailure("VUE_NPM_BUILD_FAILED", "npm run build", buildResult, projectPath);
@@ -213,14 +241,14 @@ public class VueProjectBuilder {
         }
     }
 
-    private CommandResult executeNpmInstall(File projectDir) {
+    private CommandResult executeNpmInstall(File projectDir, ActiveBuild activeBuild) {
         log.info("执行 npm install...");
-        return executeCommand(projectDir, List.of(buildCommand("npm"), "install"), 300);
+        return executeCommand(projectDir, List.of(buildCommand("npm"), "install"), 300, activeBuild);
     }
 
-    private CommandResult executeNpmBuild(File projectDir) {
+    private CommandResult executeNpmBuild(File projectDir, ActiveBuild activeBuild) {
         log.info("执行 npm run build...");
-        return executeCommand(projectDir, List.of(buildCommand("npm"), "run", "build"), 180);
+        return executeCommand(projectDir, List.of(buildCommand("npm"), "run", "build"), 180, activeBuild);
     }
 
     private void normalizeGeneratedSourceFiles(File projectDir) {
@@ -277,10 +305,13 @@ public class VueProjectBuilder {
         return baseCommand;
     }
 
-    private CommandResult executeCommand(File workingDir, List<String> command, int timeoutSeconds) {
+    private CommandResult executeCommand(
+            File workingDir, List<String> command, int timeoutSeconds, ActiveBuild activeBuild) {
         try {
+            if (activeBuild.cancelled()) return new CommandResult(-1, "", "build cancelled");
             log.info("在目录 {} 中执行命令: {}", workingDir.getAbsolutePath(), command);
             CommandResult result = commandRunner.run(workingDir, command, timeoutSeconds);
+            if (activeBuild.cancelled()) return new CommandResult(-1, "", "build cancelled");
             String stdout = result.stdout();
             String stderr = result.stderr();
             if (!stdout.isBlank()) {
@@ -298,9 +329,29 @@ public class VueProjectBuilder {
             log.error("命令执行失败，退出码: {}", result.exitCode());
             return result;
         } catch (Exception e) {
+            if (activeBuild.cancelled()) {
+                return new CommandResult(-1, "", "build cancelled");
+            }
             log.error("执行命令失败: {}, 错误信息: {}", command, e.getMessage(), e);
             return new CommandResult(-1, "", safeExceptionMessage(e));
         }
+    }
+
+    public boolean cancelBuild(String requestId) {
+        if (requestId == null || requestId.isBlank()) return false;
+        ActiveBuild activeBuild = activeBuildMap.get(requestId);
+        if (activeBuild == null) return false;
+        activeBuild.cancel();
+        return true;
+    }
+
+    private ActiveBuild registerActiveBuild(String requestId) {
+        ActiveBuild activeBuild = new ActiveBuild();
+        return activeBuildMap.putIfAbsent(requestId, activeBuild) == null ? activeBuild : null;
+    }
+
+    private VueBuildResult cancelledBuild() {
+        return VueBuildResult.failure("VUE_BUILD_CANCELLED", "Vue build was cancelled");
     }
 
     private VueBuildResult commandFailure(String code, String operation, CommandResult result, String projectPath) {
@@ -378,6 +429,26 @@ public class VueProjectBuilder {
     @FunctionalInterface
     interface CommandRunner {
         CommandResult run(File workingDirectory, List<String> command, int timeoutSeconds) throws Exception;
+    }
+
+    private static final class ActiveBuild {
+        private final AtomicBoolean cancelled = new AtomicBoolean();
+        private volatile Thread thread;
+
+        void bind(Thread thread) {
+            this.thread = thread;
+            if (cancelled.get()) thread.interrupt();
+        }
+
+        void cancel() {
+            cancelled.set(true);
+            Thread runningThread = thread;
+            if (runningThread != null) runningThread.interrupt();
+        }
+
+        boolean cancelled() {
+            return cancelled.get();
+        }
     }
 
     record CommandResult(int exitCode, String stdout, String stderr) {

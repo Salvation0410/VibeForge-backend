@@ -28,6 +28,7 @@ import com.yupi.yuaicodemother.model.dto.app.AppQueryRequest;
 import com.yupi.yuaicodemother.model.entity.App;
 import com.yupi.yuaicodemother.model.entity.SysUser;
 import com.yupi.yuaicodemother.model.vo.AppVO;
+import com.yupi.yuaicodemother.model.vo.AppGenerationStatusVO;
 import com.yupi.yuaicodemother.model.vo.SysUserVO;
 import com.yupi.yuaicodemother.service.AppService;
 import com.yupi.yuaicodemother.service.ChatHistoryOriginalService;
@@ -123,7 +124,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
                         .doOnCancel(() -> {
                             // 取消只有在提交尚未开始时才能胜出；提交胜出后保持成功终态。
                             if (generationLeaseService.cancel(lease)) {
-                                aiGenerationGateway.cancel(appId, loginUser.getId(), requestId);
+                                cancelActiveExecution(appId, loginUser.getId(), requestId);
                             }
                         });
             } catch (Throwable error) {
@@ -131,6 +132,45 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
                 return Flux.error(error);
             }
         }).onErrorMap(error -> wrapGenerationError(requestId, error));
+    }
+
+    @Override
+    public AppGenerationStatusVO cancelGeneration(Long appId, SysUser loginUser) {
+        App app = requireOwnedApp(appId, loginUser);
+        var snapshot = generationLeaseService.cancelActive(appId);
+        if (snapshot.cancellationRequested()) {
+            cancelActiveExecution(appId, app.getUserId(), snapshot.requestId());
+        }
+        return toGenerationStatus(appId, snapshot);
+    }
+
+    @Override
+    public AppGenerationStatusVO getGenerationStatus(Long appId, SysUser loginUser) {
+        requireOwnedApp(appId, loginUser);
+        return toGenerationStatus(appId, generationLeaseService.getStatus(appId));
+    }
+
+    private App requireOwnedApp(Long appId, SysUser loginUser) {
+        ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "appId is invalid");
+        ThrowUtils.throwIf(loginUser == null, ErrorCode.NOT_LOGIN_ERROR, "User not logged in");
+        App app = this.getById(appId);
+        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "App not found");
+        if (!app.getUserId().equals(loginUser.getId())) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "No permission to access app");
+        }
+        return app;
+    }
+
+    private AppGenerationStatusVO toGenerationStatus(
+            Long appId, GenerationLeaseService.GenerationStateSnapshot snapshot) {
+        return new AppGenerationStatusVO(appId, snapshot.requestId(), snapshot.state().name());
+    }
+
+    private void cancelActiveExecution(Long appId, Long userId, String requestId) {
+        if (vueProjectBuilder != null) {
+            vueProjectBuilder.cancelBuild(requestId);
+        }
+        aiGenerationGateway.cancel(appId, userId, requestId);
     }
 
     /**

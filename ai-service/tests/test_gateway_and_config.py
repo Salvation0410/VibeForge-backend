@@ -628,6 +628,24 @@ def test_security_tokens_must_be_configured():
         )
 
 
+def test_model_max_tokens_defaults_to_8192_and_must_be_positive():
+    settings = Settings(
+        internal_bearer_token="internal-token",
+        spring_gateway_base_url="http://spring.test",
+        spring_gateway_bearer_token="gateway-token",
+    )
+
+    assert settings.model_max_tokens == 8192
+
+    with pytest.raises(ValidationError):
+        Settings(
+            internal_bearer_token="internal-token",
+            spring_gateway_base_url="http://spring.test",
+            spring_gateway_bearer_token="gateway-token",
+            model_max_tokens=0,
+        )
+
+
 @pytest.mark.asyncio
 async def test_optional_redis_has_explicit_degraded_mode(monkeypatch):
     checkpoint = RedisCheckpoint("redis://127.0.0.1:1/0", required=False, ttl_seconds=86400)

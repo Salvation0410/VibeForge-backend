@@ -10,6 +10,7 @@ import com.yupi.yuaicodemother.model.dto.app.AppUserUpdateRequest;
 import com.yupi.yuaicodemother.model.entity.App;
 import com.yupi.yuaicodemother.model.entity.SysUser;
 import com.yupi.yuaicodemother.model.vo.AppVO;
+import com.yupi.yuaicodemother.model.vo.AppGenerationStatusVO;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
@@ -55,6 +56,10 @@ public interface AppService extends IService<App> {
      * @return 流式生成的代码
      */
     public Flux<String> chatToGenCode(Long appId, String message, SysUser loginUser);
+
+    AppGenerationStatusVO cancelGeneration(Long appId, SysUser loginUser);
+
+    AppGenerationStatusVO getGenerationStatus(Long appId, SysUser loginUser);
 
     /**
      *

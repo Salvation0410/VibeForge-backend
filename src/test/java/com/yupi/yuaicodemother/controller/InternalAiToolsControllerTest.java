@@ -240,7 +240,7 @@ class InternalAiToolsControllerTest {
         var builder = mock(VueProjectBuilder.class);
         var resolver = mock(ArtifactPathResolver.class);
         when(resolver.resolveActiveRoot(CodeGenTypeEnum.VUE_PROJECT, 42L)).thenReturn(tempDir);
-        when(builder.buildProjectDetailed(tempDir.toString()))
+        when(builder.buildProjectDetailed(tempDir.toString(), "req-build"))
                 .thenReturn(VueBuildResult.failure("VUE_NPM_BUILD_FAILED", "vite failed"));
         var properties = new AiEngineProperties();
         properties.setToken("test-token");
@@ -259,9 +259,9 @@ class InternalAiToolsControllerTest {
                 "built", false,
                 "errorCode", "VUE_NPM_BUILD_FAILED",
                 "message", "vite failed"), result);
-        verify(builder).buildProjectDetailed(tempDir.toString());
+        verify(builder).buildProjectDetailed(tempDir.toString(), "req-build");
 
-        when(builder.buildProjectDetailed(tempDir.toString())).thenReturn(VueBuildResult.success());
+        when(builder.buildProjectDetailed(tempDir.toString(), "req-build")).thenReturn(VueBuildResult.success());
         Map<String, Object> success = controller.invoke("Bearer test-token",
                 new InternalAiToolsController.ToolRequest(42L, "req-build", "call-build-success",
                         "project_build", Map.of("codeGenType", "VUE_PROJECT"))).getData();

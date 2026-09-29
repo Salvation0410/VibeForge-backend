@@ -7,8 +7,10 @@ import com.yupi.yuaicodemother.ai.gateway.GenerationStreamException;
 import com.yupi.yuaicodemother.core.artifact.ArtifactPathResolver;
 import com.yupi.yuaicodemother.core.artifact.ArtifactValidationException;
 import com.yupi.yuaicodemother.core.artifact.HtmlOutputBudgetGuard;
+import com.yupi.yuaicodemother.core.builder.VueProjectBuilder;
 import com.yupi.yuaicodemother.core.handler.StreamHandlerExecutor;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
+import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.model.entity.App;
 import com.yupi.yuaicodemother.model.entity.SysUser;
 import com.yupi.yuaicodemother.service.ChatHistoryOriginalService;
@@ -25,6 +27,33 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class AppServiceGenerationCancellationTest {
+
+    @Test
+    void explicitCancelUsesAuthoritativeRequestAndStatusChecksOwnership() {
+        AiGenerationGateway gateway = mock(AiGenerationGateway.class);
+        GenerationLeaseService leases = mock(GenerationLeaseService.class);
+        when(leases.cancelActive(42L)).thenReturn(new GenerationLeaseService.GenerationStateSnapshot(
+                "req-active", GenerationLeaseService.PublicState.STOPPING, true));
+        when(leases.getStatus(42L)).thenReturn(new GenerationLeaseService.GenerationStateSnapshot(
+                "req-active", GenerationLeaseService.PublicState.STOPPING, false));
+
+        AppServiceImpl service = spy(new AppServiceImpl(mock(SysUserService.class), gateway,
+                mock(ChatHistoryService.class), mock(ArtifactPathResolver.class), leases,
+                mock(HtmlOutputBudgetGuard.class)));
+        VueProjectBuilder builder = mock(VueProjectBuilder.class);
+        ReflectionTestUtils.setField(service, "vueProjectBuilder", builder);
+        doReturn(App.builder().id(42L).userId(7L).build()).when(service).getById(42L);
+
+        var cancelled = service.cancelGeneration(42L, SysUser.builder().id(7L).build());
+        assertEquals("STOPPING", cancelled.getState());
+        assertEquals("req-active", cancelled.getRequestId());
+        verify(gateway).cancel(42L, 7L, "req-active");
+        verify(builder).cancelBuild("req-active");
+        assertEquals("STOPPING", service.getGenerationStatus(42L, SysUser.builder().id(7L).build()).getState());
+
+        assertThrows(BusinessException.class,
+                () -> service.cancelGeneration(42L, SysUser.builder().id(8L).build()));
+    }
 
     @Test
     void downstreamCancelKeepsLeaseUntilEngineTerminates() {
@@ -45,6 +74,8 @@ class AppServiceGenerationCancellationTest {
 
         AppServiceImpl service = spy(new AppServiceImpl(mock(SysUserService.class), gateway, history,
                 mock(ArtifactPathResolver.class), leases, mock(HtmlOutputBudgetGuard.class)));
+        VueProjectBuilder builder = mock(VueProjectBuilder.class);
+        ReflectionTestUtils.setField(service, "vueProjectBuilder", builder);
         ReflectionTestUtils.setField(service, "streamHandlerExecutor", streamHandler);
         ReflectionTestUtils.setField(service, "chatHistoryOriginalService", originalHistory);
         doReturn(App.builder().id(42L).userId(7L).codeGenType("multi_file").build())
@@ -54,6 +85,7 @@ class AppServiceGenerationCancellationTest {
         subscription.dispose();
 
         verify(gateway, timeout(1000)).cancel(eq(42L), eq(7L), anyString());
+        verify(builder, timeout(1000)).cancelBuild(anyString());
         verify(leases, never()).release(lease);
 
         engine.tryEmitError(new IllegalStateException("cancelled"));

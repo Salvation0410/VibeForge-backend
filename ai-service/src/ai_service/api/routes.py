@@ -18,6 +18,7 @@ from ai_service.api.schemas import (
 from ai_service.infrastructure.checkpoint import CheckpointStore
 from ai_service.models.base import GenerationModel
 from ai_service.orchestration.cancellation import CancellationRegistry
+from ai_service.orchestration.active_generations import ActiveGenerationRegistry
 from ai_service.orchestration.workflow import GenerationWorkflow
 
 
@@ -28,6 +29,7 @@ def register_routes(
     workflow: GenerationWorkflow,
     checkpoint_store: CheckpointStore,
     cancellations: CancellationRegistry,
+    active_generations: ActiveGenerationRegistry,
     require_internal_auth: Any,
 ) -> None:
     """注册健康检查和内部生成接口，所有运行依赖由应用工厂显式传入。"""
@@ -79,12 +81,16 @@ def register_routes(
 
         thread_id = f"{body.app_id}:{body.request_id}"
 
+        def cancel_generation() -> None:
+            cancellations.cancel(thread_id)
+            active_generations.cancel(thread_id)
+
         async def stream():
             completed = False
             try:
                 async for event in workflow.stream(body):
                     if await request.is_disconnected():
-                        cancellations.cancel(thread_id)
+                        cancel_generation()
                         break
                     yield json.dumps(
                         event.model_dump(by_alias=True, mode="json", exclude_none=True),
@@ -95,7 +101,7 @@ def register_routes(
                         completed = True
             finally:
                 if not completed:
-                    cancellations.cancel(thread_id)
+                    cancel_generation()
 
         return StreamingResponse(stream(), media_type="application/x-ndjson")
 
@@ -109,5 +115,7 @@ def register_routes(
     async def cancel(request_id: str, body: CancelRequest) -> CancelResponse:
         """标记指定应用和请求对应的工作流为已取消。"""
 
-        cancellations.cancel(f"{body.app_id}:{request_id}")
+        thread_id = f"{body.app_id}:{request_id}"
+        cancellations.cancel(thread_id)
+        active_generations.cancel(thread_id)
         return CancelResponse(request_id=request_id)

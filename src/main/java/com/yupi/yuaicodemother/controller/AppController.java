@@ -21,6 +21,7 @@ import com.yupi.yuaicodemother.model.dto.app.*;
 import com.yupi.yuaicodemother.model.entity.App;
 import com.yupi.yuaicodemother.model.entity.SysUser;
 import com.yupi.yuaicodemother.model.vo.AppVO;
+import com.yupi.yuaicodemother.model.vo.AppGenerationStatusVO;
 import com.yupi.yuaicodemother.ratelimit.annotation.RateLimit;
 import com.yupi.yuaicodemother.ratelimit.enums.RateLimitType;
 import com.yupi.yuaicodemother.service.AppService;
@@ -362,6 +363,21 @@ public class AppController {
                     return Mono.just(ServerSentEvent.<String>builder()
                             .event("business-error").data(JSONUtil.toJsonStr(body)).build());
                 });
+    }
+
+    @PostMapping("/chat/gen/code/cancel")
+    public BaseResponse<AppGenerationStatusVO> cancelGeneration(
+            @RequestBody AppGenerationCancelRequest cancelRequest, HttpServletRequest request) {
+        ThrowUtils.throwIf(cancelRequest == null, ErrorCode.PARAMS_ERROR);
+        SysUser loginUser = userService.getLoginUser(request);
+        return ResultUtils.success(appService.cancelGeneration(cancelRequest.getAppId(), loginUser));
+    }
+
+    @GetMapping("/chat/gen/code/status")
+    public BaseResponse<AppGenerationStatusVO> getGenerationStatus(
+            @RequestParam Long appId, HttpServletRequest request) {
+        SysUser loginUser = userService.getLoginUser(request);
+        return ResultUtils.success(appService.getGenerationStatus(appId, loginUser));
     }
 
     /**

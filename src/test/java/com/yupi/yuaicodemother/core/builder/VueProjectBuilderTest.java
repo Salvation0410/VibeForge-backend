@@ -202,6 +202,28 @@ class VueProjectBuilderTest {
         assertEquals(2, installCount.get());
     }
 
+    @Test
+    void cancelBuildInterruptsBlockingCommandAndReturnsCancelledResult() throws Exception {
+        Files.writeString(tempDir.resolve("package.json"), "{}");
+        CountDownLatch commandStarted = new CountDownLatch(1);
+        var builder = new VueProjectBuilder((workingDirectory, command, timeoutSeconds) -> {
+            commandStarted.countDown();
+            new CountDownLatch(1).await();
+            return new VueProjectBuilder.CommandResult(0, "", "");
+        });
+
+        CompletableFuture<VueBuildResult> execution = CompletableFuture.supplyAsync(
+                () -> builder.buildProjectDetailed(tempDir.toString(), "req-cancel-build"));
+        assertTrue(commandStarted.await(2, TimeUnit.SECONDS));
+
+        assertTrue(builder.cancelBuild("req-cancel-build"));
+        VueBuildResult result = execution.get(2, TimeUnit.SECONDS);
+
+        assertFalse(result.built());
+        assertEquals("VUE_BUILD_CANCELLED", result.errorCode());
+        assertFalse(builder.cancelBuild("req-cancel-build"));
+    }
+
     @ParameterizedTest
     @ValueSource(ints = {4001, 8000})
     void boundedOutputKeepsContentAtOrBelowLimitWithoutMarker(int length) {

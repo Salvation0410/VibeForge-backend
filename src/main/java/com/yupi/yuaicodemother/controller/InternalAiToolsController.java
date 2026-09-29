@@ -122,7 +122,7 @@ public class InternalAiToolsController {
             case ARTIFACT_CONTEXT -> artifactContextReader.read(artifactContextType(args), appId);
             case ARTIFACT_VALIDATE -> validateArtifact(args);
             case ARTIFACT_PUBLISH -> publishArtifact(appId, requestId, args);
-            case PROJECT_BUILD -> buildProject(appId, args);
+            case PROJECT_BUILD -> buildProject(appId, requestId, args);
             case VUE_SOURCE_SNAPSHOT -> vueSourceSnapshot(appId, args);
         };
     }
@@ -279,9 +279,9 @@ public class InternalAiToolsController {
      * @param args 包含代码生成类型的工具参数
      * @return 不包含项目路径的结构化构建结果
      */
-    private Map<String, Object> buildProject(long appId, Map<String, Object> args) {
+    private Map<String, Object> buildProject(long appId, String requestId, Map<String, Object> args) {
         Path root = projectRoot(appId, text(args.get("codeGenType")));
-        VueBuildResult result = projectBuilder.buildProjectDetailed(root.toString());
+        VueBuildResult result = projectBuilder.buildProjectDetailed(root.toString(), requestId);
         return Map.of(
                 "built", result.built(),
                 "errorCode", result.errorCode(),

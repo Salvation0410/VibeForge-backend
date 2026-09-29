@@ -90,6 +90,35 @@ class GenerationLeaseServiceTest {
         assertEquals("req-1:COMMITTING", value.get());
     }
 
+    @Test
+    void explicitCancellationAndStatusExposeStablePublicStates() {
+        RedissonClient client = mock(RedissonClient.class);
+        RLock transitionLock = mock(RLock.class);
+        RBucket<String> state = mock(RBucket.class);
+        AtomicReference<String> value = bucketValue(state);
+        when(client.getLock("ai:generation:transition:42")).thenReturn(transitionLock);
+        when(client.<String>getBucket("ai:generation:state:42")).thenReturn(state);
+        var service = new GenerationLeaseService(client);
+
+        assertEquals(GenerationLeaseService.PublicState.IDLE, service.getStatus(42).state());
+
+        value.set("req-1:ACTIVE");
+        var firstCancel = service.cancelActive(42);
+        assertEquals(GenerationLeaseService.PublicState.STOPPING, firstCancel.state());
+        assertTrue(firstCancel.cancellationRequested());
+        assertEquals("req-1:CANCELLED", value.get());
+
+        var repeatedCancel = service.cancelActive(42);
+        assertEquals(GenerationLeaseService.PublicState.STOPPING, repeatedCancel.state());
+        assertFalse(repeatedCancel.cancellationRequested());
+
+        value.set("req-2:COMMITTING");
+        var committing = service.cancelActive(42);
+        assertEquals(GenerationLeaseService.PublicState.COMMITTING, committing.state());
+        assertFalse(committing.cancellationRequested());
+        assertEquals("req-2:COMMITTING", value.get());
+    }
+
     /** 用原子引用模拟 Redis bucket 的读取、写入和删除语义。 */
     private AtomicReference<String> bucketValue(RBucket<String> bucket) {
         AtomicReference<String> value = new AtomicReference<>();

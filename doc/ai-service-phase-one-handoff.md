@@ -263,6 +263,8 @@ Python checkpoint Redis: redis://localhost:6379/2
 10. **离线验证完成。** 本轮 Python 165 项测试全部通过；Java 快照、契约、Controller 和 HTTP 定向测试共 54 项，0 failures/errors、1 项按 Windows 符号链接权限条件跳过；Python 编译、锁文件检查和 Java clean compile（237 个生产源文件）均通过。本分支全量 `mvn test` 共 188 项，其中 186 项通过、0 failures、1 error、1 skipped；唯一 error 是既有 `contextLoads` 因缺少 `openAiChatModel` bean，skipped 是 Windows 符号链接权限条件测试，因此本轮不声称全量测试通过。真实 Redis、真实 Spring/Python HTTP、真实模型和前端三类型首次生成/二次修改仍属于后续验收。
 11. **Checkpoint 产物留存边界已收敛。** 业务快照不再保存完整 artifact，保留 `node`、`requestId`、`appId`、`codeGenType`、`qualityPassed`、`repairCount` 和 `toolCallCount` 等状态与审计摘要；执行期节点恢复由 LangGraph 自动 checkpoint 承担，该 checkpoint 在请求执行期间仍可能保留完整产物，成功、失败或取消进入终态后清理对应 thread，并使用 Redis 固定前缀避免误删。终态清理失败只使 checkpoint 就绪状态降级，不反转生成结果；TTL 作为异常退出兜底。本轮未执行真实 Redis、真实模型及 Spring/Python 真实服务依赖的自动化或接口验收；前端三类型生成、预览和交互由用户人工验证并反馈错误。
 12. **Vue 修复后最终源码审查已完成。** 至少一次修复、硬校验和重新构建成功后，Reviewer 读取 Spring 瞬时生成的有界最终源码快照；扫描、选择、字符和文件大小均有硬上限，完整源码不进入幂等 Redis、业务或 LangGraph checkpoint/state/事件。读取或审查失败不回退旧 artifact，事件和异常保持脱敏。
+13. **模型输出上限已显式配置。** Python 新链路通过 `AI_SERVICE_MODEL_MAX_TOKENS` 配置单次模型响应上限，默认值为 `8192` 且必须为正数。该配置可以降低较长静态页面被供应商截断的概率，但不会改变静态多文件协议：`MULTI_FILE` 仍必须在一次响应中完整返回 `index.html`、`style.css` 和 `script.js`，只有三个文件全部解析、校验并发布成功后才会更新活动版本。若三文件总量持续超过单次响应能力，应优先拆分需求或分轮修改；将静态多文件生成改造成分阶段或工具写入式流程属于后续架构优化，当前不能把提高 token 上限当作完整性保证。
+14. **停止链路已改为主动取消与权威状态确认。** Spring 新增应用级生成取消与状态查询接口，对外统一使用 `IDLE`、`RUNNING`、`STOPPING`、`COMMITTING`；取消只把活动租约转为 `STOPPING`，不会提前释放应用锁。LangGraph 在保留节点边界取消检查的同时，按 thread 注册当前 `asyncio.Task` 并主动 `cancel()` 正在等待的模型或工具调用；Vue 构建按请求 ID 跟踪执行线程，取消时中断等待并由进程运行器清理 npm 进程树。前端点击停止后进入“正在停止”，关闭已确认取消的 SSE，并轮询 Spring 权威状态到 `IDLE` 后才允许下一轮输入。Legacy 仍是协作式取消，因此可能在 `STOPPING` 保持更久，但不会再向用户误报已经停止。
 
 ## 8. 关键提交
 

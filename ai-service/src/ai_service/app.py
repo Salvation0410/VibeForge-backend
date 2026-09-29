@@ -17,6 +17,7 @@ from ai_service.infrastructure.spring_tools import SpringToolGateway
 from ai_service.models.base import GenerationModel
 from ai_service.models.openai_compatible import OpenAICompatibleModel
 from ai_service.orchestration.cancellation import CancellationRegistry
+from ai_service.orchestration.active_generations import ActiveGenerationRegistry
 from ai_service.orchestration.workflow import GenerationWorkflow
 
 
@@ -49,11 +50,13 @@ def create_app(
         else DisabledCheckpoint()
     )
     cancellations = CancellationRegistry()
+    active_generations = ActiveGenerationRegistry()
     workflow = GenerationWorkflow(
         model=generation_model,
         tool_gateway=gateway,
         checkpoint=checkpoint_store,
         cancellations=cancellations,
+        active_generations=active_generations,
         settings=config,
     )
 
@@ -76,6 +79,7 @@ def create_app(
     app.state.tool_gateway = gateway
     app.state.checkpoint = checkpoint_store
     app.state.cancellations = cancellations
+    app.state.active_generations = active_generations
     app.state.workflow = workflow
 
     register_routes(
@@ -84,6 +88,7 @@ def create_app(
         workflow=workflow,
         checkpoint_store=checkpoint_store,
         cancellations=cancellations,
+        active_generations=active_generations,
         require_internal_auth=create_internal_auth_dependency(config.internal_bearer_token),
     )
     return app

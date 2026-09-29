@@ -11,6 +11,7 @@ from ai_service.api.schemas import CodeGenType, GenerationRequest
 from ai_service.infrastructure.spring_tools import SpringToolGateway
 from ai_service.models.base import ModelTurn, ToolCall
 from ai_service.orchestration.cancellation import CancellationRegistry
+from ai_service.orchestration.active_generations import ActiveGenerationRegistry
 from ai_service.orchestration.events import EventEmitter
 from ai_service.orchestration.workflow import GenerationWorkflow, _after_build
 from conftest import FakeModel, FakeToolGateway, MemoryCheckpoint
@@ -231,6 +232,56 @@ async def test_stream_consumer_cancellation_waits_for_checkpoint_cleanup(setting
     await stream.aclose()
 
     assert checkpoint.cleaned_graph_threads == ["42:req-stream-cancel"]
+
+
+@pytest.mark.asyncio
+async def test_active_registry_cancels_blocking_model_and_emits_cancelled_terminal(settings):
+    class BlockingModel(FakeModel):
+        def __init__(self):
+            super().__init__()
+            self.started = asyncio.Event()
+
+        async def generate(self, branch, context):
+            self.started.set()
+            await asyncio.Event().wait()
+            raise AssertionError("阻塞模型不应正常返回")
+
+    model = BlockingModel()
+    checkpoint = MemoryCheckpoint()
+    active = ActiveGenerationRegistry()
+    workflow = GenerationWorkflow(
+        model=model,
+        tool_gateway=FakeToolGateway(),
+        checkpoint=checkpoint,
+        cancellations=CancellationRegistry(),
+        active_generations=active,
+        settings=settings,
+    )
+    request = GenerationRequest(
+        requestId="req-active-cancel",
+        appId="42",
+        prompt="build it",
+        codeGenType=CodeGenType.HTML,
+    )
+    events = []
+
+    async def consume() -> None:
+        async for event in workflow.stream(request):
+            events.append(event)
+
+    consumer = asyncio.create_task(consume())
+    await asyncio.wait_for(model.started.wait(), timeout=1)
+    assert active.is_active("42:req-active-cancel")
+
+    assert active.cancel("42:req-active-cancel") is True
+    await asyncio.wait_for(consumer, timeout=1)
+
+    assert events[-1].type == "failed"
+    assert events[-1].error is not None
+    assert events[-1].error.code == "cancelled"
+    assert not [event for event in events if event.type == "completed"]
+    assert checkpoint.cleaned_graph_threads == ["42:req-active-cancel"]
+    assert not active.is_active("42:req-active-cancel")
 
 
 def test_existing_artifact_context_is_loaded_before_generation(app_factory, auth_headers, ndjson_parser):
