@@ -76,6 +76,96 @@ class ToolInvocationIdempotencyRedisIT {
         assertEquals(1, executions.get());
     }
 
+    /** 验证两个真实 Redis 客户端竞争同一调用时，后到实例等待并回放唯一成功结果。 */
+    @Test
+    void concurrentClientsExecuteSameRequestOnlyOnce() throws Exception {
+        String requestId = unique("concurrent");
+        String toolCallId = unique("call");
+        AtomicInteger executions = new AtomicInteger();
+        CountDownLatch actionStarted = new CountDownLatch(1);
+        CountDownLatch releaseAction = new CountDownLatch(1);
+        AiEngineProperties properties = properties();
+        properties.setToolIdempotencyLockWaitMillis(5_000);
+        ToolInvocationIdempotencyService firstService = new ToolInvocationIdempotencyService(
+                firstClient, new ObjectMapper(), properties);
+        ToolInvocationIdempotencyService secondService = new ToolInvocationIdempotencyService(
+                secondClient, new ObjectMapper(), properties);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<Map<String, Object>> firstResult = executor.submit(() -> firstService.execute(
+                    42L, requestId, toolCallId, InternalAiTool.FILE_READ,
+                    Map.of("relativeFilePath", "src/App.vue"), () -> {
+                        executions.incrementAndGet();
+                        actionStarted.countDown();
+                        try {
+                            if (!releaseAction.await(10, TimeUnit.SECONDS)) {
+                                throw new IllegalStateException("Timed out waiting to release tool action");
+                            }
+                        } catch (InterruptedException error) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException("Interrupted while waiting to release tool action", error);
+                        }
+                        return Map.of("content", "ready");
+                    }));
+            assertTrue(actionStarted.await(10, TimeUnit.SECONDS), "first tool action did not start");
+            Future<Map<String, Object>> replay = executor.submit(() -> secondService.execute(
+                    42L, requestId, toolCallId, InternalAiTool.FILE_READ,
+                    Map.of("relativeFilePath", "src/App.vue"), () -> {
+                        executions.incrementAndGet();
+                        return Map.of("content", "wrong");
+                    }));
+
+            releaseAction.countDown();
+            assertEquals(Map.of("content", "ready"), firstResult.get(10, TimeUnit.SECONDS));
+            assertEquals(Map.of("content", "ready"), replay.get(10, TimeUnit.SECONDS));
+            assertEquals(1, executions.get());
+        } finally {
+            releaseAction.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    /** 验证不同 Spring 实例复用作用域但改变参数时，第二次 action 不会执行。 */
+    @Test
+    void rejectsArgumentConflictAcrossTwoRedisClients() {
+        String requestId = unique("argument-conflict");
+        String toolCallId = unique("call");
+        first.execute(42L, requestId, toolCallId, InternalAiTool.FILE_READ,
+                Map.of("relativeFilePath", "src/App.vue"), () -> Map.of("content", "ready"));
+        AtomicInteger replayExecutions = new AtomicInteger();
+
+        BusinessException error = assertThrows(BusinessException.class, () -> second.execute(
+                42L, requestId, toolCallId, InternalAiTool.FILE_READ,
+                Map.of("relativeFilePath", "src/main.ts"), () -> {
+                    replayExecutions.incrementAndGet();
+                    return Map.of("content", "wrong");
+                }));
+
+        assertEquals("TOOL_IDEMPOTENCY_CONFLICT", error.getMessage());
+        assertEquals(0, replayExecutions.get());
+    }
+
+    /** 验证不同 Spring 实例复用作用域但改变 canonical 工具名时，第二次 action 不会执行。 */
+    @Test
+    void rejectsToolConflictAcrossTwoRedisClients() {
+        String requestId = unique("tool-conflict");
+        String toolCallId = unique("call");
+        first.execute(42L, requestId, toolCallId, InternalAiTool.FILE_READ,
+                Map.of("relativeFilePath", "src/App.vue"), () -> Map.of("content", "ready"));
+        AtomicInteger replayExecutions = new AtomicInteger();
+
+        BusinessException error = assertThrows(BusinessException.class, () -> second.execute(
+                42L, requestId, toolCallId, InternalAiTool.FILE_WRITE,
+                Map.of("relativeFilePath", "src/App.vue", "content", "changed"), () -> {
+                    replayExecutions.incrementAndGet();
+                    return Map.of("ok", true);
+                }));
+
+        assertEquals("TOOL_IDEMPOTENCY_CONFLICT", error.getMessage());
+        assertEquals(0, replayExecutions.get());
+    }
+
     /** 验证遗留 RUNNING 状态按不确定结果处理，重试不得再次执行工具。 */
     @Test
     void staleRunningStateIsIndeterminateAndDoesNotExecuteAction() {

@@ -9,12 +9,15 @@
     [long]$VueAppId,
     [string]$Account = $env:APP_TEST_USER_ACCOUNT,
     [string]$Password = $env:APP_TEST_USER_PASSWORD,
+    [string]$SessionCookie = $env:APP_TEST_SESSION_COOKIE,
+    [string]$CaptchaCode,
     [int]$TimeoutSec = 120,
     [string]$OutputPath
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'ai-validation-auth.ps1')
 
 # 在任何登录或生成请求前校验参数，避免误操作真实应用。
 function Assert-Inputs {
@@ -22,18 +25,11 @@ function Assert-Inputs {
     $ids = @($HtmlAppId, $MultiFileAppId, $VueAppId)
     if ($ids | Where-Object { $_ -le 0 }) { throw 'HTML、MULTI_FILE 和 VUE_PROJECT 的应用 ID 必须为正数。' }
     if (@($ids | Sort-Object -Unique).Count -ne 3) { throw 'HTML、MULTI_FILE 和 VUE_PROJECT 的应用 ID 必须互不相同。' }
-    if ([string]::IsNullOrWhiteSpace($Account) -or [string]::IsNullOrWhiteSpace($Password)) { throw '账号和密码不能为空。' }
+    if ([string]::IsNullOrWhiteSpace($SessionCookie) -and
+            ([string]::IsNullOrWhiteSpace($Account) -or [string]::IsNullOrWhiteSpace($Password))) {
+        throw '必须提供会话 Cookie，或同时提供账号和密码。'
+    }
     if ($TimeoutSec -lt 10) { throw 'TimeoutSec 不能小于 10 秒。' }
-}
-
-# 创建只用于本轮验收的登录会话，不在输出中记录账号、密码或 Cookie。
-function New-Session {
-    $session = [Microsoft.PowerShell.Commands.WebRequestSession]::new()
-    $body = @{ account = $Account; password = $Password } | ConvertTo-Json
-    $login = Invoke-WebRequest -Uri "$($SpringBaseUrl.TrimEnd('/'))/users/login" -Method Post -WebSession $session -ContentType 'application/json; charset=utf-8' -Body $body
-    $payload = $login.Content | ConvertFrom-Json
-    if ([int]$payload.code -ne 0) { throw '端到端验收账号登录失败。' }
-    return $session
 }
 
 # 只提取终态数量和稳定错误码，不把流式源码写入验收报告。
@@ -111,7 +107,8 @@ if (-not $Execute) {
     return
 }
 
-$session = New-Session
+$session = New-AiValidationAuthenticatedSession -BaseUrl $SpringBaseUrl -Account $Account -Password $Password `
+    -SessionCookie $SessionCookie -CaptchaCode $CaptchaCode
 # 三个应用彼此隔离，避免不同生成类型或历史产物互相影响。
 $cases = @(
     [pscustomobject]@{ type = 'HTML'; appId = $HtmlAppId; initial = '创建一个咖啡店单页，包含清晰的头图、菜单区域和可点击的查看菜单按钮。'; modify = '只把查看菜单按钮文字改为立即点单，保留原有文字、图片、布局、功能和操作方式。' },

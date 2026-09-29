@@ -6,26 +6,24 @@ param(
     [long]$LangGraphAppId,
     [string]$Account = $env:APP_TEST_USER_ACCOUNT,
     [string]$Password = $env:APP_TEST_USER_PASSWORD,
+    [string]$SessionCookie = $env:APP_TEST_SESSION_COOKIE,
+    [string]$LegacyCaptchaCode,
+    [string]$LangGraphCaptchaCode,
     [string]$OutputPath
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'ai-validation-auth.ps1')
 
 function Assert-TestInputs {
     if (-not $Execute) { return }
     if ($LegacyAppId -le 0 -or $LangGraphAppId -le 0) { throw 'LegacyAppId and LangGraphAppId must be positive.' }
     if ($LegacyAppId -eq $LangGraphAppId) { throw 'LegacyAppId and LangGraphAppId must be distinct.' }
-    if ([string]::IsNullOrWhiteSpace($Account) -or [string]::IsNullOrWhiteSpace($Password)) { throw 'Account and Password are required.' }
-}
-
-function New-AuthenticatedSession([string]$BaseUrl, [string]$LoginAccount, [string]$LoginPassword) {
-    $session = [Microsoft.PowerShell.Commands.WebRequestSession]::new()
-    $body = @{ account = $LoginAccount; password = $LoginPassword } | ConvertTo-Json
-    $response = Invoke-WebRequest -Uri "$($BaseUrl.TrimEnd('/'))/users/login" -Method Post -WebSession $session -ContentType 'application/json; charset=utf-8' -Body $body
-    $payload = $response.Content | ConvertFrom-Json
-    if ([int]$payload.code -ne 0) { throw 'Test account login failed.' }
-    return $session
+    if ([string]::IsNullOrWhiteSpace($SessionCookie) -and
+            ([string]::IsNullOrWhiteSpace($Account) -or [string]::IsNullOrWhiteSpace($Password))) {
+        throw 'SessionCookie or Account and Password are required.'
+    }
 }
 
 function Invoke-GenerationStream([string]$BaseUrl, [long]$AppId, [string]$Prompt, $Session) {
@@ -72,8 +70,10 @@ $prompts = @(
     [pscustomobject]@{ type = 'VUE_PROJECT'; text = 'Create a small Vue task list with add and complete interactions.' }
 )
 $results = [System.Collections.Generic.List[object]]::new()
-$legacySession = New-AuthenticatedSession $LegacyBaseUrl $Account $Password
-$langGraphSession = New-AuthenticatedSession $LangGraphBaseUrl $Account $Password
+$legacySession = New-AiValidationAuthenticatedSession -BaseUrl $LegacyBaseUrl -Account $Account -Password $Password `
+    -SessionCookie $SessionCookie -CaptchaCode $LegacyCaptchaCode
+$langGraphSession = New-AiValidationAuthenticatedSession -BaseUrl $LangGraphBaseUrl -Account $Account -Password $Password `
+    -SessionCookie $SessionCookie -CaptchaCode $LangGraphCaptchaCode
 foreach ($case in $prompts) {
     $legacyRequestId = "legacy-$([guid]::NewGuid().ToString('N'))"
     $langGraphRequestId = "langgraph-$([guid]::NewGuid().ToString('N'))"

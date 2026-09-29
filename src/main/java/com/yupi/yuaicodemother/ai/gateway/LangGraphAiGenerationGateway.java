@@ -31,6 +31,8 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
     private final AiEngineProperties properties;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient = HttpClient.newBuilder()
+            // Uvicorn 不接受 JDK 客户端默认发送的明文 HTTP/2 升级请求，必须固定使用 HTTP/1.1。
+            .version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofSeconds(10)).build();
 
     /**

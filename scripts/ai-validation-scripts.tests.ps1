@@ -7,6 +7,13 @@ $expectedScripts = @(
     'test-ai-phase-two-e2e.ps1'
 )
 
+$authHelperPath = Join-Path $PSScriptRoot 'ai-validation-auth.ps1'
+if (-not (Test-Path -LiteralPath $authHelperPath)) { throw 'Missing validation authentication helper.' }
+$authHelper = Get-Content -Raw -LiteralPath $authHelperPath
+foreach ($marker in @('New-AiValidationAuthenticatedSession', '/users/login/captcha', 'captchaCode', 'SessionCookie', 'finally', 'Remove-Item')) {
+    if ($authHelper -notmatch [regex]::Escape($marker)) { throw "Authentication helper misses $marker" }
+}
+
 foreach ($name in $expectedScripts) {
     $path = Join-Path $PSScriptRoot $name
     if (-not (Test-Path -LiteralPath $path)) { throw "Missing validation script: $name" }
@@ -29,16 +36,36 @@ foreach ($label in @('health/live', 'health/ready', 'missing token', 'invalid to
 foreach ($forbidden in @('Write-Host.*InternalToken', 'Write-Host.*Authorization', 'Write-Host.*Response.Content')) {
     if ($http -match $forbidden) { throw "HTTP checklist may expose sensitive response data: $forbidden" }
 }
+foreach ($expected in @(
+    "Assert-Status `$missingAuth 200 'missing token'",
+    "Assert-BusinessCode `$missingAuth 40101 'missing token'",
+    "Assert-Status `$invalidAuth 200 'invalid token'",
+    "Assert-BusinessCode `$invalidAuth 40101 'invalid token'",
+    "Assert-Status `$missingResponse 200 'missing fields'",
+    "Assert-BusinessCode `$missingResponse 40000 'missing fields'"
+)) {
+    if ($http -notmatch [regex]::Escape($expected)) {
+        throw "HTTP checklist is not aligned with Spring BaseResponse: $expected"
+    }
+}
 
 $comparison = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'compare-ai-generation-engines.ps1')
+foreach ($marker in @('ai-validation-auth.ps1', 'SessionCookie', 'New-AiValidationAuthenticatedSession')) {
+    if ($comparison -notmatch [regex]::Escape($marker)) { throw "Comparison script misses authenticated-session support: $marker" }
+}
 foreach ($field in @('engine','appId','codeGenType','requestId','terminalStatus','toolNames','artifactHashes','buildStatus','errorCode','durationMs')) {
     if ($comparison -notmatch [regex]::Escape($field)) { throw "Comparison report misses $field" }
 }
-foreach ($forbidden in @('prompt =','source =','cookie =','token =','toolArguments =')) {
-    if ($comparison -match [regex]::Escape($forbidden)) { throw "Comparison report contains forbidden field $forbidden" }
+foreach ($forbidden in @('prompt','source','cookie','token','toolArguments')) {
+    if ($comparison -match "(?im)^\s*$([regex]::Escape($forbidden))\s*=") {
+        throw "Comparison report contains forbidden field $forbidden"
+    }
 }
 
 $e2e = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'test-ai-phase-two-e2e.ps1')
+foreach ($marker in @('ai-validation-auth.ps1', 'SessionCookie', 'New-AiValidationAuthenticatedSession')) {
+    if ($e2e -notmatch [regex]::Escape($marker)) { throw "E2E script misses authenticated-session support: $marker" }
+}
 # 三类型验收入口必须同时包含自动终态断言和中文人工检查清单。
 foreach ($marker in @(
     'HTML', 'MULTI_FILE', 'VUE_PROJECT', 'business-error', 'manualChecks',

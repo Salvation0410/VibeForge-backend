@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -71,6 +72,31 @@ class LangGraphAiGenerationGatewayTest {
 
         assertEquals("MODEL_OUTPUT_TRUNCATED", error.getErrorCode());
         assertEquals("req-fail", error.getRequestId());
+    }
+
+    @Test
+    void routeUsesHttp11WithoutH2cUpgrade() throws Exception {
+        AtomicReference<String> protocol = new AtomicReference<>();
+        AtomicReference<String> upgrade = new AtomicReference<>();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/internal/v1/route", exchange -> {
+            protocol.set(exchange.getProtocol());
+            upgrade.set(exchange.getRequestHeaders().getFirst("Upgrade"));
+            exchange.getRequestBody().readAllBytes();
+            byte[] bytes = "{\"codeGenType\":\"HTML\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+        AiEngineProperties properties = new AiEngineProperties();
+        properties.setServiceUrl("http://127.0.0.1:" + server.getAddress().getPort());
+        properties.setToken("test-token");
+        var gateway = new LangGraphAiGenerationGateway(properties, new ObjectMapper());
+
+        assertEquals(CodeGenTypeEnum.HTML, gateway.route("build", null, 7L, "req-route"));
+        assertEquals("HTTP/1.1", protocol.get());
+        assertNull(upgrade.get(), "LangGraph requests must not attempt an h2c upgrade");
     }
 
     /** 启动一次性本地 NDJSON 服务，避免测试依赖真实 Python 进程。 */

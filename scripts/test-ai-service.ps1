@@ -66,16 +66,19 @@ Assert-Status $valid 200 'valid invocation'
 $payload = Assert-BusinessCode $valid 0 'valid invocation'
 $results.Add([ordered]@{ check = 'valid invocation'; status = [int]$valid.StatusCode; dataFields = @($payload.data.PSObject.Properties.Name) })
 $missingAuth = Invoke-Json 'POST' "$($SpringBaseUrl.TrimEnd('/'))/internal/ai-tools/invoke" @{} $body
-Assert-Status $missingAuth 401 'missing token'
-$results.Add([ordered]@{ check = 'missing token'; status = [int]$missingAuth.StatusCode })
+Assert-Status $missingAuth 200 'missing token'
+$missingAuthPayload = Assert-BusinessCode $missingAuth 40101 'missing token'
+$results.Add([ordered]@{ check = 'missing token'; status = [int]$missingAuth.StatusCode; businessCode = [int]$missingAuthPayload.code })
 $invalidAuth = Invoke-Json 'POST' "$($SpringBaseUrl.TrimEnd('/'))/internal/ai-tools/invoke" @{ Authorization = 'Bearer invalid-test-token' } $body
-Assert-Status $invalidAuth 401 'invalid token'
-$results.Add([ordered]@{ check = 'invalid token'; status = [int]$invalidAuth.StatusCode })
+Assert-Status $invalidAuth 200 'invalid token'
+$invalidAuthPayload = Assert-BusinessCode $invalidAuth 40101 'invalid token'
+$results.Add([ordered]@{ check = 'invalid token'; status = [int]$invalidAuth.StatusCode; businessCode = [int]$invalidAuthPayload.code })
 # 使用只读 artifact_context 验证字段绑定失败，避免验收脚本修改项目文件。
 $missingApp = @{ requestId = $body.requestId; toolCallId = 'missing-app'; toolName = 'artifact_context'; arguments = $body.arguments }
 $missingResponse = Invoke-Json 'POST' "$($SpringBaseUrl.TrimEnd('/'))/internal/ai-tools/invoke" $headers $missingApp
-Assert-Status $missingResponse 400 'missing fields'
-$results.Add([ordered]@{ check = 'missing fields'; status = [int]$missingResponse.StatusCode })
+Assert-Status $missingResponse 200 'missing fields'
+$missingPayload = Assert-BusinessCode $missingResponse 40000 'missing fields'
+$results.Add([ordered]@{ check = 'missing fields'; status = [int]$missingResponse.StatusCode; businessCode = [int]$missingPayload.code })
 # 畸形协议和错误脱敏无法安全地由真实服务制造，明确引用离线契约测试结果。
 $results.Add([ordered]@{ check = 'stable idempotency errors'; status = 'offline-contract-tests'; note = 'Covered by Spring/Python contract tests without exposing request data.' })
 $results.Add([ordered]@{ check = 'sanitization'; status = 'offline-contract-tests'; note = 'Covered by error-boundary tests; response bodies are not written to this report.' })
