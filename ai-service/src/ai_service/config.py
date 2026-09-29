@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     checkpoint_pool_max_size: int = Field(default=5, ge=1, le=50)
     vue_max_tool_calls: int = Field(default=4, ge=1, le=20)
     max_repair_attempts: int = Field(default=2, ge=0, le=5)
+    multi_agent_review_enabled: bool = False
+    multi_agent_review_timeout_seconds: float = Field(default=60.0, gt=0, le=300)
 
     @model_validator(mode="after")
     def validate_checkpoint_pool(self) -> "Settings":

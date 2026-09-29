@@ -668,3 +668,64 @@ def test_checkpoint_pool_max_must_not_be_smaller_than_min():
             checkpoint_pool_min_size=4,
             checkpoint_pool_max_size=2,
         )
+
+
+def test_multi_agent_review_defaults_to_disabled_with_sixty_second_timeout():
+    settings = Settings(
+        internal_bearer_token="internal-token",
+        spring_gateway_base_url="http://spring.test",
+        spring_gateway_bearer_token="gateway-token",
+    )
+
+    assert settings.multi_agent_review_enabled is False
+    assert settings.multi_agent_review_timeout_seconds == 60.0
+
+
+@pytest.mark.parametrize("timeout", [0, -1, 301])
+def test_multi_agent_review_timeout_rejects_out_of_range_values(timeout):
+    with pytest.raises(ValidationError, match="multi_agent_review_timeout_seconds"):
+        Settings(
+            internal_bearer_token="internal-token",
+            spring_gateway_base_url="http://spring.test",
+            spring_gateway_bearer_token="gateway-token",
+            multi_agent_review_timeout_seconds=timeout,
+        )
+
+
+@pytest.mark.parametrize("timeout", [0.1, 300])
+def test_multi_agent_review_timeout_accepts_boundary_values(timeout):
+    settings = Settings(
+        internal_bearer_token="internal-token",
+        spring_gateway_base_url="http://spring.test",
+        spring_gateway_bearer_token="gateway-token",
+        multi_agent_review_timeout_seconds=timeout,
+    )
+
+    assert settings.multi_agent_review_timeout_seconds == timeout
+
+
+def test_multi_agent_review_config_parses_string_constructor_values():
+    settings = Settings(
+        internal_bearer_token="internal-token",
+        spring_gateway_base_url="http://spring.test",
+        spring_gateway_bearer_token="gateway-token",
+        multi_agent_review_enabled="true",
+        multi_agent_review_timeout_seconds="12.5",
+    )
+
+    assert settings.multi_agent_review_enabled is True
+    assert settings.multi_agent_review_timeout_seconds == 12.5
+
+
+def test_multi_agent_review_config_uses_ai_service_environment_prefix(monkeypatch):
+    monkeypatch.setenv("AI_SERVICE_MULTI_AGENT_REVIEW_ENABLED", "true")
+    monkeypatch.setenv("AI_SERVICE_MULTI_AGENT_REVIEW_TIMEOUT_SECONDS", "45.5")
+
+    settings = Settings(
+        internal_bearer_token="internal-token",
+        spring_gateway_base_url="http://spring.test",
+        spring_gateway_bearer_token="gateway-token",
+    )
+
+    assert settings.multi_agent_review_enabled is True
+    assert settings.multi_agent_review_timeout_seconds == 45.5
