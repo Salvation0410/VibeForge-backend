@@ -2,7 +2,7 @@
 
 **日期：** 2026-09-29
 
-**状态：** 已确认，待编写实施计划
+**状态：** 已实施，自动测试通过，真实环境人工验证待完成
 
 **适用范围：** Python AI 服务的 `VUE_PROJECT` 质量审查节点
 
@@ -299,7 +299,7 @@ TaskGroup 取消三个 Reviewer
 - 进程在节点执行中退出时，不复用部分 Reviewer 结果；恢复后重新执行三方审查。
 - 节点已经完成并成功 checkpoint 后，恢复从 `repair_feedback` 继续进入 repair，不重复调用已经完成的 Reviewer；修复后仍重新执行三方审查。
 
-整组三方审查只有只读模型调用，没有文件副作用，因此重放安全。源码快照请求使用稳定工具调用 ID，由现有 Spring 工具幂等边界处理重复调用。
+整组三方审查和 `vue_source_snapshot` 都是只读操作，没有文件副作用，因此重放安全。快照请求使用稳定 `toolCallId` 仅用于调用关联和观测；该工具旁路 Spring Redis 工具幂等服务，不把源码快照成功结果缓存到 Redis。进程在 `quality_review` 节点执行中退出时，节点重放会重新从 Spring 读取当时最新的受限快照；节点已经完成并成功 checkpoint 时，则从有界 `repair_feedback` 继续进入 repair，修复后的下一轮审查再次从 Spring 获取最新受限快照。
 
 本设计不调整 PostgreSQL checkpoint 表结构。业务状态表 `ai_workflow_status` 只保存节点、请求/应用标识、生成类型、质量结果和有限计数，不写入源码、完整问题、证据或 `repair_feedback`；图 checkpoint 与业务状态表是不同边界。正常成功、失败或取消终态仍 best-effort 删除对应图 thread，TTL 继续作为异常退出时的兜底清理机制。
 
