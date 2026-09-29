@@ -4,7 +4,8 @@ $ErrorActionPreference = 'Stop'
 $expectedScripts = @(
     'compare-ai-generation-engines.ps1',
     'test-ai-service.ps1',
-    'test-ai-phase-two-e2e.ps1'
+    'test-ai-phase-two-e2e.ps1',
+    'test-ai-tool-controller-competition.ps1'
 )
 
 $authHelperPath = Join-Path $PSScriptRoot 'ai-validation-auth.ps1'
@@ -85,6 +86,34 @@ $duplicateExitCode = $LASTEXITCODE
 $ErrorActionPreference = $previousErrorActionPreference
 if ($duplicateExitCode -eq 0 -or "$duplicateResult" -notmatch '必须互不相同') {
     throw 'E2E script must reject duplicate application IDs before network access'
+}
+
+$competition = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'test-ai-tool-controller-competition.ps1')
+foreach ($marker in @(
+    'FirstSpringBaseUrl', 'SecondSpringBaseUrl', 'IsolatedVueAppId', 'file_write', 'file_delete',
+    '[System.Threading.Tasks.Task]::WhenAll', 'concurrent delete', 'replay', 'fresh-scope absence probe',
+    'target/ai-validation', 'AI_SERVICE_INTERNAL_BEARER_TOKEN'
+)) {
+    if ($competition -notmatch [regex]::Escape($marker)) {
+        throw "Controller competition script misses $marker"
+    }
+}
+foreach ($forbidden in @('Write-Host.*InternalToken', 'Write-Host.*Authorization', 'Write-Host.*content')) {
+    if ($competition -match $forbidden) {
+        throw "Controller competition script may expose sensitive data: $forbidden"
+    }
+}
+$previousErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+$sameInstanceResult = & powershell -NoProfile -ExecutionPolicy Bypass `
+    -File (Join-Path $PSScriptRoot 'test-ai-tool-controller-competition.ps1') `
+    -Execute -FirstSpringBaseUrl http://localhost:8123/api `
+    -SecondSpringBaseUrl http://localhost:8123/api -InternalToken test-only `
+    -IsolatedVueAppId 1 2>&1
+$sameInstanceExitCode = $LASTEXITCODE
+$ErrorActionPreference = $previousErrorActionPreference
+if ($sameInstanceExitCode -eq 0 -or "$sameInstanceResult" -notmatch 'must be different') {
+    throw 'Controller competition script must reject identical Spring instances before network access'
 }
 
 'AI validation script static checks passed'

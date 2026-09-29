@@ -298,6 +298,18 @@ pwsh -NoProfile -File scripts/compare-ai-generation-engines.ps1 -Execute `
 
 8. 将 LangGraph 实例切回 Legacy 后重新发起一次隔离请求，确认无需数据库迁移即可回滚；灰度比例调整必须作为独立提交，不能与功能修复混合。
 9. 在隔离压力环境验证慢流超时：临时设置 `AI_GENERATION_STREAM_IDLE_TIMEOUT_SECONDS=30` 并重启 LangGraph Spring，使用可控 Python 测试服务或代理先返回一个合法 NDJSON 事件，再停止转发完整事件超过 30 秒。确认前端收到 `LANGGRAPH_STREAM_IDLE_TIMEOUT`、旧预览不变、Spring 生成状态最终回到 `IDLE`，且测试服务观察到客户端连接关闭。完成后恢复默认 `600` 秒并重启，不能用该故障注入替代真实模型三类型验收。
+10. 验证两个真实 Spring Controller 的 Redis 锁竞争和结果回放。前提是 8123、8124 使用同一 Spring Redis database、同一内部 Bearer 令牌和同一项目根目录，并准备一个不承载真实用户编辑的隔离 Vue 应用。脚本只在显式 `-Execute` 时创建并删除 `ai-validation/` 下的随机临时文件，报告不保存令牌、文件路径、文件内容或响应正文：
+
+```powershell
+$env:AI_SERVICE_INTERNAL_BEARER_TOKEN = '<本地内部令牌>'
+pwsh -NoProfile -File scripts/test-ai-tool-controller-competition.ps1 -Execute `
+  -FirstSpringBaseUrl http://localhost:8123/api `
+  -SecondSpringBaseUrl http://localhost:8124/api `
+  -IsolatedVueAppId <隔离Vue应用ID>
+Remove-Item Env:AI_SERVICE_INTERNAL_BEARER_TOKEN
+```
+
+判定标准：同一删除调用并发发送到两个实例时，两端均返回 HTTP 200、业务码 `0` 和 `data.ok=true`；随后在两端重放相同作用域仍为 `true`；使用新作用域再次删除则必须为 `false`，证明原调用只执行一次且成功结果可跨实例回放。任一实例返回 `false`、非零业务码或超时都视为失败。当前本机 8123、8124 端口可达，但执行终端没有可复用内部令牌；本轮已用两个共享内存状态的本地临时 HTTP 服务实际执行 PowerShell 5.1/7 的完整 `-Execute` 路径并通过，真实 Spring/Redis 竞争仍待人工注入本地令牌后执行。
 
 ### 本轮已经完成的优化
 
@@ -318,6 +330,7 @@ pwsh -NoProfile -File scripts/compare-ai-generation-engines.ps1 -Execute `
 15. **Java NDJSON 响应流取消已释放网络资源。** `LangGraphAiGenerationGateway` 将下游取消与未完成的 `sendAsync` future、已取得的响应 `InputStream` 和虚拟线程读取循环绑定；取消会关闭响应体、停止继续读取并避免在取消后补发错误。非 2xx 响应也会关闭响应体。回归测试使用持续写入的本地 HTTP 流，修复前 5 秒内连接不会关闭，修复后服务端能够观察到客户端断开。该测试只证明 Java 网络资源释放，Python 模型、工具调用和 npm 进程仍需真实停止场景验收。
 16. **并发大 NDJSON 流的请求隔离已增加回归覆盖。** 本地 HTTP 测试并发执行 8 个生成请求，每个请求返回 500 个 `content_delta`，共解析 4000 个增量事件；每个流只提交自身 requestId 对应的最后候选，没有跨请求串线或丢失完成终态。该测试证明共享 `HttpClient` 和 Java 单请求解析状态在受控并发下相互隔离，但不替代真实 Python、模型供应商、网络背压和长时间运行压力测试。
 17. **Java NDJSON 慢流增加空闲超时保护。** `LangGraphAiGenerationGateway` 为每个已建立的响应流启动轻量虚拟线程看门狗，只有收到完整 NDJSON 行才续期；连续空闲达到 `AI_GENERATION_STREAM_IDLE_TIMEOUT_SECONDS` 后关闭响应体、解除阻塞读取并返回 `LANGGRAPH_STREAM_IDLE_TIMEOUT`。默认值为 600 秒，最小按 1 秒执行。回归测试使用先发一条事件后永久停顿的本地 HTTP 流，确认稳定错误码、requestId 和服务端连接关闭；真实模型慢流、代理背压和不同超时阈值仍需按上方人工步骤验收。
+18. **双 Spring Controller 竞争验收脚本已补齐。** `scripts/test-ai-tool-controller-competition.ps1` 默认 dry-run，真实执行前强制要求两个不同 Spring 地址、内部令牌和正数隔离 Vue 应用 ID。脚本先写入随机临时文件，再把完全相同的删除作用域并发发送到两个实例；两端必须都回放 `ok=true`，随后双端重放仍为 `true`，而新作用域删除必须为 `false`。该组合可以区分 Redis 成功结果回放和第二实例重复执行。脚本在 `finally` 中尝试清理临时文件，只输出不含令牌、路径、内容或响应正文的摘要。PowerShell 7 静态检查、PowerShell 5.1/7 dry-run，以及两个共享状态临时 HTTP 服务上的完整 `-Execute` 路径均已通过；模拟执行还发现并修复了 PowerShell 5.1 会把 `Task.WhenAll` 聚合结果额外写入管道的兼容问题。真实 Spring/Redis 执行因当前终端缺少内部令牌而保留为人工验收项。
 
 ## 8. 关键提交
 
@@ -408,7 +421,7 @@ caeb0cb fix: 保持预览加载图为正圆
 ### P0：真实环境验收门
 
 1. **HTTP/1.1 源码和验收脚本修复已完成，继续重跑 LangGraph 真实生成。** `LangGraphAiGenerationGateway` 已强制 HTTP/1.1，回归测试证明修复前会发送 `Upgrade: h2c`、修复后不再发送；真实内部工具脚本已按 HTTP 200 加业务码契约在 8123、8124 通过，登录脚本已支持受控 Cookie 或人工验证码。剩余项是使用新提交重启 8124，再验证成功生成、未知/额外字段、Schema 响应错误、构建长超时、连接中断和错误脱敏。只有真实 LangGraph 流通过，才能证明共享 Schema 和 NDJSON 在网络边界完整可用。
-2. **真实 Redis 故障与客户端竞争验收已完成，继续补双 Spring HTTP 竞争。** 2026-09-29 opt-in 集成测试在 `redis://localhost:6379/1` 上 6 项全部通过，已经覆盖跨客户端结果回放、并发唯一执行、参数/工具名冲突、陈旧 `RUNNING` 和 action 成功后写回失败窗口。剩余真实环境项是两个 Spring 实例通过 Controller 对相同 `appId + requestId + toolCallId` 的锁竞争和结果回放；不追求 Redis 与文件系统之间严格 exactly-once。
+2. **真实 Redis 服务级竞争已完成，双 Spring HTTP 竞争入口已补齐但真实执行待完成。** 2026-09-29 opt-in 集成测试在 `redis://localhost:6379/1` 上 6 项全部通过，覆盖跨客户端结果回放、并发唯一执行、参数/工具名冲突、陈旧 `RUNNING` 和 action 成功后写回失败窗口。新增脚本可让两个 Spring Controller 对相同 `appId + requestId + toolCallId` 并发删除同一随机临时文件，并验证双端结果回放和新作用域缺失探针；当前终端没有内部令牌，因此尚不能把 Controller 级真实竞争记录为通过。不追求 Redis 与文件系统之间严格 exactly-once。
 3. **完成三种生成类型的首次生成与二次修改（人工前端验收）。** 分别使用隔离的 HTML、MULTI_FILE、VUE_PROJECT 测试应用，验证聊天记录、完整内容、图片和交互保留、严格解析、HTML Selenium 烟测、Vue 工具循环、构建、不可变发布、活动指针和最终预览。原因是 Fake Model 无法证明真实模型会稳定遵守代码块、三文件和 JSON 工具协议，尤其无法证明二次修改不会丢失现有功能；该项等待用户执行并反馈错误。
 4. **验证停止、断线和失败终态（人工前端 + 后台日志）。** 覆盖生成中停止、客户端断开、模型超时、Spring 工具失败、Vue 长构建和迟到回调，确认取消请求不能发布新版本，失败保留旧预览，前端只在当前请求成功后刷新一次。原因是这些行为横跨前端、Spring、Python 和 Redis，单服务测试无法证明终态一致；页面行为由用户人工观察，后端状态由日志和自动化脚本补证。
 5. **验证稳定灰度和 Legacy 回滚。** 对相同业务主体重复执行 `route`、`generate`、`cancel`，确认始终选择同一引擎；使用摘要和哈希比较 Legacy/LangGraph 结果，并演练切回 Legacy。原因是稳定桶虽已实现，但提高灰度比例会扩大故障面，必须先证明路由一致、取消一致且回滚可用。灰度配置应作为独立提交修改。
@@ -441,7 +454,7 @@ caeb0cb fix: 保持预览加载图为正圆
 
 1. HTTP/1.1、Spring 业务码脚本、验证码/受控 Cookie 认证助手已经完成；使用最新提交重启 8124。
 2. 使用三个隔离应用完成三类型首次生成和二次修改，再执行停止、断线和失败终态人工验收。
-3. 重跑双引擎摘要和 Legacy 回滚，并补两个真实 Spring Controller 的相同工具调用竞争和结果回放。
+3. 注入本地内部令牌后执行双 Spring Controller 竞争脚本，再重跑双引擎摘要和 Legacy 回滚；报告不得保存令牌、临时路径或响应正文。
 4. 应用创建阶段的灰度身份键契约已经关闭：按 userId 稳定灰度，缺失用户时才回退 appId/requestId。
 5. Java NDJSON 下游取消资源释放、受控并发大流和可配置空闲超时已经完成；下一项 P1 是真实连接复用、代理背压、阈值调优和长时间 npm 构建压力验证，只有复现漏进程后才升级平台相关进程治理。
 6. P2 只在真实运行数据证明有必要时进入实施，不与 P0/P1 混合提交。
