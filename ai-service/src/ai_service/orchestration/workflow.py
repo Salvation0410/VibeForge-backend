@@ -35,8 +35,6 @@ class WorkflowState(TypedDict, total=False):
     validation: dict[str, Any]
     build: dict[str, Any]
     quality_passed: bool
-    reviewer_results: list[dict[str, Any]]
-    quality_issues: list[dict[str, Any]]
     repair_feedback: str
     repair_count: int
     tool_call_count: int
@@ -372,14 +370,6 @@ class GenerationWorkflow:
                 self._raise_if_cancelled(thread_id)
                 return {
                     "quality_passed": result.passed,
-                    "reviewer_results": [
-                        reviewer.model_dump(mode="json")
-                        for reviewer in result.reviewer_results
-                    ],
-                    "quality_issues": [
-                        issue.model_dump(mode="json")
-                        for issue in (*result.blocking_issues, *result.minor_issues)
-                    ],
                     "repair_feedback": result.repair_feedback,
                 }
             if uses_vue_snapshot:
@@ -426,8 +416,6 @@ class GenerationWorkflow:
                     "repair_count": count,
                     "finish_reason": result["finish_reason"],
                     "token_usage": result["token_usage"],
-                    "reviewer_results": [],
-                    "quality_issues": [],
                     "repair_feedback": "",
                 }
             turn = await self.model.repair(

@@ -55,6 +55,26 @@ def reviewer_result(
     return ReviewerResult(reviewer=role, summary=f"{role.value} review", issues=issues)
 
 
+class GraphMemoryCheckpoint(MemoryCheckpoint):
+    def __init__(self):
+        super().__init__()
+        self.graph_saver = InMemorySaver()
+
+    def get_graph_saver(self):
+        return self.graph_saver
+
+
+async def graph_channel_values(
+    checkpoint: GraphMemoryCheckpoint,
+    thread_id: str,
+) -> list[dict]:
+    config = {"configurable": {"thread_id": thread_id}}
+    return [
+        item.checkpoint["channel_values"]
+        async for item in checkpoint.graph_saver.alist(config)
+    ]
+
+
 def test_authentication_is_required(app_factory, auth_headers):
     client = TestClient(app_factory())
     assert client.get("/internal/v1/health/live").status_code == 200
@@ -652,7 +672,7 @@ def test_vue_multi_agent_reviewer_system_errors_fail_without_repair(
     assert not [call for call in model.calls if call[0] == "repair"]
 
 
-def test_multi_agent_review_details_are_excluded_from_checkpoint_payload_and_memory(
+def test_multi_agent_review_feedback_is_excluded_from_business_checkpoint(
     settings, app_factory, auth_headers, ndjson_parser
 ):
     state = {
@@ -662,8 +682,6 @@ def test_multi_agent_review_details_are_excluded_from_checkpoint_payload_and_mem
         "quality_passed": False,
         "repair_count": 1,
         "tool_call_count": 2,
-        "reviewer_results": [{"summary": "UNIQUE_REVIEW_SUMMARY"}],
-        "quality_issues": [{"evidence": "UNIQUE_CHECKPOINT_EVIDENCE"}],
         "repair_feedback": "UNIQUE_CHECKPOINT_FEEDBACK",
     }
     payload = GenerationWorkflow._checkpoint_payload(state, "quality_review")
@@ -687,9 +705,173 @@ def test_multi_agent_review_details_are_excluded_from_checkpoint_payload_and_mem
 
     assert events[-1]["type"] == "completed"
     assert all(
-        not {"reviewer_results", "quality_issues", "repair_feedback"}.intersection(saved)
+        "repair_feedback" not in saved
         for saved in checkpoint.saved["42:req-1"]
     )
+
+
+@pytest.mark.asyncio
+async def test_vue_minor_review_details_never_enter_real_graph_checkpoint(settings):
+    settings.multi_agent_review_enabled = True
+    summary_secret = "UNIQUE_MINOR_SUMMARY_1501"
+    evidence_secret = "UNIQUE_MINOR_EVIDENCE_1502"
+    repair_secret = "UNIQUE_MINOR_REPAIR_HINT_1503"
+    model = FakeModel(role_reviews={
+        ReviewerRole.REQUIREMENT: [ReviewerResult(
+            reviewer=ReviewerRole.REQUIREMENT,
+            summary=summary_secret,
+            issues=[QualityIssue(
+                code="MINOR_ONLY",
+                category="quality",
+                summary="minor issue",
+                evidence=evidence_secret,
+                repair_hint=repair_secret,
+                severity=IssueSeverity.MINOR,
+            )],
+        )]
+    })
+    checkpoint = GraphMemoryCheckpoint()
+    workflow = GenerationWorkflow(
+        model=model,
+        tool_gateway=FakeToolGateway(),
+        checkpoint=checkpoint,
+        cancellations=CancellationRegistry(),
+        settings=settings,
+    )
+
+    events = await workflow.run(GenerationRequest.model_validate(
+        generation_payload("VUE_PROJECT")
+    ))
+    channel_values = await graph_channel_values(checkpoint, "42:req-1")
+    serialized = json.dumps(channel_values, ensure_ascii=False)
+
+    assert events[-1].type == "completed"
+    assert all("reviewer_results" not in values for values in channel_values)
+    assert all("quality_issues" not in values for values in channel_values)
+    assert summary_secret not in serialized
+    assert evidence_secret not in serialized
+    assert repair_secret not in serialized
+
+
+@pytest.mark.asyncio
+async def test_vue_blocking_review_real_graph_checkpoint_keeps_only_bounded_feedback(settings):
+    settings.multi_agent_review_enabled = True
+    evidence = "UNIQUE_BLOCKING_EVIDENCE_1601"
+    repair_hint = "UNIQUE_BLOCKING_REPAIR_HINT_1602"
+    model = FakeModel(role_reviews={
+        ReviewerRole.REQUIREMENT: [
+            reviewer_result(
+                ReviewerRole.REQUIREMENT,
+                severity=IssueSeverity.MAJOR,
+                code="BLOCKING_CHECKPOINT",
+                evidence=evidence,
+                repair_hint=repair_hint,
+            ),
+            reviewer_result(ReviewerRole.REQUIREMENT),
+        ]
+    })
+    checkpoint = GraphMemoryCheckpoint()
+    workflow = GenerationWorkflow(
+        model=model,
+        tool_gateway=FakeToolGateway(),
+        checkpoint=checkpoint,
+        cancellations=CancellationRegistry(),
+        settings=settings,
+    )
+
+    events = await workflow.run(GenerationRequest.model_validate(
+        generation_payload("VUE_PROJECT")
+    ))
+    channel_values = await graph_channel_values(checkpoint, "42:req-1")
+    feedback_values = [
+        values["repair_feedback"]
+        for values in channel_values
+        if values.get("repair_feedback")
+    ]
+
+    assert events[-1].type == "completed"
+    assert all("reviewer_results" not in values for values in channel_values)
+    assert all("quality_issues" not in values for values in channel_values)
+    assert feedback_values
+    assert all(len(feedback) <= 4000 for feedback in feedback_values)
+    assert any(evidence in feedback and repair_hint in feedback for feedback in feedback_values)
+
+
+@pytest.mark.asyncio
+async def test_vue_blocking_review_resumes_from_feedback_without_repeating_reviewers(settings):
+    settings.multi_agent_review_enabled = True
+    evidence = "UNIQUE_RESUME_EVIDENCE_1701"
+    repair_hint = "UNIQUE_RESUME_REPAIR_HINT_1702"
+
+    class ResumeModel(FakeModel):
+        def __init__(self):
+            super().__init__(role_reviews={
+                ReviewerRole.REQUIREMENT: [
+                    reviewer_result(
+                        ReviewerRole.REQUIREMENT,
+                        severity=IssueSeverity.MAJOR,
+                        code="BLOCKING_RESUME",
+                        evidence=evidence,
+                        repair_hint=repair_hint,
+                    ),
+                    reviewer_result(ReviewerRole.REQUIREMENT),
+                ]
+            })
+            self.review_count_when_repair_called: int | None = None
+
+        async def repair(self, artifact, context):
+            self.review_count_when_repair_called = len([
+                call for call in self.calls if call[0] == "review_role"
+            ])
+            return await super().repair(artifact, context)
+
+    model = ResumeModel()
+    checkpoint = GraphMemoryCheckpoint()
+    workflow = GenerationWorkflow(
+        model=model,
+        tool_gateway=FakeToolGateway(),
+        checkpoint=checkpoint,
+        cancellations=CancellationRegistry(),
+        settings=settings,
+    )
+    emitter = EventEmitter("req-1")
+    graph = workflow._build_graph(
+        emitter,
+        "42:req-1",
+        {"published": False, "completed": False},
+    )
+    config = {"configurable": {"thread_id": "42:req-1"}}
+    request = GenerationRequest.model_validate(generation_payload("VUE_PROJECT"))
+    initial = {
+        "app_id": request.app_id,
+        "request_id": request.request_id,
+        "thread_id": "42:req-1",
+        "prompt": request.prompt,
+        "code_gen_type": request.code_gen_type.value,
+        "conversation": [item.model_dump() for item in request.conversation],
+        "metadata": request.metadata,
+        "repair_count": 0,
+        "tool_call_count": 0,
+    }
+
+    await graph.ainvoke(initial, config=config, interrupt_after=["quality_review"])
+    first_checkpoint = await checkpoint.graph_saver.aget_tuple(config)
+    assert first_checkpoint is not None
+    feedback = first_checkpoint.checkpoint["channel_values"]["repair_feedback"]
+    assert evidence in feedback
+    assert repair_hint in feedback
+    assert len([call for call in model.calls if call[0] == "review_role"]) == 3
+
+    await graph.ainvoke(None, config=config, interrupt_after=["repair"])
+    assert model.review_count_when_repair_called == 3
+    repair_call = next(data for name, data in model.calls if name == "repair")
+    assert repair_call["context"]["qualityReview"]["repairFeedback"] == feedback
+    assert len([call for call in model.calls if call[0] == "review_role"]) == 3
+
+    final_state = await graph.ainvoke(None, config=config)
+    assert final_state["quality_passed"] is True
+    assert final_state["repair_count"] == 1
+    assert len([call for call in model.calls if call[0] == "review_role"]) == 6
 
 
 def test_vue_build_failure_is_repaired_and_rebuilt_before_review(
