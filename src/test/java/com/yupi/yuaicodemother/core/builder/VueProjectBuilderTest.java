@@ -257,6 +257,44 @@ class VueProjectBuilderTest {
     }
 
     @Test
+    void repeatedLongRunningProcessTreesTimeoutWithoutResidualChildrenOrBlockedPipes() throws Exception {
+        var runner = new VueProjectBuilder.ProcessCommandRunner();
+
+        for (int iteration = 0; iteration < 3; iteration++) {
+            Path childReady = tempDir.resolve("timeout-child-" + iteration);
+            Path unreleasedRoot = tempDir.resolve("timeout-root-" + iteration);
+            List<String> command = javaFixtureCommand("parent-noisy", childReady, unreleasedRoot);
+            long childPid = -1;
+            try {
+                VueProjectBuilder.CommandResult result = assertTimeoutPreemptively(
+                        Duration.ofSeconds(8),
+                        () -> runner.run(tempDir.toFile(), command, 1));
+
+                assertEquals(-1, result.exitCode());
+                assertTrue(result.stderr().contains("command timed out"));
+                assertTrue(result.stdout().length() <= 8000);
+                assertTrue(result.stderr().length() <= 8100);
+                assertTrue(Files.exists(childReady));
+                childPid = Long.parseLong(Files.readString(childReady));
+                long capturedPid = childPid;
+                awaitCondition(
+                        () -> ProcessHandle.of(capturedPid).map(handle -> !handle.isAlive()).orElse(true),
+                        Duration.ofSeconds(3));
+            } finally {
+                if (childPid <= 0 && Files.exists(childReady)) {
+                    String persistedPid = Files.readString(childReady);
+                    if (!persistedPid.isBlank()) {
+                        childPid = Long.parseLong(persistedPid);
+                    }
+                }
+                if (childPid > 0) {
+                    ProcessHandle.of(childPid).ifPresent(ProcessHandle::destroyForcibly);
+                }
+            }
+        }
+    }
+
+    @Test
     void processRunnerKillsCapturedDescendantHoldingPipesAfterRootExit() throws Exception {
         Path childReady = tempDir.resolve("child-ready");
         Path releaseRoot = tempDir.resolve("release-root");
@@ -349,18 +387,22 @@ class VueProjectBuilderTest {
             Path childReady = Path.of(args[1]);
             Path releaseRoot = Path.of(args[2]);
             if ("child".equals(args[0])) {
-                Path stagedReady = childReady.resolveSibling(childReady.getFileName() + ".tmp");
-                Files.writeString(stagedReady, Long.toString(ProcessHandle.current().pid()));
-                Files.move(
-                        stagedReady,
-                        childReady,
-                        StandardCopyOption.ATOMIC_MOVE,
-                        StandardCopyOption.REPLACE_EXISTING);
+                writeChildPid(childReady);
                 new CountDownLatch(1).await();
                 return;
             }
+            if ("child-noisy".equals(args[0])) {
+                writeChildPid(childReady);
+                String output = "x".repeat(256);
+                while (true) {
+                    System.out.println(output);
+                    System.err.println(output);
+                    Thread.sleep(1);
+                }
+            }
 
-            new ProcessBuilder(javaCommand("child", childReady, releaseRoot))
+            String childMode = "parent-noisy".equals(args[0]) ? "child-noisy" : "child";
+            new ProcessBuilder(javaCommand(childMode, childReady, releaseRoot))
                     .inheritIO()
                     .start();
             while (!Files.exists(childReady)) {
@@ -372,6 +414,16 @@ class VueProjectBuilderTest {
             while (!Files.exists(releaseRoot)) {
                 Thread.sleep(10);
             }
+        }
+
+        private static void writeChildPid(Path childReady) throws Exception {
+            Path stagedReady = childReady.resolveSibling(childReady.getFileName() + ".tmp");
+            Files.writeString(stagedReady, Long.toString(ProcessHandle.current().pid()));
+            Files.move(
+                    stagedReady,
+                    childReady,
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING);
         }
 
         private static List<String> javaCommand(String mode, Path childReady, Path releaseRoot) {
