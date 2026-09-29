@@ -16,6 +16,7 @@ from ai_service.models.tool_contract import validate_vue_tool_call
 from ai_service.orchestration.cancellation import CancellationRegistry, GenerationCancelled
 from ai_service.orchestration.active_generations import ActiveGenerationRegistry
 from ai_service.orchestration.events import EventEmitter
+from ai_service.orchestration.multi_agent_review import run_multi_agent_review
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,9 @@ class WorkflowState(TypedDict, total=False):
     validation: dict[str, Any]
     build: dict[str, Any]
     quality_passed: bool
+    reviewer_results: list[dict[str, Any]]
+    quality_issues: list[dict[str, Any]]
+    repair_feedback: str
     repair_count: int
     tool_call_count: int
     finish_reason: str | None
@@ -323,28 +327,61 @@ class GenerationWorkflow:
                 return {"quality_passed": False}
             review_artifact = state.get("artifact", "")
             repair_count = state.get("repair_count", 0)
+            multi_agent_enabled = (
+                state["code_gen_type"] == "VUE_PROJECT"
+                and self.settings.multi_agent_review_enabled
+            )
             uses_vue_snapshot = (
                 state["code_gen_type"] == "VUE_PROJECT"
-                and repair_count > 0
                 and state.get("build", {}).get("built") is True
+                and (multi_agent_enabled or repair_count > 0)
             )
             if uses_vue_snapshot:
-                snapshot = await self._invoke_tool(
-                    emitter,
-                    "quality_review",
-                    "vue_source_snapshot",
-                    {"codeGenType": "VUE_PROJECT"},
-                    state["app_id"],
-                    state["request_id"],
-                    f"{state['request_id']}:vue-source-snapshot:{repair_count}",
-                    event_result=_vue_snapshot_event_result,
-                )
+                try:
+                    snapshot = await self._invoke_tool(
+                        emitter,
+                        "quality_review",
+                        "vue_source_snapshot",
+                        {"codeGenType": "VUE_PROJECT"},
+                        state["app_id"],
+                        state["request_id"],
+                        f"{state['request_id']}:vue-source-snapshot:{repair_count}",
+                        event_result=_vue_snapshot_event_result,
+                    )
+                except Exception:
+                    if multi_agent_enabled:
+                        raise RuntimeError(
+                            "MULTI_AGENT_REVIEW_SNAPSHOT_ERROR: "
+                            "Vue source snapshot is unavailable"
+                        ) from None
+                    raise
                 review_artifact = _vue_snapshot_artifact(snapshot)
             review_context = {
                 **state["context"],
                 "validation": state.get("validation"),
                 "build": state.get("build"),
             }
+            if multi_agent_enabled:
+                self._raise_if_cancelled(thread_id)
+                result = await run_multi_agent_review(
+                    self.model,
+                    review_artifact,
+                    review_context,
+                    timeout_seconds=self.settings.multi_agent_review_timeout_seconds,
+                )
+                self._raise_if_cancelled(thread_id)
+                return {
+                    "quality_passed": result.passed,
+                    "reviewer_results": [
+                        reviewer.model_dump(mode="json")
+                        for reviewer in result.reviewer_results
+                    ],
+                    "quality_issues": [
+                        issue.model_dump(mode="json")
+                        for issue in (*result.blocking_issues, *result.minor_issues)
+                    ],
+                    "repair_feedback": result.repair_feedback,
+                }
             if uses_vue_snapshot:
                 try:
                     passed = await self.model.review(review_artifact, review_context)
@@ -364,6 +401,10 @@ class GenerationWorkflow:
                 "validation": state.get("validation"),
                 "build": state.get("build"),
             }
+            if state.get("repair_feedback"):
+                repair_context["qualityReview"] = {
+                    "repairFeedback": state["repair_feedback"]
+                }
             if state["code_gen_type"] == "VUE_PROJECT":
                 result = await self._run_vue_tool_loop(
                     state={**state, "context": repair_context},
@@ -373,13 +414,21 @@ class GenerationWorkflow:
                     call_id_prefix=f"{state['request_id']}:vue-repair:{count}",
                     invoke_model=lambda context: self.model.repair(state.get("artifact", ""), context),
                 )
+                next_context = {
+                    key: value
+                    for key, value in result["context"].items()
+                    if key != "qualityReview"
+                }
                 return {
-                    "context": result["context"],
+                    "context": next_context,
                     "build": {},
                     "tool_call_count": result["tool_call_count"],
                     "repair_count": count,
                     "finish_reason": result["finish_reason"],
                     "token_usage": result["token_usage"],
+                    "reviewer_results": [],
+                    "quality_issues": [],
+                    "repair_feedback": "",
                 }
             turn = await self.model.repair(
                 state.get("artifact", ""),

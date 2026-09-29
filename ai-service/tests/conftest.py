@@ -11,12 +11,23 @@ from fastapi.testclient import TestClient
 from ai_service.app import create_app
 from ai_service.config import Settings
 from ai_service.models.base import ModelTurn, ToolCall
+from ai_service.models.quality_review import ReviewerResult, ReviewerRole
 
 
 class FakeModel:
-    def __init__(self, *, reviews: list[bool] | None = None, vue_tool_calls: int = 0):
+    def __init__(
+        self,
+        *,
+        reviews: list[bool] | None = None,
+        role_reviews: dict[ReviewerRole, list[ReviewerResult]] | None = None,
+        vue_tool_calls: int = 0,
+    ):
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.reviews = list(reviews or [True])
+        self.role_reviews = {
+            role: list(results)
+            for role, results in (role_reviews or {}).items()
+        }
         self.vue_tool_calls = vue_tool_calls
         self._vue_turn = 0
 
@@ -42,6 +53,21 @@ class FakeModel:
     async def review(self, artifact: str, context: dict[str, Any]) -> bool:
         self.calls.append(("review", {"artifact": artifact, "context": context}))
         return self.reviews.pop(0) if self.reviews else False
+
+    async def review_role(
+        self,
+        role: ReviewerRole,
+        artifact: str,
+        context: dict[str, Any],
+    ) -> ReviewerResult:
+        self.calls.append((
+            "review_role",
+            {"role": role, "artifact": artifact, "context": context},
+        ))
+        results = self.role_reviews.get(role, [])
+        if results:
+            return results.pop(0)
+        return ReviewerResult(reviewer=role, summary=f"{role.value} passed")
 
     async def repair(self, artifact: str, context: dict[str, Any]) -> ModelTurn:
         self.calls.append(("repair", {"artifact": artifact, "context": context}))

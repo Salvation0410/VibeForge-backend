@@ -10,6 +10,13 @@ from langgraph.checkpoint.memory import InMemorySaver
 from ai_service.api.schemas import CodeGenType, GenerationRequest
 from ai_service.infrastructure.spring_tools import SpringToolGateway
 from ai_service.models.base import ModelTurn, ToolCall
+from ai_service.models.quality_review import (
+    IssueSeverity,
+    QualityIssue,
+    QualityReviewOutputError,
+    ReviewerResult,
+    ReviewerRole,
+)
 from ai_service.orchestration.cancellation import CancellationRegistry
 from ai_service.orchestration.active_generations import ActiveGenerationRegistry
 from ai_service.orchestration.events import EventEmitter
@@ -25,6 +32,27 @@ def generation_payload(code_gen_type: str) -> dict:
         "codeGenType": code_gen_type,
         "conversation": [{"role": "user", "content": "previous detail"}],
     }
+
+
+def reviewer_result(
+    role: ReviewerRole,
+    *,
+    severity: IssueSeverity | None = None,
+    code: str = "QUALITY_ISSUE",
+    evidence: str = "visible evidence",
+    repair_hint: str = "apply the repair",
+) -> ReviewerResult:
+    issues = []
+    if severity is not None:
+        issues.append(QualityIssue(
+            code=code,
+            category="quality",
+            summary=f"{role.value} found a problem",
+            evidence=evidence,
+            repair_hint=repair_hint,
+            severity=severity,
+        ))
+    return ReviewerResult(reviewer=role, summary=f"{role.value} review", issues=issues)
 
 
 def test_authentication_is_required(app_factory, auth_headers):
@@ -351,6 +379,317 @@ def test_non_vue_repair_is_capped_without_source_snapshot(
     assert len([call for call in model.calls if call[0] == "repair"]) == 2
     assert events[-1]["type"] == "failed"
     assert not [call for call in gateway.calls if call["name"] == "vue_source_snapshot"]
+
+
+def test_vue_multi_agent_switch_off_keeps_first_review_without_snapshot(
+    app_factory, auth_headers, ndjson_parser
+):
+    model = FakeModel()
+    gateway = FakeToolGateway()
+
+    events = ndjson_parser(TestClient(app_factory(model=model, gateway=gateway)).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    assert events[-1]["type"] == "completed"
+    assert [data["artifact"] for name, data in model.calls if name == "review"] == [
+        "artifact:VUE_PROJECT"
+    ]
+    assert not [call for call in model.calls if call[0] == "review_role"]
+    assert not [call for call in gateway.calls if call["name"] == "vue_source_snapshot"]
+
+
+def test_vue_multi_agent_first_review_uses_snapshot_for_all_roles(
+    settings, app_factory, auth_headers, ndjson_parser
+):
+    settings.multi_agent_review_enabled = True
+    source = "<template>REAL_SNAPSHOT_SOURCE</template>"
+    gateway = FakeToolGateway(vue_source_snapshot={
+        "files": [{"path": "src/App.vue", "content": source, "truncated": False}],
+        "eligibleFileCount": 1,
+        "includedFileCount": 1,
+        "omittedFileCount": 0,
+        "truncated": False,
+    })
+    model = FakeModel()
+
+    events = ndjson_parser(TestClient(app_factory(model=model, gateway=gateway)).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    snapshot_calls = [call for call in gateway.calls if call["name"] == "vue_source_snapshot"]
+    assert [call["toolCallId"] for call in snapshot_calls] == [
+        "req-1:vue-source-snapshot:0"
+    ]
+    role_calls = [data for name, data in model.calls if name == "review_role"]
+    assert {call["role"] for call in role_calls} == set(ReviewerRole)
+    assert all(source in call["artifact"] for call in role_calls)
+    assert all(call["artifact"] != "artifact:VUE_PROJECT" for call in role_calls)
+    assert not [call for call in model.calls if call[0] == "review"]
+    assert events[-1]["type"] == "completed"
+    assert events[-1]["data"]["qualityPassed"] is True
+
+
+def test_vue_multi_agent_minor_issue_passes_without_repair(
+    settings, app_factory, auth_headers, ndjson_parser
+):
+    settings.multi_agent_review_enabled = True
+    model = FakeModel(role_reviews={
+        ReviewerRole.REQUIREMENT: [
+            reviewer_result(ReviewerRole.REQUIREMENT, severity=IssueSeverity.MINOR)
+        ]
+    })
+
+    events = ndjson_parser(TestClient(app_factory(model=model)).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    assert events[-1]["type"] == "completed"
+    assert events[-1]["data"]["repairCount"] == 0
+    assert not [call for call in model.calls if call[0] == "repair"]
+
+
+def test_vue_multi_agent_major_issue_repairs_with_feedback_and_reviews_fresh_snapshot(
+    settings, app_factory, auth_headers, ndjson_parser
+):
+    settings.multi_agent_review_enabled = True
+    issue_code = "REQ_MAJOR_CODE"
+    evidence = "REQ_MAJOR_EVIDENCE"
+    repair_hint = "REQ_MAJOR_REPAIR_HINT"
+    model = FakeModel(
+        vue_tool_calls=1,
+        role_reviews={
+            ReviewerRole.REQUIREMENT: [
+                reviewer_result(
+                    ReviewerRole.REQUIREMENT,
+                    severity=IssueSeverity.MAJOR,
+                    code=issue_code,
+                    evidence=evidence,
+                    repair_hint=repair_hint,
+                ),
+                reviewer_result(ReviewerRole.REQUIREMENT),
+            ],
+            ReviewerRole.FUNCTION: [
+                reviewer_result(ReviewerRole.FUNCTION),
+                reviewer_result(ReviewerRole.FUNCTION),
+            ],
+            ReviewerRole.TECHNICAL: [
+                reviewer_result(ReviewerRole.TECHNICAL),
+                reviewer_result(ReviewerRole.TECHNICAL),
+            ],
+        },
+    )
+    gateway = FakeToolGateway()
+
+    events = ndjson_parser(TestClient(app_factory(model=model, gateway=gateway)).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    repair_call = next(data for name, data in model.calls if name == "repair")
+    feedback = repair_call["context"]["qualityReview"]["repairFeedback"]
+    assert issue_code in feedback
+    assert evidence in feedback
+    assert repair_hint in feedback
+    assert repair_call["context"]["toolResults"]
+    snapshot_calls = [call for call in gateway.calls if call["name"] == "vue_source_snapshot"]
+    assert [call["toolCallId"] for call in snapshot_calls] == [
+        "req-1:vue-source-snapshot:0",
+        "req-1:vue-source-snapshot:1",
+    ]
+    second_round = [
+        data for name, data in model.calls if name == "review_role"
+    ][3:]
+    assert len(second_round) == 3
+    assert all("qualityReview" not in call["context"] for call in second_round)
+    assert all(call["context"]["toolResults"] for call in second_round)
+    assert events[-1]["type"] == "completed"
+    assert events[-1]["data"]["repairCount"] == 1
+
+
+def test_vue_multi_agent_two_blocking_rounds_exhaust_repairs_without_leaking_review_text(
+    settings, app_factory, auth_headers, ndjson_parser
+):
+    settings.multi_agent_review_enabled = True
+    source_secret = "UNIQUE_SNAPSHOT_SOURCE_1049"
+    evidence_secret = "UNIQUE_EVIDENCE_2857"
+    repair_secret = "UNIQUE_REPAIR_HINT_3981"
+    blocking = [
+        reviewer_result(
+            ReviewerRole.REQUIREMENT,
+            severity=IssueSeverity.MAJOR,
+            code="BLOCKING_REQUIREMENT",
+            evidence=evidence_secret,
+            repair_hint=repair_secret,
+        )
+        for _ in range(3)
+    ]
+    model = FakeModel(role_reviews={ReviewerRole.REQUIREMENT: blocking})
+    gateway = FakeToolGateway(vue_source_snapshot={
+        "files": [{"path": "src/App.vue", "content": source_secret, "truncated": False}],
+        "eligibleFileCount": 1,
+        "includedFileCount": 1,
+        "omittedFileCount": 0,
+        "truncated": False,
+    })
+    checkpoint = MemoryCheckpoint()
+
+    events = ndjson_parser(TestClient(app_factory(
+        model=model,
+        gateway=gateway,
+        checkpoint=checkpoint,
+    )).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    assert events[-1]["type"] == "failed"
+    repair_calls = [data for name, data in model.calls if name == "repair"]
+    assert [call["context"]["repairCount"] for call in repair_calls] == [1, 2]
+    snapshot_calls = [call for call in gateway.calls if call["name"] == "vue_source_snapshot"]
+    assert [call["toolCallId"] for call in snapshot_calls] == [
+        "req-1:vue-source-snapshot:0",
+        "req-1:vue-source-snapshot:1",
+        "req-1:vue-source-snapshot:2",
+    ]
+    assert max(state["repairCount"] for state in checkpoint.saved["42:req-1"]) == 2
+    serialized = json.dumps(events, ensure_ascii=False)
+    assert source_secret not in serialized
+    assert "BLOCKING_REQUIREMENT" not in serialized
+    assert evidence_secret not in serialized
+    assert repair_secret not in serialized
+    assert all(
+        call["context"]["qualityReview"]["repairFeedback"] not in serialized
+        for call in repair_calls
+    )
+    assert "repair_feedback" not in serialized
+
+
+def test_vue_multi_agent_snapshot_failure_is_stable_and_stops_before_review_or_repair(
+    settings, app_factory, auth_headers, ndjson_parser
+):
+    settings.multi_agent_review_enabled = True
+    secret = "UNIQUE_SNAPSHOT_PROVIDER_SECRET_7741"
+
+    class SnapshotFailureGateway(FakeToolGateway):
+        async def invoke(self, name, arguments, *, app_id, request_id, tool_call_id):
+            if name == "vue_source_snapshot":
+                raise RuntimeError(f"snapshot provider failed: {secret}")
+            return await super().invoke(
+                name,
+                arguments,
+                app_id=app_id,
+                request_id=request_id,
+                tool_call_id=tool_call_id,
+            )
+
+    model = FakeModel()
+    events = ndjson_parser(TestClient(app_factory(
+        model=model,
+        gateway=SnapshotFailureGateway(),
+    )).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    assert events[-1]["type"] == "failed"
+    assert events[-1]["error"] == {
+        "code": "MULTI_AGENT_REVIEW_SNAPSHOT_ERROR",
+        "message": "MULTI_AGENT_REVIEW_SNAPSHOT_ERROR: Vue source snapshot is unavailable",
+    }
+    assert secret not in json.dumps(events, ensure_ascii=False)
+    assert not [call for call in model.calls if call[0] == "review_role"]
+    assert not [call for call in model.calls if call[0] == "repair"]
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_code"),
+    [
+        ("timeout", "MULTI_AGENT_REVIEW_TIMEOUT"),
+        ("invalid", "MULTI_AGENT_REVIEW_INVALID_OUTPUT"),
+        ("model", "MULTI_AGENT_REVIEW_MODEL_ERROR"),
+    ],
+)
+def test_vue_multi_agent_reviewer_system_errors_fail_without_repair(
+    settings, app_factory, auth_headers, ndjson_parser, failure, expected_code
+):
+    settings.multi_agent_review_enabled = True
+    settings.multi_agent_review_timeout_seconds = 0.01 if failure == "timeout" else 1
+
+    class FailingRoleModel(FakeModel):
+        async def review_role(self, role, artifact, context):
+            self.calls.append((
+                "review_role",
+                {"role": role, "artifact": artifact, "context": context},
+            ))
+            if failure == "timeout":
+                await asyncio.Event().wait()
+            if role is ReviewerRole.REQUIREMENT:
+                if failure == "invalid":
+                    raise QualityReviewOutputError("invalid_json")
+                raise RuntimeError("unique downstream provider detail")
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+    model = FailingRoleModel()
+    events = ndjson_parser(TestClient(app_factory(model=model)).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    assert events[-1]["type"] == "failed"
+    assert events[-1]["error"]["code"] == expected_code
+    assert not [call for call in model.calls if call[0] == "repair"]
+
+
+def test_multi_agent_review_details_are_excluded_from_checkpoint_payload_and_memory(
+    settings, app_factory, auth_headers, ndjson_parser
+):
+    state = {
+        "request_id": "req-1",
+        "app_id": "42",
+        "code_gen_type": "VUE_PROJECT",
+        "quality_passed": False,
+        "repair_count": 1,
+        "tool_call_count": 2,
+        "reviewer_results": [{"summary": "UNIQUE_REVIEW_SUMMARY"}],
+        "quality_issues": [{"evidence": "UNIQUE_CHECKPOINT_EVIDENCE"}],
+        "repair_feedback": "UNIQUE_CHECKPOINT_FEEDBACK",
+    }
+    payload = GenerationWorkflow._checkpoint_payload(state, "quality_review")
+    assert set(payload) == {
+        "node",
+        "requestId",
+        "appId",
+        "codeGenType",
+        "qualityPassed",
+        "repairCount",
+        "toolCallCount",
+    }
+
+    settings.multi_agent_review_enabled = True
+    checkpoint = MemoryCheckpoint()
+    events = ndjson_parser(TestClient(app_factory(checkpoint=checkpoint)).post(
+        "/internal/v1/generations:stream",
+        json=generation_payload("VUE_PROJECT"),
+        headers=auth_headers,
+    ))
+
+    assert events[-1]["type"] == "completed"
+    assert all(
+        not {"reviewer_results", "quality_issues", "repair_feedback"}.intersection(saved)
+        for saved in checkpoint.saved["42:req-1"]
+    )
 
 
 def test_vue_build_failure_is_repaired_and_rebuilt_before_review(
