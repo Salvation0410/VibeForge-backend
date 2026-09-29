@@ -5,7 +5,8 @@ $expectedScripts = @(
     'compare-ai-generation-engines.ps1',
     'test-ai-service.ps1',
     'test-ai-phase-two-e2e.ps1',
-    'test-ai-tool-controller-competition.ps1'
+    'test-ai-tool-controller-competition.ps1',
+    'verify-langgraph-real-gate.ps1'
 )
 
 $authHelperPath = Join-Path $PSScriptRoot 'ai-validation-auth.ps1'
@@ -114,6 +115,34 @@ $sameInstanceExitCode = $LASTEXITCODE
 $ErrorActionPreference = $previousErrorActionPreference
 if ($sameInstanceExitCode -eq 0 -or "$sameInstanceResult" -notmatch 'must be different') {
     throw 'Controller competition script must reject identical Spring instances before network access'
+}
+
+$verification = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'verify-langgraph-real-gate.ps1')
+foreach ($marker in @(
+    '[switch]$Execute', '[switch]$IncludeRedis', 'mvn clean -DskipTests compile',
+    'LangGraphAiGenerationGatewayTest,DelegatingAiGenerationGatewayTest,AppServiceGenerationCancellationTest,VueProjectBuilderTest',
+    'ai-validation-scripts.tests.ps1', 'ToolInvocationIdempotencyRedisIT',
+    'target/ai-validation/langgraph-real-gate.json', 'manualValidationRequired'
+)) {
+    if ($verification -notmatch [regex]::Escape($marker)) {
+        throw "Unified verification script misses $marker"
+    }
+}
+foreach ($forbidden in @('InternalToken', 'Authorization', 'SessionCookie', 'Response.Content')) {
+    if ($verification -match [regex]::Escape($forbidden)) {
+        throw "Unified verification script may collect sensitive field $forbidden"
+    }
+}
+$dryRunOutputPath = Join-Path $PSScriptRoot '../target/ai-validation/verify-dry-run-must-not-write.json'
+Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $dryRunOutputPath
+$dryRunResult = & powershell -NoProfile -ExecutionPolicy Bypass `
+    -File (Join-Path $PSScriptRoot 'verify-langgraph-real-gate.ps1') `
+    -OutputPath $dryRunOutputPath 2>&1
+if ($LASTEXITCODE -ne 0 -or "$dryRunResult" -notmatch 'Dry run only' -or "$dryRunResult" -notmatch 'IncludeRedis') {
+    throw 'Unified verification script dry run must describe execution and optional Redis coverage'
+}
+if (Test-Path -LiteralPath $dryRunOutputPath) {
+    throw 'Unified verification script dry run must not write a report file'
 }
 
 'AI validation script static checks passed'

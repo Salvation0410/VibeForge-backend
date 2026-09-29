@@ -139,6 +139,8 @@ START
 - 快照排除依赖、构建产物、隐藏目录、符号链接、锁文件、非文本、非法 UTF-8 和 NUL。
 - 完整快照只瞬时传给当前 Reviewer，不进入工具幂等 Redis、业务 checkpoint、LangGraph state/checkpoint 或事件。
 - npm 输出、路径和环境值有界且脱敏；父子进程树和输出读取使用有界终止策略。
+- `scripts/verify-langgraph-real-gate.ps1` 提供统一验证入口：默认 dry-run，显式 `-Execute` 后固定执行 Java clean compile、35 项定向测试和 PowerShell 脚本检查，`-IncludeRedis` 可追加真实 Redis 6 项。
+- 统一入口只向 `target/ai-validation/langgraph-real-gate.json` 写入步骤名、命令标签、状态、退出码、耗时和人工待验收项，不收集 Maven 原始日志、源码、令牌、Cookie 或响应正文。
 
 ## 4. 关键文件
 
@@ -157,6 +159,8 @@ START
 | `src/main/java/com/yupi/yuaicodemother/core/artifact/VueSourceSnapshotReader.java` | 修复后 Vue 最终源码有界快照 |
 | `src/main/java/com/yupi/yuaicodemother/core/builder/VueProjectBuilder.java` | 强制构建、进程治理和错误脱敏 |
 | `src/main/java/com/yupi/yuaicodemother/service/impl/AppServiceImpl.java` | 生成入口、租约、历史和 SSE 生命周期 |
+| `scripts/verify-langgraph-real-gate.ps1` | 统一执行自动化验收门并输出脱敏 JSON 摘要 |
+| `scripts/ai-validation-scripts.tests.ps1` | 验收脚本的静态安全与参数契约检查 |
 
 ### Python AI 服务
 
@@ -215,6 +219,19 @@ Python AI_SERVICE_INTERNAL_BEARER_TOKEN
 
 本地真实验收前先确认服务和配置，不要把“端口当前可达”“当前终端有令牌”等临时现场写成长期事实。
 
+统一自动化门禁：
+
+```powershell
+# 仅显示计划，不执行构建或测试
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1
+
+# 执行干净编译、35 项定向测试和 PowerShell 脚本检查
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1 -Execute
+
+# Redis database 1 可用于隔离验收时，额外执行真实 Redis 6 项
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1 -Execute -IncludeRedis
+```
+
 ## 6. 当前自动化验证证据
 
 下表只记录 2026-09-29 当前分支可复现的最新基线。历史测试数量不再作为当前结论。
@@ -225,12 +242,14 @@ Python AI_SERVICE_INTERNAL_BEARER_TOKEN
 | Java 网关 | `mvn "-Dtest=LangGraphAiGenerationGatewayTest" test` | 10 项通过 | HTTP/1.1、连接复用、大流隔离、空闲超时与恢复 |
 | Vue 构建器 | `mvn "-Dtest=VueProjectBuilderTest" test` | 16 项通过 | 构建错误边界、输出限制、父子进程回收 |
 | Java 生产编译 | `mvn clean -DskipTests compile` | 239 个生产源文件编译成功 | 当前生产源码可干净编译 |
-| Redis opt-in 集成 | `mvn "-Dtest=ToolInvocationIdempotencyRedisIT" "-DAI_REDIS_INTEGRATION=true" test` | 最近真实环境 6 项通过 | 跨客户端回放、唯一执行、冲突与不确定态 |
+| Redis opt-in 集成 | `powershell -NoProfile -File scripts/verify-langgraph-real-gate.ps1 -Execute -IncludeRedis` | 最近真实环境 6 项通过 | 跨客户端回放、唯一执行、冲突与不确定态 |
 | PowerShell 脚本 | `powershell -NoProfile -File scripts/ai-validation-scripts.tests.ps1` | Windows PowerShell 5.1 与 PowerShell 7 检查通过 | 验收脚本参数、认证和脱敏约束 |
+| 统一非 Redis 门禁 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1 -Execute` | 2026-09-29 fresh 执行通过，JSON 中 3 个步骤均为 `passed` | 一条命令复现 clean compile、35 项定向测试和脚本检查 |
 
 重要限制：
 
 - 全量 `mvn test` 存在历史实验代码和外部依赖相关失败，当前不能声明全量 Java 测试通过。
+- 本轮统一入口未使用 `-IncludeRedis`；表中的真实 Redis 6 项来自最近一次独立真实环境验证，不冒充本轮 fresh 结果。
 - Python 大部分测试使用 Fake Model、内存网关或 MockTransport，不能替代真实模型、真实 Spring 和完整前端验收。
 - 受控本地 HTTP/进程测试不能证明真实 Uvicorn、代理、供应商限流、网络背压或 npm 包装层在所有平台上的行为。
 - 未实际运行的 Docker、真实模型、浏览器端到端和生产灰度，必须明确标记为未验证。
@@ -301,10 +320,9 @@ Python AI_SERVICE_INTERNAL_BEARER_TOKEN
 
 ### P1：提高验收可复现性与资源证据
 
-1. 提供统一验证入口，固定执行 Java clean compile、35 项定向测试、PowerShell 静态检查，并可选运行真实 Redis 6 项；输出脱敏机器可读摘要。
-2. 在真实 Uvicorn/代理环境观测连接复用、慢流、网络背压、空闲超时和虚拟线程收敛。
-3. 对真实 npm/Shell 包装层执行重复长构建、取消与超时压力；只有复现残留进程时才引入 Windows Job Object 或 Unix process group。
-4. 为 P0 人工验收建立统一记录模板，明确环境、场景、requestId、终态、错误码和旧预览状态。
+1. 在真实 Uvicorn/代理环境观测连接复用、慢流、网络背压、空闲超时和虚拟线程收敛。
+2. 对真实 npm/Shell 包装层执行重复长构建、取消与超时压力；只有复现残留进程时才引入 Windows Job Object 或 Unix process group。
+3. 为 P0 人工验收建立统一记录模板，明确环境、场景、requestId、终态、错误码和旧预览状态。
 
 ### P2：真实运行稳定后再做
 
