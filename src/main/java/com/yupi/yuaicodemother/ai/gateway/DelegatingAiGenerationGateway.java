@@ -81,6 +81,10 @@ public class DelegatingAiGenerationGateway implements AiGenerationGateway {
         return legacy;
     }
 
+    /**
+     * 计算稳定灰度桶。用户 ID 的优先级是明确契约：应用创建前还没有 appId，创建后的生成和取消
+     * 仍继续使用同一 userId，避免同一应用流程因身份键切换而跨引擎漂移。只有缺少用户身份时才回退到 appId。
+     */
     private int stableBucket(Long appId, Long userId, String requestId) {
         String subject = userId != null ? "user:" + userId
                 : appId != null ? "app:" + appId

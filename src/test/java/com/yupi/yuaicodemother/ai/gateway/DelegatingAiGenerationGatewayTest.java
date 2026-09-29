@@ -34,6 +34,27 @@ class DelegatingAiGenerationGatewayTest {
     }
 
     @Test
+    void creationRouteAndPersistedAppOperationsUseSameUserBucket() {
+        AiEngineProperties properties = properties("gray", 50, "creation-stage-test");
+        LegacyAiGenerationGateway legacy = mock(LegacyAiGenerationGateway.class);
+        LangGraphAiGenerationGateway langGraph = mock(LangGraphAiGenerationGateway.class);
+        when(legacy.route(anyString(), any(), any(), anyString())).thenReturn(CodeGenTypeEnum.HTML);
+        when(langGraph.route(anyString(), any(), any(), anyString())).thenReturn(CodeGenTypeEnum.HTML);
+        when(legacy.generate(anyString(), any(), any(), any(), anyString())).thenReturn(Flux.empty());
+        when(langGraph.generate(anyString(), any(), any(), any(), anyString())).thenReturn(Flux.empty());
+        DelegatingAiGenerationGateway gateway = new DelegatingAiGenerationGateway(properties, legacy, langGraph);
+
+        gateway.route("create", null, 42L, "create-request");
+        gateway.generate("modify", CodeGenTypeEnum.HTML, 7L, 42L, "generate-request").blockLast();
+        gateway.cancel(7L, 42L, "generate-request");
+
+        long legacyCalls = mockingDetails(legacy).getInvocations().size();
+        long langGraphCalls = mockingDetails(langGraph).getInvocations().size();
+        assertTrue((legacyCalls == 3 && langGraphCalls == 0)
+                || (legacyCalls == 0 && langGraphCalls == 3));
+    }
+
+    @Test
     void routeGenerateAndCancelUseSameEngine() {
         AiEngineProperties properties = properties("gray", 50, "consistent-test");
         LegacyAiGenerationGateway legacy = mock(LegacyAiGenerationGateway.class);

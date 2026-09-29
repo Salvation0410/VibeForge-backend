@@ -2,7 +2,7 @@
 
 ## 1. 文档用途与当前基线
 
-本文供下一轮 AI Agent 或开发者继续维护代码生成链路。内容更新至 2026-09-24 Vue 修复后最终源码审查实现基线，覆盖第一阶段 LangChain + LangGraph 重构，以及后续接入的 HTML 安全发布、生成取消治理、前端流式性能修复、Spring 工具响应契约加固、Python 提示词语义迁移、第二阶段 Task 1-4、稳定灰度、跨服务工具 Schema 校验和修复后 Vue 源码快照审查。
+本文供下一轮 AI Agent 或开发者继续维护代码生成链路。内容更新至 2026-09-29 LangGraph 真实环境验收门和灰度身份键契约基线，覆盖第一阶段 LangChain + LangGraph 重构，以及后续接入的 HTML 安全发布、生成取消治理、前端流式性能修复、Spring 工具响应契约加固、Python 提示词语义迁移、第二阶段 Task 1-4、稳定灰度、跨服务工具 Schema 校验、修复后 Vue 源码快照审查和 Java/Python HTTP/1.1 兼容修复。
 
 开始工作前依次阅读：
 
@@ -220,14 +220,32 @@ Python checkpoint Redis: redis://localhost:6379/2
 - Python 本轮 `compileall`、完整 `pytest` 和 `uv lock --check` 通过，其中 `pytest` 共 98 项测试通过并有 2 个既有依赖弃用警告。测试覆盖提示词加载、活动产物注入、Vue 生成/修复共享工具预算、非法工具和受控参数、取消、截断/过滤、构建失败修复上限、严格 `built` 类型及构建专用 HTTP 超时。多数测试仍使用 Fake Model、内存工具网关或 MockTransport，不属于真实 Spring 或端到端验证。
 - 工作树本地存在未跟踪的 `InternalAiToolsHttpContractTest`，使用 standalone MockMvc 经过 `InternalAiToolsController`、JSON 绑定和 `GlobalExceptionHandler`，覆盖成功响应、Bearer 鉴权失败、缺少 `appId` 参数错误和稳定幂等错误消息；该文件尚未进入提交，且不加载 MyBatis、数据库或真实服务。
 - `ToolInvocationIdempotencyRedisIT` 默认跳过；设置 `AI_REDIS_INTEGRATION=true` 后使用独立 Redisson 客户端验证跨客户端成功结果回放、陈旧 `RUNNING` 拒绝，以及 action 已成功但 Redis 连接在 `SUCCEEDED` 写回前丢失时保持不确定状态且不重复执行。未设置时不会连接或启动 Redis。
-- 本次尝试执行真实 Redis 集成测试：`AI_REDIS_INTEGRATION=true mvn -Dtest=ToolInvocationIdempotencyRedisIT test`；Redisson 连接 `redis://127.0.0.1:6379/1` 时收到 `Connection refused`，因此未执行任何幂等断言。当前工作区未发现 6379、6380 或 16379 的监听端口，需确认 Redis 实际监听地址、端口及认证配置后重试。
+- 2026-09-22 曾尝试执行真实 Redis 集成测试，但当时 `redis://127.0.0.1:6379/1` 拒绝连接；该历史阻塞已于 2026-09-29 的真实环境验证中解除，最新结果见下节。
 - `mvn clean -DskipTests compile` 通过，Java 21 干净编译 236 个源文件；仓库当前没有 `mvnw.cmd`，本轮使用系统 `mvn`。
 - 前端 `optimizePrompt`、`generationStreamProgress`、`previewRefreshCoordinator` 共 14 项测试通过。
 - 前端 `npm run type-check` 和 `npm run build-only` 通过；构建仍有既有的大 chunk 警告。
 - 浏览器确认简短优化提示包含图片保护要求，冗余生成提示已移除，加载图编译样式为固定 1:1 比例。
 - 事故应用旧产物被确认含自然语言前缀并缺少 `</script>`、`</html>`；未对该产物执行覆盖或新生成。
 
-本次最终源码审查阶段只完成离线验证，没有启动真实 Spring/Python HTTP、MySQL、Redis、多 Spring 实例或真实模型，也没有执行前端 HTML、MULTI_FILE、VUE_PROJECT 首次生成和二次修改。真实 Redis 恢复、跨实例共享、锁竞争和 Redis/文件系统故障窗口仍需在集成环境覆盖，不能据此声称上述真实环境验收已经通过。
+上述 2026-09-24 最终源码审查阶段只完成离线验证；2026-09-29 已补充真实 Spring、Python、Redis、双 Spring 实例和 Legacy 模型链路验证。Java 客户端 h2c 根因已经在源码和自动化回归测试中修复，但运行中的 LangGraph Spring 实例尚未使用新提交完成三类型真实生成，因此仍不能声称全部真实环境验收已经通过。
+
+### 2026-09-29 真实环境验证结果
+
+本轮使用 Spring Legacy 实例 `http://localhost:8123/api`、Spring LangGraph 实例 `http://localhost:8124/api`、Python `http://localhost:8000`、Redis `localhost:6379` 完成真实环境验证。账号、密码和内部共享令牌均只从本地环境或 `.env` 读取，未写入仓库和验收报告。
+
+- Python `/health/live` 返回 `live`；`/health/ready` 返回 `ready` 且 `checkpoint=true`。
+- 8123 保持默认 `legacy`，8124 使用 `langgraph`；两实例重启并统一内部共享令牌后，调用 `/api/internal/ai-tools/invoke` 均返回 HTTP 200、业务码 `0`。
+- 真实 Redis 幂等测试使用 `AI_REDIS_INTEGRATION=true` 和 `redis://localhost:6379/1` 执行 `ToolInvocationIdempotencyRedisIT`，现有 6 项测试全部通过，覆盖跨客户端成功结果回放、两个客户端竞争时 action 只执行一次、参数冲突、canonical 工具名冲突、陈旧 `RUNNING` 拒绝和成功 action 在 `SUCCEEDED` 写回前断开 Redis时不重复执行。故障窗口中的锁释放警告属于测试主动关闭 Redisson 后的预期现象。
+- 8124 使用测试应用 `462380329121435648` 调用真实 `project_build`，返回业务码 `0`、`built=true`、空 `errorCode`，证明 Spring 内部工具鉴权、项目定位和 Vue 构建在该环境可用。
+- 内部工具错误契约实测为 HTTP 200 加业务码：缺少或错误 Bearer 返回 `40101`，缺少 `appId` 返回 `40000`。`scripts/test-ai-service.ps1` 已按该契约修正，并在 8123、8124 两个 Spring 实例上重新执行通过；报告只保存状态、业务码和成功 data 字段名。
+- 登录接口继续强制图形验证码。`scripts/compare-ai-generation-engines.ps1` 和 `scripts/test-ai-phase-two-e2e.ps1` 已共享 `scripts/ai-validation-auth.ps1`：优先复用调用方提供的受控 Session Cookie，否则在同一会话获取验证码图片并要求人工输入。临时验证码图片在 `finally` 中删除，账号、密码和 Cookie 不写入验收报告；仍不得通过关闭或绕过生产鉴权完成验收。
+- Legacy HTML 使用应用 `462368060174061568` 发起真实生成，约 23.1 秒后只出现一个 `done` 终态，生成成功。
+- LangGraph 首次使用应用 `459478857908031488` 时，在模型调用前被 `HtmlOutputBudgetGuard` 正确拒绝：当前活动 `index.html` 为 24027 字符，超过 `max-rewrite-source-chars=24000`，对外返回 `HTML_OUTPUT_BUDGET_EXCEEDED` 并保留旧版本。
+- 改用当前活动 HTML 为 14795 字符的隔离应用后，LangGraph 仍在约 0.5 秒内返回 `GENERATION_FAILED / HTTP 422`。捕获 Java 实际请求确认 JSON 字段、枚举和值均符合 Python `GenerationRequest`，并确认 8124 运行配置为 `ai.engine=langgraph`、`ai.service-url=http://localhost:8000`。
+- 422 根因已通过独立代理和直接请求稳定复现：Java 21 `HttpClient` 默认尝试明文 HTTP/2 升级，发送 `Connection: Upgrade, HTTP2-Settings` 和 `Upgrade: h2c`；Uvicorn 在该请求下没有把 JSON 交给 FastAPI，请求校验返回 `body` 缺失。相同 JSON 使用普通 HTTP/1.1 返回 HTTP 200 并进入 NDJSON 工作流。临时 8125 LangGraph 实例使用相同源码也复现 422，因此不是 8124 的令牌、地址或旧进程问题。
+- `LangGraphAiGenerationGateway` 已显式设置 `.version(HttpClient.Version.HTTP_1_1)`。新增本地 HTTP 回归测试在修复前稳定捕获 `Upgrade: h2c`，修复后确认协议为 HTTP/1.1 且不再发送 Upgrade 头；提交 `5eab7d9` 还同步修正真实验收脚本和 Redis 竞争测试。仍需使用该提交重启 LangGraph Spring 实例，再继续 HTML、MULTI_FILE、VUE_PROJECT 和取消验收；在这些真实场景通过前不得提高灰度比例。
+- 本轮重新执行全量 `mvn test`：共 233 项，2 failures、9 errors、1 skipped。失败集中在未接入主链路的历史 `langraph4j` 实验测试、外部插画返回空结果、DashScope 免费额度耗尽、实验工作流缺少 `AiCodeGeneratorFacade` Bean，以及一个真实模型流测试触发生成租约保护；当前 Spring/Python LangGraph 主链路的定向测试结论不因此反转，但仍不能声称 Java 全量测试通过。
+- 临时 8125 Spring 实例和诊断代理均已停止，临时登录 Cookie 已删除。本轮未修改业务代码；工作树原有 `.gitignore`、未跟踪计划文档和 `projects/` 保持不变。
 
 ### 稳定灰度与验收门实施记录
 
@@ -249,6 +267,35 @@ Python checkpoint Redis: redis://localhost:6379/2
 - 本轮 Agent 继续推进不依赖前端页面的自动化事项，优先完成 Spring/Python 真实 HTTP 契约验收入口；真实模型生成、三类型产物质量和浏览器交互不由自动化离线测试代替。
 - `scripts/test-ai-phase-two-e2e.ps1` 可以依次发起三种类型的首次生成和二次修改，并输出中文人工检查项及聊天、预览、下载、历史地址；脚本只能辅助收集终态，不能代替用户对页面视觉、功能、图片和交互的人工判断。
 
+人工验收按以下顺序执行，并将结果、应用 ID、终态错误码、后台 requestId 和必要截图记录到独立验收报告；不得保存账号、密码、Cookie、内部令牌或完整生成源码：
+
+1. 使用包含 HTTP/1.1 修复的提交启动 LangGraph Spring 实例，确认 Python `/health/ready` 为 `ready`。
+2. 准备三个正数且互不相同的隔离应用 ID，分别对应 HTML、MULTI_FILE、VUE_PROJECT；不得使用真实用户正在编辑的应用。
+3. 认证优先通过当前终端的 `APP_TEST_SESSION_COOKIE` 提供受控会话；未提供时脚本会打开临时验证码图片并要求人工输入。验证码和登录必须在同一 `WebRequestSession` 中完成。
+4. 执行三类型首次生成与二次修改：
+
+```powershell
+pwsh -NoProfile -File scripts/test-ai-phase-two-e2e.ps1 -Execute `
+  -SpringBaseUrl http://localhost:8124/api `
+  -HtmlAppId <HTML测试应用ID> `
+  -MultiFileAppId <MULTI_FILE测试应用ID> `
+  -VueAppId <VUE_PROJECT测试应用ID>
+```
+
+5. 页面人工检查每个应用的文字、图片、布局、交互和操作方式是否保留；确认聊天历史为完整最终消息，成功后预览只刷新一次，失败时旧预览不变。
+6. 在模型等待、Vue 工具调用和 npm 构建三个阶段分别点击停止；再覆盖浏览器刷新或 EventSource 断线，确认状态按 `RUNNING -> STOPPING -> IDLE` 收敛、取消获胜后不发布、无迟到刷新和 npm 残留进程。
+7. 使用两个隔离应用执行 Legacy/LangGraph 对比并演练回滚：
+
+```powershell
+pwsh -NoProfile -File scripts/compare-ai-generation-engines.ps1 -Execute `
+  -LegacyBaseUrl http://localhost:8123/api `
+  -LangGraphBaseUrl http://localhost:8124/api `
+  -LegacyAppId <Legacy测试应用ID> `
+  -LangGraphAppId <LangGraph测试应用ID>
+```
+
+8. 将 LangGraph 实例切回 Legacy 后重新发起一次隔离请求，确认无需数据库迁移即可回滚；灰度比例调整必须作为独立提交，不能与功能修复混合。
+
 ### 本轮已经完成的优化
 
 1. **Python 提示词与工作流语义迁移。** 路由、HTML、MULTI_FILE、Vue、质量检查和修复提示词已由 Python 模型适配器加载；生成前会读取当前活动产物，Vue 首次生成和修复共用同一受限工具循环。
@@ -257,11 +304,11 @@ Python checkpoint Redis: redis://localhost:6379/2
 4. **跨服务工具契约统一。** 十个内部工具已共享 Draft 2020-12 JSON Schema。Python 在请求发出前和成功响应返回后执行运行时校验；Java 测试使用同一 Schema 验证 Controller 请求样例和成功响应，生产业务校验不被 Schema 替代。
 5. **稳定灰度路由实现。** `route`、`generate`、`cancel` 已统一使用 `graySalt + userId/appId/requestId` 的稳定业务桶，并提供双引擎摘要对比和真实环境验收脚本；当前尚未提高灰度比例。
 6. **流式和预览体验治理。** 前端只保留最近 2000 字符、最多每 80ms 更新一次响应式快照，终态回源聊天历史；旧预览在生成期间保持，仅在当前请求成功后刷新一次。
-7. **HTTP 验收入口已补齐。** `scripts/test-ai-service.ps1` 已增加 Python 健康检查、Spring 成功调用、缺少/错误令牌、缺少字段、构建可选开关、幂等错误和脱敏覆盖标签；默认 dry-run，只有显式 `-Execute` 才发送请求。真实 HTTP 仍待用户启动服务后执行。
-8. **Redis 故障验收入口已补齐。** 真实 Redis 集成测试现已覆盖陈旧 `RUNNING` 和 action 成功后状态写回失败两个不确定窗口；重试必须拒绝再次执行 action。测试默认跳过，只有显式设置 `AI_REDIS_INTEGRATION=true` 才连接 `AI_REDIS_URL`。
-9. **三类型人工验收入口已加固。** 三个应用 ID 必须为正数且互不相同，成功场景出现 `business-error` 或终态数量异常时立即失败；六个提示词、人工检查项和操作提示均使用中文。脚本默认 dry-run，不保存流式源码、账号、密码或 Cookie。
-10. **离线验证完成。** 本轮 Python 165 项测试全部通过；Java 快照、契约、Controller 和 HTTP 定向测试共 54 项，0 failures/errors、1 项按 Windows 符号链接权限条件跳过；Python 编译、锁文件检查和 Java clean compile（237 个生产源文件）均通过。本分支全量 `mvn test` 共 188 项，其中 186 项通过、0 failures、1 error、1 skipped；唯一 error 是既有 `contextLoads` 因缺少 `openAiChatModel` bean，skipped 是 Windows 符号链接权限条件测试，因此本轮不声称全量测试通过。真实 Redis、真实 Spring/Python HTTP、真实模型和前端三类型首次生成/二次修改仍属于后续验收。
-11. **Checkpoint 产物留存边界已收敛。** 业务快照不再保存完整 artifact，保留 `node`、`requestId`、`appId`、`codeGenType`、`qualityPassed`、`repairCount` 和 `toolCallCount` 等状态与审计摘要；执行期节点恢复由 LangGraph 自动 checkpoint 承担，该 checkpoint 在请求执行期间仍可能保留完整产物，成功、失败或取消进入终态后清理对应 thread，并使用 Redis 固定前缀避免误删。终态清理失败只使 checkpoint 就绪状态降级，不反转生成结果；TTL 作为异常退出兜底。本轮未执行真实 Redis、真实模型及 Spring/Python 真实服务依赖的自动化或接口验收；前端三类型生成、预览和交互由用户人工验证并反馈错误。
+7. **HTTP 验收入口已补齐并修正真实契约。** `scripts/test-ai-service.ps1` 已增加 Python 健康检查、Spring 成功调用、缺少/错误令牌、缺少字段、构建可选开关、幂等错误和脱敏覆盖标签；默认 dry-run，只有显式 `-Execute` 才发送请求。错误响应现按 HTTP 200 加业务码断言，8123、8124 的真实执行均通过。
+8. **Redis 故障与竞争验收入口已补齐。** 真实 Redis 集成测试现有 6 项，覆盖跨客户端回放、并发唯一执行、参数/工具名冲突、陈旧 `RUNNING` 和 action 成功后状态写回失败窗口；重试必须拒绝再次执行 action。测试默认跳过，只有显式设置 `AI_REDIS_INTEGRATION=true` 才连接 `AI_REDIS_URL`。
+9. **三类型人工验收入口和认证流程已加固。** 三个应用 ID 必须为正数且互不相同，成功场景出现 `business-error` 或终态数量异常时立即失败；脚本支持受控 Session Cookie 或同会话验证码登录。六个提示词、人工检查项和操作提示均使用中文，默认 dry-run，不保存流式源码、账号、密码或 Cookie。
+10. **离线验证完成，真实环境继续验收。** Python 165 项离线测试全部通过；最新相关 Java 网关、租约、Controller、HTTP 契约和取消测试 71 项通过，Java clean compile 编译 239 个生产源文件；真实 Redis 6 项通过，PowerShell 7 和 Windows PowerShell 5.1 的脚本检查通过。真实 Python 健康检查、双 Spring Bearer、内部工具、Vue 构建和 Legacy HTML 已有通过证据；HTTP/1.1 源码修复已通过回归测试，但 LangGraph 三类型首次生成/二次修改、停止和 Legacy 回滚仍需重启新实例后人工验收。最新全量 `mvn test` 仍包含历史实验代码和外部服务依赖失败，因此不声称全量测试通过。
+11. **Checkpoint 产物留存边界已收敛。** 业务快照不再保存完整 artifact，保留 `node`、`requestId`、`appId`、`codeGenType`、`qualityPassed`、`repairCount` 和 `toolCallCount` 等状态与审计摘要；执行期节点恢复由 LangGraph 自动 checkpoint 承担，该 checkpoint 在请求执行期间仍可能保留完整产物，成功、失败或取消进入终态后清理对应 thread，并使用 Redis 固定前缀避免误删。终态清理失败只使 checkpoint 就绪状态降级，不反转生成结果；TTL 作为异常退出兜底。2026-09-29 已确认真实 checkpoint Redis 就绪并完成 Spring Redis 工具幂等测试；HTTP/1.1 源码阻断已修复，但终态 checkpoint 清理和三类型真实产物仍需在新实例上继续验收。
 12. **Vue 修复后最终源码审查已完成。** 至少一次修复、硬校验和重新构建成功后，Reviewer 读取 Spring 瞬时生成的有界最终源码快照；扫描、选择、字符和文件大小均有硬上限，完整源码不进入幂等 Redis、业务或 LangGraph checkpoint/state/事件。读取或审查失败不回退旧 artifact，事件和异常保持脱敏。
 13. **模型输出上限已显式配置。** Python 新链路通过 `AI_SERVICE_MODEL_MAX_TOKENS` 配置单次模型响应上限，默认值为 `8192` 且必须为正数。该配置可以降低较长静态页面被供应商截断的概率，但不会改变静态多文件协议：`MULTI_FILE` 仍必须在一次响应中完整返回 `index.html`、`style.css` 和 `script.js`，只有三个文件全部解析、校验并发布成功后才会更新活动版本。若三文件总量持续超过单次响应能力，应优先拆分需求或分轮修改；将静态多文件生成改造成分阶段或工具写入式流程属于后续架构优化，当前不能把提高 token 上限当作完整性保证。
 14. **停止链路已改为主动取消与权威状态确认。** Spring 新增应用级生成取消与状态查询接口，对外统一使用 `IDLE`、`RUNNING`、`STOPPING`、`COMMITTING`；取消只把活动租约转为 `STOPPING`，不会提前释放应用锁。LangGraph 在保留节点边界取消检查的同时，按 thread 注册当前 `asyncio.Task` 并主动 `cancel()` 正在等待的模型或工具调用；Vue 构建按请求 ID 跟踪执行线程，取消时中断等待并由进程运行器清理 npm 进程树。前端点击停止后进入“正在停止”，关闭已确认取消的 SSE，并轮询 Spring 权威状态到 `IDLE` 后才允许下一轮输入。Legacy 仍是协作式取消，因此可能在 `STOPPING` 保持更久，但不会再向用户误报已经停止。
@@ -354,17 +401,17 @@ caeb0cb fix: 保持预览加载图为正圆
 
 ### P0：真实环境验收门
 
-1. **执行 Spring/Python 真实 HTTP 契约。** 验收入口已经实现，但当前 Java standalone MockMvc 和 Python MockTransport 仍只分别证明两端逻辑正确，无法覆盖真实端口、Bearer 配置、HTTP 超时、JSON 编解码和连接中断。需要用户启动真实 Spring 与 Python 后执行脚本，验证成功调用、非零业务码、鉴权失败、字段绑定失败、未知/额外字段、Schema 响应错误、构建长超时和错误脱敏。只有这一步通过，才能证明共享 Schema 在真实网络边界有效；该项不依赖前端人工生成。
-2. **执行真实 Redis 工具幂等验收。** opt-in 集成测试已经覆盖跨客户端结果回放、陈旧 `RUNNING` 和 action 成功后写回失败窗口，但最近一次真实执行因 `127.0.0.1:6379` 拒绝连接而没有执行断言。需要在可连接 Redis 上运行，并继续核对相同 `toolCallId` 参数冲突和锁竞争。原因是网络重试即使在“一个账号对一个应用只有一个业务请求”的前提下仍可能重复提交写文件、删除或构建操作；但不追求跨 Redis 与文件系统的严格 exactly-once。
+1. **HTTP/1.1 源码和验收脚本修复已完成，继续重跑 LangGraph 真实生成。** `LangGraphAiGenerationGateway` 已强制 HTTP/1.1，回归测试证明修复前会发送 `Upgrade: h2c`、修复后不再发送；真实内部工具脚本已按 HTTP 200 加业务码契约在 8123、8124 通过，登录脚本已支持受控 Cookie 或人工验证码。剩余项是使用新提交重启 8124，再验证成功生成、未知/额外字段、Schema 响应错误、构建长超时、连接中断和错误脱敏。只有真实 LangGraph 流通过，才能证明共享 Schema 和 NDJSON 在网络边界完整可用。
+2. **真实 Redis 故障与客户端竞争验收已完成，继续补双 Spring HTTP 竞争。** 2026-09-29 opt-in 集成测试在 `redis://localhost:6379/1` 上 6 项全部通过，已经覆盖跨客户端结果回放、并发唯一执行、参数/工具名冲突、陈旧 `RUNNING` 和 action 成功后写回失败窗口。剩余真实环境项是两个 Spring 实例通过 Controller 对相同 `appId + requestId + toolCallId` 的锁竞争和结果回放；不追求 Redis 与文件系统之间严格 exactly-once。
 3. **完成三种生成类型的首次生成与二次修改（人工前端验收）。** 分别使用隔离的 HTML、MULTI_FILE、VUE_PROJECT 测试应用，验证聊天记录、完整内容、图片和交互保留、严格解析、HTML Selenium 烟测、Vue 工具循环、构建、不可变发布、活动指针和最终预览。原因是 Fake Model 无法证明真实模型会稳定遵守代码块、三文件和 JSON 工具协议，尤其无法证明二次修改不会丢失现有功能；该项等待用户执行并反馈错误。
 4. **验证停止、断线和失败终态（人工前端 + 后台日志）。** 覆盖生成中停止、客户端断开、模型超时、Spring 工具失败、Vue 长构建和迟到回调，确认取消请求不能发布新版本，失败保留旧预览，前端只在当前请求成功后刷新一次。原因是这些行为横跨前端、Spring、Python 和 Redis，单服务测试无法证明终态一致；页面行为由用户人工观察，后端状态由日志和自动化脚本补证。
 5. **验证稳定灰度和 Legacy 回滚。** 对相同业务主体重复执行 `route`、`generate`、`cancel`，确认始终选择同一引擎；使用摘要和哈希比较 Legacy/LangGraph 结果，并演练切回 Legacy。原因是稳定桶虽已实现，但提高灰度比例会扩大故障面，必须先证明路由一致、取消一致且回滚可用。灰度配置应作为独立提交修改。
 
 ### P1：可靠性、质量与资源优化
 
-1. **瘦身 checkpoint 中的完整 artifact（已完成）。** 本次实际边界是：业务快照去除完整 artifact，保留 `node`、`requestId`、`appId`、`codeGenType`、`qualityPassed`、`repairCount` 和 `toolCallCount` 等状态与审计摘要；执行期节点恢复由 LangGraph 自动 checkpoint 承担，运行期 checkpoint 仍可保留完整产物，终态立即清理对应 thread，Redis 使用固定前缀防止误删，清理失败只降级 checkpoint 就绪状态、不反转终态。TTL 作为异常退出兜底；真实服务依赖的 Redis、模型和 Spring/Python 接口验收尚未执行，前端三类型生成、预览和交互由用户人工验证。
+1. **瘦身 checkpoint 中的完整 artifact（已完成）。** 本次实际边界是：业务快照去除完整 artifact，保留 `node`、`requestId`、`appId`、`codeGenType`、`qualityPassed`、`repairCount` 和 `toolCallCount` 等状态与审计摘要；执行期节点恢复由 LangGraph 自动 checkpoint 承担，运行期 checkpoint 仍可保留完整产物，终态立即清理对应 thread，Redis 使用固定前缀防止误删，清理失败只降级 checkpoint 就绪状态、不反转终态。TTL 作为异常退出兜底；真实 Redis 和部分 Spring/Python HTTP 已于 2026-09-29 验证，LangGraph 模型工作流、终态清理和前端三类型生成仍被 h2c/HTTP 422 阻断。
 2. **让 Vue 修复后的质量检查读取修复后源码视图（已完成）。** 当前边界是：至少一次修复、硬校验和重新构建成功后才调用 `vue_source_snapshot`；最多 24 文件、单文件 12000 字符、总计 60000 字符，项目总访问条目最多 20000 个，其中合格源码候选最多 10000 个，并只读取排序最佳 24 个，每文件最大 1 MiB。依赖/构建产物、隐藏目录、符号链接、锁文件、非文本、非法 UTF-8 和 NUL 均被排除或拒绝，依赖/构建目录和锁文件按大小写不敏感处理。完整快照仅瞬时传给当前 Reviewer，不进入幂等 Redis、业务 checkpoint、LangGraph state/checkpoint 或事件；事件仅含四个统计字段，失败 pending checkpoint 只稳定外层异常。读取失败使用稳定脱敏消息且不暴露绝对项目路径；读取或 Reviewer 失败不回退旧 artifact；首次未修复 Vue、HTML、MULTI_FILE 不调用。
-3. **明确应用创建阶段的灰度身份键（下一项 P1）。** 当路由发生在 appId 创建前，需要固定使用 userId，创建后再按既定优先级使用 appId，并增加跨阶段一致性测试。原因是身份键切换如果没有明确契约，同一次创建流程可能在 Legacy 和 LangGraph 之间漂移。若现有调用链证明创建阶段始终有稳定 appId，则记录证据后关闭此项，不为假设增加代码。
+3. **明确应用创建阶段的灰度身份键（已完成）。** 实际调用链在创建阶段使用 `appId=null、userId=登录用户`，创建后的生成和取消同时传入 appId 与同一 userId；`stableBucket` 明确优先使用 userId，仅在 userId 缺失时回退 appId，再缺失时使用 requestId。因此同一用户从创建路由到持久化应用操作不会切换身份键。已增加跨阶段、跨 requestId 的 route/generate/cancel 一致性测试并补充源码注释，不新增持久化字段，也不改变现有按用户灰度语义。
 4. **压测 Java HTTP 客户端与长构建。** 验证 JDK HttpClient 连接复用、虚拟线程、读写超时、大 NDJSON 流、客户端断开和长时间 npm 构建下的资源释放。原因是功能测试覆盖正确性，但无法暴露连接耗尽、线程/进程残留、背压和超时边界问题。
 5. **按证据决定是否升级构建进程治理。** 当前 npm 后代进程通过 100ms 轮询捕获并有界清理；只有压力测试复现漏进程时，才引入 Windows Job Object 或 Unix process group。原因是现有方案存在理论窗口，但直接引入平台相关进程管理会提高复杂度，应由可复现问题驱动。
 
@@ -386,13 +433,12 @@ caeb0cb fix: 保持预览加载图为正圆
 
 ## 10. 下一轮执行顺序
 
-1. 用户启动 Spring/Python/Redis 后，先执行已实现的真实 Spring/Python HTTP 契约验收入口；Agent 根据失败报告修复问题。
-2. 再连接真实 Redis，执行工具幂等集成测试并记录剩余故障窗口。
-3. 使用三个隔离应用完成三类型首次生成和二次修改。
-4. 执行停止、断线、大流式响应和长构建压力验证。
-5. 对比 Legacy/LangGraph 摘要并演练回滚；全部通过后才能讨论提高灰度比例。
-6. P1 的 checkpoint artifact 瘦身和 Vue 修复后最终源码审查已完成；下一项是明确应用创建阶段的灰度身份键，每项单独设计、测试和提交。
-7. P2 只在真实运行数据证明有必要时进入实施，不与 P0/P1 混合提交。
+1. HTTP/1.1、Spring 业务码脚本、验证码/受控 Cookie 认证助手已经完成；使用最新提交重启 8124。
+2. 使用三个隔离应用完成三类型首次生成和二次修改，再执行停止、断线和失败终态人工验收。
+3. 重跑双引擎摘要和 Legacy 回滚，并补两个真实 Spring Controller 的相同工具调用竞争和结果回放。
+4. 应用创建阶段的灰度身份键契约已经关闭：按 userId 稳定灰度，缺失用户时才回退 appId/requestId。
+5. 下一项 P1 是压测 Java HTTP 客户端、大 NDJSON 流和长时间 npm 构建的资源释放；只有复现漏进程后才升级平台相关进程治理。
+6. P2 只在真实运行数据证明有必要时进入实施，不与 P0/P1 混合提交。
 
 ## 11. 下一轮开始前检查清单
 
@@ -402,6 +448,8 @@ caeb0cb fix: 保持预览加载图为正圆
 - [ ] 保留 `.gitignore`、`workflow.py` 注释、本文档既有编辑、未跟踪 HTTP 契约计划和 `projects/` 的现有用户修改。
 - [ ] 保留 `projects/`、本地 `.env`、前端既有 `package-lock.json` 等用户文件。
 - [ ] 不自动启动 Python AI 服务；真实验收前确认用户是否已从 IDE 启动。
+- [x] LangGraph Java HTTP 客户端已显式使用 HTTP/1.1，回归测试拒绝 h2c Upgrade。
+- [x] 真实验收脚本已与 HTTP 200 加业务码契约对齐，并支持受控 Cookie 或同会话人工验证码登录。
 - [ ] 使用 `rg` 重新确认 Java、Python 和 Vue 实际调用链。
 - [ ] 代码生成改动同时检查三种生成类型、发布终态、取消和错误码。
 - [ ] 前端流式改动检查 2000 字符、80ms、停止、卸载、历史回源和单次预览刷新。
@@ -535,7 +583,11 @@ Legacy Java 的 `AiCodeGeneratorService`、`ToolManager` 和 `BaseTool` 中仍�
 - [x] 在保留 Legacy 回滚路径的前提下，实现稳定用户灰度桶并提供双引擎摘要对比脚本。
 - [x] 使用共享 JSON Schema 统一十个内部工具的请求/成功响应协议，并在 Python 运行时和 Java 测试期校验。
 - [x] 在 Vue 至少修复一次、硬校验和重新构建成功后，通过 Spring 瞬时有界快照让 Reviewer 审查最终源码；失败不回退旧 artifact，源码不进入持久状态或事件。
-- [ ] 在真实环境执行双引擎摘要对比和 Legacy 回滚演练。
-- [ ] 完成真实 Spring HTTP、真实 Redis、多实例幂等、取消和三类型首次生成/二次修改验收后，再提高 LangGraph 灰度比例。
+- [x] 在真实 Redis database 1 上完成工具幂等故障窗口测试，并验证双 Spring 实例的内部 Bearer、Python 健康检查和 Vue 真实构建。
+- [x] 强制 LangGraph Java客户端使用 HTTP/1.1，增加修复前后 h2c 请求头回归测试，并在 8123、8124 重跑真实内部工具 HTTP 契约。
+- [x] 明确灰度身份键优先级为 `userId -> appId -> requestId`，增加应用创建前后跨 requestId 的 route/generate/cancel 一致性测试。
+- [ ] 完成真实双引擎摘要对比和 Legacy 回滚演练；当前 Legacy HTML 已成功，LangGraph 尚未进入模型工作流。
+- [ ] 使用包含 HTTP/1.1 修复的新 Spring 实例完成 LangGraph 三类型首次生成/二次修改、取消、终态 checkpoint 清理和旧预览保留验收。
+- [ ] 完成两个真实 Spring Controller 的相同工具调用竞争和结果回放后，再提高 LangGraph 灰度比例。
 
 迁移完成的判定标准不是“Python 中出现了工具类”，而是：LangGraph 新链路的模型决策由 Python 控制；Java 仍是所有业务数据、文件、构建和发布操作的唯一可信执行边界；失败、取消、重试和幂等语义在 Legacy 与 LangGraph 两条链路中保持一致。
