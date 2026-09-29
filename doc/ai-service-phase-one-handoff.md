@@ -141,6 +141,8 @@ START
 - npm 输出、路径和环境值有界且脱敏；父子进程树和输出读取使用有界终止策略。
 - `scripts/verify-langgraph-real-gate.ps1` 提供统一验证入口：默认 dry-run，显式 `-Execute` 后固定执行 Java clean compile、35 项定向测试和 PowerShell 脚本检查，`-IncludeRedis` 可追加真实 Redis 6 项。
 - 统一入口只向 `target/ai-validation/langgraph-real-gate.json` 写入步骤名、命令标签、状态、退出码、耗时和人工待验收项，不收集 Maven 原始日志、源码、令牌、Cookie 或响应正文。
+- `scripts/new-ai-validation-record.ps1` 可离线创建版本化人工验收记录，固定覆盖三类型首次生成/二次修改、停止、断线、模型超时、工具失败、长构建、双 Spring 竞争和 Legacy 回滚 13 个 P0 场景。
+- 人工记录为 requestId、终态、稳定错误码、旧预览、刷新次数、历史回源和证据引用提供统一字段，初始状态全部为 `pending`，不保存凭据、源码、工具参数或响应正文。
 
 ## 4. 关键文件
 
@@ -160,6 +162,7 @@ START
 | `src/main/java/com/yupi/yuaicodemother/core/builder/VueProjectBuilder.java` | 强制构建、进程治理和错误脱敏 |
 | `src/main/java/com/yupi/yuaicodemother/service/impl/AppServiceImpl.java` | 生成入口、租约、历史和 SSE 生命周期 |
 | `scripts/verify-langgraph-real-gate.ps1` | 统一执行自动化验收门并输出脱敏 JSON 摘要 |
+| `scripts/new-ai-validation-record.ps1` | 创建包含 13 个 P0 场景的脱敏人工验收记录 |
 | `scripts/ai-validation-scripts.tests.ps1` | 验收脚本的静态安全与参数契约检查 |
 
 ### Python AI 服务
@@ -231,6 +234,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-rea
 # Redis database 1 可用于隔离验收时，额外执行真实 Redis 6 项
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1 -Execute -IncludeRedis
 ```
+
+创建人工验收记录：
+
+```powershell
+# 仅查看说明，不写文件
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-record.ps1
+
+# 创建 target/ai-validation/manual-validation-record.json
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-record.ps1 -Execute
+```
+
+人工执行每个场景后只更新对应记录的 `status`、`requestId`、`terminalStatus`、`errorCode`、`durationMs`、`oldPreviewPreserved`、`previewRefreshCount`、`historyReloaded`、`evidenceRefs` 和简短脱敏备注。不要把日志正文、源码、提示词或认证信息复制进记录。
 
 ## 6. 当前自动化验证证据
 
@@ -310,6 +325,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-rea
 - 切回 `legacy` 后生成、取消、聊天历史和旧预览语义正常。
 - 灰度配置变更作为独立提交，不能和功能修复混在一起。
 
+### 7.6 统一人工验收记录
+
+运行 `scripts/new-ai-validation-record.ps1 -Execute` 创建本轮记录。13 个场景必须逐项从 `pending` 更新为以下状态之一：
+
+- `passed`：通过标准有直接证据。
+- `failed`：已执行且行为不符合通过标准，应记录稳定错误码和最小复现信息。
+- `blocked`：缺少环境、权限或外部依赖，应记录直接阻塞原因。
+- `not-run`：本轮明确不执行，不能计入通过率。
+
+证据优先引用 `target/ai-validation/` 下的脱敏 JSON 文件、requestId 和稳定错误码。浏览器截图或后台日志如果包含账号、源码、Cookie、令牌、绝对路径或完整请求正文，必须先脱敏且不得提交到 Git。
+
 ## 8. 未完成优化清单
 
 ### P0：先关闭真实验收门
@@ -322,7 +348,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-rea
 
 1. 在真实 Uvicorn/代理环境观测连接复用、慢流、网络背压、空闲超时和虚拟线程收敛。
 2. 对真实 npm/Shell 包装层执行重复长构建、取消与超时压力；只有复现残留进程时才引入 Windows Job Object 或 Unix process group。
-3. 为 P0 人工验收建立统一记录模板，明确环境、场景、requestId、终态、错误码和旧预览状态。
 
 ### P2：真实运行稳定后再做
 
