@@ -220,7 +220,55 @@ async def test_nested_base_exception_group_with_cancelled_error_maps_invalid_out
 
 
 @pytest.mark.asyncio
-async def test_base_exception_group_with_system_exit_is_rethrown() -> None:
+async def test_external_cancellation_wins_over_cleanup_output_error_group() -> None:
+    all_started = asyncio.Event()
+    started: set[ReviewerRole] = set()
+
+    async def review(
+        role: ReviewerRole,
+        artifact: str,
+        context: dict[str, Any],
+    ) -> ReviewerResult:
+        started.add(role)
+        if started == set(ReviewerRole):
+            all_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            if role is ReviewerRole.REQUIREMENT:
+                raise BaseExceptionGroup(
+                    "cleanup",
+                    [
+                        asyncio.CancelledError(),
+                        QualityReviewOutputError("identity_mismatch"),
+                    ],
+                )
+            raise
+
+    model = FakeReviewModel(review)
+    parent = asyncio.create_task(
+        run_multi_agent_review(
+            model,
+            "artifact",
+            {},
+            timeout_seconds=10,
+        )
+    )
+    await asyncio.wait_for(all_started.wait(), timeout=1)
+    parent.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await parent
+
+    assert not isinstance(parent.exception() if not parent.cancelled() else None, MultiAgentReviewError)
+    assert parent.cancelled()
+    assert_all_reviewer_tasks_done(model)
+
+
+@pytest.mark.asyncio
+async def test_mixed_fatal_group_propagates_only_system_exit_without_secret() -> None:
+    secret = "fatal-group-secret-6bc8"
+
     async def review(
         role: ReviewerRole,
         artifact: str,
@@ -229,7 +277,43 @@ async def test_base_exception_group_with_system_exit_is_rethrown() -> None:
         if role is ReviewerRole.REQUIREMENT:
             raise BaseExceptionGroup(
                 "fatal",
-                [SystemExit(17), QualityReviewOutputError("invalid_json")],
+                [SystemExit(17), RuntimeError(secret)],
+            )
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    model = FakeReviewModel(review)
+    with pytest.raises(SystemExit) as caught:
+        await run_multi_agent_review(
+            model,
+            "artifact",
+            {},
+            timeout_seconds=1,
+        )
+
+    rendered = "".join(
+        traceback.format_exception(type(caught.value), caught.value, caught.value.__traceback__)
+    )
+    assert caught.value.code == 17
+    assert secret not in rendered
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert_all_reviewer_tasks_done(model)
+
+
+@pytest.mark.asyncio
+async def test_multiple_fatal_leaves_use_fixed_redacted_group() -> None:
+    secret = "multiple-fatal-secret-53ad"
+
+    async def review(
+        role: ReviewerRole,
+        artifact: str,
+        context: dict[str, Any],
+    ) -> ReviewerResult:
+        if role is ReviewerRole.REQUIREMENT:
+            raise BaseExceptionGroup(
+                "provider group containing secret",
+                [SystemExit(11), RuntimeError(secret), SystemExit(12)],
             )
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
@@ -243,12 +327,16 @@ async def test_base_exception_group_with_system_exit_is_rethrown() -> None:
             timeout_seconds=1,
         )
 
-    def leaves(error: BaseException) -> list[BaseException]:
-        if isinstance(error, BaseExceptionGroup):
-            return [leaf for nested in error.exceptions for leaf in leaves(nested)]
-        return [error]
-
-    assert any(isinstance(error, SystemExit) and error.code == 17 for error in leaves(caught.value))
+    rendered = "".join(
+        traceback.format_exception(type(caught.value), caught.value, caught.value.__traceback__)
+    )
+    assert caught.value.message == (
+        "MULTI_AGENT_REVIEW_FATAL: quality reviewers raised fatal exceptions"
+    )
+    assert [error.code for error in caught.value.exceptions] == [11, 12]
+    assert secret not in rendered
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
     assert_all_reviewer_tasks_done(model)
 
 

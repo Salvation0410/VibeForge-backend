@@ -24,18 +24,23 @@ _TIMEOUT_MESSAGE = (
     "MULTI_AGENT_REVIEW_TIMEOUT: quality reviewers exceeded the configured timeout"
 )
 _MODEL_ERROR_MESSAGE = "MULTI_AGENT_REVIEW_MODEL_ERROR: quality reviewer call failed"
+_FATAL_GROUP_MESSAGE = "MULTI_AGENT_REVIEW_FATAL: quality reviewers raised fatal exceptions"
 
 
 class MultiAgentReviewError(RuntimeError):
     """多角色质量审查协调失败后的稳定、脱敏外层异常。"""
 
 
-def _contains_fatal_base_exception(error: BaseException) -> bool:
+def _fatal_base_exceptions(error: BaseException) -> list[BaseException]:
     if isinstance(error, (KeyboardInterrupt, SystemExit)):
-        return True
+        return [error]
     if isinstance(error, BaseExceptionGroup):
-        return any(_contains_fatal_base_exception(nested) for nested in error.exceptions)
-    return False
+        return [
+            fatal
+            for nested in error.exceptions
+            for fatal in _fatal_base_exceptions(nested)
+        ]
+    return []
 
 
 def _find_output_error(error: BaseException) -> QualityReviewOutputError | None:
@@ -135,24 +140,40 @@ async def run_multi_agent_review(
 ) -> QualityReviewResult:
     tasks: dict[ReviewerRole, asyncio.Task[ReviewerResult]] = {}
     mapped_error: str | None = None
+    fatal_errors: list[BaseException] = []
+    external_cancelled = False
+
+    async def run_reviewers() -> None:
+        async with asyncio.TaskGroup() as task_group:
+            for role in ReviewerRole:
+                tasks[role] = task_group.create_task(
+                    model.review_role(role, artifact, dict(context))
+                )
 
     try:
         async with asyncio.timeout(timeout_seconds):
-            async with asyncio.TaskGroup() as task_group:
-                for role in ReviewerRole:
-                    tasks[role] = task_group.create_task(
-                        model.review_role(role, artifact, dict(context))
-                    )
+            await asyncio.create_task(run_reviewers())
     except TimeoutError:
         mapped_error = _TIMEOUT_MESSAGE
     except BaseExceptionGroup as error_group:
-        if _contains_fatal_base_exception(error_group):
-            raise
-        output_error = _find_output_error(error_group)
-        mapped_error = str(output_error) if output_error is not None else _MODEL_ERROR_MESSAGE
+        fatal_errors = _fatal_base_exceptions(error_group)
+        if not fatal_errors:
+            current_task = asyncio.current_task()
+            external_cancelled = current_task is not None and current_task.cancelling() > 0
+        if not fatal_errors and not external_cancelled:
+            output_error = _find_output_error(error_group)
+            mapped_error = (
+                str(output_error) if output_error is not None else _MODEL_ERROR_MESSAGE
+            )
     except Exception:
         mapped_error = _MODEL_ERROR_MESSAGE
 
+    if fatal_errors:
+        if len(fatal_errors) == 1:
+            raise fatal_errors[0] from None
+        raise BaseExceptionGroup(_FATAL_GROUP_MESSAGE, fatal_errors) from None
+    if external_cancelled:
+        raise asyncio.CancelledError() from None
     if mapped_error is not None:
         raise MultiAgentReviewError(mapped_error) from None
 
