@@ -23,7 +23,10 @@ import java.io.InputStreamReader;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.LockSupport;
 
 /**
  * 独立 LangGraph AI 服务的 HTTP 适配器，将内部 NDJSON 事件转换为既有 SSE 处理链可消费的数据。
@@ -123,11 +126,15 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
                                 return;
                             }
                             Thread.startVirtualThread(() -> {
+                                AtomicLong lastEventNanos = new AtomicLong(System.nanoTime());
+                                AtomicBoolean idleTimedOut = new AtomicBoolean(false);
+                                Thread idleWatchdog = startIdleWatchdog(bodyStream, lastEventNanos, idleTimedOut);
                                 try (BufferedReader reader = new BufferedReader(new InputStreamReader(bodyStream, StandardCharsets.UTF_8))) {
                                     String line;
                                     String latestArtifact = null;
                                     boolean completed = false;
                                     while (!sink.isCancelled() && (line = reader.readLine()) != null) {
+                                        lastEventNanos.set(System.nanoTime());
                                         ParsedEvent event = parseEvent(line, codeGenType, requestId);
                                         if (event.artifact() != null) latestArtifact = event.artifact();
                                         if (!event.message().isBlank()) sink.next(event.message());
@@ -147,13 +154,41 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
                                     }
                                     sink.complete();
                                 } catch (Exception streamError) {
-                                    if (!sink.isCancelled()) sink.error(streamError);
+                                    if (!sink.isCancelled()) {
+                                        if (idleTimedOut.get()) {
+                                            sink.error(new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(),
+                                                    "LANGGRAPH_STREAM_IDLE_TIMEOUT", requestId,
+                                                    "LangGraph 事件流长时间无新事件，已中止本轮生成并保留上一版本",
+                                                    streamError));
+                                        } else {
+                                            sink.error(streamError);
+                                        }
+                                    }
                                 } finally {
+                                    idleWatchdog.interrupt();
                                     responseBody.compareAndSet(bodyStream, null);
                                 }
                             });
                         });
             } catch (Exception e) { sink.error(e); }
+        });
+    }
+
+    /** 监控完整 NDJSON 事件的空闲时间，到期后关闭响应体以解除阻塞读取。 */
+    private Thread startIdleWatchdog(
+            InputStream bodyStream, AtomicLong lastEventNanos, AtomicBoolean idleTimedOut) {
+        long timeoutNanos = Duration.ofSeconds(
+                Math.max(1, properties.getGenerationStreamIdleTimeoutSeconds())).toNanos();
+        return Thread.startVirtualThread(() -> {
+            while (!Thread.currentThread().isInterrupted()) {
+                long remainingNanos = timeoutNanos - (System.nanoTime() - lastEventNanos.get());
+                if (remainingNanos <= 0) {
+                    idleTimedOut.set(true);
+                    closeQuietly(bodyStream);
+                    return;
+                }
+                LockSupport.parkNanos(Math.min(remainingNanos, Duration.ofSeconds(1).toNanos()));
+            }
         });
     }
 

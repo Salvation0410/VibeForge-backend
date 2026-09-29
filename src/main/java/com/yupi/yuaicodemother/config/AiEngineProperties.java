@@ -18,6 +18,8 @@ public class AiEngineProperties {
     private String serviceUrl = "http://localhost:8000";
     /** Spring 与 Python 服务双向内部调用使用的共享 Bearer 令牌。 */
     private String token = "";
+    /** LangGraph NDJSON 响应连续无完整事件的最长等待时间，单位为秒。 */
+    private long generationStreamIdleTimeoutSeconds = 600;
     /** 灰度模式下强制使用 LangGraph 的用户 ID 白名单。 */
     private List<Long> grayWhitelist = new ArrayList<>();
     /** 灰度模式下进入 LangGraph 的流量百分比，运行时会限制在 0 到 100。 */

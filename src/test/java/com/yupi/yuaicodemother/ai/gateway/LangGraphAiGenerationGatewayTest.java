@@ -161,6 +161,48 @@ class LangGraphAiGenerationGatewayTest {
     }
 
     @Test
+    void idleNdjsonStreamFailsWithStableErrorAndClosesConnection() throws Exception {
+        CountDownLatch clientClosed = new CountDownLatch(1);
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/internal/v1/generations:stream", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            exchange.sendResponseHeaders(200, 0);
+            String chunk = "{\"requestId\":\"req-idle\",\"type\":\"node_status\","
+                    + "\"data\":{\"node\":\"generate_html\",\"status\":\"started\"}}\n";
+            exchange.getResponseBody().write(chunk.getBytes(StandardCharsets.UTF_8));
+            exchange.getResponseBody().flush();
+            try {
+                while (true) {
+                    Thread.sleep(50);
+                    exchange.getResponseBody().write(' ');
+                    exchange.getResponseBody().flush();
+                }
+            } catch (IOException expected) {
+                clientClosed.countDown();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            } finally {
+                exchange.close();
+            }
+        });
+        server.start();
+        AiEngineProperties properties = new AiEngineProperties();
+        properties.setServiceUrl("http://127.0.0.1:" + server.getAddress().getPort());
+        properties.setToken("test-token");
+        properties.setGenerationStreamIdleTimeoutSeconds(1);
+        var gateway = new LangGraphAiGenerationGateway(properties, new ObjectMapper());
+
+        GenerationStreamException error = assertThrows(GenerationStreamException.class,
+                () -> gateway.generate("build", CodeGenTypeEnum.HTML, 42L, 7L, "req-idle")
+                        .collectList().block(Duration.ofSeconds(5)));
+
+        assertEquals("LANGGRAPH_STREAM_IDLE_TIMEOUT", error.getErrorCode());
+        assertEquals("req-idle", error.getRequestId());
+        assertTrue(clientClosed.await(5, TimeUnit.SECONDS),
+                "idle timeout must close the NDJSON response body");
+    }
+
+    @Test
     void concurrentLargeStaticStreamsKeepIndependentFinalCandidates() throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         serverExecutor = Executors.newFixedThreadPool(8);

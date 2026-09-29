@@ -195,6 +195,8 @@ Spring Redis: redis://localhost:6379/1
 Python checkpoint Redis: redis://localhost:6379/2
 ```
 
+Spring 的 LangGraph NDJSON 响应空闲超时由 `AI_GENERATION_STREAM_IDLE_TIMEOUT_SECONDS` 控制，默认 `600` 秒。它按“连续多久没有收到完整 NDJSON 行”计时，不是整轮生成总时长；超时会关闭响应体并返回稳定错误码 `LANGGRAPH_STREAM_IDLE_TIMEOUT`，旧活动版本保持不变。生产值不应为了缩短人工测试而长期调低。
+
 用户当前偏好从 IDE 启动 Python AI 服务。自动化修改和验证期间不要擅自启动或占用 8000 端口；需要真实生成验收时先确认 IDE 中服务已启动。
 
 ## 7. 当前验证基线
@@ -295,6 +297,7 @@ pwsh -NoProfile -File scripts/compare-ai-generation-engines.ps1 -Execute `
 ```
 
 8. 将 LangGraph 实例切回 Legacy 后重新发起一次隔离请求，确认无需数据库迁移即可回滚；灰度比例调整必须作为独立提交，不能与功能修复混合。
+9. 在隔离压力环境验证慢流超时：临时设置 `AI_GENERATION_STREAM_IDLE_TIMEOUT_SECONDS=30` 并重启 LangGraph Spring，使用可控 Python 测试服务或代理先返回一个合法 NDJSON 事件，再停止转发完整事件超过 30 秒。确认前端收到 `LANGGRAPH_STREAM_IDLE_TIMEOUT`、旧预览不变、Spring 生成状态最终回到 `IDLE`，且测试服务观察到客户端连接关闭。完成后恢复默认 `600` 秒并重启，不能用该故障注入替代真实模型三类型验收。
 
 ### 本轮已经完成的优化
 
@@ -307,13 +310,14 @@ pwsh -NoProfile -File scripts/compare-ai-generation-engines.ps1 -Execute `
 7. **HTTP 验收入口已补齐并修正真实契约。** `scripts/test-ai-service.ps1` 已增加 Python 健康检查、Spring 成功调用、缺少/错误令牌、缺少字段、构建可选开关、幂等错误和脱敏覆盖标签；默认 dry-run，只有显式 `-Execute` 才发送请求。错误响应现按 HTTP 200 加业务码断言，8123、8124 的真实执行均通过。
 8. **Redis 故障与竞争验收入口已补齐。** 真实 Redis 集成测试现有 6 项，覆盖跨客户端回放、并发唯一执行、参数/工具名冲突、陈旧 `RUNNING` 和 action 成功后状态写回失败窗口；重试必须拒绝再次执行 action。测试默认跳过，只有显式设置 `AI_REDIS_INTEGRATION=true` 才连接 `AI_REDIS_URL`。
 9. **三类型人工验收入口和认证流程已加固。** 三个应用 ID 必须为正数且互不相同，成功场景出现 `business-error` 或终态数量异常时立即失败；脚本支持受控 Session Cookie 或同会话验证码登录。六个提示词、人工检查项和操作提示均使用中文，默认 dry-run，不保存流式源码、账号、密码或 Cookie。
-10. **离线验证完成，真实环境继续验收。** Python 165 项离线测试全部通过；最新相关 Java 网关、租约、Controller、HTTP 契约和取消测试在原 71 项基础上新增灰度跨阶段、NDJSON 取消释放和并发大流测试，当前相关覆盖为 74 项；Java clean compile 编译 239 个生产源文件。真实 Redis 6 项通过，PowerShell 7 和 Windows PowerShell 5.1 的脚本检查通过。真实 Python 健康检查、双 Spring Bearer、内部工具、Vue 构建和 Legacy HTML 已有通过证据；HTTP/1.1 源码修复已通过回归测试，但 LangGraph 三类型首次生成/二次修改、停止和 Legacy 回滚仍需重启新实例后人工验收。最新全量 `mvn test` 仍包含历史实验代码和外部服务依赖失败，因此不声称全量测试通过。
+10. **离线验证完成，真实环境继续验收。** Python 165 项离线测试全部通过；最新相关 Java 网关、租约、Controller、HTTP 契约和取消测试在原 71 项基础上新增灰度跨阶段、NDJSON 取消释放、并发大流和慢流空闲超时测试，当前相关覆盖为 75 项。本轮慢流修改后，网关、灰度、取消和构建定向集合 32 项通过，Java clean compile 编译 239 个生产源文件。真实 Redis 6 项通过，PowerShell 7 和 Windows PowerShell 5.1 的脚本检查通过。真实 Python 健康检查、双 Spring Bearer、内部工具、Vue 构建和 Legacy HTML 已有通过证据；HTTP/1.1 源码修复已通过回归测试，但 LangGraph 三类型首次生成/二次修改、停止、慢流阈值和 Legacy 回滚仍需重启新实例后人工验收。最新全量 `mvn test` 仍包含历史实验代码和外部服务依赖失败，因此不声称全量测试通过。
 11. **Checkpoint 产物留存边界已收敛。** 业务快照不再保存完整 artifact，保留 `node`、`requestId`、`appId`、`codeGenType`、`qualityPassed`、`repairCount` 和 `toolCallCount` 等状态与审计摘要；执行期节点恢复由 LangGraph 自动 checkpoint 承担，该 checkpoint 在请求执行期间仍可能保留完整产物，成功、失败或取消进入终态后清理对应 thread，并使用 Redis 固定前缀避免误删。终态清理失败只使 checkpoint 就绪状态降级，不反转生成结果；TTL 作为异常退出兜底。2026-09-29 已确认真实 checkpoint Redis 就绪并完成 Spring Redis 工具幂等测试；HTTP/1.1 源码阻断已修复，但终态 checkpoint 清理和三类型真实产物仍需在新实例上继续验收。
 12. **Vue 修复后最终源码审查已完成。** 至少一次修复、硬校验和重新构建成功后，Reviewer 读取 Spring 瞬时生成的有界最终源码快照；扫描、选择、字符和文件大小均有硬上限，完整源码不进入幂等 Redis、业务或 LangGraph checkpoint/state/事件。读取或审查失败不回退旧 artifact，事件和异常保持脱敏。
 13. **模型输出上限已显式配置。** Python 新链路通过 `AI_SERVICE_MODEL_MAX_TOKENS` 配置单次模型响应上限，默认值为 `8192` 且必须为正数。该配置可以降低较长静态页面被供应商截断的概率，但不会改变静态多文件协议：`MULTI_FILE` 仍必须在一次响应中完整返回 `index.html`、`style.css` 和 `script.js`，只有三个文件全部解析、校验并发布成功后才会更新活动版本。若三文件总量持续超过单次响应能力，应优先拆分需求或分轮修改；将静态多文件生成改造成分阶段或工具写入式流程属于后续架构优化，当前不能把提高 token 上限当作完整性保证。
 14. **停止链路已改为主动取消与权威状态确认。** Spring 新增应用级生成取消与状态查询接口，对外统一使用 `IDLE`、`RUNNING`、`STOPPING`、`COMMITTING`；取消只把活动租约转为 `STOPPING`，不会提前释放应用锁。LangGraph 在保留节点边界取消检查的同时，按 thread 注册当前 `asyncio.Task` 并主动 `cancel()` 正在等待的模型或工具调用；Vue 构建按请求 ID 跟踪执行线程，取消时中断等待并由进程运行器清理 npm 进程树。前端点击停止后进入“正在停止”，关闭已确认取消的 SSE，并轮询 Spring 权威状态到 `IDLE` 后才允许下一轮输入。Legacy 仍是协作式取消，因此可能在 `STOPPING` 保持更久，但不会再向用户误报已经停止。
 15. **Java NDJSON 响应流取消已释放网络资源。** `LangGraphAiGenerationGateway` 将下游取消与未完成的 `sendAsync` future、已取得的响应 `InputStream` 和虚拟线程读取循环绑定；取消会关闭响应体、停止继续读取并避免在取消后补发错误。非 2xx 响应也会关闭响应体。回归测试使用持续写入的本地 HTTP 流，修复前 5 秒内连接不会关闭，修复后服务端能够观察到客户端断开。该测试只证明 Java 网络资源释放，Python 模型、工具调用和 npm 进程仍需真实停止场景验收。
 16. **并发大 NDJSON 流的请求隔离已增加回归覆盖。** 本地 HTTP 测试并发执行 8 个生成请求，每个请求返回 500 个 `content_delta`，共解析 4000 个增量事件；每个流只提交自身 requestId 对应的最后候选，没有跨请求串线或丢失完成终态。该测试证明共享 `HttpClient` 和 Java 单请求解析状态在受控并发下相互隔离，但不替代真实 Python、模型供应商、网络背压和长时间运行压力测试。
+17. **Java NDJSON 慢流增加空闲超时保护。** `LangGraphAiGenerationGateway` 为每个已建立的响应流启动轻量虚拟线程看门狗，只有收到完整 NDJSON 行才续期；连续空闲达到 `AI_GENERATION_STREAM_IDLE_TIMEOUT_SECONDS` 后关闭响应体、解除阻塞读取并返回 `LANGGRAPH_STREAM_IDLE_TIMEOUT`。默认值为 600 秒，最小按 1 秒执行。回归测试使用先发一条事件后永久停顿的本地 HTTP 流，确认稳定错误码、requestId 和服务端连接关闭；真实模型慢流、代理背压和不同超时阈值仍需按上方人工步骤验收。
 
 ## 8. 关键提交
 
@@ -414,7 +418,7 @@ caeb0cb fix: 保持预览加载图为正圆
 1. **瘦身 checkpoint 中的完整 artifact（已完成）。** 本次实际边界是：业务快照去除完整 artifact，保留 `node`、`requestId`、`appId`、`codeGenType`、`qualityPassed`、`repairCount` 和 `toolCallCount` 等状态与审计摘要；执行期节点恢复由 LangGraph 自动 checkpoint 承担，运行期 checkpoint 仍可保留完整产物，终态立即清理对应 thread，Redis 使用固定前缀防止误删，清理失败只降级 checkpoint 就绪状态、不反转终态。TTL 作为异常退出兜底；真实 Redis 和部分 Spring/Python HTTP 已于 2026-09-29 验证，LangGraph 模型工作流、终态清理和前端三类型生成仍被 h2c/HTTP 422 阻断。
 2. **让 Vue 修复后的质量检查读取修复后源码视图（已完成）。** 当前边界是：至少一次修复、硬校验和重新构建成功后才调用 `vue_source_snapshot`；最多 24 文件、单文件 12000 字符、总计 60000 字符，项目总访问条目最多 20000 个，其中合格源码候选最多 10000 个，并只读取排序最佳 24 个，每文件最大 1 MiB。依赖/构建产物、隐藏目录、符号链接、锁文件、非文本、非法 UTF-8 和 NUL 均被排除或拒绝，依赖/构建目录和锁文件按大小写不敏感处理。完整快照仅瞬时传给当前 Reviewer，不进入幂等 Redis、业务 checkpoint、LangGraph state/checkpoint 或事件；事件仅含四个统计字段，失败 pending checkpoint 只稳定外层异常。读取失败使用稳定脱敏消息且不暴露绝对项目路径；读取或 Reviewer 失败不回退旧 artifact；首次未修复 Vue、HTML、MULTI_FILE 不调用。
 3. **明确应用创建阶段的灰度身份键（已完成）。** 实际调用链在创建阶段使用 `appId=null、userId=登录用户`，创建后的生成和取消同时传入 appId 与同一 userId；`stableBucket` 明确优先使用 userId，仅在 userId 缺失时回退 appId，再缺失时使用 requestId。因此同一用户从创建路由到持久化应用操作不会切换身份键。已增加跨阶段、跨 requestId 的 route/generate/cancel 一致性测试并补充源码注释，不新增持久化字段，也不改变现有按用户灰度语义。
-4. **压测 Java HTTP 客户端与长构建（取消释放和受控并发大流已完成，真实压力验证待执行）。** 下游取消现在会取消未完成 HTTP future、关闭 NDJSON 响应体并终止读取循环；本地测试还覆盖 8 个并发请求、每个 500 个增量事件的最终候选隔离。剩余项是验证真实连接复用、模型慢流、读写超时、虚拟线程收敛和长时间 npm 构建下的进程/管道释放。原因是受控本地测试证明取消正确性和请求隔离，但仍无法暴露真实网络背压、供应商限流、连接耗尽和平台进程残留问题。
+4. **压测 Java HTTP 客户端与长构建（取消释放、受控并发大流和流空闲超时已完成，真实压力验证待执行）。** 下游取消会取消未完成 HTTP future、关闭 NDJSON 响应体并终止读取循环；本地测试覆盖 8 个并发请求、每个 500 个增量事件的最终候选隔离，以及事件流永久停顿后的有界失败和连接关闭。剩余项是验证真实连接复用、模型慢流与代理背压、虚拟线程收敛和长时间 npm 构建下的进程/管道释放。原因是受控本地测试证明取消、请求隔离和无事件超时语义，但仍无法暴露供应商限流、连接耗尽和平台进程残留问题。
 5. **按证据决定是否升级构建进程治理。** 当前 npm 后代进程通过 100ms 轮询捕获并有界清理；只有压力测试复现漏进程时，才引入 Windows Job Object 或 Unix process group。原因是现有方案存在理论窗口，但直接引入平台相关进程管理会提高复杂度，应由可复现问题驱动。
 
 ### P2：生产化与后续架构演进
@@ -439,7 +443,7 @@ caeb0cb fix: 保持预览加载图为正圆
 2. 使用三个隔离应用完成三类型首次生成和二次修改，再执行停止、断线和失败终态人工验收。
 3. 重跑双引擎摘要和 Legacy 回滚，并补两个真实 Spring Controller 的相同工具调用竞争和结果回放。
 4. 应用创建阶段的灰度身份键契约已经关闭：按 userId 稳定灰度，缺失用户时才回退 appId/requestId。
-5. Java NDJSON 下游取消资源释放和受控并发大流已经完成；下一项 P1 是真实连接复用、慢流超时和长时间 npm 构建压力验证，只有复现漏进程后才升级平台相关进程治理。
+5. Java NDJSON 下游取消资源释放、受控并发大流和可配置空闲超时已经完成；下一项 P1 是真实连接复用、代理背压、阈值调优和长时间 npm 构建压力验证，只有复现漏进程后才升级平台相关进程治理。
 6. P2 只在真实运行数据证明有必要时进入实施，不与 P0/P1 混合提交。
 
 ## 11. 下一轮开始前检查清单
