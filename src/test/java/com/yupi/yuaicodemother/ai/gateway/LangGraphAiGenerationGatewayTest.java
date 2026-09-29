@@ -7,11 +7,16 @@ import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.BaseSubscriber;
+import reactor.core.publisher.Flux;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -19,10 +24,12 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class LangGraphAiGenerationGatewayTest {
     private HttpServer server;
+    private ExecutorService serverExecutor;
 
     @AfterEach
     void stopServer() {
         if (server != null) server.stop(0);
+        if (serverExecutor != null) serverExecutor.shutdownNow();
     }
 
     @Test
@@ -151,6 +158,49 @@ class LangGraphAiGenerationGatewayTest {
         assertTrue(firstChunkReceived.await(5, TimeUnit.SECONDS), "subscriber did not receive the first chunk");
         assertTrue(clientClosed.await(5, TimeUnit.SECONDS),
                 "cancelling the downstream subscriber must close the NDJSON response body");
+    }
+
+    @Test
+    void concurrentLargeStaticStreamsKeepIndependentFinalCandidates() throws Exception {
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        serverExecutor = Executors.newFixedThreadPool(8);
+        server.setExecutor(serverExecutor);
+        server.createContext("/internal/v1/generations:stream", exchange -> {
+            String requestBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            String requestId = new ObjectMapper().readTree(requestBody).path("requestId").asText();
+            StringBuilder body = new StringBuilder();
+            for (int index = 0; index < 500; index++) {
+                body.append("{\"requestId\":\"").append(requestId)
+                        .append("\",\"type\":\"content_delta\",\"data\":{\"content\":\"")
+                        .append(requestId).append("-candidate-").append(index).append("\"}}\n");
+            }
+            body.append("{\"requestId\":\"").append(requestId)
+                    .append("\",\"type\":\"completed\",\"data\":{}}\n");
+            byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+        AiEngineProperties properties = new AiEngineProperties();
+        properties.setServiceUrl("http://127.0.0.1:" + server.getAddress().getPort());
+        properties.setToken("test-token");
+        var gateway = new LangGraphAiGenerationGateway(properties, new ObjectMapper());
+
+        var results = Flux.range(0, 8)
+                .flatMap(index -> {
+                    String requestId = "large-" + index;
+                    return gateway.generate("build", CodeGenTypeEnum.HTML, 42L, 7L, requestId)
+                            .collectList()
+                            .map(chunks -> Map.entry(requestId, chunks));
+                }, 8)
+                .collectList()
+                .block(Duration.ofSeconds(20));
+
+        assertNotNull(results);
+        assertEquals(8, results.size());
+        results.forEach(result -> assertEquals(
+                java.util.List.of(result.getKey() + "-candidate-499"), result.getValue()));
     }
 
     /** 启动一次性本地 NDJSON 服务，避免测试依赖真实 Python 进程。 */
