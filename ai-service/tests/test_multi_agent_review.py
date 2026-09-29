@@ -26,6 +26,7 @@ ReviewBehavior = Callable[
 class FakeReviewModel:
     def __init__(self, behavior: ReviewBehavior) -> None:
         self._behavior = behavior
+        self.reviewer_tasks: dict[ReviewerRole, asyncio.Task[Any]] = {}
 
     async def review_role(
         self,
@@ -33,11 +34,21 @@ class FakeReviewModel:
         artifact: str,
         context: dict[str, Any],
     ) -> ReviewerResult:
+        current_task = asyncio.current_task()
+        assert current_task is not None
+        self.reviewer_tasks[role] = current_task
         return await self._behavior(role, artifact, context)
 
 
 def result(role: ReviewerRole) -> ReviewerResult:
     return ReviewerResult(reviewer=role, summary=f"{role.value} ok")
+
+
+def assert_all_reviewer_tasks_done(model: FakeReviewModel) -> None:
+    assert set(model.reviewer_tasks) == set(ReviewerRole)
+    reviewer_tasks = set(model.reviewer_tasks.values())
+    assert all(task.done() for task in reviewer_tasks)
+    assert reviewer_tasks.isdisjoint(asyncio.all_tasks())
 
 
 @pytest.mark.asyncio
@@ -110,9 +121,10 @@ async def test_shared_timeout_cancels_and_cleans_up_all_reviewers() -> None:
             cancelled.add(role)
             raise
 
+    model = FakeReviewModel(review)
     with pytest.raises(MultiAgentReviewError) as caught:
         await run_multi_agent_review(
-            FakeReviewModel(review),
+            model,
             "artifact",
             {},
             timeout_seconds=0.02,
@@ -123,6 +135,7 @@ async def test_shared_timeout_cancels_and_cleans_up_all_reviewers() -> None:
     )
     assert started == set(ReviewerRole)
     assert cancelled == set(ReviewerRole)
+    assert_all_reviewer_tasks_done(model)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
 
@@ -150,9 +163,10 @@ async def test_invalid_output_cancels_siblings_and_drops_raw_exception_chain() -
             cancelled.add(role)
             raise
 
+    model = FakeReviewModel(review)
     with pytest.raises(MultiAgentReviewError) as caught:
         await run_multi_agent_review(
-            FakeReviewModel(review),
+            model,
             "artifact",
             {},
             timeout_seconds=1,
@@ -160,28 +174,38 @@ async def test_invalid_output_cancels_siblings_and_drops_raw_exception_chain() -
 
     assert str(caught.value) == "MULTI_AGENT_REVIEW_INVALID_OUTPUT: invalid JSON"
     assert cancelled == {ReviewerRole.FUNCTION, ReviewerRole.TECHNICAL}
+    assert_all_reviewer_tasks_done(model)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
 
 
 @pytest.mark.asyncio
-async def test_nested_exception_group_still_maps_invalid_output() -> None:
+async def test_nested_base_exception_group_with_cancelled_error_maps_invalid_output() -> None:
     async def review(
         role: ReviewerRole,
         artifact: str,
         context: dict[str, Any],
     ) -> ReviewerResult:
         if role is ReviewerRole.REQUIREMENT:
-            raise ExceptionGroup(
+            raise BaseExceptionGroup(
                 "outer",
-                [ExceptionGroup("inner", [QualityReviewOutputError("identity_mismatch")])],
+                [
+                    BaseExceptionGroup(
+                        "inner",
+                        [
+                            QualityReviewOutputError("identity_mismatch"),
+                            asyncio.CancelledError(),
+                        ],
+                    )
+                ],
             )
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
 
+    model = FakeReviewModel(review)
     with pytest.raises(MultiAgentReviewError) as caught:
         await run_multi_agent_review(
-            FakeReviewModel(review),
+            model,
             "artifact",
             {},
             timeout_seconds=1,
@@ -192,6 +216,40 @@ async def test_nested_exception_group_still_maps_invalid_output() -> None:
     )
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
+    assert_all_reviewer_tasks_done(model)
+
+
+@pytest.mark.asyncio
+async def test_base_exception_group_with_system_exit_is_rethrown() -> None:
+    async def review(
+        role: ReviewerRole,
+        artifact: str,
+        context: dict[str, Any],
+    ) -> ReviewerResult:
+        if role is ReviewerRole.REQUIREMENT:
+            raise BaseExceptionGroup(
+                "fatal",
+                [SystemExit(17), QualityReviewOutputError("invalid_json")],
+            )
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    model = FakeReviewModel(review)
+    with pytest.raises(BaseExceptionGroup) as caught:
+        await run_multi_agent_review(
+            model,
+            "artifact",
+            {},
+            timeout_seconds=1,
+        )
+
+    def leaves(error: BaseException) -> list[BaseException]:
+        if isinstance(error, BaseExceptionGroup):
+            return [leaf for nested in error.exceptions for leaf in leaves(nested)]
+        return [error]
+
+    assert any(isinstance(error, SystemExit) and error.code == 17 for error in leaves(caught.value))
+    assert_all_reviewer_tasks_done(model)
 
 
 @pytest.mark.asyncio
@@ -214,9 +272,10 @@ async def test_runtime_error_is_redacted_from_error_and_traceback() -> None:
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
 
+    model = FakeReviewModel(review)
     with pytest.raises(MultiAgentReviewError) as caught:
         await run_multi_agent_review(
-            FakeReviewModel(review),
+            model,
             "artifact",
             {},
             timeout_seconds=1,
@@ -232,6 +291,7 @@ async def test_runtime_error_is_redacted_from_error_and_traceback() -> None:
     assert secret not in rendered
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
+    assert_all_reviewer_tasks_done(model)
 
 
 @pytest.mark.asyncio
@@ -254,9 +314,10 @@ async def test_parent_cancellation_propagates_and_cancels_all_reviewers() -> Non
             cancelled.add(role)
             raise
 
+    model = FakeReviewModel(review)
     parent = asyncio.create_task(
         run_multi_agent_review(
-            FakeReviewModel(review),
+            model,
             "artifact",
             {},
             timeout_seconds=10,
@@ -269,6 +330,7 @@ async def test_parent_cancellation_propagates_and_cancels_all_reviewers() -> Non
         await parent
 
     assert cancelled == set(ReviewerRole)
+    assert_all_reviewer_tasks_done(model)
 
 
 @pytest.mark.asyncio

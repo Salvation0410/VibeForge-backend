@@ -30,10 +30,18 @@ class MultiAgentReviewError(RuntimeError):
     """多角色质量审查协调失败后的稳定、脱敏外层异常。"""
 
 
-def _find_output_error(error: Exception) -> QualityReviewOutputError | None:
+def _contains_fatal_base_exception(error: BaseException) -> bool:
+    if isinstance(error, (KeyboardInterrupt, SystemExit)):
+        return True
+    if isinstance(error, BaseExceptionGroup):
+        return any(_contains_fatal_base_exception(nested) for nested in error.exceptions)
+    return False
+
+
+def _find_output_error(error: BaseException) -> QualityReviewOutputError | None:
     if isinstance(error, QualityReviewOutputError):
         return error
-    if isinstance(error, ExceptionGroup):
+    if isinstance(error, BaseExceptionGroup):
         for nested in error.exceptions:
             output_error = _find_output_error(nested)
             if output_error is not None:
@@ -137,7 +145,9 @@ async def run_multi_agent_review(
                     )
     except TimeoutError:
         mapped_error = _TIMEOUT_MESSAGE
-    except ExceptionGroup as error_group:
+    except BaseExceptionGroup as error_group:
+        if _contains_fatal_base_exception(error_group):
+            raise
         output_error = _find_output_error(error_group)
         mapped_error = str(output_error) if output_error is not None else _MODEL_ERROR_MESSAGE
     except Exception:
