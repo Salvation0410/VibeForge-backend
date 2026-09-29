@@ -14,10 +14,13 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -111,6 +114,33 @@ class LangGraphAiGenerationGatewayTest {
     }
 
     @Test
+    void sequentialRoutesReuseBoundedHttpConnections() throws Exception {
+        Set<Integer> remotePorts = ConcurrentHashMap.newKeySet();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/internal/v1/route", exchange -> {
+            remotePorts.add(exchange.getRemoteAddress().getPort());
+            exchange.getRequestBody().readAllBytes();
+            byte[] bytes = "{\"codeGenType\":\"HTML\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+        AiEngineProperties properties = new AiEngineProperties();
+        properties.setServiceUrl("http://127.0.0.1:" + server.getAddress().getPort());
+        properties.setToken("test-token");
+        var gateway = new LangGraphAiGenerationGateway(properties, new ObjectMapper());
+
+        for (int index = 0; index < 30; index++) {
+            assertEquals(CodeGenTypeEnum.HTML,
+                    gateway.route("build", null, 7L, "reuse-" + index));
+        }
+
+        assertTrue(remotePorts.size() <= 2,
+                "sequential requests should reuse HTTP/1.1 connections, ports=" + remotePorts);
+    }
+
+    @Test
     void cancellingSubscriberClosesNdjsonResponseBody() throws Exception {
         CountDownLatch firstChunkReceived = new CountDownLatch(1);
         CountDownLatch clientClosed = new CountDownLatch(1);
@@ -200,6 +230,68 @@ class LangGraphAiGenerationGatewayTest {
         assertEquals("req-idle", error.getRequestId());
         assertTrue(clientClosed.await(5, TimeUnit.SECONDS),
                 "idle timeout must close the NDJSON response body");
+    }
+
+    @Test
+    void idleTimeoutStormReleasesConnectionsAndKeepsClientUsable() throws Exception {
+        int streamCount = 12;
+        CountDownLatch clientClosed = new CountDownLatch(streamCount);
+        AtomicInteger activeStreams = new AtomicInteger();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        serverExecutor = Executors.newFixedThreadPool(streamCount + 1);
+        server.setExecutor(serverExecutor);
+        server.createContext("/internal/v1/generations:stream", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            exchange.sendResponseHeaders(200, 0);
+            activeStreams.incrementAndGet();
+            String chunk = "{\"requestId\":\"storm\",\"type\":\"node_status\","
+                    + "\"data\":{\"node\":\"generate_html\",\"status\":\"started\"}}\n";
+            exchange.getResponseBody().write(chunk.getBytes(StandardCharsets.UTF_8));
+            exchange.getResponseBody().flush();
+            try {
+                while (true) {
+                    Thread.sleep(25);
+                    exchange.getResponseBody().write(' ');
+                    exchange.getResponseBody().flush();
+                }
+            } catch (IOException expected) {
+                clientClosed.countDown();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            } finally {
+                activeStreams.decrementAndGet();
+                exchange.close();
+            }
+        });
+        server.createContext("/internal/v1/route", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            byte[] bytes = "{\"codeGenType\":\"HTML\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+        AiEngineProperties properties = new AiEngineProperties();
+        properties.setServiceUrl("http://127.0.0.1:" + server.getAddress().getPort());
+        properties.setToken("test-token");
+        properties.setGenerationStreamIdleTimeoutSeconds(1);
+        var gateway = new LangGraphAiGenerationGateway(properties, new ObjectMapper());
+
+        var errors = Flux.range(0, streamCount)
+                .flatMap(index -> gateway.generate("build", CodeGenTypeEnum.HTML, 42L, 7L, "storm-" + index)
+                        .then(reactor.core.publisher.Mono.just("unexpected-completion"))
+                        .onErrorResume(GenerationStreamException.class,
+                                error -> reactor.core.publisher.Mono.just(error.getErrorCode())), streamCount)
+                .collectList()
+                .block(Duration.ofSeconds(10));
+
+        assertNotNull(errors);
+        assertEquals(streamCount, errors.size());
+        assertTrue(errors.stream().allMatch("LANGGRAPH_STREAM_IDLE_TIMEOUT"::equals));
+        assertTrue(clientClosed.await(5, TimeUnit.SECONDS),
+                "all stalled response bodies must be closed after the idle timeout");
+        assertEquals(0, activeStreams.get());
+        assertEquals(CodeGenTypeEnum.HTML, gateway.route("build", null, 7L, "after-storm"));
     }
 
     @Test
