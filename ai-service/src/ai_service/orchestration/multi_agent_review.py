@@ -1,5 +1,8 @@
+import asyncio
 from collections.abc import Sequence
+from typing import Any
 
+from ai_service.models.base import GenerationModel
 from ai_service.models.quality_review import (
     IssueSeverity,
     QualityIssue,
@@ -17,6 +20,25 @@ _SEVERITY_RANK = {
 }
 _REQUIRED_ROLES = frozenset(ReviewerRole)
 _ROLE_RANK = {role: index for index, role in enumerate(ReviewerRole)}
+_TIMEOUT_MESSAGE = (
+    "MULTI_AGENT_REVIEW_TIMEOUT: quality reviewers exceeded the configured timeout"
+)
+_MODEL_ERROR_MESSAGE = "MULTI_AGENT_REVIEW_MODEL_ERROR: quality reviewer call failed"
+
+
+class MultiAgentReviewError(RuntimeError):
+    """多角色质量审查协调失败后的稳定、脱敏外层异常。"""
+
+
+def _find_output_error(error: Exception) -> QualityReviewOutputError | None:
+    if isinstance(error, QualityReviewOutputError):
+        return error
+    if isinstance(error, ExceptionGroup):
+        for nested in error.exceptions:
+            output_error = _find_output_error(nested)
+            if output_error is not None:
+                return output_error
+    return None
 
 
 def _key(issue: QualityIssue) -> tuple[str, str, str]:
@@ -94,3 +116,43 @@ def aggregate_review_results(results: Sequence[ReviewerResult]) -> QualityReview
         minor_issues=minor,
         repair_feedback=feedback,
     )
+
+
+async def run_multi_agent_review(
+    model: GenerationModel,
+    artifact: str,
+    context: dict[str, Any],
+    *,
+    timeout_seconds: float,
+) -> QualityReviewResult:
+    tasks: dict[ReviewerRole, asyncio.Task[ReviewerResult]] = {}
+    mapped_error: str | None = None
+
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            async with asyncio.TaskGroup() as task_group:
+                for role in ReviewerRole:
+                    tasks[role] = task_group.create_task(
+                        model.review_role(role, artifact, dict(context))
+                    )
+    except TimeoutError:
+        mapped_error = _TIMEOUT_MESSAGE
+    except ExceptionGroup as error_group:
+        output_error = _find_output_error(error_group)
+        mapped_error = str(output_error) if output_error is not None else _MODEL_ERROR_MESSAGE
+    except Exception:
+        mapped_error = _MODEL_ERROR_MESSAGE
+
+    if mapped_error is not None:
+        raise MultiAgentReviewError(mapped_error) from None
+
+    ordered_results = [tasks[role].result() for role in ReviewerRole]
+    aggregate_error: str | None = None
+    try:
+        return aggregate_review_results(ordered_results)
+    except QualityReviewOutputError as error:
+        aggregate_error = str(error)
+    except Exception:
+        aggregate_error = _MODEL_ERROR_MESSAGE
+
+    raise MultiAgentReviewError(aggregate_error) from None
