@@ -13,14 +13,17 @@
 - Spring 通过 `AiGenerationGateway` 在 Legacy、LangGraph 和稳定灰度模式之间路由，对前端继续保持原有 SSE 协议。
 - LangGraph 已支持 HTML、MULTI_FILE、VUE_PROJECT 三类生成、最多两次修复、Vue 有界工具循环、构建失败修复、质量检查、取消和终态事件。
 - HTML 与 MULTI_FILE 只有在 Spring 严格解析、确定性校验和不可变版本发布成功后才能完成；HTML 还执行 Selenium 浏览器烟测。
-- Legacy LangChain4j 仍是生产回滚路径。真实验收门通过前不得删除 Legacy、提高灰度比例或引入多 Agent。
+- 用户已于 2026-09-29 确认 P0 真实环境验收完成；本轮文档更新没有重复执行或重新生成验收证据。
+- Legacy LangChain4j 仍是生产回滚路径。稳定灰度数据和回滚窗口满足要求前不得删除 Legacy。
+- Python checkpoint 当前仍由 Redis database 2 提供；迁移到独立 PostgreSQL 数据库 `yu_ai_checkpoint` 的设计已批准，但代码尚未实施。
+- 本轮不启用长期记忆，不创建或注入 `PostgresStore`。
 
 ### 当前最高优先级
 
-1. 在真实 Spring、Python、Redis、模型和前端环境中完成三种生成类型的首次生成与二次修改。
-2. 验证停止、断线、模型超时、工具失败和长构建时的取消、旧预览保留和唯一终态。
-3. 完成两个真实 Spring 实例对同一工具调用的竞争与结果回放。
-4. 完成 Legacy/LangGraph 摘要对比和切回 Legacy 的回滚演练。
+1. 使用官方 `AsyncPostgresSaver` 将 Python checkpoint 从 Redis 迁移到独立 PostgreSQL 数据库 `yu_ai_checkpoint`。
+2. 保留终态删除完整图 checkpoint、异常退出 TTL 兜底和短期脱敏业务摘要语义。
+3. 增加本机 Docker PostgreSQL 的 opt-in 集成测试、初始化命令和运行文档。
+4. 明确长期记忆保持关闭；只有出现清晰的跨 thread 用户或应用记忆需求时才重新评估 `PostgresStore`。
 
 ### 已关闭的源码阻塞
 
@@ -202,6 +205,10 @@ Spring Redis: redis://localhost:6379/1
 Python checkpoint Redis: redis://localhost:6379/2
 ```
 
+以上是当前已实现配置。下一阶段会把 Python checkpoint 改为本机 Docker 中的独立 PostgreSQL
+数据库 `yu_ai_checkpoint`；迁移完成前不得提前删除 `AI_SERVICE_REDIS_*` 配置或把 PostgreSQL 写成
+已上线能力。Spring 工具幂等继续使用 Redis database 1，不属于本次迁移范围。
+
 当前两个调用方向仍共用静态令牌，本地联调时以下值必须一致：
 
 ```text
@@ -271,14 +278,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 
 ## 7. 当前人工与真实环境验收门
 
+用户已于 2026-09-29 确认本章 P0 场景完成。本轮没有重新执行真实模型、浏览器或双 Spring
+验收，因此只记录用户确认，不补造 requestId、截图或自动化通过证据。
+
 ### 7.1 状态总表
 
 | 优先级 | 验收项 | 当前状态 | 通过标准 |
 | --- | --- | --- | --- |
-| P0 | 三类型首次生成和二次修改 | 待执行 | 三个隔离应用均完成，历史、完整内容、图片、交互、构建、发布和预览正确 |
-| P0 | 停止、断线和失败终态 | 待执行 | 取消不发布新版本，失败保留旧预览，迟到回调不刷新，终态唯一 |
-| P0 | 双 Spring 工具竞争 | 自动化入口已具备，真实执行待完成 | 同一作用域只执行一次，另一实例回放同一成功结果，新作用域探针保持独立 |
-| P0 | 双引擎摘要与 Legacy 回滚 | Legacy 单链路已有成功记录，完整演练待完成 | 同一主体路由稳定，可比较摘要，可切回 Legacy 且取消语义一致 |
+| P0 | 三类型首次生成和二次修改 | 用户确认已完成，本轮未复测 | 三个隔离应用均完成，历史、完整内容、图片、交互、构建、发布和预览正确 |
+| P0 | 停止、断线和失败终态 | 用户确认已完成，本轮未复测 | 取消不发布新版本，失败保留旧预览，迟到回调不刷新，终态唯一 |
+| P0 | 双 Spring 工具竞争 | 用户确认已完成，本轮未复测 | 同一作用域只执行一次，另一实例回放同一成功结果，新作用域探针保持独立 |
+| P0 | 双引擎摘要与 Legacy 回滚 | 用户确认已完成，本轮未复测 | 同一主体路由稳定，可比较摘要，可切回 Legacy 且取消语义一致 |
 | P1 | 真实 Uvicorn/代理压力 | 待执行 | 无连接泄漏，慢流/背压可控，超时后线程与连接收敛 |
 | P1 | 真实 npm 长构建压力 | 待执行 | 取消/超时后无可复现残留 PID 或管道阻塞 |
 
@@ -338,11 +348,26 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 
 ## 8. 未完成优化清单
 
-### P0：先关闭真实验收门
+### 下一阶段：PostgreSQL checkpoint 重构
 
-1. 完成第 7 章四项真实环境验收并保存脱敏摘要。
-2. 将人工发现的问题转成最小可复现测试，再修复源码；不要只改验收脚本绕过失败。
-3. P0 全部通过后再评估提高灰度比例，任何提高都必须保留 Legacy 一键回滚。
+设计已批准，代码尚未实施。实施范围：
+
+1. 增加与当前 LangGraph 版本兼容的 `langgraph-checkpoint-postgres`、Psycopg 3 和连接池依赖。
+2. 使用 `AsyncPostgresSaver` 替换自定义 `RedisGraphSaver`，不自行复制官方 checkpoint SQL。
+3. 使用独立 PostgreSQL 数据库 `yu_ai_checkpoint`，与 Spring MySQL 和工具幂等 Redis 隔离。
+4. 使用同一 PostgreSQL 连接池维护短期脱敏业务摘要表 `ai_workflow_status`。
+5. 终态立即调用 `adelete_thread()`；异常退出通过 `expires_at` 和周期清理保持原 24 小时兜底语义。
+6. 增加独立初始化命令、optional/required/disabled 生命周期、ready 探测和真实 PostgreSQL opt-in 测试。
+7. 删除 Python Redis checkpoint 依赖和 `AI_SERVICE_REDIS_*` 配置，并同步更新全部启动、配置和交接文档。
+
+详细设计见 `docs/superpowers/specs/2026-09-29-postgres-checkpoint-design.md`。
+
+### 长期记忆决策
+
+- 本轮不启用 `PostgresStore`，不保存跨 thread 用户偏好或应用事实。
+- Spring 已提供聊天历史，当前没有必须由长期记忆解决的明确业务缺口。
+- 只有出现跨应用稳定偏好、跨 requestId 结构化架构决策，且已定义查看、修改、删除和过期机制时才重新评估。
+- 未来即使启用长期记忆，也必须使用独立 Store namespace，不得读取 checkpoint 表模拟记忆，也不得保存完整源码。
 
 ### P1：提高验收可复现性与资源证据
 
@@ -363,7 +388,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 - 不把文件、数据库、构建或发布迁移到 Python。
 - 当前单 worker、单实例 Python 部署下，不实现跨进程共享取消；扩容到多 worker/实例时重新评估。
 - 业务约束未变化前，不额外实现同账号同应用的并发修改仲裁。
-- P0 未通过前不提高灰度、不删除 Legacy、不引入多 Agent。
+- PostgreSQL checkpoint 迁移和稳定运行验证完成前，不删除 Legacy 或引入多 Agent。
 
 ## 9. 最近关键提交
 
@@ -412,6 +437,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 - `ai-service/README.md`：Python AI 服务使用、配置和测试说明。
 - `doc/ai-service-startup.md`：本地启动与联调步骤。
 - `doc/ai-service-langchain-langgraph-refactor-design.md`：重构架构与边界设计。
+- `docs/superpowers/specs/2026-09-29-postgres-checkpoint-design.md`：PostgreSQL checkpoint 迁移、故障语义和长期记忆决策。
 - `docs/superpowers/specs/2026-09-21-bounded-streaming-simple-prompts-design.md`：有限流式窗口和简短优化提示设计。
 - `docs/superpowers/specs/2026-09-21-circular-preview-spinner-design.md`：预览加载图正圆修复设计。
 
