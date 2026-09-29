@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import Sequence
+from copy import deepcopy
 from typing import Any
 
 from ai_service.models.base import GenerationModel
@@ -31,9 +32,26 @@ class MultiAgentReviewError(RuntimeError):
     """多角色质量审查协调失败后的稳定、脱敏外层异常。"""
 
 
+class _ReviewerFatalSignal(Exception):
+    def __init__(self, kind: str, code: int = 1) -> None:
+        super().__init__("quality reviewer raised a fatal exception")
+        self.kind = kind
+        self.code = code
+
+
+def _safe_system_exit_code(code: object) -> int:
+    return int(code) if isinstance(code, int) else 1
+
+
 def _fatal_base_exceptions(error: BaseException) -> list[BaseException]:
+    if isinstance(error, _ReviewerFatalSignal):
+        if error.kind == "system_exit":
+            return [SystemExit(error.code)]
+        return [KeyboardInterrupt()]
     if isinstance(error, (KeyboardInterrupt, SystemExit)):
-        return [error]
+        if isinstance(error, SystemExit):
+            return [SystemExit(_safe_system_exit_code(error.code))]
+        return [KeyboardInterrupt()]
     if isinstance(error, BaseExceptionGroup):
         return [
             fatal
@@ -82,11 +100,19 @@ def _feedback(issues: list[QualityIssue]) -> str:
         return ""
     lines: list[str] = []
     for index, issue in enumerate(issues, 1):
+        code = _feedback_value(issue.code)
+        summary = _feedback_value(issue.summary)
+        evidence = _feedback_value(issue.evidence)
+        repair_hint = _feedback_value(issue.repair_hint)
         lines.append(
-            f"{index}. severity={issue.severity.value}; code={issue.code}; issue={issue.summary}; "
-            f"evidence={issue.evidence}; repair={issue.repair_hint}"
+            f"{index}. severity={issue.severity.value}; code={code}; issue={summary}; "
+            f"evidence={evidence}; repair={repair_hint}"
         )
     return "\n".join(lines)
+
+
+def _feedback_value(value: str) -> str:
+    return " ".join(value.split()).replace(";", "；").replace("=", "＝")
 
 
 def aggregate_review_results(results: Sequence[ReviewerResult]) -> QualityReviewResult:
@@ -143,11 +169,27 @@ async def run_multi_agent_review(
     fatal_errors: list[BaseException] = []
     external_cancelled = False
 
+    async def run_reviewer(
+        role: ReviewerRole,
+        reviewer_context: dict[str, Any],
+    ) -> ReviewerResult:
+        fatal_signal: _ReviewerFatalSignal | None = None
+        try:
+            return await model.review_role(role, artifact, reviewer_context)
+        except SystemExit as error:
+            fatal_signal = _ReviewerFatalSignal(
+                "system_exit",
+                _safe_system_exit_code(error.code),
+            )
+        except KeyboardInterrupt:
+            fatal_signal = _ReviewerFatalSignal("keyboard_interrupt")
+        raise fatal_signal from None
+
     async def run_reviewers() -> None:
         async with asyncio.TaskGroup() as task_group:
             for role in ReviewerRole:
                 tasks[role] = task_group.create_task(
-                    model.review_role(role, artifact, dict(context))
+                    run_reviewer(role, deepcopy(context))
                 )
 
     timeout_scope = asyncio.timeout(timeout_seconds)
