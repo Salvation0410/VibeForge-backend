@@ -114,9 +114,12 @@ START
 
 - 功能开关 `AI_SERVICE_MULTI_AGENT_REVIEW_ENABLED` 默认 `false`，第一阶段只支持 `VUE_PROJECT`，不改变 HTML、MULTI_FILE 或关闭开关时的现有路径。
 - 三个角色分别是 requirement、function、technical；三者并发、只读、职责独立，共享 `AI_SERVICE_MULTI_AGENT_REVIEW_TIMEOUT_SECONDS` 指定的整体超时。
+- 三个角色的 `artifact` 均为 Spring 返回的有界真实 snapshot；Reviewer `context` 严格白名单为 `prompt`、`codeGenType`、`validation`、`build`，且为每个角色深拷贝。不会传入 `conversation`、`metadata`、`currentArtifact`、`toolResults`、`appId`、`requestId` 或其他生成期状态；Vue repair 工具循环仍保留 `toolResults`。
+- 提示词要求无 Markdown 围栏的纯 JSON。适配器仅为供应商兼容防御性剥离单一完整 JSON 围栏，随后仍执行严格 Pydantic schema、字段边界和 Reviewer 身份校验；围栏外解释或其他附加文本仍属于非法输出。
 - 聚合由确定性代码完成。`critical`、`major` 生成最多 4000 字符的阻断性 `repair_feedback` 并进入现有 repair 回环；`minor` 不触发 repair，也不消耗修复次数。
+- `repair_feedback` 每个问题固定单独一行，字段依次为 `severity`、`code`、`issue`、`evidence`、`repair`；字段值折叠空白并把内部 `;`、`=` 规范化为全角字符，不添加总标题、Reviewer 或 category。
 - repair 总上限仍由 `AI_SERVICE_MAX_REPAIR_ATTEMPTS` 控制，默认最多两次。每次修复后重新执行硬校验、项目构建、真实源码快照和三个 Reviewer。
-- 任一 Reviewer 超时、模型调用异常、非法结构或快照失败均按 F1 直接进入 `failed`，不回退单 Reviewer、不盲修、不发布候选结果。稳定错误码为 `MULTI_AGENT_REVIEW_TIMEOUT`、`MULTI_AGENT_REVIEW_MODEL_ERROR`、`MULTI_AGENT_REVIEW_INVALID_OUTPUT`、`MULTI_AGENT_REVIEW_SNAPSHOT_ERROR`。
+- 任一 Reviewer 超时、普通模型调用异常、非法结构或快照失败均按 F1 直接进入 `failed`，不回退单 Reviewer、不盲修、不发布候选结果。稳定错误码为 `MULTI_AGENT_REVIEW_TIMEOUT`、`MULTI_AGENT_REVIEW_MODEL_ERROR`、`MULTI_AGENT_REVIEW_INVALID_OUTPUT`、`MULTI_AGENT_REVIEW_SNAPSHOT_ERROR`。直接 `SystemExit`/`KeyboardInterrupt` 会在 Reviewer 边界脱敏，等待兄弟任务清理后重新抛出；非整数 `SystemExit.code` 归一为 `1`。
 - 取消检查覆盖快照前、Reviewer 启动前和聚合完成后；`asyncio.CancelledError` 保持取消语义，仍在运行的 Reviewer 任务由任务组收敛。
 - 不新增公开 SSE 类型，不改变 Spring 对应用数据、项目文件、构建、发布、聊天历史和对外 SSE 的所有权。
 - 业务状态表 `ai_workflow_status` 不保存审查正文。LangGraph 图 checkpoint 只保存最多 4000 字符的阻断性 `repair_feedback`，用于从已完成的 `quality_review` 恢复到 repair 且不重复 Reviewer；minor 详情、Reviewer summary、`reviewer_results`、`quality_issues` 均不保存。
@@ -303,11 +306,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 | Redis opt-in 集成 | `powershell -NoProfile -File scripts/verify-langgraph-real-gate.ps1 -Execute -IncludeRedis` | 最近真实环境 6 项通过 | 跨客户端回放、唯一执行、冲突与不确定态 |
 | PowerShell 脚本 | `powershell -NoProfile -File scripts/ai-validation-scripts.tests.ps1` | Windows PowerShell 5.1 与 PowerShell 7 检查通过 | 验收脚本参数、认证和脱敏约束 |
 | 统一非外部数据库门禁 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1 -Execute` | 本轮未重新执行；此前历史基线为 6 个步骤通过 | 不能作为本轮新增多 Agent 测试数量的 fresh 证据 |
-| Python 编译 | `uv run python -m compileall -q src` | 2026-09-29 fresh：退出码 0，无输出 | 当前 Python 源码可完成字节码编译 |
-| Python 全量 | `uv run pytest` | 2026-09-29 fresh：241 项通过、1 项跳过、2 个依赖弃用警告 | Fake Model、三类工作流、多 Agent 聚合/取消/checkpoint、降级、清理与 API 契约 |
-| Python 锁文件 | `uv lock --check` | 2026-09-29 fresh：退出码 0，解析 71 个包 | `uv.lock` 与项目依赖声明一致 |
-| 文档空白检查 | `git diff --check` | 2026-09-29 fresh：退出码 0，无空白错误；仅有 Git 的 LF/CRLF 工作树提示 | 本轮文档差异没有尾随空格等补丁错误 |
-| 修改范围 | `git status --short` | 2026-09-29 fresh：仅 README、阶段交接和多 Agent 设计三份允许文档为修改状态 | 未修改业务代码、测试、计划或其他文件 |
+| Python 编译 | `uv run python -m compileall -q src` | 2026-09-29 最终实现 fresh：退出码 0，无输出 | 当前 Python 源码可完成字节码编译 |
+| Python 全量 | `uv run pytest` | 2026-09-29 最终实现 fresh：246 项通过、1 项跳过、2 个依赖弃用警告 | Fake Model、三类工作流、多 Agent 输入白名单/fatal/反馈规范化/取消/checkpoint、降级、清理与 API 契约 |
+| Python 锁文件 | `uv lock --check` | 2026-09-29 最终实现 fresh：退出码 0，解析 71 个包 | `uv.lock` 与项目依赖声明一致 |
+| 文档空白检查 | `git diff --check` | 2026-09-29 最终同步 fresh：退出码 0，无空白错误；仅有 Git 的 LF/CRLF 工作树提示 | 本轮文档差异没有尾随空格等补丁错误 |
+| 当前工作树 | `git status --short` | 当前隔离分支工作树干净，最终提交后命令无输出 | 不把其他工作树或前端仓库状态混入本分支结论 |
+| 实现差异范围 | `git diff --stat b5c665d..HEAD` | 20 个文件，2510 行新增、57 行删除，覆盖 Python 生产代码、测试、配置和文档 | Vue 多 Agent 实施并非仅文档修改；范围以设计基线至当前 HEAD 的真实 Git 差异为准 |
 | PostgreSQL 默认门 | `uv run pytest tests/test_postgres_checkpoint_integration.py` | 默认 1 项跳过，不连接数据库 | opt-in 门禁不会误连本机数据库 |
 
 重要限制：
@@ -458,6 +462,8 @@ Vue 多 Agent 是 Python LangGraph 内部的功能开关，回滚时保持 LangG
 
 | 提交 | 内容 |
 | --- | --- |
+| `e1abf75` | 限制多 Agent Reviewer 输入上下文 |
+| `47662be` | 加固审查上下文、反馈格式与致命异常处理 |
 | `928a973` | 覆盖多 Agent 审查取消与导入 |
 | `42dd584` | 收敛质量审查 checkpoint 状态 |
 | `b1360ca` | 接入 Vue 多 Agent 质量审查 |

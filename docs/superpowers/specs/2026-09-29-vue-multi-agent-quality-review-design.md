@@ -102,12 +102,16 @@ Spring vue_source_snapshot 返回有界真实源码
 
 三个 Reviewer：
 
-- 接收相同的用户需求、生成类型、构建摘要和有界源码快照。
+- `artifact` 接收相同的有界真实源码 snapshot。
+- `context` 只接收 `prompt`、`codeGenType`、`validation`、`build` 四个白名单字段。
+- 不接收 `conversation`、`metadata`、`currentArtifact`、`toolResults`、`appId`、`requestId` 或其他生成期状态。
 - 使用独立 system prompt。
-- 不共享可变对话状态。
+- 每个 Reviewer 使用独立深拷贝 context，不共享嵌套可变状态。
 - 不持有 Spring 工具网关。
 - 不直接修改 LangGraph 工作流状态。
 - 只返回结构化 `ReviewerResult`。
+
+Reviewer context 白名单不改变 repair 输入。Vue repair 继续在既有工具循环 context 中保留并使用 `toolResults`，只在下一轮 Reviewer 调用时重新收敛为上述四个字段。
 
 ## 6. 源码审查输入
 
@@ -129,9 +133,11 @@ Python 不直接读取项目目录。源码快照仍由 Spring 在应用沙箱�
 
 源码和文件内容不能进入 NDJSON/SSE 事件。工具事件只暴露文件数量、遗漏数量和是否截断等统计信息。
 
+Reviewer 的模型请求由 `artifact=<有界 snapshot>` 与四字段 context 组成；conversation、metadata、当前 artifact、工具返回源码和应用/请求标识不能通过 context 旁路快照边界进入审查模型。
+
 ## 7. 结构化数据契约
 
-建议使用以下领域模型：
+当前实现使用以下领域模型：
 
 ```python
 class ReviewerRole(StrEnum):
@@ -170,6 +176,8 @@ class QualityReviewResult(BaseModel):
 ```
 
 模型不直接返回最终 `passed`。是否通过完全由聚合器根据经过校验的问题严重度计算，避免模型同时返回“通过”和 critical 问题等矛盾结果。
+
+提示词要求模型返回无 Markdown 围栏、无解释文字的纯 JSON。为兼容部分供应商，适配器可防御性剥离单一完整 JSON 围栏；剥离后仍执行严格 Pydantic schema、额外字段、枚举、长度和 Reviewer 身份校验。该兼容只处理完整围栏，不允许 JSON 前后夹带说明、多个围栏或任意解释文本。
 
 ## 8. 数据上限
 
@@ -214,7 +222,7 @@ Python 必须验证所有边界，不能只依赖提示词。超限、字段缺�
 1. severity=major; code=REQ_MISSING_SEARCH; issue=用户要求的搜索功能未实现。; evidence=页面存在搜索输入框，但没有提交或过滤逻辑。; repair=补充搜索触发和结果过滤，同时保留现有列表功能。
 ```
 
-每个阻断问题占一行，字段固定为 `severity`、`code`、`issue`、`evidence`、`repair`；实现不会额外添加总标题，也不会把 Reviewer 身份或 category 写入 `repair_feedback`。
+每个阻断问题占一行，字段固定为 `severity`、`code`、`issue`、`evidence`、`repair`；实现先把字段值中的换行、制表符和连续空白折叠为单个空格，再把值内部的 ASCII `;`、`=` 规范化为全角 `；`、`＝`，防止伪造结构分隔符。反馈不会额外添加总标题，也不会把 Reviewer 身份或 category 写入 `repair_feedback`。
 
 Repair 上下文增加质量反馈：
 
@@ -262,6 +270,8 @@ MULTI_AGENT_REVIEW_SNAPSHOT_ERROR
 ```
 
 任一错误均发送现有 `failed` 终态，不进入 repair，不发布候选版本。错误消息不得包含源码、用户完整提示词或模型原始响应。
+
+进程控制类 fatal 单独处理：Reviewer 直接抛出 `SystemExit` 或 `KeyboardInterrupt` 时，边界先转换为无敏感信息的内部信号，让 `TaskGroup` 取消并等待兄弟任务清理，再重新抛出脱敏的 fatal；非整数 `SystemExit.code` 统一归一为 `1`。fatal 不包装成普通模型错误，也不泄露原异常参数或 traceback context。
 
 ## 12. 取消语义
 
@@ -329,14 +339,14 @@ failed
 
 ## 15. 文件边界
 
-计划新增：
+本轮新增：
 
 - `ai-service/src/ai_service/models/quality_review.py`：领域类型和严格输出解析。
 - `ai-service/src/ai_service/orchestration/multi_agent_review.py`：并发协调、超时、聚合和反馈生成。
 - `ai-service/tests/test_quality_review.py`：结构校验和聚合规则测试。
 - `ai-service/tests/test_multi_agent_review.py`：并发、超时、取消和异常传播测试。
 
-计划修改：
+本轮修改：
 
 - `ai-service/src/ai_service/config.py`
 - `ai-service/src/ai_service/models/base.py`
@@ -353,7 +363,7 @@ failed
 - `ai-service/README.md`
 - `doc/ai-service-phase-one-handoff.md`
 
-预计无需修改 Spring、前端、内部工具契约和数据库迁移文件。
+本轮未修改 Spring、前端、内部工具契约和数据库迁移文件。
 
 ## 16. 测试要求
 
@@ -365,6 +375,8 @@ failed
 - 重复问题正确归并并保留最高严重度。
 - 问题数量和字段长度受到硬限制。
 - 非 JSON、顶层类型错误、缺字段、未知角色、角色错配、未知严重度和超限内容均导致失败。
+- 提示词要求纯 JSON，适配器只兼容单一完整 JSON 围栏，围栏外解释仍拒绝。
+- repair feedback 折叠空白、规范化值内部的 `;`/`=`，并保持每个问题单行。
 
 ### 16.2 并发与取消
 
@@ -374,6 +386,7 @@ failed
 - 整体超时时取消全部任务。
 - 用户停止时返回 `cancelled`，不误报模型错误。
 - 取消后不调用 repair，不发送 completed。
+- 直接 `SystemExit`/`KeyboardInterrupt` 脱敏，等待兄弟任务清理；非整数退出码归一为 `1`。
 
 ### 16.3 工作流
 
@@ -384,6 +397,7 @@ failed
 - 每次修复后读取新快照。
 - 快照源码不进入事件。
 - critical/major 反馈传入 repair context。
+- Reviewer context 只含四个白名单字段且不含 `toolResults`；repair 工具循环仍保留 `toolResults`。
 - minor 不进入 repair feedback。
 - 修复后重新构建并重新三方审查。
 - 最多两次修复限制保持不变。
@@ -410,7 +424,7 @@ git status --short
 
 ## 17. 人工验证
 
-以下项目依赖真实模型和完整本地环境，需要实施后人工验证并同步到交接文档：
+以下项目依赖真实模型和完整本地环境，实施完成后仍待人工验证并同步到交接文档：
 
 1. 本机 Docker PostgreSQL checkpoint 正常可用。
 2. Spring、Python AI 服务和 Vue 前端全部启动。

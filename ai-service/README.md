@@ -96,9 +96,15 @@ Vue 多 Agent 质量审查开启时，首次生成和每次修复重新通过硬
 - `function`：检查主要交互、页面流程和功能可用性。
 - `technical`：检查工程结构、运行风险、明显安全问题和可维护性阻塞。
 
+三个角色收到的 `artifact` 都是 Spring 返回的有界真实源码 snapshot；Reviewer `context` 只允许 `prompt`、`codeGenType`、`validation`、`build` 四个字段，并为每个角色创建独立深拷贝。Reviewer 不接收 `conversation`、`metadata`、`currentArtifact`、`toolResults`、`appId`、`requestId` 或其他生成期状态，避免无界内容和内部标识扩散。该白名单只约束审查输入，不改变 repair：Vue repair 工具循环仍保留并继续使用 `toolResults`。
+
+Reviewer 提示词要求模型只返回没有 Markdown 围栏的纯 JSON。为兼容部分 OpenAI 兼容供应商，适配器可防御性剥离单一完整 JSON 围栏，随后仍使用严格 Pydantic schema 校验字段、长度、枚举、额外字段和 Reviewer 身份；这不表示允许围栏外解释、前后缀文字或任意自然语言输出。
+
 三个 Reviewer 共享 `AI_SERVICE_MULTI_AGENT_REVIEW_TIMEOUT_SECONDS` 指定的整体超时，不是每个角色各自拥有一份超时预算。聚合由确定性代码完成：`critical` 和 `major` 属于阻断问题，会生成最多 4000 字符的 `repair_feedback` 并进入现有 repair 回环；`minor` 只作为本次调用内的审查详情，不触发 repair，也不消耗修复次数。修复仍受 `AI_SERVICE_MAX_REPAIR_ATTEMPTS` 限制，默认最多两次；每次修复后重新执行校验、构建、真实源码快照和三角色审查。
 
-任一 Reviewer 超时、模型调用失败、返回非法结构，或源码快照失败，都按 F1 直接发送 `failed`，不回退到单 Reviewer、不盲目修复、也不把候选版本当作成功。稳定错误码包括 `MULTI_AGENT_REVIEW_TIMEOUT`、`MULTI_AGENT_REVIEW_MODEL_ERROR`、`MULTI_AGENT_REVIEW_INVALID_OUTPUT` 和 `MULTI_AGENT_REVIEW_SNAPSHOT_ERROR`。用户取消会继续沿用现有协作式取消语义，并取消仍在运行的 Reviewer 任务。
+`repair_feedback` 的每个阻断问题固定为单独一行，字段顺序是 `severity`、`code`、`issue`、`evidence`、`repair`。字段值先折叠换行、制表符等空白，再把值内部的 `;`、`=` 规范化为全角分隔符，防止内容伪造结构字段；反馈不添加总标题，也不包含 Reviewer 身份或 category。
+
+任一 Reviewer 超时、普通模型调用失败、返回非法结构，或源码快照失败，都按 F1 直接发送 `failed`，不回退到单 Reviewer、不盲目修复、也不把候选版本当作成功。稳定错误码包括 `MULTI_AGENT_REVIEW_TIMEOUT`、`MULTI_AGENT_REVIEW_MODEL_ERROR`、`MULTI_AGENT_REVIEW_INVALID_OUTPUT` 和 `MULTI_AGENT_REVIEW_SNAPSHOT_ERROR`。用户取消会继续沿用现有协作式取消语义，并取消仍在运行的 Reviewer 任务。Reviewer 边界直接收到 `SystemExit` 或 `KeyboardInterrupt` 时会先脱敏，再等待兄弟任务取消和清理完成后重新抛出；非整数 `SystemExit.code` 统一归一为 `1`，不会泄露原始异常内容。
 
 该能力不新增公开 SSE 事件，不改变 Spring 对业务数据、项目文件、构建、发布和对外 SSE 的所有权。完整源码快照、Reviewer summary、`reviewer_results`、`quality_issues` 和 minor 详情都不持久化；`ai_workflow_status` 仍只保存脱敏状态摘要。LangGraph 图 checkpoint 仅在阻断问题需要恢复到 repair 时保存最多 4000 字符的 `repair_feedback`，恢复后直接进入 repair，不重复调用已经完成的 Reviewer。终态仍执行 best-effort thread 清理，TTL 继续作为异常退出兜底。本轮不启用长期记忆，也不创建或注入 `PostgresStore`。
 
