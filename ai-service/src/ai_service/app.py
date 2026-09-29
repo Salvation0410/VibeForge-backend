@@ -11,8 +11,8 @@ from ai_service.config import Settings, get_settings
 from ai_service.infrastructure.checkpoint import (
     CheckpointStore,
     DisabledCheckpoint,
-    RedisCheckpoint,
 )
+from ai_service.infrastructure.postgres_checkpoint import PostgresCheckpoint
 from ai_service.infrastructure.spring_tools import SpringToolGateway
 from ai_service.models.base import GenerationModel
 from ai_service.models.openai_compatible import OpenAICompatibleModel
@@ -41,12 +41,15 @@ def create_app(
         bearer_token=config.spring_gateway_bearer_token,
     )
     checkpoint_store = checkpoint or (
-        RedisCheckpoint(
-            config.redis_url,
-            required=config.redis_required,
+        PostgresCheckpoint(
+            config.checkpoint_postgres_url,
+            required=config.checkpoint_required,
+            auto_setup=config.checkpoint_auto_setup,
             ttl_seconds=config.checkpoint_ttl_seconds,
+            pool_min_size=config.checkpoint_pool_min_size,
+            pool_max_size=config.checkpoint_pool_max_size,
         )
-        if config.redis_enabled
+        if config.checkpoint_enabled
         else DisabledCheckpoint()
     )
     cancellations = CancellationRegistry()

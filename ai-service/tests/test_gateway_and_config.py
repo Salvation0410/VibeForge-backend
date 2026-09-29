@@ -1,4 +1,3 @@
-import fnmatch
 import json
 
 import httpx
@@ -6,7 +5,6 @@ import pytest
 from pydantic import ValidationError
 
 from ai_service.config import Settings
-from ai_service.infrastructure.checkpoint import RedisCheckpoint, RedisGraphSaver
 from ai_service.infrastructure.spring_tools import (
     InvalidSpringToolRequest,
     SpringToolError,
@@ -646,98 +644,27 @@ def test_model_max_tokens_defaults_to_8192_and_must_be_positive():
         )
 
 
-@pytest.mark.asyncio
-async def test_optional_redis_has_explicit_degraded_mode(monkeypatch):
-    checkpoint = RedisCheckpoint("redis://127.0.0.1:1/0", required=False, ttl_seconds=86400)
+def test_checkpoint_postgres_defaults():
+    settings = Settings(
+        internal_bearer_token="internal-token",
+        spring_gateway_base_url="http://spring.test",
+        spring_gateway_bearer_token="gateway-token",
+    )
 
-    async def unavailable():
-        raise OSError("redis unavailable")
-
-    monkeypatch.setattr(checkpoint._client, "ping", unavailable)
-    await checkpoint.start()
-    assert checkpoint.available is False
-    await checkpoint.save("42:req", {"node": "input_guard"})
-    assert checkpoint.get_graph_saver() is None
-
-
-def test_available_redis_exposes_a_real_langgraph_checkpointer():
-    checkpoint = RedisCheckpoint("redis://localhost:6379/0", required=False, ttl_seconds=86400)
-    checkpoint.available = True
-    assert checkpoint.get_graph_saver() is not None
-    assert checkpoint.get_graph_saver().__class__.__mro__[1].__name__ == "BaseCheckpointSaver"
+    assert settings.checkpoint_enabled is True
+    assert settings.checkpoint_required is False
+    assert settings.checkpoint_postgres_url.startswith("postgresql://")
+    assert settings.checkpoint_auto_setup is True
+    assert settings.checkpoint_pool_min_size == 1
+    assert settings.checkpoint_pool_max_size == 5
 
 
-@pytest.mark.asyncio
-async def test_required_redis_fails_startup(monkeypatch):
-    checkpoint = RedisCheckpoint("redis://127.0.0.1:1/0", required=True, ttl_seconds=86400)
-
-    async def unavailable():
-        raise OSError("redis unavailable")
-
-    monkeypatch.setattr(checkpoint._client, "ping", unavailable)
-    with pytest.raises(RuntimeError, match="Redis checkpoint is required"):
-        await checkpoint.start()
-
-
-@pytest.mark.asyncio
-async def test_redis_graph_saver_deletes_only_target_thread_artifacts():
-    all_keys = {
-        "yu-ai:langgraph:checkpoint:NDI6cmVxLTE:_:cp-1",
-        "yu-ai:langgraph:latest:NDI6cmVxLTE:_",
-        "yu-ai:langgraph:writes:NDI6cmVxLTE:_:cp-1:task-0",
-        "yu-ai:langgraph:checkpoint:NDI6b3RoZXI:_:cp-2",
-        "yu-ai:langgraph:latest:OTHER:NDI6cmVxLTE:N",
-    }
-    deleted: list[str] = []
-
-    class FakeRedis:
-        async def scan_iter(self, *, match: str):
-            for key in all_keys:
-                if fnmatch.fnmatch(key, match):
-                    yield key
-
-        async def delete(self, *keys: str):
-            deleted.extend(keys)
-
-    saver = RedisGraphSaver(FakeRedis(), ttl_seconds=60)
-    await saver.adelete_thread("42:req-1")
-
-    assert set(deleted) == {
-        "yu-ai:langgraph:checkpoint:NDI6cmVxLTE:_:cp-1",
-        "yu-ai:langgraph:latest:NDI6cmVxLTE:_",
-        "yu-ai:langgraph:writes:NDI6cmVxLTE:_:cp-1:task-0",
-    }
-    assert "yu-ai:langgraph:checkpoint:NDI6b3RoZXI:_:cp-2" not in deleted
-    assert "yu-ai:langgraph:latest:OTHER:NDI6cmVxLTE:N" not in deleted
-
-
-@pytest.mark.asyncio
-async def test_redis_checkpoint_cleanup_delegates_when_available(monkeypatch):
-    checkpoint = RedisCheckpoint("redis://localhost:6379/0", required=False, ttl_seconds=60)
-    checkpoint.available = True
-    cleaned: list[str] = []
-
-    async def cleanup(thread_id: str):
-        cleaned.append(thread_id)
-
-    monkeypatch.setattr(checkpoint._graph_saver, "adelete_thread", cleanup)
-    await checkpoint.cleanup_graph("42:req-1")
-
-    assert cleaned == ["42:req-1"]
-    assert checkpoint.available is True
-
-
-@pytest.mark.asyncio
-async def test_required_redis_cleanup_failure_degrades_without_raising(monkeypatch, caplog):
-    checkpoint = RedisCheckpoint("redis://localhost:6379/0", required=True, ttl_seconds=60)
-    checkpoint.available = True
-
-    async def cleanup(_: str):
-        raise OSError("cleanup unavailable")
-
-    monkeypatch.setattr(checkpoint._graph_saver, "adelete_thread", cleanup)
-    with caplog.at_level("WARNING"):
-        await checkpoint.cleanup_graph("42:req-1")
-
-    assert checkpoint.available is False
-    assert "LangGraph checkpoint cleanup failed for 42:req-1" in caplog.text
+def test_checkpoint_pool_max_must_not_be_smaller_than_min():
+    with pytest.raises(ValidationError, match="checkpoint_pool_max_size"):
+        Settings(
+            internal_bearer_token="internal-token",
+            spring_gateway_base_url="http://spring.test",
+            spring_gateway_bearer_token="gateway-token",
+            checkpoint_pool_min_size=4,
+            checkpoint_pool_max_size=2,
+        )

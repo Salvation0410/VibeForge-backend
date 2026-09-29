@@ -135,8 +135,8 @@ def settings() -> Settings:
         internal_bearer_token="test-secret",
         spring_gateway_base_url="http://spring.test/api/internal/ai-tools",
         spring_gateway_bearer_token="spring-secret",
-        redis_enabled=False,
-        redis_required=False,
+        checkpoint_enabled=False,
+        checkpoint_required=False,
     )
 
 
