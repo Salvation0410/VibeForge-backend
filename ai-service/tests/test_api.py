@@ -606,9 +606,151 @@ def test_vue_multi_agent_major_issue_repairs_with_feedback_and_reviews_fresh_sna
     ][3:]
     assert len(second_round) == 3
     assert all("qualityReview" not in call["context"] for call in second_round)
-    assert all(call["context"]["toolResults"] for call in second_round)
+    assert all("toolResults" not in call["context"] for call in second_round)
+    assert all(call["context"]["codeGenType"] == "VUE_PROJECT" for call in second_round)
+    assert all(set(call["context"]) == {
+        "prompt",
+        "codeGenType",
+        "validation",
+        "build",
+    } for call in second_round)
     assert events[-1]["type"] == "completed"
     assert events[-1]["data"]["repairCount"] == 1
+
+
+def test_vue_multi_agent_review_context_excludes_unbounded_generation_state(
+    settings, app_factory, auth_headers, ndjson_parser
+):
+    settings.multi_agent_review_enabled = True
+    tool_source_marker = "UNIQUE_TOOL_SOURCE_2101"
+    tool_source = tool_source_marker + ("x" * 100_001)
+    conversation_marker = "UNIQUE_CONVERSATION_2102"
+    metadata_marker = "UNIQUE_METADATA_2103"
+    current_artifact_marker = "UNIQUE_CURRENT_ARTIFACT_2104"
+    snapshot_marker = "UNIQUE_BOUNDED_SNAPSHOT_2105"
+
+    class ToolingRepairModel(FakeModel):
+        def __init__(self):
+            super().__init__(role_reviews={
+                ReviewerRole.REQUIREMENT: [
+                    reviewer_result(
+                        ReviewerRole.REQUIREMENT,
+                        severity=IssueSeverity.MAJOR,
+                        code="REPAIR_REQUIRED",
+                    ),
+                    reviewer_result(ReviewerRole.REQUIREMENT),
+                ]
+            })
+            self.generate_turn = 0
+            self.repair_turn = 0
+
+        async def generate(self, branch, context):
+            self.calls.append(("generate", {"branch": branch, "context": context}))
+            self.generate_turn += 1
+            if self.generate_turn == 1:
+                return ModelTurn(
+                    content="generate tool request",
+                    tool_calls=[ToolCall(
+                        name="file_read",
+                        arguments={"relativeFilePath": "src/App.vue"},
+                    )],
+                )
+            return ModelTurn(content="generated", finish_reason="STOP")
+
+        async def repair(self, artifact, context):
+            self.calls.append(("repair", {"artifact": artifact, "context": context}))
+            self.repair_turn += 1
+            if self.repair_turn == 1:
+                return ModelTurn(
+                    content="repair tool request",
+                    tool_calls=[ToolCall(
+                        name="file_read",
+                        arguments={"relativeFilePath": "src/App.vue"},
+                    )],
+                )
+            return ModelTurn(content="repaired", finish_reason="STOP")
+
+    class SensitiveGateway(FakeToolGateway):
+        def __init__(self):
+            super().__init__(
+                artifact_context={
+                    "exists": True,
+                    "content": current_artifact_marker,
+                },
+                vue_source_snapshot={
+                    "files": [{
+                        "path": "src/App.vue",
+                        "content": snapshot_marker,
+                        "truncated": False,
+                    }],
+                    "eligibleFileCount": 1,
+                    "includedFileCount": 1,
+                    "omittedFileCount": 0,
+                    "truncated": False,
+                },
+            )
+
+        async def invoke(self, name, arguments, *, app_id, request_id, tool_call_id):
+            result = await super().invoke(
+                name,
+                arguments,
+                app_id=app_id,
+                request_id=request_id,
+                tool_call_id=tool_call_id,
+            )
+            if name == "file_read":
+                return {"content": tool_source}
+            return result
+
+    payload = generation_payload("VUE_PROJECT")
+    payload["conversation"] = [{"role": "user", "content": conversation_marker}]
+    payload["metadata"] = {"privateMarker": metadata_marker}
+    model = ToolingRepairModel()
+
+    events = ndjson_parser(TestClient(app_factory(
+        model=model,
+        gateway=SensitiveGateway(),
+    )).post(
+        "/internal/v1/generations:stream",
+        json=payload,
+        headers=auth_headers,
+    ))
+
+    role_calls = [data for name, data in model.calls if name == "review_role"]
+    assert len(role_calls) == 6
+    expected_context_keys = {"prompt", "codeGenType", "validation", "build"}
+    forbidden_keys = {
+        "conversation",
+        "metadata",
+        "currentArtifact",
+        "toolResults",
+        "appId",
+        "requestId",
+        "qualityReview",
+    }
+    forbidden_markers = {
+        tool_source_marker,
+        conversation_marker,
+        metadata_marker,
+        current_artifact_marker,
+    }
+    for call in role_calls:
+        assert set(call["context"]) == expected_context_keys
+        assert call["context"]["codeGenType"] == "VUE_PROJECT"
+        assert forbidden_keys.isdisjoint(call["context"])
+        serialized_context = json.dumps(call["context"], ensure_ascii=False)
+        assert all(marker not in serialized_context for marker in forbidden_markers)
+        assert snapshot_marker in call["artifact"]
+        assert tool_source_marker not in call["artifact"]
+        assert conversation_marker not in call["artifact"]
+        assert metadata_marker not in call["artifact"]
+        assert current_artifact_marker not in call["artifact"]
+
+    repair_calls = [data for name, data in model.calls if name == "repair"]
+    assert len(repair_calls) == 2
+    assert all(call["context"]["toolResults"] for call in repair_calls)
+    assert tool_source_marker in json.dumps(repair_calls, ensure_ascii=False)
+    assert events[-1]["type"] == "completed"
 
 
 def test_vue_multi_agent_two_blocking_rounds_exhaust_repairs_without_leaking_review_text(

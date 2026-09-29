@@ -354,12 +354,13 @@ class GenerationWorkflow:
                         ) from None
                     raise
                 review_artifact = _vue_snapshot_artifact(snapshot)
-            review_context = {
-                **state["context"],
-                "validation": state.get("validation"),
-                "build": state.get("build"),
-            }
             if multi_agent_enabled:
+                review_context = {
+                    "prompt": state["prompt"],
+                    "codeGenType": "VUE_PROJECT",
+                    "validation": state.get("validation"),
+                    "build": state.get("build"),
+                }
                 self._raise_if_cancelled(thread_id)
                 result = await run_multi_agent_review(
                     self.model,
@@ -372,6 +373,11 @@ class GenerationWorkflow:
                     "quality_passed": result.passed,
                     "repair_feedback": result.repair_feedback,
                 }
+            review_context = {
+                **state["context"],
+                "validation": state.get("validation"),
+                "build": state.get("build"),
+            }
             if uses_vue_snapshot:
                 try:
                     passed = await self.model.review(review_artifact, review_context)
