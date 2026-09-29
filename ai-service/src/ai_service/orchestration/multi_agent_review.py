@@ -150,8 +150,9 @@ async def run_multi_agent_review(
                     model.review_role(role, artifact, dict(context))
                 )
 
+    timeout_scope = asyncio.timeout(timeout_seconds)
     try:
-        async with asyncio.timeout(timeout_seconds):
+        async with timeout_scope:
             await asyncio.create_task(run_reviewers())
     except TimeoutError:
         mapped_error = _TIMEOUT_MESSAGE
@@ -161,10 +162,13 @@ async def run_multi_agent_review(
             current_task = asyncio.current_task()
             external_cancelled = current_task is not None and current_task.cancelling() > 0
         if not fatal_errors and not external_cancelled:
-            output_error = _find_output_error(error_group)
-            mapped_error = (
-                str(output_error) if output_error is not None else _MODEL_ERROR_MESSAGE
-            )
+            if timeout_scope.expired():
+                mapped_error = _TIMEOUT_MESSAGE
+            else:
+                output_error = _find_output_error(error_group)
+                mapped_error = (
+                    str(output_error) if output_error is not None else _MODEL_ERROR_MESSAGE
+                )
     except Exception:
         mapped_error = _MODEL_ERROR_MESSAGE
 

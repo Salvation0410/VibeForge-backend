@@ -141,6 +141,47 @@ async def test_shared_timeout_cancels_and_cleans_up_all_reviewers() -> None:
 
 
 @pytest.mark.asyncio
+async def test_timeout_wins_over_cleanup_output_error_group() -> None:
+    started: set[ReviewerRole] = set()
+
+    async def review(
+        role: ReviewerRole,
+        artifact: str,
+        context: dict[str, Any],
+    ) -> ReviewerResult:
+        started.add(role)
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            if role is ReviewerRole.REQUIREMENT:
+                raise BaseExceptionGroup(
+                    "timeout cleanup",
+                    [
+                        asyncio.CancelledError(),
+                        QualityReviewOutputError("identity_mismatch"),
+                    ],
+                )
+            raise
+
+    model = FakeReviewModel(review)
+    with pytest.raises(MultiAgentReviewError) as caught:
+        await run_multi_agent_review(
+            model,
+            "artifact",
+            {},
+            timeout_seconds=0.02,
+        )
+
+    assert str(caught.value) == (
+        "MULTI_AGENT_REVIEW_TIMEOUT: quality reviewers exceeded the configured timeout"
+    )
+    assert started == set(ReviewerRole)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert_all_reviewer_tasks_done(model)
+
+
+@pytest.mark.asyncio
 async def test_invalid_output_cancels_siblings_and_drops_raw_exception_chain() -> None:
     all_started = asyncio.Event()
     started: set[ReviewerRole] = set()
