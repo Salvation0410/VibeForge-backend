@@ -1,7 +1,7 @@
 # AI 服务 LangGraph 交接说明
 
 > 更新日期：2026-09-29
-> 当前分支：`codex/langgraph-real-gate`
+> 当前分支：`codex/vue-multi-agent-quality-review`
 > 文档目标：让后续开发者用最短时间确认当前事实、验证证据、人工验收门和下一步优先级。
 
 ## 1. 五分钟接手摘要
@@ -12,16 +12,17 @@
 - Python AI 服务负责模型调用、LangGraph 编排、工具选择、参数校验、质量检查和有限修复，不连接业务 MySQL，也不直接读写项目目录。
 - Spring 通过 `AiGenerationGateway` 在 Legacy、LangGraph 和稳定灰度模式之间路由，对前端继续保持原有 SSE 协议。
 - LangGraph 已支持 HTML、MULTI_FILE、VUE_PROJECT 三类生成、最多两次修复、Vue 有界工具循环、构建失败修复、质量检查、取消和终态事件。
+- Vue 多 Agent 质量审查已经实现，但 `AI_SERVICE_MULTI_AGENT_REVIEW_ENABLED=false` 默认关闭且只对 `VUE_PROJECT` 生效；开启后由 requirement、function、technical 三个只读 Reviewer 并发审查真实源码快照。
 - HTML 与 MULTI_FILE 只有在 Spring 严格解析、确定性校验和不可变版本发布成功后才能完成；HTML 还执行 Selenium 浏览器烟测。
-- 用户已于 2026-09-29 确认 P0 真实环境验收完成；本轮文档更新没有重复执行或重新生成验收证据。
+- 用户此前确认的 P0 真实环境验收不包含本轮新增的 Vue 多 Agent 能力；本轮真实 PostgreSQL、真实模型和完整前端人工验收仍明确待执行。
 - Legacy LangChain4j 仍是生产回滚路径。稳定灰度数据和回滚窗口满足要求前不得删除 Legacy。
 - Python checkpoint 已迁移到独立 PostgreSQL 数据库 `yu_ai_checkpoint`，使用官方 `AsyncPostgresSaver` 和同池脱敏状态表 `ai_workflow_status`；Python 不再依赖 Redis database 2。
 - 本轮不启用长期记忆，不创建或注入 `PostgresStore`。
 
 ### 当前最高优先级
 
-1. 在本机现有 PostgreSQL Docker 容器中由管理员创建独立角色和数据库 `yu_ai_checkpoint`，运行初始化命令后执行 opt-in 集成测试；当前代码与测试入口已就绪，但数据库尚未创建。
-2. 使用更新后的统一门禁复现 Java、Python 和脚本检查，并保留真实 PostgreSQL、真实模型和端到端未执行的边界说明。
+1. 在本机 Docker PostgreSQL、Spring、Python 和 Vue 前端齐备的环境中开启 Vue 多 Agent 开关，完成首次生成、针对性 major 修复、停止传播、超时/错误凭据和延迟/token 成本人工验证。
+2. 在本机现有 PostgreSQL Docker 容器中由管理员创建独立角色和数据库 `yu_ai_checkpoint`，运行初始化命令后执行 opt-in 集成测试；当前代码与测试入口已就绪，但数据库尚未创建。
 3. 继续 P1 真实 Uvicorn/代理压力和真实 npm 长构建压力，补充资源收敛证据。
 4. 长期记忆保持关闭；只有出现清晰的跨 thread 用户或应用记忆需求时才重新评估 `PostgresStore`。
 
@@ -107,9 +108,21 @@ START
 - MULTI_FILE 要求完整匹配的 `index.html`、`style.css`、`script.js`。
 - Vue 首次生成与修复复用五个标准文件工具，并共享 `AI_SERVICE_VUE_MAX_TOOL_CALLS` 总预算。
 - `project_build` 返回 `built/errorCode/message`；失败进入有限修复，质量检查只在构建成功后执行。
-- 至少修复一次且重新构建成功的 Vue，会通过 `vue_source_snapshot` 让 Reviewer 瞬时审查最终源码。
+- 多 Agent 开启时，Vue 首次构建成功以及每次修复后重新构建成功都会通过 `vue_source_snapshot` 让三个 Reviewer 瞬时审查当前真实源码；开关关闭时保持原有仅修复后快照的兼容行为。
 
-### 3.2 工具契约与安全
+### 3.2 Vue 多 Agent 质量审查
+
+- 功能开关 `AI_SERVICE_MULTI_AGENT_REVIEW_ENABLED` 默认 `false`，第一阶段只支持 `VUE_PROJECT`，不改变 HTML、MULTI_FILE 或关闭开关时的现有路径。
+- 三个角色分别是 requirement、function、technical；三者并发、只读、职责独立，共享 `AI_SERVICE_MULTI_AGENT_REVIEW_TIMEOUT_SECONDS` 指定的整体超时。
+- 聚合由确定性代码完成。`critical`、`major` 生成最多 4000 字符的阻断性 `repair_feedback` 并进入现有 repair 回环；`minor` 不触发 repair，也不消耗修复次数。
+- repair 总上限仍由 `AI_SERVICE_MAX_REPAIR_ATTEMPTS` 控制，默认最多两次。每次修复后重新执行硬校验、项目构建、真实源码快照和三个 Reviewer。
+- 任一 Reviewer 超时、模型调用异常、非法结构或快照失败均按 F1 直接进入 `failed`，不回退单 Reviewer、不盲修、不发布候选结果。稳定错误码为 `MULTI_AGENT_REVIEW_TIMEOUT`、`MULTI_AGENT_REVIEW_MODEL_ERROR`、`MULTI_AGENT_REVIEW_INVALID_OUTPUT`、`MULTI_AGENT_REVIEW_SNAPSHOT_ERROR`。
+- 取消检查覆盖快照前、Reviewer 启动前和聚合完成后；`asyncio.CancelledError` 保持取消语义，仍在运行的 Reviewer 任务由任务组收敛。
+- 不新增公开 SSE 类型，不改变 Spring 对应用数据、项目文件、构建、发布、聊天历史和对外 SSE 的所有权。
+- 业务状态表 `ai_workflow_status` 不保存审查正文。LangGraph 图 checkpoint 只保存最多 4000 字符的阻断性 `repair_feedback`，用于从已完成的 `quality_review` 恢复到 repair 且不重复 Reviewer；minor 详情、Reviewer summary、`reviewer_results`、`quality_issues` 均不保存。
+- 成功、失败或取消终态仍 best-effort 清理图 checkpoint，TTL 继续作为异常退出兜底。本轮不启用长期记忆，也不创建或注入 `PostgresStore`。
+
+### 3.3 工具契约与安全
 
 - `ai-service/src/ai_service/contracts/internal-ai-tools-v1.json` 是 Java/Python 共享的版本化工具契约。
 - Python 在出站前按请求 Schema 严格校验工具参数；未知工具、未知参数和额外字段不会到达 Spring。
@@ -119,7 +132,7 @@ START
 - 已存在的 `RUNNING` 和 action 成功但 Redis 完成状态写回失败，都按不确定状态处理，不承诺文件系统与 Redis 严格 exactly-once。
 - Python `SpringToolGateway` 会识别 HTTP 200 中非零的 Spring `BaseResponse.code`，不会把业务失败当作成功。
 
-### 3.3 产物发布、并发与取消
+### 3.4 产物发布、并发与取消
 
 - HTML 在发布前执行文档、CSS、JavaScript 完整性校验和 Selenium 烟测。
 - HTML/MULTI_FILE 使用不可变 release、manifest、请求墓碑、单调序号和原子活动指针。
@@ -129,7 +142,7 @@ START
 - 取消先获胜时禁止发布；提交已经开始后，迟到取消不能反向覆盖成功版本。
 - Python 在产物已发布但外围 checkpoint 失败时最多补发一次完成事件，避免文件已发布而前端收到失败。
 
-### 3.4 前端生成体验
+### 3.5 前端生成体验
 
 - 前端只在普通 JavaScript 状态中累计完整流式进度，Vue 响应式状态仅保留最近 2000 个字符。
 - 界面每 80ms 最多刷新一次，自动滚动每 200ms 最多一次。
@@ -137,13 +150,13 @@ START
 - 生成期间保留旧预览，仅在当前请求成功后刷新一次；失败、停止、卸载和迟到回调不得刷新。
 - 三类“优化提示”均使用简短普通语言，并要求保留原有功能、文字、图片和操作方式。
 
-### 3.5 资源边界
+### 3.6 资源边界
 
 - 活动 HTML/MULTI_FILE 上下文最多 100000 字符；Vue 上下文最多返回 200 个排序后的文件项。
 - 修复后 Vue 快照最多 24 个文件、单文件 12000 字符、总计 60000 字符。
 - Vue 项目总访问条目最多 20000 个，合格源码候选最多 10000 个，单文件最大 1 MiB。
 - 快照排除依赖、构建产物、隐藏目录、符号链接、锁文件、非文本、非法 UTF-8 和 NUL。
-- 完整快照只瞬时传给当前 Reviewer，不进入工具幂等 Redis、业务 checkpoint、LangGraph state/checkpoint 或事件。
+- 完整快照只瞬时传给当前 Reviewer，不进入工具幂等 Redis、业务 checkpoint、LangGraph state/checkpoint 或事件；只有阻断性审查生成的最多 4000 字符 `repair_feedback` 可进入图 checkpoint。
 - npm 输出、路径和环境值有界且脱敏；父子进程树和输出读取使用有界终止策略。
 - `scripts/verify-langgraph-real-gate.ps1` 提供统一验证入口：默认 dry-run，显式 `-Execute` 后固定执行 Java clean compile、35 项定向测试、Python compileall/pytest/lock 检查和 PowerShell 脚本检查；`-IncludeRedis` 可追加 Spring 工具幂等真实 Redis 6 项，`-IncludePostgres` 可追加真实 checkpoint 集成测试。
 - 统一入口只向 `target/ai-validation/langgraph-real-gate.json` 写入步骤名、命令标签、状态、退出码、耗时和人工待验收项，不收集 Maven 原始日志、源码、令牌、Cookie 或响应正文。
@@ -181,7 +194,9 @@ START
 | `ai-service/src/ai_service/orchestration/workflow.py` | LangGraph 工作流、修复、构建和终态 |
 | `ai-service/src/ai_service/orchestration/cancellation.py` | 单进程协作式取消 |
 | `ai-service/src/ai_service/models/openai_compatible.py` | OpenAI 兼容模型与 Vue 工具轮次解析 |
+| `ai-service/src/ai_service/models/quality_review.py` | Reviewer、问题严重级别和严格结构化审查契约 |
 | `ai-service/src/ai_service/models/tool_contract.py` | 模型工具提示和出站校验 |
+| `ai-service/src/ai_service/orchestration/multi_agent_review.py` | 三角色并发、整体超时、F1 异常和确定性聚合 |
 | `ai-service/src/ai_service/prompts/` | 路由、生成、审查和修复提示词 |
 | `ai-service/src/ai_service/infrastructure/checkpoint.py` | checkpoint 协议与禁用实现 |
 | `ai-service/src/ai_service/infrastructure/postgres_checkpoint.py` | 官方 PostgreSQL saver、脱敏状态摘要和 TTL 清理 |
@@ -239,6 +254,9 @@ Python AI_SERVICE_INTERNAL_BEARER_TOKEN
 - `AI_SERVICE_URL=http://localhost:8000`
 - `AI_GENERATION_STREAM_IDLE_TIMEOUT_SECONDS=600`
 - `AI_SERVICE_VUE_MAX_TOOL_CALLS=<有限正整数>`
+- `AI_SERVICE_MAX_REPAIR_ATTEMPTS=2`
+- `AI_SERVICE_MULTI_AGENT_REVIEW_ENABLED=false`：默认关闭，只影响 Vue。
+- `AI_SERVICE_MULTI_AGENT_REVIEW_TIMEOUT_SECONDS=60`：三个 Reviewer 共享的整体超时。
 - `AI_REDIS_INTEGRATION=true`：只在明确运行真实 Redis 集成测试时设置。
 - `AI_SERVICE_POSTGRES_INTEGRATION=true`：只在独立 `yu_ai_checkpoint` 已初始化且明确运行真实 checkpoint 集成测试时设置。
 
@@ -274,7 +292,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 
 ## 6. 当前自动化验证证据
 
-下表只记录 2026-09-29 当前分支可复现的最新基线。历史测试数量不再作为当前结论。
+下表优先记录 2026-09-29 当前分支的 fresh 结果；未在本轮重新执行的历史门禁显式标明，不能替代本轮 Vue 多 Agent 验证。
 
 | 范围 | 命令 | 最新证据 | 能证明什么 |
 | --- | --- | --- | --- |
@@ -284,8 +302,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 | Java 生产编译 | `mvn clean -DskipTests compile` | 239 个生产源文件编译成功 | 当前生产源码可干净编译 |
 | Redis opt-in 集成 | `powershell -NoProfile -File scripts/verify-langgraph-real-gate.ps1 -Execute -IncludeRedis` | 最近真实环境 6 项通过 | 跨客户端回放、唯一执行、冲突与不确定态 |
 | PowerShell 脚本 | `powershell -NoProfile -File scripts/ai-validation-scripts.tests.ps1` | Windows PowerShell 5.1 与 PowerShell 7 检查通过 | 验收脚本参数、认证和脱敏约束 |
-| 统一非外部数据库门禁 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1 -Execute` | 2026-09-29 fresh 执行通过，JSON 中 6 个步骤均为 `passed` | 一条命令复现 Java clean compile、35 项定向测试、Python 173 项、锁文件和脚本检查 |
-| Python 全量 | `uv run pytest` | 2026-09-29 fresh：173 项通过、1 项真实 PostgreSQL 集成跳过 | Fake Model、三类工作流、降级、清理与 API 契约 |
+| 统一非外部数据库门禁 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1 -Execute` | 本轮未重新执行；此前历史基线为 6 个步骤通过 | 不能作为本轮新增多 Agent 测试数量的 fresh 证据 |
+| Python 编译 | `uv run python -m compileall -q src` | 2026-09-29 fresh：退出码 0，无输出 | 当前 Python 源码可完成字节码编译 |
+| Python 全量 | `uv run pytest` | 2026-09-29 fresh：241 项通过、1 项跳过、2 个依赖弃用警告 | Fake Model、三类工作流、多 Agent 聚合/取消/checkpoint、降级、清理与 API 契约 |
+| Python 锁文件 | `uv lock --check` | 2026-09-29 fresh：退出码 0，解析 71 个包 | `uv.lock` 与项目依赖声明一致 |
+| 文档空白检查 | `git diff --check` | 2026-09-29 fresh：退出码 0，无空白错误；仅有 Git 的 LF/CRLF 工作树提示 | 本轮文档差异没有尾随空格等补丁错误 |
+| 修改范围 | `git status --short` | 2026-09-29 fresh：仅 README、阶段交接和多 Agent 设计三份允许文档为修改状态 | 未修改业务代码、测试、计划或其他文件 |
 | PostgreSQL 默认门 | `uv run pytest tests/test_postgres_checkpoint_integration.py` | 默认 1 项跳过，不连接数据库 | opt-in 门禁不会误连本机数据库 |
 
 重要限制：
@@ -294,13 +316,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 - 本轮统一入口未使用 `-IncludeRedis`；表中的真实 Redis 6 项来自最近一次独立真实环境验证，不冒充本轮 fresh 结果。
 - 本机 PostgreSQL Docker 容器存在，但独立数据库 `yu_ai_checkpoint` 尚未创建；本轮没有运行 `-IncludePostgres`，不得声称真实 PostgreSQL 集成通过。
 - Python 大部分测试使用 Fake Model、内存网关或 MockTransport，不能替代真实模型、真实 Spring 和完整前端验收。
+- pytest 的 2 个 warning 分别来自 Starlette `anyio.abc.BlockingPortal` 别名弃用和 LangGraph `allowed_objects` 默认值将变更；本轮没有把依赖 warning 写成测试失败，也没有扩大范围修改依赖。
 - 受控本地 HTTP/进程测试不能证明真实 Uvicorn、代理、供应商限流、网络背压或 npm 包装层在所有平台上的行为。
 - 未实际运行的 Docker、真实模型、浏览器端到端和生产灰度，必须明确标记为未验证。
 
 ## 7. 当前人工与真实环境验收门
 
-用户已于 2026-09-29 确认本章 P0 场景完成。本轮没有重新执行真实模型、浏览器或双 Spring
-验收，因此只记录用户确认，不补造 requestId、截图或自动化通过证据。
+用户此前确认的历史 P0 场景不覆盖 Vue 多 Agent。本轮没有执行真实模型、浏览器或多 Agent 人工验收，因此相关项目全部保持待验证，不补造 requestId、截图或通过证据。
 
 ### 7.1 状态总表
 
@@ -367,6 +389,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 
 证据优先引用 `target/ai-validation/` 下的脱敏 JSON 文件、requestId 和稳定错误码。浏览器截图或后台日志如果包含账号、源码、Cookie、令牌、绝对路径或完整请求正文，必须先脱敏且不得提交到 Git。
 
+### 7.7 Vue 多 Agent 人工待验证
+
+以下项目本轮均未执行，不能写为通过：
+
+1. 本机 Docker PostgreSQL 创建并初始化独立 `yu_ai_checkpoint`，确认 checkpoint 与 `/health/ready` 正常可用。
+2. 同时启动 Spring、Python AI 服务和 Vue 前端，配置一致的内部令牌并显式开启多 Agent 开关。
+3. 使用真实模型完成 Vue 首次生成，确认首次构建后读取真实源码 snapshot 并执行三个 Reviewer。
+4. 制造明确的 major 问题，确认 repair 仅针对结构化阻断反馈修复，保留未提及的原功能；修复后重新构建、重新取 snapshot、重新审查，且总 repair 不超过两次。
+5. 在审查期间停止生成，确认取消传播到三个 Reviewer，终态为 cancelled，候选版本不发布且旧预览不刷新。
+6. 分别使用错误模型凭据、整体超时和非法模型输出，确认稳定错误码为 `MULTI_AGENT_REVIEW_MODEL_ERROR`、`MULTI_AGENT_REVIEW_TIMEOUT` 或 `MULTI_AGENT_REVIEW_INVALID_OUTPUT`，且不泄露供应商响应、凭据或源码。
+7. 对比开关关闭/开启后的端到端延迟、模型 token 消耗、repair 次数和成功率，评估测试环境灰度成本。
+
 ## 8. 未完成优化清单
 
 ### P0：激活并验证 PostgreSQL checkpoint 运行环境
@@ -407,12 +441,26 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 - 不把文件、数据库、构建或发布迁移到 Python。
 - 当前单 worker、单实例 Python 部署下，不实现跨进程共享取消；扩容到多 worker/实例时重新评估。
 - 业务约束未变化前，不额外实现同账号同应用的并发修改仲裁。
-- PostgreSQL checkpoint 真实运行验证和稳定观察完成前，不删除 Legacy 或引入多 Agent。
+- PostgreSQL checkpoint 和 Vue 多 Agent 真实运行验证、稳定观察完成前，不删除 Legacy，也不默认开启多 Agent。
 
 ## 9. 最近关键提交
 
 | 提交 | 内容 |
 | --- | --- |
+| `928a973` | 覆盖多 Agent 审查取消与导入 |
+| `42dd584` | 收敛质量审查 checkpoint 状态 |
+| `b1360ca` | 接入 Vue 多 Agent 质量审查 |
+| `12f7244` | 隔离多 Agent 配置环境 |
+| `fef8771` | 增加多 Agent 审查配置 |
+| `3b8bc74` | 稳定审查超时竞争语义 |
+| `ec9334e` | 保留审查取消与致命异常语义 |
+| `0d449f1` | 完善审查任务组异常清理 |
+| `3fc43f4` | 并发执行多 Agent 质量审查 |
+| `28d386a` | 脱敏审查解析异常链 |
+| `9c2fdf9` | 增加多角色质量审查模型接口 |
+| `497578b` | 稳定质量审查聚合边界 |
+| `67b5e68` | 收紧质量审查数据校验 |
+| `9c54244` | 定义多 Agent 质量审查契约 |
 | `5eab7d9` | 打通 LangGraph 真实环境验收门基础能力 |
 | `ffa72de` | 明确灰度身份键契约 |
 | `f6e6f1a` | 取消时释放 LangGraph 响应流 |
@@ -424,7 +472,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 | `553a8ca` | 迁移 AI checkpoint 到 PostgreSQL |
 | `ad4bbe9` | 增加 PostgreSQL checkpoint opt-in 集成测试 |
 
-这些提交都在 `codex/langgraph-real-gate`。未经用户明确要求，不自动推送、合并、删除分支或清理工作树。
+Vue 多 Agent 提交位于 `codex/vue-multi-agent-quality-review`，设计基线为 `b5c665d`；其余历史交接提交来自原 `codex/langgraph-real-gate` 演进链。未经用户明确要求，不自动推送、合并、删除分支或清理工作树。
 
 ## 10. 接手检查与禁止事项
 
@@ -459,6 +507,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 - `doc/ai-service-startup.md`：本地启动与联调步骤。
 - `doc/ai-service-langchain-langgraph-refactor-design.md`：重构架构与边界设计。
 - `docs/superpowers/specs/2026-09-29-postgres-checkpoint-design.md`：PostgreSQL checkpoint 迁移、故障语义和长期记忆决策。
+- `docs/superpowers/specs/2026-09-29-vue-multi-agent-quality-review-design.md`：Vue 三角色质量审查、F1 错误语义、repair 和 checkpoint 边界。
 - `docs/superpowers/specs/2026-09-21-bounded-streaming-simple-prompts-design.md`：有限流式窗口和简短优化提示设计。
 - `docs/superpowers/specs/2026-09-21-circular-preview-spinner-design.md`：预览加载图正圆修复设计。
 

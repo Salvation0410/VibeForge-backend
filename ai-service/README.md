@@ -84,9 +84,23 @@ START
 
 Vue 分支允许模型请求 Spring 工具，但工具调用次数受 `AI_SERVICE_VUE_MAX_TOOL_CALLS` 限制。每次工具调用都带有确定性的 `toolCallId`，供 Spring 执行幂等控制。
 
-Vue 至少完成一次修复、重新通过硬校验并重新构建成功后，质量检查会调用 Spring 工作流专用且模型不可调用的 `vue_source_snapshot`，以最终项目源码而不是旧 artifact 作为当前 Reviewer 的审查输入。首次未发生修复的 Vue，以及 HTML、MULTI_FILE 分支均不调用该工具。快照最多返回 24 个文件，单文件内容最多 12000 个字符，总内容最多 60000 个字符；Spring 遍历的项目总访问条目（根目录之外的目录、文件和访问失败条目）最多 20000 个，其中合格源码候选最多 10000 个，并只读取按 `package.json`、入口文件、`src/App.vue`、其余路径稳定排序后的最佳 24 个候选，每个源文件最大 1 MiB。
+Vue 多 Agent 质量审查开启时，首次生成和每次修复重新通过硬校验、重新构建成功后，都会调用 Spring 工作流专用且模型不可调用的 `vue_source_snapshot`，以当前项目真实源码而不是旧 artifact 作为三个 Reviewer 的审查输入。开关关闭时保持原有兼容行为，仅至少完成一次修复的 Vue 在单 Reviewer 质量检查前读取快照。HTML、MULTI_FILE 分支均不调用该工具。快照最多返回 24 个文件，单文件内容最多 12000 个字符，总内容最多 60000 个字符；Spring 遍历的项目总访问条目（根目录之外的目录、文件和访问失败条目）最多 20000 个，其中合格源码候选最多 10000 个，并只读取按 `package.json`、入口文件、`src/App.vue`、其余路径稳定排序后的最佳 24 个候选，每个源文件最大 1 MiB。
 
-快照排除依赖和构建产物目录、隐藏目录、符号链接、锁文件及非文本扩展名，依赖/构建目录和锁文件的大小写变体同样排除；入选文件执行严格 UTF-8 与 NUL 检查。完整快照只在本次质量检查调用栈内传给当前 Reviewer，不写入 Spring 工具幂等 Redis、业务 checkpoint、LangGraph state/checkpoint 或 NDJSON 事件；质量检查失败时可能产生的 pending checkpoint 也只包含稳定的外层异常，不包含源码。`tool_finished` 事件只公开 `eligibleFileCount`、`includedFileCount`、`omittedFileCount` 和 `truncated` 四个统计字段。快照读取失败使用稳定的脱敏消息，错误响应不包含绝对项目路径；快照读取或 Reviewer 调用失败时不回退到旧 artifact，而是进入失败终态。
+快照排除依赖和构建产物目录、隐藏目录、符号链接、锁文件及非文本扩展名，依赖/构建目录和锁文件的大小写变体同样排除；入选文件执行严格 UTF-8 与 NUL 检查。完整快照只在本次质量检查调用栈内传给当前 Reviewer，不写入 Spring 工具幂等 Redis、业务 checkpoint、LangGraph state/checkpoint 或 NDJSON 事件；快照读取或 Reviewer 系统异常产生的 pending checkpoint 只包含稳定的外层异常，不包含源码，阻断性审查结果则仅按下文规则保存有界 `repair_feedback`。`tool_finished` 事件只公开 `eligibleFileCount`、`includedFileCount`、`omittedFileCount` 和 `truncated` 四个统计字段。快照读取失败使用稳定的脱敏消息，错误响应不包含绝对项目路径；快照读取或 Reviewer 调用失败时不回退到旧 artifact，而是进入失败终态。
+
+### Vue 多 Agent 质量审查
+
+`AI_SERVICE_MULTI_AGENT_REVIEW_ENABLED` 默认是 `false`，只对 `VUE_PROJECT` 生效；关闭时 HTML、MULTI_FILE 和现有 Vue 质量检查行为保持兼容。开启后，Python 并发执行三个只读角色：
+
+- `requirement`：检查用户目标、明确要求和内容完整性。
+- `function`：检查主要交互、页面流程和功能可用性。
+- `technical`：检查工程结构、运行风险、明显安全问题和可维护性阻塞。
+
+三个 Reviewer 共享 `AI_SERVICE_MULTI_AGENT_REVIEW_TIMEOUT_SECONDS` 指定的整体超时，不是每个角色各自拥有一份超时预算。聚合由确定性代码完成：`critical` 和 `major` 属于阻断问题，会生成最多 4000 字符的 `repair_feedback` 并进入现有 repair 回环；`minor` 只作为本次调用内的审查详情，不触发 repair，也不消耗修复次数。修复仍受 `AI_SERVICE_MAX_REPAIR_ATTEMPTS` 限制，默认最多两次；每次修复后重新执行校验、构建、真实源码快照和三角色审查。
+
+任一 Reviewer 超时、模型调用失败、返回非法结构，或源码快照失败，都按 F1 直接发送 `failed`，不回退到单 Reviewer、不盲目修复、也不把候选版本当作成功。稳定错误码包括 `MULTI_AGENT_REVIEW_TIMEOUT`、`MULTI_AGENT_REVIEW_MODEL_ERROR`、`MULTI_AGENT_REVIEW_INVALID_OUTPUT` 和 `MULTI_AGENT_REVIEW_SNAPSHOT_ERROR`。用户取消会继续沿用现有协作式取消语义，并取消仍在运行的 Reviewer 任务。
+
+该能力不新增公开 SSE 事件，不改变 Spring 对业务数据、项目文件、构建、发布和对外 SSE 的所有权。完整源码快照、Reviewer summary、`reviewer_results`、`quality_issues` 和 minor 详情都不持久化；`ai_workflow_status` 仍只保存脱敏状态摘要。LangGraph 图 checkpoint 仅在阻断问题需要恢复到 repair 时保存最多 4000 字符的 `repair_feedback`，恢复后直接进入 repair，不重复调用已经完成的 Reviewer。终态仍执行 best-effort thread 清理，TTL 继续作为异常退出兜底。本轮不启用长期记忆，也不创建或注入 `PostgresStore`。
 
 内部工具统一契约为 `src/ai_service/contracts/internal-ai-tools-v1.json`。该文件使用 JSON Schema Draft 2020-12，同时约束工具标准名称和历史别名、模型调用权限、请求参数以及成功响应。模型只能调用 `dir_read`、`file_read`、`file_write`、`file_modify` 和 `file_delete`；`artifact_context`、`artifact_validate`、`artifact_publish`、`project_build` 和 `vue_source_snapshot` 只允许工作流调用。Spring 继续兼容已存在的 camelCase 和旧 snake_case 别名，但模型提示只使用标准名称。
 
@@ -149,12 +163,16 @@ Copy-Item .env.example .env
 | `AI_SERVICE_CHECKPOINT_POOL_MAX_SIZE` | PostgreSQL 连接池最大连接数 | `5` |
 | `AI_SERVICE_VUE_MAX_TOOL_CALLS` | 单次 Vue 工作流最大工具调用次数 | `4` |
 | `AI_SERVICE_MAX_REPAIR_ATTEMPTS` | 质量检查失败后的最大修复次数 | `2` |
+| `AI_SERVICE_MULTI_AGENT_REVIEW_ENABLED` | 是否仅为 Vue 开启三角色质量审查 | `false` |
+| `AI_SERVICE_MULTI_AGENT_REVIEW_TIMEOUT_SECONDS` | 三个 Reviewer 共享的整体超时秒数 | `60` |
 
 本机直接启动时，通常需要将 `.env` 中的 Spring 和 PostgreSQL 地址改为：
 
 ```dotenv
 AI_SERVICE_SPRING_GATEWAY_BASE_URL=http://localhost:8123/api/internal/ai-tools
 AI_SERVICE_CHECKPOINT_POSTGRES_URL=postgresql://yu_ai_checkpoint:<set-outside-git>@localhost:5432/yu_ai_checkpoint
+AI_SERVICE_MULTI_AGENT_REVIEW_ENABLED=false
+AI_SERVICE_MULTI_AGENT_REVIEW_TIMEOUT_SECONDS=60
 ```
 
 仓库不创建或管理本机已有的 PostgreSQL Docker 容器。由数据库管理员在容器中执行以下 SQL，真实密码不得写入仓库：
@@ -301,11 +319,11 @@ Python 与 Spring 之间使用 NDJSON；Spring 对前端的内容事件仍为 `d
 
 `completed.data` 只携带生成类型、质量、修复/工具计数以及发布或构建摘要，不重复携带完整源码。HTML/MULTI_FILE 的最终候选仍来自最后一个 `content_delta`，且只有 Spring 发布成功后 Java 才向现有下游提交该候选。
 
-业务 checkpoint 不保存完整源码，业务快照保留 `node`、`requestId`、`appId`、`codeGenType`、`qualityPassed`、`repairCount` 和 `toolCallCount` 等状态与审计摘要；执行期节点恢复由 LangGraph 自动 checkpoint 承担，该 checkpoint 在请求执行期间仍可能包含完整产物。请求在成功、失败或取消进入终态后会立即清理对应 thread，TTL 仅作为异常退出时的兜底。若终态清理失败，只会使 checkpoint 就绪状态降级，不会反转已经确定的生成结果。
+业务 checkpoint 不保存完整源码或审查正文，`ai_workflow_status` 只保留 `node`、`requestId`、`appId`、`codeGenType`、`qualityPassed`、`repairCount` 和 `toolCallCount` 等状态与审计摘要。执行期节点恢复由 LangGraph 自动 checkpoint 承担，该 checkpoint 在请求执行期间仍可能包含完整产物；Vue 多 Agent 审查只额外保留最多 4000 字符的阻断性 `repair_feedback`，不保存 minor 详情、Reviewer summary、`reviewer_results` 或 `quality_issues`。从已完成的 `quality_review` 恢复时直接进入 repair，不重复执行 Reviewer。请求在成功、失败或取消进入终态后会立即 best-effort 清理对应 thread，TTL 仅作为异常退出时的兜底。若终态清理失败，只会使 checkpoint 就绪状态降级，不会反转已经确定的生成结果。
 
 ## PostgreSQL checkpoint 与故障降级
 
-LangGraph 使用官方 `AsyncPostgresSaver`，`thread_id` 为 `{appId}:{requestId}`。同一连接池还维护 `ai_workflow_status`，该表只允许保存节点、请求/应用标识、生成类型、质量结果和有限计数，不保存完整源码。正常终态调用 `adelete_thread()` 删除官方图 checkpoint；异常退出先由 `expires_at` 找到过期 thread，成功删除图 checkpoint 后才删除状态行，图删除失败时保留状态行供下次重试。
+LangGraph 使用官方 `AsyncPostgresSaver`，`thread_id` 为 `{appId}:{requestId}`。同一连接池还维护 `ai_workflow_status`，该表只允许保存节点、请求/应用标识、生成类型、质量结果和有限计数，不保存完整源码、`repair_feedback` 或其他审查正文。正常终态调用 `adelete_thread()` 删除官方图 checkpoint；异常退出先由 `expires_at` 找到过期 thread，成功删除图 checkpoint 后才删除状态行，图删除失败时保留状态行供下次重试。
 
 - `AI_SERVICE_CHECKPOINT_REQUIRED=false`：PostgreSQL 不可用时记录脱敏警告，服务继续运行但不具备 checkpoint 恢复能力，ready 返回 503。
 - `AI_SERVICE_CHECKPOINT_REQUIRED=true`：启动探测或 checkpoint 写入失败时显式失败。

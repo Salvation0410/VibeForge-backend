@@ -19,7 +19,7 @@
 - 采用三个并行 Reviewer 和一个确定性 Python 聚合器，不增加模型 Judge。
 - 第一阶段仅覆盖 `VUE_PROJECT`；HTML 和 MULTI_FILE 继续使用现有单 Reviewer。
 - 任一 Reviewer 超时、调用异常或结构化输出非法时，本次生成失败，不使用部分结果，不回退单 Reviewer，也不进入 repair。
-- `critical` 和 `major` 问题触发 repair；`minor` 问题只记录在本次工作流状态中，不消耗修复次数。
+- `critical` 和 `major` 问题触发 repair；`minor` 问题只参与本次审查调用内的聚合，不进入持久化工作流状态，也不消耗修复次数。
 - 首次 Vue 生成以及每次修复后，都审查 Spring 返回的真实、有界源码快照。
 - Reviewer 只读，不获得 Spring 工具网关或文件写入能力。
 - 保持最多两次修复的现有限制。
@@ -293,14 +293,15 @@ TaskGroup 取消三个 Reviewer
 `quality_review` 保持单一 LangGraph 节点的原子输出边界：
 
 - 不将单个 Reviewer 的部分结果提前写入工作流状态。
-- 三个 Reviewer 和聚合全部成功后才返回完整节点结果。
-- 节点完成后的 checkpoint 包含有界聚合结果。
+- 三个 Reviewer 和聚合全部成功后才返回精简节点结果：`quality_passed` 与必要时的有界 `repair_feedback`。
+- 节点完成后的图 checkpoint 只在存在阻断问题时包含最多 4000 字符的 `repair_feedback`，用于恢复到 repair。
+- minor 详情、Reviewer summary、`reviewer_results` 和 `quality_issues` 不进入工作流状态或图 checkpoint。
 - 进程在节点执行中退出时，不复用部分 Reviewer 结果；恢复后重新执行三方审查。
-- 节点已经完成并成功 checkpoint 后，恢复从后续节点继续，不重复调用 Reviewer。
+- 节点已经完成并成功 checkpoint 后，恢复从 `repair_feedback` 继续进入 repair，不重复调用已经完成的 Reviewer；修复后仍重新执行三方审查。
 
 整组三方审查只有只读模型调用，没有文件副作用，因此重放安全。源码快照请求使用稳定工具调用 ID，由现有 Spring 工具幂等边界处理重复调用。
 
-本设计不调整 PostgreSQL checkpoint 表结构，也不向 `ai_workflow_status` 写入源码、完整问题、证据或 repair feedback。
+本设计不调整 PostgreSQL checkpoint 表结构。业务状态表 `ai_workflow_status` 只保存节点、请求/应用标识、生成类型、质量结果和有限计数，不写入源码、完整问题、证据或 `repair_feedback`；图 checkpoint 与业务状态表是不同边界。正常成功、失败或取消终态仍 best-effort 删除对应图 thread，TTL 继续作为异常退出时的兜底清理机制。
 
 ## 14. SSE 与日志
 
