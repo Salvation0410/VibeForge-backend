@@ -21,8 +21,8 @@
 
 ### 当前最高优先级
 
-1. 在本机 Docker PostgreSQL、Spring、Python 和 Vue 前端齐备的环境中开启 Vue 多 Agent 开关，完成首次生成、针对性 major 修复、停止传播、超时/错误凭据和延迟/token 成本人工验证。
-2. 在本机现有 PostgreSQL Docker 容器中由管理员创建独立角色和数据库 `yu_ai_checkpoint`，运行初始化命令后执行 opt-in 集成测试；当前代码与测试入口已就绪，但数据库尚未创建。
+1. 先在本机现有 PostgreSQL Docker 容器中创建并初始化独立角色和数据库 `yu_ai_checkpoint`，配置 Python checkpoint 连接，执行 opt-in 集成测试并确认 `/health/ready`；当前代码与测试入口已就绪，但数据库尚未创建。
+2. 在上述 checkpoint 环境可用后，再启动 Spring、Python 和 Vue 前端并开启 Vue 多 Agent 开关，完成首次生成、针对性 major 修复、停止传播、超时/错误凭据和延迟/token 成本人工验证。
 3. 继续 P1 真实 Uvicorn/代理压力和真实 npm 长构建压力，补充资源收敛证据。
 4. 长期记忆保持关闭；只有出现清晰的跨 thread 用户或应用记忆需求时才重新评估 `PostgresStore`。
 
@@ -400,6 +400,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 5. 在审查期间停止生成，确认取消传播到三个 Reviewer，终态为 cancelled，候选版本不发布且旧预览不刷新。
 6. 分别使用错误模型凭据、整体超时和非法模型输出，确认稳定错误码为 `MULTI_AGENT_REVIEW_MODEL_ERROR`、`MULTI_AGENT_REVIEW_TIMEOUT` 或 `MULTI_AGENT_REVIEW_INVALID_OUTPUT`，且不泄露供应商响应、凭据或源码。
 7. 对比开关关闭/开启后的端到端延迟、模型 token 消耗、repair 次数和成功率，评估测试环境灰度成本。
+
+### 7.8 Vue 多 Agent 功能回滚
+
+Vue 多 Agent 是 Python LangGraph 内部的功能开关，回滚时保持 LangGraph 引擎不变，按以下顺序执行：
+
+1. 在所有 Python AI 服务部署环境设置 `AI_SERVICE_MULTI_AGENT_REVIEW_ENABLED=false`。
+2. 逐实例停止接收新请求、等待或终止在途请求后，滚动重启 Python AI 服务；不要同时重启 Spring 或前端，以缩小回滚影响面。
+3. 每个 Python 实例重启后检查 `/health/ready`，确认服务和 checkpoint 依赖就绪，再继续下一实例。
+4. 使用隔离的 Vue 生成请求确认恢复现有单 Reviewer 路径，不再执行 requirement、function、technical 三角色审查。
+
+该功能回滚无需修改 Spring、Vue 前端、业务数据库 schema、PostgreSQL checkpoint schema，也无需回退或清理既有 checkpoint 数据。`AI_ENGINE=legacy` 或调整 Spring 灰度配置属于更上层的引擎回滚，用于整个 LangGraph 链路异常；它与仅关闭 Vue 多 Agent 的功能回滚是两套独立手段，不应混用或同时变更。
 
 ## 8. 未完成优化清单
 

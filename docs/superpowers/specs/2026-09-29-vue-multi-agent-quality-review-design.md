@@ -211,13 +211,10 @@ Python 必须验证所有边界，不能只依赖提示词。超限、字段缺�
 聚合器使用稳定格式生成反馈，而不是直接拼接 Reviewer 原始响应：
 
 ```text
-质量审查未通过，请修复以下阻断问题，并保持未提及的现有功能不变。
-
-1. [requirement/major/REQ_MISSING_SEARCH]
-问题：用户要求的搜索功能未实现。
-证据：页面存在搜索输入框，但没有提交或过滤逻辑。
-修复要求：补充搜索触发和结果过滤，同时保留现有列表功能。
+1. severity=major; code=REQ_MISSING_SEARCH; issue=用户要求的搜索功能未实现。; evidence=页面存在搜索输入框，但没有提交或过滤逻辑。; repair=补充搜索触发和结果过滤，同时保留现有列表功能。
 ```
+
+每个阻断问题占一行，字段固定为 `severity`、`code`、`issue`、`evidence`、`repair`；实现不会额外添加总标题，也不会把 Reviewer 身份或 category 写入 `repair_feedback`。
 
 Repair 上下文增加质量反馈：
 
