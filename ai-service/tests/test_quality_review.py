@@ -5,6 +5,7 @@ from ai_service.models.quality_review import (
     IssueSeverity,
     QualityIssue,
     QualityReviewOutputError,
+    QualityReviewResult,
     ReviewerResult,
     ReviewerRole,
 )
@@ -21,6 +22,37 @@ def issue(role: ReviewerRole, severity: IssueSeverity, code: str = "ISSUE", cate
 
 def trio(*results: ReviewerResult) -> list[ReviewerResult]:
     return list(results)
+
+
+def empty_reviewer_results() -> list[ReviewerResult]:
+    return [
+        ReviewerResult(reviewer=ReviewerRole.REQUIREMENT, summary="ok"),
+        ReviewerResult(reviewer=ReviewerRole.FUNCTION, summary="ok"),
+        ReviewerResult(reviewer=ReviewerRole.TECHNICAL, summary="ok"),
+    ]
+
+
+def test_quality_review_result_rejects_non_strict_passed_value():
+    with pytest.raises(ValidationError):
+        QualityReviewResult(
+            passed=1,
+            reviewer_results=empty_reviewer_results(),
+            blocking_issues=[],
+            minor_issues=[],
+            repair_feedback="",
+        )
+
+
+def test_quality_review_result_strips_repair_feedback():
+    result = QualityReviewResult(
+        passed=True,
+        reviewer_results=empty_reviewer_results(),
+        blocking_issues=[],
+        minor_issues=[],
+        repair_feedback=" x ",
+    )
+
+    assert result.repair_feedback == "x"
 
 
 def test_three_reviewers_without_blockers_pass():

@@ -25,7 +25,7 @@ Trimmed = Annotated[str, StringConstraints(strip_whitespace=True)]
 
 
 class _StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
 
 class QualityIssue(_StrictModel):
@@ -48,4 +48,4 @@ class QualityReviewResult(_StrictModel):
     reviewer_results: Annotated[list[ReviewerResult], Field(min_length=3, max_length=3)]
     blocking_issues: Annotated[list[QualityIssue], Field(max_length=12)]
     minor_issues: Annotated[list[QualityIssue], Field(max_length=12)]
-    repair_feedback: Annotated[str, Field(max_length=4000)]
+    repair_feedback: Annotated[Trimmed, Field(max_length=4000)]
