@@ -110,21 +110,7 @@ public final class KnowledgeDocumentFilePolicy {
                 || bytes[3] != 'F' || bytes[4] != '-') {
             throw invalid("文件内容与类型不匹配");
         }
-        // Full encryption detection belongs to the Python PDF parser; this catches an explicit PDF encryption dictionary.
-        if (containsAscii(bytes, "/Encrypt")) {
-            throw invalid("不支持加密 PDF");
-        }
-    }
-
-    private static boolean containsAscii(byte[] bytes, String marker) {
-        byte[] needle = marker.getBytes(StandardCharsets.US_ASCII);
-        outer: for (int index = 0; index <= bytes.length - needle.length; index++) {
-            for (int offset = 0; offset < needle.length; offset++) {
-                if (bytes[index + offset] != needle[offset]) continue outer;
-            }
-            return true;
-        }
-        return false;
+        // Python pypdf checks encryption during ETL; page text can legally contain "/Encrypt".
     }
 
     private static void validateDocx(byte[] bytes) {

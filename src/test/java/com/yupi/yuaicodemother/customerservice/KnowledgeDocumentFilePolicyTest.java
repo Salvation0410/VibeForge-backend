@@ -9,6 +9,7 @@ import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import java.util.Locale;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -27,6 +28,12 @@ class KnowledgeDocumentFilePolicyTest {
         assertAccepted("guide.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", docx, "docx");
         assertAccepted("guide.md", "text/markdown", md, "md");
         assertAccepted("guide.txt", "text/plain", txt, "txt");
+    }
+
+    @Test
+    void acceptsUnencryptedPdfWhosePageTextMentionsEncrypt() throws Exception {
+        byte[] pdf = ordinaryPdfWithText("The /Encrypt PDF trailer entry is optional.");
+        assertAccepted("pdf-guide.pdf", "application/pdf", pdf, "pdf");
     }
 
     @Test
@@ -206,5 +213,37 @@ class KnowledgeDocumentFilePolicyTest {
             if (payload != null) addEntry(zip, "word/payload.bin", payload);
         }
         return output.toByteArray();
+    }
+
+    private static byte[] ordinaryPdfWithText(String text) throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        int[] offsets = new int[6];
+        writeAscii(output, "%PDF-1.4\n");
+        String content = "BT /F1 12 Tf 72 720 Td (" + text + ") Tj ET\n";
+        String[] objects = {
+                "<< /Type /Catalog /Pages 2 0 R >>",
+                "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+                        + "/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+                "<< /Length " + content.getBytes(StandardCharsets.US_ASCII).length + " >>\nstream\n"
+                        + content + "endstream",
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+        };
+        for (int index = 1; index <= objects.length; index++) {
+            offsets[index] = output.size();
+            writeAscii(output, index + " 0 obj\n" + objects[index - 1] + "\nendobj\n");
+        }
+        int xrefOffset = output.size();
+        writeAscii(output, "xref\n0 6\n0000000000 65535 f \n");
+        for (int index = 1; index <= objects.length; index++) {
+            writeAscii(output, String.format(Locale.ROOT, "%010d 00000 n \n", offsets[index]));
+        }
+        writeAscii(output, "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n"
+                + xrefOffset + "\n%%EOF\n");
+        return output.toByteArray();
+    }
+
+    private static void writeAscii(ByteArrayOutputStream output, String text) throws Exception {
+        output.write(text.getBytes(StandardCharsets.US_ASCII));
     }
 }
