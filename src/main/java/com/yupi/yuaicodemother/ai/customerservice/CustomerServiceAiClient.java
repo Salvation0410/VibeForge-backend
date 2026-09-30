@@ -83,6 +83,31 @@ public class CustomerServiceAiClient {
         }
     }
 
+    public AnswerResponse answer(AnswerRequest request) {
+        JsonNode payload = call("/internal/v1/customer-service/answers", request);
+        String responseRequestId = optionalText(payload, "requestId", 128);
+        JsonNode answered = payload.get("answered");
+        JsonNode answer = payload.get("answer");
+        if (answered == null || !answered.isBoolean() || answer == null || !answer.isTextual()
+                || answer.textValue().length() > 4_000) invalidResponse();
+        JsonNode sources = payload.get("sources");
+        if (sources == null || !sources.isArray() || sources.size() > 3) invalidResponse();
+        List<AnswerSource> parsed = new java.util.ArrayList<>();
+        for (JsonNode source : sources) {
+            if (!source.isObject()) invalidResponse();
+            String documentId = requiredText(source, "documentId", 128);
+            String documentName = requiredText(source, "documentName", 255);
+            JsonNode version = source.get("documentVersion");
+            if (version == null || !version.isIntegralNumber() || !version.canConvertToLong() || version.longValue() < 1) invalidResponse();
+            String chunkId = requiredText(source, "chunkId", 512);
+            String locator = optionalText(source, "locator", 500);
+            String excerpt = requiredText(source, "excerpt", 400);
+            parsed.add(new AnswerSource(documentId, documentName, version.longValue(), chunkId, locator, excerpt));
+        }
+        return new AnswerResponse(responseRequestId.isBlank() ? request.requestId() : responseRequestId,
+                answered.booleanValue(), answer.textValue(), List.copyOf(parsed));
+    }
+
     private JsonNode call(String path, Object body) {
         try {
             byte[] json = serializeRequest(body);
@@ -182,6 +207,20 @@ public class CustomerServiceAiClient {
     private static void requireText(JsonNode payload, String field, String expected) {
         JsonNode value = payload.get(field);
         if (value == null || !value.isTextual() || !expected.equals(value.textValue())) invalidResponse();
+    }
+
+    private static String requiredText(JsonNode payload, String field, int maxLength) {
+        JsonNode value = payload.get(field);
+        if (value == null || !value.isTextual() || value.textValue().isBlank()
+                || value.textValue().length() > maxLength) invalidResponse();
+        return value.textValue();
+    }
+
+    private static String optionalText(JsonNode payload, String field, int maxLength) {
+        JsonNode value = payload.get(field);
+        if (value == null || value.isNull()) return "";
+        if (!value.isTextual() || value.textValue().length() > maxLength) invalidResponse();
+        return value.textValue();
     }
 
     private static int requiredInt(JsonNode payload, String field, int minimum, int maximum) {
@@ -327,6 +366,11 @@ public class CustomerServiceAiClient {
     }
     public record Result(int chunkCount, boolean idempotent) { }
     public record RebuildResult(int documentCount, boolean idempotent) { }
+    public record AnswerRequest(@JsonProperty(access = JsonProperty.Access.WRITE_ONLY) String requestId, String question) { }
+    public record AnswerSource(String documentId, String documentName, long documentVersion,
+                               String chunkId, String locator, String excerpt) { }
+    public record AnswerResponse(String requestId, boolean answered, String answer,
+                                 List<AnswerSource> sources) { }
 
     public static final class CallException extends RuntimeException {
         private final String code;
