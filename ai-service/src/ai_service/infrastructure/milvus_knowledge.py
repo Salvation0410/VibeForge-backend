@@ -561,10 +561,11 @@ class MilvusKnowledgeStore:
 
     async def _cleanup_retired_collections(
         self, *, current: str, just_replaced: str | None,
-        model: str, dimension: int, fence: int,
+        model: str, dimension: int, permit: MutationPermit,
     ) -> None:
         """Best-effort bounded retention after publication; uncertainty preserves data."""
 
+        fence = permit.fence
         deadline = asyncio.get_running_loop().time() + self._cleanup_timeout_seconds
 
         async def call(
@@ -600,6 +601,7 @@ class MilvusKnowledgeStore:
                     "mutationFence": fence,
                 }, sort_keys=True, separators=(",", ":"))
                 try:
+                    await self._assert_permit(permit)
                     await call(
                         "create_collection", name, dimension=1,
                         primary_field_name="id", id_type="string",
@@ -635,6 +637,7 @@ class MilvusKnowledgeStore:
         async def upsert_control_row(
             control: str, row: dict[str, Any], verified_fields: tuple[str, ...],
         ) -> None:
+            await self._assert_permit(permit)
             result = await call("upsert", control, data=[row])
             if self._write_count(result, "upsert") != 1:
                 raise TypeError
@@ -660,32 +663,90 @@ class MilvusKnowledgeStore:
                 "isActive": False,
                 "embedding": [0.0],
             }
-            await upsert_control_row(
-                control, row,
-                ("recordType", "collectionName", "retiredAt", "schemaVersion"),
-            )
+            await self._assert_permit(permit)
+            result = await call("upsert", control, data=[row])
+            if self._write_count(result, "upsert") != 1:
+                raise TypeError
             return row
+
+        async def write_legacy_markers(
+            control: str, collections: list[str], retired_at: float,
+        ) -> None:
+            if not collections:
+                return
+            rows = [{
+                "id": self._retirement_id(collection),
+                "recordType": "collection_retirement",
+                "collectionName": collection,
+                "retiredAt": retired_at,
+                "mutationFence": fence,
+                "schemaVersion": self._schema_version,
+                "isActive": False,
+                "embedding": [0.0],
+            } for collection in collections]
+            await self._assert_permit(permit)
+            result = await call("upsert", control, data=rows)
+            if self._write_count(result, "upsert") != len(rows):
+                raise TypeError
 
         try:
             async with asyncio.timeout(self._cleanup_timeout_seconds):
                 canonical = self._collection_name(model, dimension)
                 control = await ensure_control_collection()
-                existing_replaced: list[dict[str, Any]] = []
                 if just_replaced is not None:
-                    existing_replaced = await control_rows(
-                        control, [self._retirement_id(just_replaced)],
-                        ["id", "recordType", "collectionName", "retiredAt"],
+                    await retirement_marker(
+                        control, just_replaced, time.time(),
                     )
-                    if not any(
-                        row.get("recordType") == "collection_retirement"
-                        and row.get("collectionName") == just_replaced
-                        and isinstance(row.get("retiredAt"), (int, float))
-                        and math.isfinite(float(row["retiredAt"]))
-                        for row in existing_replaced
-                    ):
-                        await retirement_marker(
-                            control, just_replaced, time.time(),
-                        )
+                retention_rows = await control_rows(
+                    control, [self._retention_state_id()],
+                    [
+                        "id", "recordType", "protectedCollections",
+                        "retentionComplete",
+                    ],
+                )
+                protected: list[str] = []
+                retention_complete = self._retention_generations == 2
+                if (
+                    len(retention_rows) == 1
+                    and retention_rows[0].get("recordType")
+                    == "collection_retention_state"
+                    and isinstance(
+                        retention_rows[0].get("protectedCollections"), list
+                    )
+                ):
+                    protected = [
+                        name for name in retention_rows[0]["protectedCollections"]
+                        if isinstance(name, str)
+                    ][:self._retention_generations - 1]
+                    retention_complete = bool(
+                        retention_rows[0].get("retentionComplete")
+                    )
+                if just_replaced is not None:
+                    protected = [
+                        just_replaced,
+                        *(name for name in protected if name != just_replaced),
+                    ][:self._retention_generations - 1]
+                    retention_complete = (
+                        retention_complete
+                        or len(protected) >= self._retention_generations - 1
+                    )
+                    retention_row = {
+                        "id": self._retention_state_id(),
+                        "recordType": "collection_retention_state",
+                        "protectedCollections": protected,
+                        "retentionComplete": retention_complete,
+                        "mutationFence": fence,
+                        "schemaVersion": self._schema_version,
+                        "isActive": False,
+                        "embedding": [0.0],
+                    }
+                    await upsert_control_row(
+                        control, retention_row,
+                        (
+                            "recordType", "protectedCollections",
+                            "retentionComplete", "schemaVersion",
+                        ),
+                    )
                 names = await call("list_collections")
                 if not isinstance(names, list):
                     raise TypeError
@@ -696,32 +757,9 @@ class MilvusKnowledgeStore:
                     )
                 ]
                 candidates.sort()
-                marker_ids = [self._retirement_id(name) for name in candidates]
-                marker_rows = await control_rows(
-                    control, marker_ids,
-                    ["id", "recordType", "collectionName", "retiredAt"],
-                )
-                markers = {
-                    str(row.get("collectionName")): row
-                    for row in marker_rows
-                    if row.get("recordType") == "collection_retirement"
-                    and isinstance(row.get("collectionName"), str)
-                    and isinstance(row.get("retiredAt"), (int, float))
-                    and math.isfinite(float(row["retiredAt"]))
-                }
-                keep = {current}
+                keep = {current, *protected}
                 if just_replaced is not None:
                     keep.add(just_replaced)
-                retired_newest_first = sorted(
-                    markers.values(),
-                    key=lambda row: (float(row["retiredAt"]), str(row["collectionName"])),
-                    reverse=True,
-                )
-                for marker in retired_newest_first:
-                    if len(keep) >= self._retention_generations:
-                        break
-                    keep.add(str(marker["collectionName"]))
-
                 processable = [name for name in candidates if name not in keep]
                 if not processable:
                     return
@@ -744,7 +782,20 @@ class MilvusKnowledgeStore:
                     )
                 ordered = processable[start:] + processable[:start]
                 batch = ordered[:self._cleanup_scan_limit]
+                marker_rows = await control_rows(
+                    control, [self._retirement_id(name) for name in batch],
+                    ["id", "recordType", "collectionName", "retiredAt"],
+                )
+                markers = {
+                    str(row.get("collectionName")): row
+                    for row in marker_rows
+                    if row.get("recordType") == "collection_retirement"
+                    and isinstance(row.get("collectionName"), str)
+                    and isinstance(row.get("retiredAt"), (int, float))
+                    and math.isfinite(float(row["retiredAt"]))
+                }
                 cutoff = time.time() - self._cleanup_grace_seconds
+                legacy: list[str] = []
                 for name in batch:
                     description = await call("describe_collection", name)
                     metadata = self._metadata(description)
@@ -757,18 +808,21 @@ class MilvusKnowledgeStore:
                         continue
                     marker = markers.get(name)
                     if marker is None:
-                        markers[name] = await retirement_marker(
-                            control, name, time.time(),
-                        )
+                        legacy.append(name)
+                        continue
+                    if not retention_complete:
                         continue
                     if float(marker["retiredAt"]) >= cutoff:
                         continue
                     if await alias_target() != current:
                         return
+                    await self._assert_permit(permit)
                     await call("drop_collection", name)
+                    await self._assert_permit(permit)
                     await call(
                         "delete", control, ids=[self._retirement_id(name)],
                     )
+                await write_legacy_markers(control, legacy, time.time())
                 cursor_row = {
                     "id": self._cleanup_cursor_id(),
                     "recordType": "collection_cleanup_cursor",
@@ -921,6 +975,11 @@ class MilvusKnowledgeStore:
             f"knowledge-collection-cleanup-cursor\0{self._alias}".encode()
         ).hexdigest()
 
+    def _retention_state_id(self) -> str:
+        return hashlib.sha256(
+            f"knowledge-collection-retention-state\0{self._alias}".encode()
+        ).hexdigest()
+
     async def _ensure_control_collection(self, fence: int) -> str:
         name = self._control_collection_name()
         try:
@@ -990,6 +1049,56 @@ class MilvusKnowledgeStore:
         actual = await self._get_rows(collection, [row["id"]])
         if len(actual) != 1 or any(actual[0].get(key) != value for key, value in row.items()):
             raise MilvusKnowledgeError("KNOWLEDGE_VECTOR_WRITE_INCOMPLETE")
+
+    async def _clear_retirement_marker_for_publish(
+        self, collection: str, permit: MutationPermit,
+    ) -> None:
+        """Prove a physical target has no stale retirement state before publication."""
+
+        control = self._control_collection_name()
+        marker_id = self._retirement_id(collection)
+        try:
+            if not await self._call("has_collection", control):
+                return
+            description = await self._call("describe_collection", control)
+            metadata = self._metadata(description)
+            if (
+                self._described_dimension(description) != 1
+                or metadata.get("kind")
+                != "customer-service-knowledge-mutation-control"
+                or metadata.get("schemaVersion") != self._schema_version
+            ):
+                raise TypeError
+            rows = await self._call(
+                "get", control, ids=[marker_id],
+                output_fields=["id", "recordType", "collectionName"],
+                consistency_level="Strong",
+            )
+            if not rows:
+                return
+            if len(rows) != 1 or rows[0].get("id") != marker_id:
+                raise TypeError
+            await self._assert_permit(permit)
+            try:
+                await self._call("delete", control, ids=[marker_id])
+            except Exception:
+                pass
+            remaining = await self._call(
+                "get", control, ids=[marker_id],
+                output_fields=["id"], consistency_level="Strong",
+            )
+            if remaining:
+                raise TypeError
+        except MilvusKnowledgeError as error:
+            if error.code == "KNOWLEDGE_MUTATION_LEASE_INVALID":
+                raise
+            raise MilvusKnowledgeError(
+                "KNOWLEDGE_RETIREMENT_MARKER_CLEAR_FAILED"
+            ) from None
+        except Exception:
+            raise MilvusKnowledgeError(
+                "KNOWLEDGE_RETIREMENT_MARKER_CLEAR_FAILED"
+            ) from None
 
     @staticmethod
     def _write_count(result: object, operation: str) -> int | None:
@@ -1582,6 +1691,9 @@ class MilvusKnowledgeStore:
                 if not await self._verify_rows(collection, [completion]):
                     raise MilvusKnowledgeError("KNOWLEDGE_STAGING_INCOMPLETE")
                 try:
+                    await self._clear_retirement_marker_for_publish(
+                        collection, permit,
+                    )
                     await self._assert_permit(permit)
                     await self._switch_alias(old, collection)
                     switched = True
@@ -1589,7 +1701,7 @@ class MilvusKnowledgeStore:
                     raise
                 await self._cleanup_retired_collections(
                     current=collection, just_replaced=old,
-                    model=model, dimension=dimension, fence=permit.fence,
+                    model=model, dimension=dimension, permit=permit,
                 )
                 return RebuildResult(
                     collection, document_count, chunk_count, False
