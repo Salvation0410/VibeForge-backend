@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import tempfile
 from pathlib import Path
@@ -97,6 +98,41 @@ async def test_dns_failure_has_stable_safe_error(settings):
     with pytest.raises(KnowledgeDownloadError, match="KNOWLEDGE_DOWNLOAD_DNS_FAILED") as caught:
         await dl.download(URL, expected_sha256=HASH, max_bytes=100)
     assert "very-secret-value" not in str(caught.value)
+    assert "very-secret-value" not in repr(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_dns_resolution_timeout_is_bounded_and_safe(settings):
+    settings.rag_download_connect_timeout_seconds = 0.02
+
+    async def resolver(_):
+        await asyncio.Event().wait()
+
+    dl = downloader(settings, lambda _: httpx.Response(200, content=BODY), resolver=resolver)
+    with pytest.raises(KnowledgeDownloadError, match="KNOWLEDGE_DOWNLOAD_TIMEOUT") as caught:
+        await asyncio.wait_for(dl.download(URL, expected_sha256=HASH, max_bytes=100), 0.5)
+    assert "very-secret-value" not in repr(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_each_redirect_dns_resolution_has_own_timeout(settings):
+    settings.rag_download_connect_timeout_seconds = 0.02
+    calls = 0
+
+    async def resolver(_):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return ["93.184.215.14"]
+        await asyncio.Event().wait()
+
+    dl = downloader(
+        settings, lambda _: httpx.Response(302, headers={"Location": "/next"}),
+        resolver=resolver,
+    )
+    with pytest.raises(KnowledgeDownloadError, match="KNOWLEDGE_DOWNLOAD_TIMEOUT") as caught:
+        await asyncio.wait_for(dl.download(URL, expected_sha256=HASH, max_bytes=100), 0.5)
+    assert calls == 2
     assert "very-secret-value" not in repr(caught.value)
 
 

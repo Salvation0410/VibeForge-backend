@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Protocol
 
 from docx import Document
+from docx.table import Table
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 
@@ -59,6 +60,12 @@ def _safe_locator(value: str) -> str:
     return re.sub(r"https?://\S+", "[link]", _clean(value), flags=re.IGNORECASE)
 
 
+def _push_heading(stack: list[tuple[int, str]], level: int, title: str) -> None:
+    while stack and stack[-1][0] >= level:
+        stack.pop()
+    stack.append((level, _safe_locator(title)))
+
+
 def _append(sections: list[ParsedSection], content: str, locator: str, count: list[int]) -> None:
     cleaned = _clean(content)
     count[0] += len(cleaned)
@@ -82,13 +89,13 @@ def _read_text(path: Path) -> str:
 def _parse_markdown(path: Path) -> list[ParsedSection]:
     sections: list[ParsedSection] = []
     count = [0]
-    headings: list[str] = []
+    headings: list[tuple[int, str]] = []
     lines: list[str] = []
     in_code = False
 
     def flush() -> None:
         if lines:
-            _append(sections, "\n".join(lines), " / ".join(headings) or "document", count)
+            _append(sections, "\n".join(lines), " / ".join(title for _, title in headings) or "document", count)
             lines.clear()
 
     for line_number, line in enumerate(_read_text(path).splitlines(), 1):
@@ -100,7 +107,7 @@ def _parse_markdown(path: Path) -> list[ParsedSection]:
         if match:
             flush()
             level = len(match.group(1))
-            headings = headings[:level - 1] + [_safe_locator(match.group(2))]
+            _push_heading(headings, level, match.group(2))
         else:
             lines.append(line)
     flush()
@@ -148,21 +155,62 @@ def _parse_docx(path: Path) -> list[ParsedSection]:
     _check_docx_archive(path)
     sections: list[ParsedSection] = []
     count = [0]
-    headings: list[str] = []
+    title = ""
+    headings: list[tuple[int, str]] = []
+
+    def read_table(table: Table, locator: str, depth: int) -> None:
+        if depth > 8:
+            raise DocumentETLError("KNOWLEDGE_DOCUMENT_TOO_LARGE")
+        seen_cells: set[object] = set()
+        for row_index, row in enumerate(table.rows, 1):
+            if row_index > MAX_SECTIONS:
+                raise DocumentETLError("KNOWLEDGE_DOCUMENT_TOO_LARGE")
+            row_locator = f"{locator} / 行 {row_index}"
+            texts: list[str] = []
+            nested_tables: list[tuple[Table, str]] = []
+            for column_index, cell in enumerate(row.cells, 1):
+                if cell._tc in seen_cells:
+                    continue
+                seen_cells.add(cell._tc)
+                nested_index = 0
+                for item in cell.iter_inner_content():
+                    if isinstance(item, Table):
+                        nested_index += 1
+                        nested_tables.append((
+                            item,
+                            f"{row_locator} / 列 {column_index} / 嵌套表格 {nested_index}",
+                        ))
+                    elif item.text.strip():
+                        texts.append(item.text)
+            _append(sections, " | ".join(texts), row_locator, count)
+            for nested, nested_locator in nested_tables:
+                read_table(nested, nested_locator, depth + 1)
+
     try:
         doc = Document(path)
-        for index, paragraph in enumerate(doc.paragraphs, 1):
-            if index > MAX_SECTIONS:
+        paragraph_index = 0
+        table_index = 0
+        for block_index, item in enumerate(doc.iter_inner_content(), 1):
+            if block_index > MAX_SECTIONS:
                 raise DocumentETLError("KNOWLEDGE_DOCUMENT_TOO_LARGE")
-            style = paragraph.style.name or ""
+            if isinstance(item, Table):
+                table_index += 1
+                prefix = [*([title] if title else []), *(text for _, text in headings)]
+                read_table(item, " / ".join([*prefix, f"表格 {table_index}"]), 0)
+                continue
+            paragraph_index += 1
+            style = item.style.name or ""
             if style == "Title":
-                headings = [_safe_locator(paragraph.text)]
+                title = _safe_locator(item.text)
+                headings.clear()
             elif match := re.fullmatch(r"Heading ([1-6])", style):
                 level = int(match.group(1))
-                headings = headings[:level] + [_safe_locator(paragraph.text)]
+                _push_heading(headings, level, item.text)
             else:
-                locator = " / ".join([*headings, f"paragraph {index}"])
-                _append(sections, paragraph.text, locator, count)
+                locator = " / ".join(
+                    [*([title] if title else []), *(text for _, text in headings), f"paragraph {paragraph_index}"]
+                )
+                _append(sections, item.text, locator, count)
     except DocumentETLError:
         raise
     except Exception:
@@ -228,7 +276,7 @@ def split_sections(
     )
     chunks: list[KnowledgeChunk] = []
     for section in sections:
-        if len(section.content) > (MAX_CHUNKS - len(chunks)) * (size - overlap):
+        if len(chunks) == MAX_CHUNKS and section.content.strip():
             raise DocumentETLError("KNOWLEDGE_DOCUMENT_TOO_LARGE")
         for content in splitter.split_text(section.content):
             if not content.strip():

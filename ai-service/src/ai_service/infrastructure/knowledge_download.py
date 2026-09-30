@@ -101,8 +101,13 @@ class KnowledgeDownloader:
         ):
             raise KnowledgeDownloadError("KNOWLEDGE_DOWNLOAD_TARGET_REJECTED")
         try:
-            addresses = await self._resolver(host)
-        except (OSError, ValueError, asyncio.TimeoutError):
+            addresses = await asyncio.wait_for(
+                self._resolver(host),
+                timeout=self._settings.rag_download_connect_timeout_seconds,
+            )
+        except TimeoutError:
+            raise KnowledgeDownloadError("KNOWLEDGE_DOWNLOAD_TIMEOUT") from None
+        except (OSError, ValueError):
             raise KnowledgeDownloadError("KNOWLEDGE_DOWNLOAD_DNS_FAILED") from None
         if not addresses:
             raise KnowledgeDownloadError("KNOWLEDGE_DOWNLOAD_DNS_FAILED")

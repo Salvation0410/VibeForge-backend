@@ -9,6 +9,8 @@ from docx import Document
 from pypdf import PdfWriter
 from pypdf.generic import DictionaryObject, NameObject, DecodedStreamObject
 
+import ai_service.orchestration.document_etl as document_etl
+
 from ai_service.orchestration.document_etl import (
     DocumentETLError,
     ParsedSection,
@@ -27,6 +29,19 @@ def test_markdown_heading_paths_and_immutable_sections():
     assert any(s.source_locator == "产品指南 / 退款 / 时限" for s in sections)
     with pytest.raises(FrozenInstanceError):
         sections[0].content = "changed"
+
+
+def test_markdown_heading_levels_handle_missing_parents_and_siblings(tmp_path):
+    path = tmp_path / "levels.md"
+    path.write_text(
+        "## Start\none\n### Deep\ntwo\n## Peer\nthree\n"
+        "#### Skip\nfour\n# Root\nfive\n### Child\nsix\n### Sibling\nseven",
+        encoding="utf-8",
+    )
+    assert [section.source_locator for section in parse_document(path, "md")] == [
+        "Start", "Start / Deep", "Peer", "Peer / Skip", "Root",
+        "Root / Child", "Root / Sibling",
+    ]
 
 
 def test_txt_line_ranges_and_unicode_cleanup(tmp_path):
@@ -65,6 +80,64 @@ def test_docx_title_heading_and_paragraph_locator(tmp_path):
     doc.save(p)
     sections = parse_document(p, "docx")
     assert any(s.source_locator == "售后政策 / 退款 / paragraph 3" for s in sections)
+
+
+def test_docx_heading_levels_without_title_and_with_title(tmp_path):
+    path = tmp_path / "levels.docx"
+    doc = Document()
+    for title, level, body in [
+        ("Start", 2, "one"), ("Deep", 3, "two"), ("Peer", 2, "three"),
+        ("Root", 1, "four"), ("Child", 3, "five"), ("Other", 1, "six"),
+    ]:
+        doc.add_heading(title, level=level)
+        doc.add_paragraph(body)
+    doc.add_paragraph("Manual", style="Title")
+    doc.add_heading("First", level=1)
+    doc.add_paragraph("seven")
+    doc.add_heading("Second", level=1)
+    doc.add_paragraph("eight")
+    doc.save(path)
+    assert [section.source_locator.rsplit(" / ", 1)[0] for section in parse_document(path, "docx")] == [
+        "Start", "Start / Deep", "Peer", "Root", "Root / Child", "Other",
+        "Manual / First", "Manual / Second",
+    ]
+
+
+def test_docx_table_content_follows_document_order(tmp_path):
+    path = tmp_path / "table.docx"
+    doc = Document()
+    doc.add_heading("Policy", level=1)
+    doc.add_paragraph("before")
+    table = doc.add_table(rows=2, cols=3)
+    table.cell(0, 0).text = "A"
+    table.cell(0, 1).text = "B"
+    table.cell(1, 0).merge(table.cell(1, 1)).text = "Merged"
+    table.cell(1, 2).text = "D"
+    doc.add_paragraph("after")
+    doc.save(path)
+    sections = parse_document(path, "docx")
+    assert [section.source_locator for section in sections] == [
+        "Policy / paragraph 2", "Policy / 表格 1 / 行 1",
+        "Policy / 表格 1 / 行 2", "Policy / paragraph 3",
+    ]
+    assert [section.content for section in sections] == [
+        "before", "A | B", "Merged | D", "after",
+    ]
+
+
+def test_docx_nested_table_text_appears_once(tmp_path):
+    path = tmp_path / "nested.docx"
+    doc = Document()
+    table = doc.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "Outer"
+    nested = table.cell(0, 0).add_table(rows=1, cols=1)
+    nested.cell(0, 0).text = "Nested"
+    table.cell(0, 1).text = "Peer"
+    doc.save(path)
+    sections = parse_document(path, "docx")
+    assert [section.content for section in sections] == ["Outer | Peer", "Nested"]
+    assert sections[0].source_locator == "表格 1 / 行 1"
+    assert sections[1].source_locator == "表格 1 / 行 1 / 列 1 / 嵌套表格 1 / 行 1"
 
 
 def test_pdf_page_locator_and_encryption(tmp_path):
@@ -171,6 +244,27 @@ def test_splitter_redacts_caller_supplied_locator_and_rejects_signed_source_name
         split_sections(
             sections, document_id="42", document_version=1,
             source_name="https://oss.example.test/file?Signature=secret", settings=settings,
+        )
+
+
+def test_chunk_capacity_counts_actual_splitter_output(settings, monkeypatch):
+    settings.rag_chunk_size = 5
+    settings.rag_chunk_overlap = 4
+    monkeypatch.setattr(document_etl, "MAX_CHUNKS", 2)
+    sections = (
+        ParsedSection("hello", "first"),
+        ParsedSection("world", "second"),
+    )
+    chunks = split_sections(
+        sections, document_id="42", document_version=1,
+        source_name="manual.txt", settings=settings,
+    )
+    assert [chunk.chunk_id for chunk in chunks] == ["42:1:0", "42:1:1"]
+    with pytest.raises(DocumentETLError, match="KNOWLEDGE_DOCUMENT_TOO_LARGE"):
+        split_sections(
+            (*sections, ParsedSection("third", "third")),
+            document_id="42", document_version=1,
+            source_name="manual.txt", settings=settings,
         )
 
 
