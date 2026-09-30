@@ -1,7 +1,7 @@
 # AI 服务 LangGraph 交接说明
 
-> 更新日期：2026-09-29
-> 当前分支：`codex/vue-multi-agent-quality-review`
+> 更新日期：2026-09-30
+> 当前分支：`codex/customer-service-rag`
 > 文档目标：让后续开发者用最短时间确认当前事实、验证证据、人工验收门和下一步优先级。
 
 ## 1. 五分钟接手摘要
@@ -25,6 +25,13 @@
 2. 在上述 checkpoint 环境可用后，再启动 Spring、Python 和 Vue 前端并开启 Vue 多 Agent 开关，完成首次生成、针对性 major 修复、停止传播、超时/错误凭据和延迟/token 成本人工验证。
 3. 继续 P1 真实 Uvicorn/代理压力和真实 npm 长构建压力，补充资源收敛证据。
 4. 长期记忆保持关闭；只有出现清晰的跨 thread 用户或应用记忆需求时才重新评估 `PostgresStore`。
+
+### 客服机器人 RAG 实施进度
+
+- 设计提交 `b61fc07`、实施计划提交 `be6b5db` 已完成；计划中的问答、ETL、Embedding、Milvus、Reranker 和前端能力不能据此视为已实现。
+- Task 1 的 MySQL 知识文档与 ETL outbox 表、对应 MyBatis-Flex 实体和 Mapper 已在提交 `8e18149` 完成。Task 2 及后续任务均未实施。
+- Task 1 定向 schema 测试 2 项通过，`mvn clean -DskipTests compile` 通过，暂存差异的 `git diff --cached --check` 通过。仓库没有 `mvnw.cmd`，测试和编译使用系统 Maven；测试实际命令为 `mvn test -Dtest=CustomerServiceKnowledgeSchemaTest`。
+- 尚未在真实 MySQL 执行 DDL、CRUD 或并发任务认领验证，这些仍是人工待验收项。
 
 ### 已关闭的源码阻塞
 
@@ -534,7 +541,7 @@ Vue 多 Agent 已于 2026-09-30 本地快进合并到 `dev`，合并后 HEAD 为
 - `doc/ai-service-langchain-langgraph-refactor-design.md`：重构架构与边界设计。
 - `docs/superpowers/specs/2026-09-29-postgres-checkpoint-design.md`：PostgreSQL checkpoint 迁移、故障语义和长期记忆决策。
 - `docs/superpowers/specs/2026-09-29-vue-multi-agent-quality-review-design.md`：Vue 三角色质量审查、F1 错误语义、repair 和 checkpoint 边界。
-- `docs/superpowers/specs/2026-09-30-customer-service-rag-design.md`：规划中的客服机器人、OSS 文档 ETL、CloseAI Embedding、Milvus 和 GPU Reranker 设计；尚未实施。
+- `docs/superpowers/specs/2026-09-30-customer-service-rag-design.md`：客服机器人、OSS 文档 ETL、CloseAI Embedding、Milvus 和 GPU Reranker 设计；目前仅 Task 1 数据库 schema 已实现，其余仍属规划。
 - `docs/superpowers/specs/2026-09-21-bounded-streaming-simple-prompts-design.md`：有限流式窗口和简短优化提示设计。
 - `docs/superpowers/specs/2026-09-21-circular-preview-spinner-design.md`：预览加载图正圆修复设计。
 
