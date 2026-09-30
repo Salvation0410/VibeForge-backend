@@ -1,0 +1,185 @@
+package com.yupi.yuaicodemother.manager;
+
+import com.yupi.yuaicodemother.exception.BusinessException;
+import com.yupi.yuaicodemother.exception.ErrorCode;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+
+/** Validates a knowledge document before it crosses the OSS boundary. */
+public final class KnowledgeDocumentFilePolicy {
+    private static final long HARD_MAX_BYTES = 20L * 1024 * 1024;
+    private static final int MAX_NAME_LENGTH = 128;
+    private static final int MAX_ZIP_ENTRIES = 1024;
+    private static final long MAX_ZIP_ENTRY_BYTES = 32L * 1024 * 1024;
+    private static final long MAX_ZIP_EXPANDED_BYTES = 64L * 1024 * 1024;
+    private static final Map<String, Set<String>> MIME_TYPES = Map.of(
+            "pdf", Set.of("application/pdf"),
+            "docx", Set.of("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            "md", Set.of("text/markdown", "text/x-markdown", "text/plain"),
+            "txt", Set.of("text/plain")
+    );
+
+    private final long maxBytes;
+
+    public KnowledgeDocumentFilePolicy(long configuredMaxBytes) {
+        if (configuredMaxBytes <= 0) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "知识文档大小配置无效");
+        }
+        this.maxBytes = Math.min(configuredMaxBytes, HARD_MAX_BYTES);
+    }
+
+    public ValidatedDocument validate(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw invalid("文件不能为空");
+        }
+        if (file.getSize() > maxBytes) {
+            throw invalid("文件大小不能超过限制");
+        }
+        String displayName = normalizeName(file.getOriginalFilename());
+        int dot = displayName.lastIndexOf('.');
+        if (dot <= 0 || dot == displayName.length() - 1) {
+            throw invalid("文件格式不支持");
+        }
+        String type = displayName.substring(dot + 1).toLowerCase(Locale.ROOT);
+        Set<String> allowedMimes = MIME_TYPES.get(type);
+        if (allowedMimes == null) {
+            throw invalid("文件格式不支持");
+        }
+        String mime = file.getContentType();
+        if (mime == null || !allowedMimes.contains(mime.split(";", 2)[0].trim().toLowerCase(Locale.ROOT))) {
+            throw invalid("文件内容与类型不匹配");
+        }
+        byte[] bytes;
+        try (InputStream input = file.getInputStream()) {
+            bytes = input.readNBytes((int) maxBytes + 1);
+        } catch (IOException e) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "知识文档读取失败");
+        }
+        if (bytes.length == 0 || bytes.length > maxBytes) {
+            throw invalid(bytes.length == 0 ? "文件不能为空" : "文件大小不能超过限制");
+        }
+        switch (type) {
+            case "pdf" -> validatePdf(bytes);
+            case "docx" -> validateDocx(bytes);
+            case "md", "txt" -> validateText(bytes);
+            default -> throw invalid("文件格式不支持");
+        }
+        return new ValidatedDocument(bytes, displayName, type, bytes.length, sha256(bytes));
+    }
+
+    private static String normalizeName(String original) {
+        if (original == null) {
+            throw invalid("文件名不能为空");
+        }
+        String name = original.replace('\\', '/');
+        name = name.substring(name.lastIndexOf('/') + 1);
+        name = name.replaceAll("[\\p{Cntrl}]", "").trim();
+        if (name.isBlank() || name.length() > MAX_NAME_LENGTH || name.startsWith(".")) {
+            throw invalid("文件名无效");
+        }
+        return name;
+    }
+
+    private static void validatePdf(byte[] bytes) {
+        if (bytes.length < 5 || bytes[0] != '%' || bytes[1] != 'P' || bytes[2] != 'D'
+                || bytes[3] != 'F' || bytes[4] != '-') {
+            throw invalid("文件内容与类型不匹配");
+        }
+        // Full encryption detection belongs to the Python PDF parser; this catches an explicit PDF encryption dictionary.
+        if (containsAscii(bytes, "/Encrypt")) {
+            throw invalid("不支持加密 PDF");
+        }
+    }
+
+    private static boolean containsAscii(byte[] bytes, String marker) {
+        byte[] needle = marker.getBytes(StandardCharsets.US_ASCII);
+        outer: for (int index = 0; index <= bytes.length - needle.length; index++) {
+            for (int offset = 0; offset < needle.length; offset++) {
+                if (bytes[index + offset] != needle[offset]) continue outer;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private static void validateDocx(byte[] bytes) {
+        if (bytes.length < 4 || bytes[0] != 'P' || bytes[1] != 'K' || bytes[2] != 3 || bytes[3] != 4) {
+            throw invalid("文件内容与类型不匹配");
+        }
+        boolean contentTypes = false;
+        boolean document = false;
+        int entries = 0;
+        long totalExpanded = 0;
+        try (ZipInputStream zip = new ZipInputStream(new java.io.ByteArrayInputStream(bytes))) {
+            ZipEntry entry;
+            byte[] buffer = new byte[8192];
+            while ((entry = zip.getNextEntry()) != null) {
+                if (++entries > MAX_ZIP_ENTRIES) {
+                    throw invalid("DOCX 压缩条目超限");
+                }
+                String name = entry.getName();
+                if (name.equals("[Content_Types].xml")) contentTypes = true;
+                if (name.equals("word/document.xml")) document = true;
+                if (name.toLowerCase(Locale.ROOT).endsWith("vbaproject.bin")) {
+                    throw invalid("不支持含宏文档");
+                }
+                long entryExpanded = 0;
+                int count;
+                while ((count = zip.read(buffer)) != -1) {
+                    entryExpanded += count;
+                    totalExpanded += count;
+                    if (entryExpanded > MAX_ZIP_ENTRY_BYTES || totalExpanded > MAX_ZIP_EXPANDED_BYTES) {
+                        throw invalid("DOCX 解压大小超限");
+                    }
+                }
+                zip.closeEntry();
+            }
+        } catch (IOException e) {
+            throw invalid("文件内容与类型不匹配");
+        }
+        if (!contentTypes || !document) {
+            throw invalid("文件内容与类型不匹配");
+        }
+    }
+
+    private static void validateText(byte[] bytes) {
+        try {
+            String text = StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(bytes)).toString();
+            for (int index = 0; index < text.length(); index++) {
+                char ch = text.charAt(index);
+                if (Character.isISOControl(ch) && ch != '\n' && ch != '\r' && ch != '\t') {
+                    throw invalid("文件内容与类型不匹配");
+                }
+            }
+        } catch (CharacterCodingException e) {
+            throw invalid("文件内容与类型不匹配");
+        }
+    }
+
+    private static String sha256(byte[] bytes) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+
+    private static BusinessException invalid(String message) {
+        return new BusinessException(ErrorCode.PARAMS_ERROR, message);
+    }
+
+    public record ValidatedDocument(byte[] bytes, String displayName, String fileType, long size, String sha256) { }
+}

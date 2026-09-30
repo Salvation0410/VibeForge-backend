@@ -46,4 +46,10 @@ public class OssProperties {
      * 头像最大大小
      */
     private long maxAvatarSize = 5 * 1024 * 1024;
+
+    private String knowledgeDir = "customer-service-knowledge";
+
+    private long maxKnowledgeDocumentSize = 20L * 1024 * 1024;
+
+    private long knowledgeSignedUrlTtlSeconds = 600;
 }

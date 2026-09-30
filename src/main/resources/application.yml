@@ -62,3 +62,8 @@ ai:
   tool-idempotency-lock-wait-millis: ${AI_TOOL_IDEMPOTENCY_LOCK_WAIT_MILLIS:30000}
   gray-whitelist: []
   gray-percentage: 0
+
+oss:
+  knowledge-dir: ${OSS_KNOWLEDGE_DIR:customer-service-knowledge}
+  max-knowledge-document-size: ${OSS_MAX_KNOWLEDGE_DOCUMENT_SIZE:20971520}
+  knowledge-signed-url-ttl-seconds: ${OSS_KNOWLEDGE_SIGNED_URL_TTL_SECONDS:600}
