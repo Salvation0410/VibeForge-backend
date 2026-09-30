@@ -949,6 +949,51 @@ async def test_max_length_alias_can_rebuild_and_publish_staging(settings):
 
 
 @pytest.mark.asyncio
+async def test_long_alias_fingerprints_keep_business_and_control_data_isolated(settings):
+    aliases = ("a" * 254 + "x", "a" * 254 + "y")
+    client = FakeMilvusClient()
+    stores = []
+    derived_names = []
+
+    for alias in aliases:
+        settings.milvus_collection_alias = alias
+        knowledge = MilvusKnowledgeStore(
+            settings, client_factory=lambda **_kwargs: client,
+            mutation_coordinator=client.coordinator,
+        )
+        stores.append(knowledge)
+        derived_names.append((
+            knowledge._collection_name("embedding-v1", 2),
+            knowledge._collection_name(
+                "embedding-v1", 2, suffix="_staging_000000000000"
+            ),
+            knowledge._control_collection_name(),
+        ))
+
+    assert all(left != right for left, right in zip(*derived_names))
+
+    for index, (alias, knowledge) in enumerate(zip(aliases, stores), start=1):
+        document_id = f"doc-{index}"
+        result = await knowledge.rebuild_collection(
+            documents(document(document_id=document_id)),
+            lease=lease(f"collection:{alias}", 100 + index),
+        )
+        assert client.aliases[alias] == result.collection_name
+        results = await knowledge.search([0.1, 0.2], 8)
+        assert {item.document_id for item in results} == {document_id}
+        await knowledge.delete_document(
+            document_id, 99,
+            lease=lease(f"document:{document_id}", 200 + index),
+        )
+
+    first_control, second_control = (
+        derived_names[0][2], derived_names[1][2]
+    )
+    assert {row["documentId"] for row in client.collections[first_control]} == {"doc-1"}
+    assert {row["documentId"] for row in client.collections[second_control]} == {"doc-2"}
+
+
+@pytest.mark.asyncio
 async def test_configured_timeout_is_used_for_client_and_rpc(settings):
     settings.milvus_rpc_timeout_seconds = 1.25
     client = FakeMilvusClient()

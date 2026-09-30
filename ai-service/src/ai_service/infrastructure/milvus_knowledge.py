@@ -22,8 +22,9 @@ _ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,128}")
 _CHUNK_ID_PATTERN = re.compile(r"[A-Za-z0-9_.:-]{1,512}")
 _MILVUS_IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,254}")
 _MAX_MILVUS_IDENTIFIER_LENGTH = 255
-_COLLECTION_BASE_LENGTH = _MAX_MILVUS_IDENTIFIER_LENGTH - len(
-    "_000000000000_staging_000000000000"
+_COLLECTION_BASE_LENGTH = _MAX_MILVUS_IDENTIFIER_LENGTH - max(
+    len("_000000000000_staging_000000000000"),
+    len("_mutation_control_v1_000000000000"),
 )
 _VERIFY_BATCH_SIZE = 256
 _MAX_DOCUMENT_HISTORY_RECORDS = 10_000
@@ -303,7 +304,8 @@ class MilvusKnowledgeStore:
 
     def _collection_name(self, model: str, dimension: int, *, suffix: str = "") -> str:
         fingerprint = hashlib.sha256(
-            f"customer-service\0{model}\0{dimension}\0{self._schema_version}".encode()
+            f"customer-service\0{self._alias}\0{model}\0{dimension}"
+            f"\0{self._schema_version}".encode()
         ).hexdigest()[:12]
         ending = f"_{fingerprint}{suffix}"
         name = f"{self._alias[:_COLLECTION_BASE_LENGTH]}{ending}"
@@ -447,7 +449,8 @@ class MilvusKnowledgeStore:
         return f'documentId == "{document_id}"'
 
     def _control_collection_name(self) -> str:
-        ending = "_mutation_control_v1"
+        alias_fingerprint = hashlib.sha256(self._alias.encode()).hexdigest()[:12]
+        ending = f"_mutation_control_v1_{alias_fingerprint}"
         name = f"{self._alias[:_COLLECTION_BASE_LENGTH]}{ending}"
         if not self._valid_collection_identifier(name):
             raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_ALIAS_INVALID")
