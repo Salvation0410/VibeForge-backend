@@ -7,9 +7,11 @@ import com.yupi.yuaicodemother.mapper.CustomerServiceKnowledgeEtlOutboxMapper;
 import com.yupi.yuaicodemother.manager.OssManager;
 import com.yupi.yuaicodemother.model.entity.CustomerServiceKnowledgeDocument;
 import com.yupi.yuaicodemother.model.entity.CustomerServiceKnowledgeEtlOutbox;
+import com.yupi.yuaicodemother.service.CustomerServiceKnowledgeTaskFinalizer;
 import com.yupi.yuaicodemother.service.KnowledgeMutationCoordinator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -33,28 +35,34 @@ public class CustomerServiceKnowledgeEtlWorker {
     private final OssManager ossManager;
     private final CustomerServiceAiClient aiClient;
     private final KnowledgeMutationCoordinator coordinator;
+    private final CustomerServiceKnowledgeTaskFinalizer taskFinalizer;
     private final CustomerServiceProperties properties;
     private final Clock clock;
     private final String owner = UUID.randomUUID().toString();
 
+    @Autowired
     public CustomerServiceKnowledgeEtlWorker(CustomerServiceKnowledgeDocumentMapper documentMapper,
                                              CustomerServiceKnowledgeEtlOutboxMapper outboxMapper,
                                              OssManager ossManager, CustomerServiceAiClient aiClient,
                                              KnowledgeMutationCoordinator coordinator,
+                                             CustomerServiceKnowledgeTaskFinalizer taskFinalizer,
                                              CustomerServiceProperties properties) {
-        this(documentMapper, outboxMapper, ossManager, aiClient, coordinator, properties, Clock.systemUTC());
+        this(documentMapper, outboxMapper, ossManager, aiClient, coordinator, taskFinalizer,
+                properties, Clock.systemUTC());
     }
 
     public CustomerServiceKnowledgeEtlWorker(CustomerServiceKnowledgeDocumentMapper documentMapper,
                                       CustomerServiceKnowledgeEtlOutboxMapper outboxMapper,
                                       OssManager ossManager, CustomerServiceAiClient aiClient,
                                       KnowledgeMutationCoordinator coordinator,
+                                      CustomerServiceKnowledgeTaskFinalizer taskFinalizer,
                                       CustomerServiceProperties properties, Clock clock) {
         this.documentMapper = documentMapper;
         this.outboxMapper = outboxMapper;
         this.ossManager = ossManager;
         this.aiClient = aiClient;
         this.coordinator = coordinator;
+        this.taskFinalizer = taskFinalizer;
         this.properties = properties;
         this.clock = clock;
     }
@@ -84,13 +92,16 @@ public class CustomerServiceKnowledgeEtlWorker {
                 case "REBUILD" -> executeRebuild(task, (PreparedRebuild) prepared, lease);
                 default -> throw new CustomerServiceAiClient.CallException("KNOWLEDGE_TASK_OPERATION_INVALID", false);
             }
-            outboxMapper.finish(task.getId(), owner, "SUCCEEDED", null);
+            if (!"INDEX".equals(task.getOperation()))
+                outboxMapper.finish(task.getId(), owner, "SUCCEEDED", null);
         } catch (LostClaimException ignored) {
             // Another worker reclaimed the task while this worker was preparing the request.
         } catch (StaleTaskException error) {
             finishSafely(task, "SKIPPED", "KNOWLEDGE_TASK_STALE");
         } catch (RebuildSnapshotChangedException error) {
             fail(task, "KNOWLEDGE_REBUILD_SNAPSHOT_CHANGED", true);
+        } catch (TaskFinalizationException error) {
+            logFinalizationFailure(task, "KNOWLEDGE_INDEX_FINALIZATION_FAILED", error.getCause());
         } catch (CustomerServiceAiClient.CallException error) {
             fail(task, error.code(), error.transientFailure());
         } catch (IllegalStateException error) {
@@ -145,8 +156,12 @@ public class CustomerServiceKnowledgeEtlWorker {
         CustomerServiceAiClient.Result result = aiClient.index(new CustomerServiceAiClient.IndexRequest(
                 String.valueOf(document.getId()), task.getDocumentVersion(), document.getName(), document.getFileType(),
                 prepared.signedUrl(), document.getContentHash(), String.valueOf(task.getEtlVersion()), lease));
-        if (documentMapper.completeIndex(document.getId(), task.getDocumentVersion(), task.getEtlVersion(), result.chunkCount()) != 1)
-            throw new StaleTaskException();
+        try {
+            taskFinalizer.completeIndex(task.getId(), owner, document.getId(), task.getDocumentVersion(),
+                    task.getEtlVersion(), result.chunkCount());
+        } catch (RuntimeException error) {
+            throw new TaskFinalizationException(error);
+        }
     }
 
     private void executeDelete(CustomerServiceKnowledgeEtlOutbox task, PreparedDelete prepared,
@@ -213,14 +228,22 @@ public class CustomerServiceKnowledgeEtlWorker {
             int previousAttempts = task.getRetryCount() == null ? 0 : task.getRetryCount();
             int attempts = previousAttempts == Integer.MAX_VALUE ? Integer.MAX_VALUE : previousAttempts + 1;
             boolean retry = transientFailure && attempts < Math.max(1, properties.getRetryMax());
-            outboxMapper.retry(task.getId(), owner, retry ? "PENDING" : "FAILED", attempts,
-                    computeRetryAt(attempts, retry), code);
-            if (!retry && "INDEX".equals(task.getOperation()))
-                documentMapper.failIndex(task.getDocumentId(), task.getDocumentVersion(), task.getEtlVersion(), code);
+            LocalDateTime retryAt = computeRetryAt(attempts, retry);
+            if (!retry && "INDEX".equals(task.getOperation())) {
+                taskFinalizer.failIndex(task.getId(), owner, task.getDocumentId(), task.getDocumentVersion(),
+                        task.getEtlVersion(), attempts, retryAt, code);
+            } else {
+                outboxMapper.retry(task.getId(), owner, retry ? "PENDING" : "FAILED", attempts, retryAt, code);
+            }
         } catch (RuntimeException persistenceError) {
-            log.warn("Knowledge worker failure state was not persisted; task remains reclaimable: taskId={}, operation={}, errorCode={}, persistenceError={}",
-                    task.getId(), task.getOperation(), code, persistenceError.getClass().getSimpleName());
+            logFinalizationFailure(task, code, persistenceError);
         }
+    }
+
+    private void logFinalizationFailure(CustomerServiceKnowledgeEtlOutbox task, String code,
+                                        Throwable persistenceError) {
+        log.warn("Knowledge worker failure state was not persisted; task remains reclaimable: taskId={}, operation={}, errorCode={}, persistenceError={}",
+                task.getId(), task.getOperation(), code, persistenceError.getClass().getSimpleName());
     }
 
     private LocalDateTime computeRetryAt(int attempts, boolean retry) {
@@ -260,6 +283,9 @@ public class CustomerServiceKnowledgeEtlWorker {
     private static final class StaleTaskException extends RuntimeException { }
     private static final class RebuildSnapshotChangedException extends RuntimeException { }
     private static final class LostClaimException extends RuntimeException { }
+    private static final class TaskFinalizationException extends RuntimeException {
+        private TaskFinalizationException(RuntimeException cause) { super(cause); }
+    }
     private interface PreparedOperation { }
     private record PreparedIndex(CustomerServiceKnowledgeDocument document, String signedUrl) implements PreparedOperation { }
     private record PreparedDelete(DeleteSnapshot snapshot) implements PreparedOperation { }

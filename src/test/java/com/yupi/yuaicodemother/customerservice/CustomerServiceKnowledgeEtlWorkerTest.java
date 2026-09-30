@@ -7,6 +7,7 @@ import com.yupi.yuaicodemother.mapper.CustomerServiceKnowledgeEtlOutboxMapper;
 import com.yupi.yuaicodemother.manager.OssManager;
 import com.yupi.yuaicodemother.model.entity.CustomerServiceKnowledgeDocument;
 import com.yupi.yuaicodemother.model.entity.CustomerServiceKnowledgeEtlOutbox;
+import com.yupi.yuaicodemother.service.CustomerServiceKnowledgeTaskFinalizer;
 import com.yupi.yuaicodemother.service.KnowledgeMutationCoordinator;
 import com.yupi.yuaicodemother.worker.CustomerServiceKnowledgeEtlWorker;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,6 +32,7 @@ class CustomerServiceKnowledgeEtlWorkerTest {
     OssManager oss = mock(OssManager.class);
     CustomerServiceAiClient ai = mock(CustomerServiceAiClient.class);
     KnowledgeMutationCoordinator coordinator = mock(KnowledgeMutationCoordinator.class);
+    CustomerServiceKnowledgeTaskFinalizer finalizer = mock(CustomerServiceKnowledgeTaskFinalizer.class);
     CustomerServiceProperties props = new CustomerServiceProperties();
     CustomerServiceKnowledgeEtlWorker worker;
 
@@ -38,7 +40,7 @@ class CustomerServiceKnowledgeEtlWorkerTest {
     void setUp() {
         props.setRetryMax(5);
         when(outbox.refreshClaim(anyLong(), anyString(), any())).thenReturn(1);
-        worker = new CustomerServiceKnowledgeEtlWorker(documents, outbox, oss, ai, coordinator, props,
+        worker = new CustomerServiceKnowledgeEtlWorker(documents, outbox, oss, ai, coordinator, finalizer, props,
                 Clock.fixed(Instant.parse("2030-01-01T00:00:00Z"), ZoneOffset.UTC));
     }
 
@@ -58,7 +60,7 @@ class CustomerServiceKnowledgeEtlWorkerTest {
         when(outbox.findClaimCandidates(any(), anyInt())).thenReturn(List.of(first, second));
         when(outbox.claim(anyLong(), anyString(), any(), any())).thenReturn(1);
         var pollingWorker = spy(new CustomerServiceKnowledgeEtlWorker(
-                documents, outbox, oss, ai, coordinator, props, clock));
+                documents, outbox, oss, ai, coordinator, finalizer, props, clock));
         doAnswer(invocation -> {
             if (((CustomerServiceKnowledgeEtlOutbox) invocation.getArgument(0)).getId() == 1L) {
                 clock.advanceSeconds(45);
@@ -140,8 +142,8 @@ class CustomerServiceKnowledgeEtlWorkerTest {
         when(oss.generateKnowledgeDownloadUrl(any())).thenReturn(new URL("https://example.com/short"));
         when(ai.index(any())).thenThrow(new CustomerServiceAiClient.CallException("BAD_FILE", false));
         worker.execute(task);
-        verify(outbox).retry(eq(1L), anyString(), eq("FAILED"), eq(1), any(), eq("BAD_FILE"));
-        verify(documents).failIndex(1, 1, 1, "BAD_FILE");
+        verify(finalizer).failIndex(eq(1L), anyString(), eq(1L), eq(1L), eq(1L), eq(1), any(), eq("BAD_FILE"));
+        verify(outbox, never()).retry(anyLong(), anyString(), eq("FAILED"), anyInt(), any(), anyString());
     }
 
     @Test
@@ -154,7 +156,7 @@ class CustomerServiceKnowledgeEtlWorkerTest {
         when(oss.generateKnowledgeDownloadUrl(any())).thenReturn(new URL("https://example.com/short"));
         when(ai.index(any())).thenThrow(new CustomerServiceAiClient.CallException("TEMPORARY", true));
         worker.execute(task);
-        verify(outbox).retry(eq(1L), anyString(), eq("FAILED"), eq(5), any(), eq("TEMPORARY"));
+        verify(finalizer).failIndex(eq(1L), anyString(), eq(1L), eq(1L), eq(1L), eq(5), any(), eq("TEMPORARY"));
     }
 
     @Test
@@ -163,7 +165,7 @@ class CustomerServiceKnowledgeEtlWorkerTest {
         task.setRetryCount(18);
         props.setRetryMax(20);
         props.setRetryBaseDelaySeconds(3600);
-        worker = new CustomerServiceKnowledgeEtlWorker(documents, outbox, oss, ai, coordinator, props,
+        worker = new CustomerServiceKnowledgeEtlWorker(documents, outbox, oss, ai, coordinator, finalizer, props,
                 Clock.fixed(Instant.parse("9999-12-31T23:58:00Z"), ZoneOffset.UTC));
         when(outbox.refreshClaim(anyLong(), anyString(), any())).thenReturn(1);
         when(coordinator.acquire(any(), any(), any(), any())).thenReturn(lease("INDEX"));
@@ -195,7 +197,49 @@ class CustomerServiceKnowledgeEtlWorkerTest {
         org.junit.jupiter.api.Assertions.assertDoesNotThrow(worker::poll);
 
         verify(outbox, never()).finish(anyLong(), anyString(), anyString(), any());
-        verify(documents, never()).failIndex(anyLong(), anyLong(), anyLong(), anyString());
+        verifyNoInteractions(finalizer);
+        assertEquals("PROCESSING", task.getStatus());
+    }
+
+    @Test
+    void indexFinalizationFailureLeavesProcessingTaskForDeadlineReclaim() throws Exception {
+        var task = task("INDEX");
+        task.setStatus("PROCESSING");
+        when(outbox.findClaimCandidates(any(), anyInt())).thenReturn(List.of(task));
+        when(outbox.claim(anyLong(), anyString(), any(), any())).thenReturn(1);
+        when(coordinator.acquire(any(), any(), any(), any())).thenReturn(lease("INDEX"));
+        when(documents.findIncludingDeleted(1)).thenReturn(document());
+        when(documents.markIndexing(1, 1, 1)).thenReturn(1);
+        when(oss.generateKnowledgeDownloadUrl(any())).thenReturn(new URL("https://example.com/short"));
+        when(ai.index(any())).thenReturn(new CustomerServiceAiClient.Result(2, false));
+        doThrow(new IllegalStateException("outbox update failed")).when(finalizer)
+                .completeIndex(anyLong(), anyString(), anyLong(), anyLong(), anyLong(), anyInt());
+
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(worker::poll);
+
+        verify(outbox, never()).finish(anyLong(), anyString(), anyString(), any());
+        verify(outbox, never()).retry(anyLong(), anyString(), anyString(), anyInt(), any(), anyString());
+        assertEquals("PROCESSING", task.getStatus());
+    }
+
+    @Test
+    void terminalIndexFailureFinalizationErrorLeavesTaskForDeadlineReclaim() throws Exception {
+        var task = task("INDEX");
+        task.setStatus("PROCESSING");
+        when(outbox.findClaimCandidates(any(), anyInt())).thenReturn(List.of(task));
+        when(outbox.claim(anyLong(), anyString(), any(), any())).thenReturn(1);
+        when(coordinator.acquire(any(), any(), any(), any())).thenReturn(lease("INDEX"));
+        when(documents.findIncludingDeleted(1)).thenReturn(document());
+        when(documents.markIndexing(1, 1, 1)).thenReturn(1);
+        when(oss.generateKnowledgeDownloadUrl(any())).thenReturn(new URL("https://example.com/short"));
+        when(ai.index(any())).thenThrow(new CustomerServiceAiClient.CallException("BAD_FILE", false));
+        doThrow(new IllegalStateException("outbox update failed")).when(finalizer)
+                .failIndex(anyLong(), anyString(), anyLong(), anyLong(), anyLong(), anyInt(), any(), anyString());
+
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(worker::poll);
+
+        verify(outbox, never()).finish(anyLong(), anyString(), anyString(), any());
+        verify(outbox, never()).retry(anyLong(), anyString(), anyString(), anyInt(), any(), anyString());
         assertEquals("PROCESSING", task.getStatus());
     }
 
@@ -210,15 +254,14 @@ class CustomerServiceKnowledgeEtlWorkerTest {
         when(oss.generateKnowledgeDownloadUrl(any())).thenReturn(new URL("https://example.com/short"));
         when(ai.index(any())).thenThrow(new CustomerServiceAiClient.CallException("TEMPORARY", true))
                 .thenReturn(new CustomerServiceAiClient.Result(2, false));
-        when(documents.completeIndex(1, 1, 1, 2)).thenReturn(1);
 
         worker.execute(task);
         task.setRetryCount(1);
         worker.execute(task);
 
         verify(ai, times(2)).index(any());
-        verify(documents).completeIndex(1, 1, 1, 2);
-        verify(outbox).finish(eq(1L), anyString(), eq("SUCCEEDED"), isNull());
+        verify(finalizer).completeIndex(eq(1L), anyString(), eq(1L), eq(1L), eq(1L), eq(2));
+        verify(outbox, never()).finish(eq(1L), anyString(), eq("SUCCEEDED"), isNull());
     }
 
     @Test
@@ -232,10 +275,10 @@ class CustomerServiceKnowledgeEtlWorkerTest {
         when(documents.markIndexing(1, 1, 1)).thenReturn(1);
         when(oss.generateKnowledgeDownloadUrl(any())).thenReturn(new URL("https://example.com/short"));
         when(ai.index(any())).thenReturn(new CustomerServiceAiClient.Result(1, false));
-        when(documents.completeIndex(1, 1, 1, 1)).thenReturn(1);
         worker.poll();
         verify(ai).index(any());
-        verify(outbox).finish(eq(1L), anyString(), eq("SUCCEEDED"), isNull());
+        verify(finalizer).completeIndex(eq(1L), anyString(), eq(1L), eq(1L), eq(1L), eq(1));
+        verify(outbox, never()).finish(eq(1L), anyString(), eq("SUCCEEDED"), isNull());
     }
 
     @Test
@@ -274,7 +317,7 @@ class CustomerServiceKnowledgeEtlWorkerTest {
     @Test
     void rebuildStopsWhenPreparationOutlivesClaimAndAnotherOwnerReclaimsIt() {
         MutableClock clock = new MutableClock(Instant.parse("2030-01-01T00:00:00Z"));
-        worker = new CustomerServiceKnowledgeEtlWorker(documents, outbox, oss, ai, coordinator, props, clock);
+        worker = new CustomerServiceKnowledgeEtlWorker(documents, outbox, oss, ai, coordinator, finalizer, props, clock);
         when(documents.listRebuildableLimited(1001)).thenAnswer(invocation -> {
             clock.advanceSeconds(61);
             return List.of();
@@ -292,7 +335,7 @@ class CustomerServiceKnowledgeEtlWorkerTest {
     @Test
     void rebuildContinuesAfterSlowPreparationWhenClaimRefreshStillOwnsTask() {
         MutableClock clock = new MutableClock(Instant.parse("2030-01-01T00:00:00Z"));
-        worker = new CustomerServiceKnowledgeEtlWorker(documents, outbox, oss, ai, coordinator, props, clock);
+        worker = new CustomerServiceKnowledgeEtlWorker(documents, outbox, oss, ai, coordinator, finalizer, props, clock);
         var lease = new KnowledgeMutationCoordinator.Lease(
                 "collection:customer_service_knowledge", "op_rebuild", "REBUILD", 8, 2000000000, "proof");
         when(documents.listRebuildableLimited(1001)).thenAnswer(invocation -> {
