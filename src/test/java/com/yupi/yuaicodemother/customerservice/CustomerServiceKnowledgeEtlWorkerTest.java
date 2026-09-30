@@ -94,6 +94,44 @@ class CustomerServiceKnowledgeEtlWorkerTest {
     }
 
     @Test
+    void deleteDoesNotCallPythonWhenDocumentIsEnabledAfterPreparation() {
+        var task = task("DELETE");
+        var disabled = document();
+        disabled.setIndexedVersion(1L);
+        disabled.setStatus("DISABLED");
+        var enabled = document();
+        enabled.setIndexedVersion(1L);
+        enabled.setEtlVersion(2L);
+        enabled.setStatus("UPLOADED");
+        when(documents.findIncludingDeleted(1)).thenReturn(disabled, enabled);
+        when(coordinator.acquire(any(), any(), eq("DELETE"), any())).thenReturn(lease("DELETE"));
+
+        worker.execute(task);
+
+        verify(ai, never()).delete(any());
+        verify(outbox).finish(eq(1L), anyString(), eq("SKIPPED"), eq("KNOWLEDGE_TASK_STALE"));
+        verify(coordinator).revoke(any());
+    }
+
+    @Test
+    void deleteCallsPythonWhenDisabledSnapshotRemainsCurrent() {
+        var task = task("DELETE");
+        var disabled = document();
+        disabled.setIndexedVersion(1L);
+        disabled.setStatus("DISABLED");
+        when(documents.findIncludingDeleted(1)).thenReturn(disabled);
+        var lease = lease("DELETE");
+        when(coordinator.acquire(any(), any(), eq("DELETE"), any())).thenReturn(lease);
+
+        worker.execute(task);
+
+        verify(documents, times(2)).findIncludingDeleted(1);
+        verify(ai).delete(argThat(request -> request.documentVersion() == 1 && request.lease() == lease));
+        verify(outbox).finish(eq(1L), anyString(), eq("SUCCEEDED"), isNull());
+        verify(coordinator).revoke(lease);
+    }
+
+    @Test
     void deterministicFailureDoesNotRetry() throws Exception {
         var task = task("INDEX");
         when(coordinator.acquire(any(), any(), any(), any())).thenReturn(lease("INDEX"));
@@ -167,19 +205,26 @@ class CustomerServiceKnowledgeEtlWorkerTest {
     }
 
     @Test
-    void rebuildHoldsCollectionLeaseForPythonCall() {
+    void rebuildRevalidatesMetadataAndSignsUrlsInsideCollectionLease() throws Exception {
         var task = task("REBUILD");
         task.setDocumentId(0L); task.setDocumentVersion(0L);
         var lease = new KnowledgeMutationCoordinator.Lease("collection:customer_service_knowledge", "op_rebuild", "REBUILD", 8, 2000000000, "proof");
+        var active = document(); active.setStatus("ACTIVE");
         when(coordinator.acquire(eq("collection:customer_service_knowledge"), any(), eq("REBUILD"), any())).thenReturn(lease);
-        when(documents.listAllActive()).thenReturn(List.of());
-        when(ai.rebuild(any())).thenReturn(new CustomerServiceAiClient.RebuildResult(0, false));
+        when(documents.listAllActive()).thenReturn(List.of(active));
+        when(oss.generateKnowledgeDownloadUrl("key")).thenReturn(new URL("https://example.com/rebuild"));
+        when(ai.rebuild(any())).thenReturn(new CustomerServiceAiClient.RebuildResult(1, false));
         worker.execute(task);
-        var order = inOrder(documents, outbox, coordinator, ai);
+        var order = inOrder(documents, outbox, coordinator, oss, ai);
         order.verify(documents).listAllActive();
         order.verify(outbox).refreshClaim(eq(1L), anyString(), eq(LocalDateTime.parse("2030-01-01T00:01:00")));
         order.verify(coordinator).acquire(eq("collection:customer_service_knowledge"), any(), eq("REBUILD"), any());
-        order.verify(ai).rebuild(argThat(request -> request.lease() == lease));
+        order.verify(documents).listAllActive();
+        order.verify(oss).generateKnowledgeDownloadUrl("key");
+        order.verify(outbox).refreshClaim(eq(1L), anyString(), eq(LocalDateTime.parse("2030-01-01T00:01:00")));
+        order.verify(ai).rebuild(argThat(request -> request.lease() == lease
+                && request.documents().size() == 1
+                && "https://example.com/rebuild".equals(request.documents().getFirst().signedUrl())));
         order.verify(outbox).finish(eq(1L), anyString(), eq("SUCCEEDED"), isNull());
         order.verify(coordinator).revoke(lease);
     }
@@ -224,6 +269,31 @@ class CustomerServiceKnowledgeEtlWorkerTest {
         order.verify(coordinator).acquire(eq("collection:customer_service_knowledge"), any(), eq("REBUILD"), any());
         order.verify(ai).rebuild(any());
         order.verify(outbox).finish(eq(1L), anyString(), eq("SUCCEEDED"), isNull());
+    }
+
+    @Test
+    void rebuildRetriesWithoutCallingPythonWhenSnapshotChangesUnderLease() throws Exception {
+        var first = document();
+        first.setStatus("ACTIVE");
+        var replacement = document();
+        replacement.setDocumentVersion(2L);
+        replacement.setEtlVersion(2L);
+        replacement.setStatus("ACTIVE");
+        replacement.setObjectKey("replacement-key");
+        replacement.setContentHash("b".repeat(64));
+        when(documents.listAllActive()).thenReturn(List.of(first), List.of(replacement));
+        when(oss.generateKnowledgeDownloadUrl(any())).thenReturn(new URL("https://example.com/rebuild"));
+        when(coordinator.acquire(any(), any(), eq("REBUILD"), any())).thenReturn(
+                new KnowledgeMutationCoordinator.Lease("collection:customer_service_knowledge",
+                        "op_rebuild", "REBUILD", 8, 2000000000, "proof"));
+
+        worker.execute(task("REBUILD"));
+
+        verify(documents, times(2)).listAllActive();
+        verify(ai, never()).rebuild(any());
+        verify(outbox).retry(eq(1L), anyString(), eq("PENDING"), eq(1), any(),
+                eq("KNOWLEDGE_REBUILD_SNAPSHOT_CHANGED"));
+        verify(coordinator).revoke(any());
     }
 
     private static CustomerServiceKnowledgeEtlOutbox task(String operation) {

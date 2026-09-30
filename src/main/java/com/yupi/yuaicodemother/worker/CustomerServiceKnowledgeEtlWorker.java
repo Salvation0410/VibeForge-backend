@@ -16,6 +16,7 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 @Component
@@ -73,8 +74,8 @@ public class CustomerServiceKnowledgeEtlWorker {
             lease = coordinator.acquire(scope, operationId, task.getOperation(), owner);
             switch (task.getOperation()) {
                 case "INDEX" -> executeIndex(task, (PreparedIndex) prepared, lease);
-                case "DELETE" -> executeDelete(task, lease);
-                case "REBUILD" -> executeRebuild((PreparedRebuild) prepared, lease);
+                case "DELETE" -> executeDelete(task, (PreparedDelete) prepared, lease);
+                case "REBUILD" -> executeRebuild(task, (PreparedRebuild) prepared, lease);
                 default -> throw new CustomerServiceAiClient.CallException("KNOWLEDGE_TASK_OPERATION_INVALID", false);
             }
             outboxMapper.finish(task.getId(), owner, "SUCCEEDED", null);
@@ -82,6 +83,8 @@ public class CustomerServiceKnowledgeEtlWorker {
             // Another worker reclaimed the task while this worker was preparing the request.
         } catch (StaleTaskException error) {
             outboxMapper.finish(task.getId(), owner, "SKIPPED", "KNOWLEDGE_TASK_STALE");
+        } catch (RebuildSnapshotChangedException error) {
+            fail(task, "KNOWLEDGE_REBUILD_SNAPSHOT_CHANGED", true);
         } catch (CustomerServiceAiClient.CallException error) {
             fail(task, error.code(), error.transientFailure());
         } catch (IllegalStateException error) {
@@ -113,9 +116,8 @@ public class CustomerServiceKnowledgeEtlWorker {
     }
 
     private PreparedDelete prepareDelete(CustomerServiceKnowledgeEtlOutbox task) {
-        CustomerServiceKnowledgeDocument document = documentMapper.findIncludingDeleted(task.getDocumentId());
-        if (document == null || !task.getEtlVersion().equals(document.getEtlVersion())) throw new StaleTaskException();
-        return new PreparedDelete();
+        return new PreparedDelete(deleteSnapshot(task,
+                documentMapper.findIncludingDeleted(task.getDocumentId())));
     }
 
     private void refreshClaim(CustomerServiceKnowledgeEtlOutbox task) {
@@ -135,22 +137,58 @@ public class CustomerServiceKnowledgeEtlWorker {
             throw new StaleTaskException();
     }
 
-    private void executeDelete(CustomerServiceKnowledgeEtlOutbox task, KnowledgeMutationCoordinator.Lease lease) {
+    private void executeDelete(CustomerServiceKnowledgeEtlOutbox task, PreparedDelete prepared,
+                               KnowledgeMutationCoordinator.Lease lease) {
+        DeleteSnapshot current = deleteSnapshot(task,
+                documentMapper.findIncludingDeleted(task.getDocumentId()));
+        if (!prepared.snapshot().equals(current)) throw new StaleTaskException();
         aiClient.delete(new CustomerServiceAiClient.DeleteRequest(
                 String.valueOf(task.getDocumentId()), task.getDocumentVersion(), lease));
     }
 
     private PreparedRebuild prepareRebuild(CustomerServiceKnowledgeEtlOutbox task) {
-        List<CustomerServiceAiClient.RebuildDocument> documents = documentMapper.listAllActive().stream().map(document ->
-                new CustomerServiceAiClient.RebuildDocument(String.valueOf(document.getId()), document.getDocumentVersion(),
-                        document.getName(), document.getFileType(),
-                        ossManager.generateKnowledgeDownloadUrl(document.getObjectKey()).toString(), document.getContentHash())).toList();
-        return new PreparedRebuild(documents, String.valueOf(task.getEtlVersion()));
+        return new PreparedRebuild(rebuildSnapshot(), String.valueOf(task.getEtlVersion()));
     }
 
-    private void executeRebuild(PreparedRebuild prepared, KnowledgeMutationCoordinator.Lease lease) {
+    private void executeRebuild(CustomerServiceKnowledgeEtlOutbox task, PreparedRebuild prepared,
+                                KnowledgeMutationCoordinator.Lease lease) {
+        List<RebuildDocumentSnapshot> current = rebuildSnapshot();
+        if (!prepared.documents().equals(current)) throw new RebuildSnapshotChangedException();
+        List<CustomerServiceAiClient.RebuildDocument> documents = current.stream().map(document ->
+                new CustomerServiceAiClient.RebuildDocument(String.valueOf(document.documentId()),
+                        document.documentVersion(), document.name(), document.fileType(),
+                        ossManager.generateKnowledgeDownloadUrl(document.objectKey()).toString(),
+                        document.contentHash())).toList();
+        refreshClaim(task);
+        long requiredLeaseExpiry = clock.instant()
+                .plusSeconds(Math.max(1, properties.getTimeoutSeconds())).getEpochSecond();
+        if (lease.expiresAt() <= requiredLeaseExpiry)
+            throw new CustomerServiceAiClient.CallException("KNOWLEDGE_MUTATION_LEASE_WINDOW_EXPIRED", true);
         aiClient.rebuild(new CustomerServiceAiClient.RebuildRequest(properties.getCollectionAlias(),
-                prepared.documents(), prepared.etlVersion(), lease));
+                documents, prepared.etlVersion(), lease));
+    }
+
+    private DeleteSnapshot deleteSnapshot(CustomerServiceKnowledgeEtlOutbox task,
+                                          CustomerServiceKnowledgeDocument document) {
+        if (document == null || !Objects.equals(task.getDocumentId(), document.getId())
+                || !Objects.equals(task.getEtlVersion(), document.getEtlVersion())) {
+            throw new StaleTaskException();
+        }
+        boolean disabled = "DISABLED".equals(document.getStatus()) && Integer.valueOf(0).equals(document.getIsDelete());
+        boolean deleting = "DELETING".equals(document.getStatus()) && Integer.valueOf(1).equals(document.getIsDelete());
+        Long targetVersion = document.getIndexedVersion() != null && document.getIndexedVersion() > 0
+                ? document.getIndexedVersion() : document.getDocumentVersion();
+        if ((!disabled && !deleting) || !Objects.equals(task.getDocumentVersion(), targetVersion))
+            throw new StaleTaskException();
+        return new DeleteSnapshot(document.getId(), document.getDocumentVersion(), document.getIndexedVersion(),
+                document.getEtlVersion(), document.getStatus(), document.getIsDelete(), targetVersion);
+    }
+
+    private List<RebuildDocumentSnapshot> rebuildSnapshot() {
+        return documentMapper.listAllActive().stream().map(document ->
+                new RebuildDocumentSnapshot(document.getId(), document.getDocumentVersion(), document.getEtlVersion(),
+                        document.getIndexedVersion(), document.getName(), document.getFileType(), document.getObjectKey(),
+                        document.getContentHash(), document.getStatus(), document.getIsDelete())).toList();
     }
 
     private void fail(CustomerServiceKnowledgeEtlOutbox task, String code, boolean transientFailure) {
@@ -171,10 +209,16 @@ public class CustomerServiceKnowledgeEtlWorker {
     }
 
     private static final class StaleTaskException extends RuntimeException { }
+    private static final class RebuildSnapshotChangedException extends RuntimeException { }
     private static final class LostClaimException extends RuntimeException { }
     private interface PreparedOperation { }
     private record PreparedIndex(CustomerServiceKnowledgeDocument document, String signedUrl) implements PreparedOperation { }
-    private record PreparedDelete() implements PreparedOperation { }
-    private record PreparedRebuild(List<CustomerServiceAiClient.RebuildDocument> documents,
+    private record PreparedDelete(DeleteSnapshot snapshot) implements PreparedOperation { }
+    private record PreparedRebuild(List<RebuildDocumentSnapshot> documents,
                                    String etlVersion) implements PreparedOperation { }
+    private record DeleteSnapshot(Long documentId, Long documentVersion, Long indexedVersion, Long etlVersion,
+                                  String status, Integer isDelete, Long targetVersion) { }
+    private record RebuildDocumentSnapshot(Long documentId, Long documentVersion, Long etlVersion,
+                                           Long indexedVersion, String name, String fileType, String objectKey,
+                                           String contentHash, String status, Integer isDelete) { }
 }
