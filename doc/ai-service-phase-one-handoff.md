@@ -28,7 +28,7 @@
 
 ### 客服机器人 RAG 实施进度
 
-- 设计提交 `b61fc07`、实施计划提交 `be6b5db` 已完成。当前 Task 1–7 的源码已实现，其中 Task 7 是 Spring/MySQL 知识文档管理、mutation coordinator 和 ETL worker，Python REBUILD 跨服务源码缺口也已关闭；Reranker、问答和前端能力仍未完成，且 Task 7 仍有下述真实环境验收门，不能据此推断整套客服机器人可用。
+- 设计提交 `b61fc07`、实施计划提交 `be6b5db` 已完成。当前 Task 1–8 的源码已实现，其中 Task 7 是 Spring/MySQL 知识文档管理、mutation coordinator 和 ETL worker，Python REBUILD 跨服务源码缺口也已关闭，Task 8 已实现本地 GPU Reranker；Task 9 客服问答和后续前端能力仍未实现，因此当前整套客服机器人仍不可用，且 Task 7、Task 8 均保留下述真实环境验收门。
 - Task 1 的 MySQL 知识文档与 ETL outbox 表、对应 MyBatis-Flex 实体和 Mapper 已在提交 `8e18149` 完成。
 - Task 1 定向 schema 测试 2 项通过，`mvn clean -DskipTests compile` 通过，暂存差异的 `git diff --cached --check` 通过。仓库没有 `mvnw.cmd`，测试和编译使用系统 Maven；测试实际命令为 `mvn test -Dtest=CustomerServiceKnowledgeSchemaTest`。
 - 尚未在真实 MySQL 执行 DDL、CRUD 或并发任务认领验证，这些仍是人工待验收项。
@@ -54,6 +54,11 @@
 - REBUILD 每解析一份文档就立即检查累计 chunks、按默认 3072 维投影的 8,000,000 embedding elements 预算和默认 64 MiB UTF-8 chunk 文本预算；任一预算失败都停止后续下载且 provider 调用数为 0。Milvus 在幂等探测后先创建 staging，逐文档消费，chunk 每批最多 100 行并逐批 readback，逐文档验证 manifest，最终验证顺序 fingerprint 与计数并写 completion marker 后才切 alias。第二批写入失败、create/insert 期间取消或校验失败均保留旧 alias；清理前重新确认 alias、collection 存在性和本 operation/plan metadata，状态不确定时保留 staging。重建只纳入当前 `ACTIVE` 且 `indexedVersion=documentVersion` 的文档；替换失败后仍指向旧 `indexedVersion` 的文档继续被排除。
 - Task 7 最新 Python 全量测试为 467 项通过、1 项跳过，`compileall`、`uv lock --check` 和 `git diff --check` 通过；Java `CustomerServiceAiClientTest` 契约 focused 8 项和 `mvn clean -DskipTests compile` 在此前实现验证中通过，本次文档同步未重新执行 Java。`CustomerServiceKnowledgeMySqlIT` 仍需 URL 与执行开关双 opt-in，本轮未运行，不能声称真实事务回滚、行锁或迁移已验证。
 - Task 7 的人工验收仍包括：在真实 MySQL 执行初始化/升级迁移，验证 Spring/MySQL fencing、guard 行锁、事务回滚、过期 reclaim 和多 Spring 实例竞争；验证真实私有 OSS、CloseAI 和 Milvus；执行 Spring/Python lease、INDEX/DELETE/REBUILD、失败恢复与完整 E2E 联调。
+- Task 8 已实现 `RerankerProvider`、disabled provider 和本地 Cross-Encoder provider，并将 `FlagEmbedding` 精确锁定为 `1.4.2`。生产 `local_cross_encoder` 使用 Windows `spawn` 模型子进程，`BAAI/bge-reranker-v2-m3` 只在子进程加载一次并常驻 GPU，模型对象不跨进程 pickle；功能关闭或 provider 为 disabled 时不导入、加载模型，也不占用 GPU。
+- 主进程与 Reranker worker 使用有界 Pipe、request ID 和单请求锁通信，排队、发送和响应共享请求 timeout。timeout 或取消会立即向调用方返回，同时禁止下一个请求与未完成 GPU 推理重叠；关闭阶段在 grace period 后执行 `terminate -> join -> kill -> join`，并覆盖 startup 取消、部分初始化失败、阻塞 IPC、重复 close 和 Windows process handle 释放。GPU ownership 由模型子进程持有：Windows 使用不含模型或设备明文的 Win32 named mutex，POSIX 使用安全 runtime/private 目录、`O_NOFOLLOW`、owner/mode/type 校验和非阻塞 flock，同一 `model + device` 只允许一个 owner。
+- FlagEmbedding 1.4.2 的原始 encoder OOM 探测可能把 batch 降为 0 并无限循环，Task 8 使用项目内安全适配器做有下限的 batch 退避；batch 最小为 1，仍 OOM 时返回脱敏 `CUSTOMER_SERVICE_RERANKER_UNAVAILABLE`。模型输出显式使用 `normalize=false`，服务统一以 sigmoid 归一化，校验数量和有限数，并保持 score 降序、同分原顺序和输入 chunk 不变。
+- Task 8 定向测试 36 项通过，完整 Python 测试 503 项通过、1 项跳过；`compileall`、`uv lock --check` 和 `git diff --check` 均通过。测试使用 Fake Cross-Encoder 和不加载 GPU 的真实 Windows spawn worker，覆盖 timeout、OOM、协议错误、阻塞 Pipe、取消、强制退出、模型资源清理、named mutex ownership 和多父进程竞争。
+- Task 8 仍需人工验证：真实下载并加载 BGE Reranker、RTX 4050 上的显存占用、延迟、吞吐和真实 CUDA OOM 行为、POSIX ownership lock，以及实际部署中的多实例/多 Web worker 拓扑。Task 9 尚未实现，当前没有客服问答编排和回答接口，不能因 Reranker 已完成而声称客服问答可用。
 
 ### 已关闭的源码阻塞
 
@@ -580,7 +585,7 @@ Vue 多 Agent 已于 2026-09-30 本地快进合并到 `dev`，合并后 HEAD 为
 - `doc/ai-service-langchain-langgraph-refactor-design.md`：重构架构与边界设计。
 - `docs/superpowers/specs/2026-09-29-postgres-checkpoint-design.md`：PostgreSQL checkpoint 迁移、故障语义和长期记忆决策。
 - `docs/superpowers/specs/2026-09-29-vue-multi-agent-quality-review-design.md`：Vue 三角色质量审查、F1 错误语义、repair 和 checkpoint 边界。
-- `docs/superpowers/specs/2026-09-30-customer-service-rag-design.md`：客服机器人、OSS 文档 ETL、CloseAI Embedding、Milvus 和 GPU Reranker 设计；目前 Task 1–7 及 Python REBUILD 路由源码已实现，Task 7 的真实 MySQL/OSS/多实例与 Spring/Python 联调仍待验收，后续 Reranker、问答和前端能力仍未完成。
+- `docs/superpowers/specs/2026-09-30-customer-service-rag-design.md`：客服机器人、OSS 文档 ETL、CloseAI Embedding、Milvus 和 GPU Reranker 设计；目前 Task 1–8 及 Python REBUILD 路由源码已实现，Task 7 的真实 MySQL/OSS/多实例与 Spring/Python 联调和 Task 8 的真实 GPU/POSIX/部署验收仍待完成，后续问答和前端能力尚未实现。
 - `docs/superpowers/specs/2026-09-21-bounded-streaming-simple-prompts-design.md`：有限流式窗口和简短优化提示设计。
 - `docs/superpowers/specs/2026-09-21-circular-preview-spinner-design.md`：预览加载图正圆修复设计。
 
