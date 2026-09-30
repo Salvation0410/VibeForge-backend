@@ -28,7 +28,7 @@
 
 ### 客服机器人 RAG 实施进度
 
-- 设计提交 `b61fc07`、实施计划提交 `be6b5db` 已完成。当前 Task 1–8 的源码已实现，其中 Task 7 是 Spring/MySQL 知识文档管理、mutation coordinator 和 ETL worker，Python REBUILD 跨服务源码缺口也已关闭，Task 8 已实现本地 GPU Reranker；Task 9 客服问答和后续前端能力仍未实现，因此当前整套客服机器人仍不可用，且 Task 7、Task 8 均保留下述真实环境验收门。
+- 设计提交 `b61fc07`、实施计划提交 `be6b5db` 已完成。当前 Task 1–9 的后端源码已实现，其中 Task 7 是 Spring/MySQL 知识文档管理、mutation coordinator 和 ETL worker，Task 8 已实现本地 GPU Reranker，Task 9 已实现带来源约束的 Grounded RAG 客服问答 API；前端接入和下述真实环境验收仍未声称完成。
 - Task 1 的 MySQL 知识文档与 ETL outbox 表、对应 MyBatis-Flex 实体和 Mapper 已在提交 `8e18149` 完成。
 - Task 1 定向 schema 测试 2 项通过，`mvn clean -DskipTests compile` 通过，暂存差异的 `git diff --cached --check` 通过。仓库没有 `mvnw.cmd`，测试和编译使用系统 Maven；测试实际命令为 `mvn test -Dtest=CustomerServiceKnowledgeSchemaTest`。
 - 尚未在真实 MySQL 执行 DDL、CRUD 或并发任务认领验证，这些仍是人工待验收项。
@@ -58,7 +58,11 @@
 - 主进程与 Reranker worker 使用有界 Pipe、request ID 和单请求锁通信，排队、发送和响应共享请求 timeout。timeout 或取消会立即向调用方返回，同时禁止下一个请求与未完成 GPU 推理重叠；关闭阶段在 grace period 后执行 `terminate -> join -> kill -> join`，并覆盖 startup 取消、部分初始化失败、阻塞 IPC、重复 close 和 Windows process handle 释放。GPU ownership 由模型子进程持有：Windows 使用不含模型或设备明文的 Win32 named mutex，POSIX 使用安全 runtime/private 目录、`O_NOFOLLOW`、owner/mode/type 校验和非阻塞 flock，同一 `model + device` 只允许一个 owner。
 - FlagEmbedding 1.4.2 的原始 encoder OOM 探测可能把 batch 降为 0 并无限循环，Task 8 使用项目内安全适配器做有下限的 batch 退避；batch 最小为 1，仍 OOM 时返回脱敏 `CUSTOMER_SERVICE_RERANKER_UNAVAILABLE`。模型输出显式使用 `normalize=false`，服务统一以 sigmoid 归一化，校验数量和有限数，并保持 score 降序、同分原顺序和输入 chunk 不变。
 - Task 8 定向测试 36 项通过，完整 Python 测试 503 项通过、1 项跳过；`compileall`、`uv lock --check` 和 `git diff --check` 均通过。测试使用 Fake Cross-Encoder 和不加载 GPU 的真实 Windows spawn worker，覆盖 timeout、OOM、协议错误、阻塞 Pipe、取消、强制退出、模型资源清理、named mutex ownership 和多父进程竞争。
-- Task 8 仍需人工验证：真实下载并加载 BGE Reranker、RTX 4050 上的显存占用、延迟、吞吐和真实 CUDA OOM 行为、POSIX ownership lock，以及实际部署中的多实例/多 Web worker 拓扑。Task 9 尚未实现，当前没有客服问答编排和回答接口，不能因 Reranker 已完成而声称客服问答可用。
+- Task 8 仍需人工验证：真实下载并加载 BGE Reranker、RTX 4050 上的显存占用、延迟、吞吐和真实 CUDA OOM 行为、POSIX ownership lock，以及实际部署中的多实例/多 Web worker 拓扑。
+- Task 9 已实现 Grounded RAG 客服问答 API 与 Bearer 鉴权，并通过 Task 7 Spring bridge 获取文档快照。检索固定为 Top 8 的同一物理 collection snapshot，先读取 manifest 的标量字段，再按 manifest 当前 chunk ID point-get，避免跨版本混读；Reranker 最终取 Top 3，disabled 模式禁止配置 rerank score threshold。Embedding、向量存储、检索、Reranker 和回答失败均映射为脱敏稳定错误码。
+- Task 9 的回答协议要求严格 JSON，拒绝 Markdown fence、额外字段和不在检索白名单内的引用；用户 prompt 被视为不可信输入，不得改变系统约束、引用白名单或工具边界。回答受总 deadline 约束，客户端断开会 drain 已启动调用后再释放资源；序列化后的 UTF-8 回答预算在输出前强制校验。
+- Task 9 的 Milvus 读路径使用 manifest scalar + point-get，重建支持空文档发布和幂等重放；retention state 保存代数，retired marker 带稳定 `aliasHash`，清理以 marker backlog 和 marker-ID 游标跨 namespace 分页，受 cleanup timeout、scan limit、ownership 验证和 mutation permit fence 约束。protected window 按顺序去重，排除 current physical，缺失项移除，ownership/RPC 不确定时 fail-closed 不删除。
+- Task 9 定向 Milvus 测试 99 项通过；最新完整 Python 测试为 576 项通过、1 项跳过，`uv run python -m compileall -q src`、`uv lock --check` 和 `git diff --check` 均通过。自动化测试未替代真实评估集阈值、真实模型/Milvus、客户端断连、多实例 cleanup 或完整 E2E 验收。
 
 ### 已关闭的源码阻塞
 
@@ -346,7 +350,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 | PowerShell 脚本 | `powershell -NoProfile -File scripts/ai-validation-scripts.tests.ps1` | Windows PowerShell 5.1 与 PowerShell 7 检查通过 | 验收脚本参数、认证和脱敏约束 |
 | 统一非外部数据库门禁 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1 -Execute` | 本轮未重新执行；此前历史基线为 6 个步骤通过 | 不能作为本轮新增多 Agent 测试数量的 fresh 证据 |
 | Python 编译 | `uv run python -m compileall -q src` | 2026-10-01 REBUILD 收尾 fresh：退出码 0，无输出 | 当前 Python 源码可完成字节码编译 |
-| Python 全量 | `uv run pytest` | 2026-10-01 REBUILD 收尾 fresh：467 项通过、1 项跳过、2 个依赖弃用警告 | 既有生成与质量阶段，以及客服知识 ETL、REBUILD、lease、流式 staging、预算和取消清理契约 |
+| Python 全量 | `uv run pytest -q` | 2026-10-01 Task 9 fresh：576 项通过、1 项跳过、2 个依赖弃用警告 | 既有生成与质量阶段，以及客服知识 ETL、Grounded RAG、REBUILD、lease、流式 staging、预算、回答 deadline 和取消清理契约 |
 | Python 锁文件 | `uv lock --check` | 2026-10-01 REBUILD 收尾 fresh：退出码 0，解析 150 个包 | `uv.lock` 与项目依赖声明一致 |
 | 文档空白检查 | `git diff --check` | 2026-10-01 REBUILD 收尾 fresh：退出码 0，仅有 Git 的 LF/CRLF 工作树提示 | 本轮文档差异没有尾随空格等补丁错误 |
 | 当前工作树 | `git status --short` | 当前隔离分支工作树干净，最终提交后命令无输出 | 不把其他工作树或前端仓库状态混入本分支结论 |
@@ -451,6 +455,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 9. 在真实 Spring 工具网关下验证 `vue_source_snapshot` 的文件数量、单文件大小、总字符数和遍历上限，确认超限时稳定失败且不泄露源码或绝对路径。
 10. 完成 Spring -> Python NDJSON -> Spring SSE -> Vue 的完整链路验收，确认多 Agent 期间的 `node_status`、唯一终态、聊天历史回源和成功后单次预览刷新行为。
 
+### 7.8 Grounded RAG 人工待验证
+
+Task 9 的协议、鉴权、快照、引用白名单、资源边界和 cleanup 安全语义已有自动化覆盖，但以下项目仍需真实环境验收，不能写为通过：
+
+1. 使用真实客服评估集校准 Top 3 rerank threshold；disabled 模式不得配置阈值，并记录拒答率、引用准确率和答案质量。
+2. 使用真实 Embedding、Reranker、Milvus 和 Spring Task 7 bridge，验证物理 snapshot、manifest scalar + point-get、跨模型/维度迁移、空 rebuild 和幂等 rebuild。
+3. 在真实客户端断连、模型超时和供应商错误下，确认 answer deadline、disconnect drain、稳定错误码和资源收敛，不泄露 prompt、引用正文、令牌或供应商响应。
+4. 使用两个或更多 Spring/Python 实例验证 cleanup marker backlog、scan cursor、ownership 校验和 mutation permit fence 的跨实例行为；确认旧 namespace 可清理、current/protected collection 不被删除。
+5. 完成真实 Spring -> Python -> 客户端的问答 E2E，确认鉴权、检索、Top 3 回答、严格 JSON、引用白名单和失败终态一致。
+
 人工验收完成后，应在脱敏记录中填写执行日期、环境版本、requestId、终态、稳定错误码、耗时和证据引用；不得只把本节复选项改成“已完成”而缺少可追溯证据。
 
 ### 7.8 Vue 多 Agent 功能回滚
@@ -510,6 +524,11 @@ Vue 多 Agent 是 Python LangGraph 内部的功能开关，回滚时保持 LangG
 
 | 提交 | 内容 |
 | --- | --- |
+| `8aecf2d` | 排除 active physical target，不把 current 计入 retention rollback window |
+| `4915fb2` | 校验 retention protected ownership、aliasHash、RPC 不确定性和 cleanup budget |
+| `d77210c` | 以 aliasHash 标记并按 marker backlog/cursor 跨 namespace 分页清理 RAG collections |
+| `1f12d39` | 加固 retirement cleanup permit fence、stale marker 和 fail-closed 删除语义 |
+| `d077c4c` | 实现 Grounded RAG 客服问答、快照检索、严格回答契约和资源边界 |
 | `70b3f68` | 将 INDEX ETL 默认并发收敛为 1 并记录 Python 内存预算 |
 | `e3d9bc3` | 限制 Spring 响应与 embedding 元素峰值 |
 | `b7e9ce5` | 完成 Embedding HTTP clients 独立清理 |
@@ -585,7 +604,7 @@ Vue 多 Agent 已于 2026-09-30 本地快进合并到 `dev`，合并后 HEAD 为
 - `doc/ai-service-langchain-langgraph-refactor-design.md`：重构架构与边界设计。
 - `docs/superpowers/specs/2026-09-29-postgres-checkpoint-design.md`：PostgreSQL checkpoint 迁移、故障语义和长期记忆决策。
 - `docs/superpowers/specs/2026-09-29-vue-multi-agent-quality-review-design.md`：Vue 三角色质量审查、F1 错误语义、repair 和 checkpoint 边界。
-- `docs/superpowers/specs/2026-09-30-customer-service-rag-design.md`：客服机器人、OSS 文档 ETL、CloseAI Embedding、Milvus 和 GPU Reranker 设计；目前 Task 1–8 及 Python REBUILD 路由源码已实现，Task 7 的真实 MySQL/OSS/多实例与 Spring/Python 联调和 Task 8 的真实 GPU/POSIX/部署验收仍待完成，后续问答和前端能力尚未实现。
+- `docs/superpowers/specs/2026-09-30-customer-service-rag-design.md`：客服机器人、OSS 文档 ETL、CloseAI Embedding、Milvus、GPU Reranker 和 Task 9 Grounded RAG 设计；Task 1–9 后端源码已实现，Task 7 的真实 MySQL/OSS/多实例、Task 8 的真实 GPU/POSIX/部署验收和 Task 9 的真实评估集/模型/Milvus/断连/多实例/E2E 验收仍待完成。
 - `docs/superpowers/specs/2026-09-21-bounded-streaming-simple-prompts-design.md`：有限流式窗口和简短优化提示设计。
 - `docs/superpowers/specs/2026-09-21-circular-preview-spinner-design.md`：预览加载图正圆修复设计。
 
