@@ -22,6 +22,11 @@ from ai_service.infrastructure.spring_knowledge_lease import SpringKnowledgeMuta
 from ai_service.models.base import GenerationModel
 from ai_service.models.embeddings import CloseAIEmbeddingProvider
 from ai_service.models.openai_compatible import OpenAICompatibleModel
+from ai_service.models.reranker import (
+    DisabledReranker,
+    LocalCrossEncoderReranker,
+    RerankerProvider,
+)
 from ai_service.orchestration.cancellation import CancellationRegistry
 from ai_service.orchestration.active_generations import ActiveGenerationRegistry
 from ai_service.orchestration.workflow import GenerationWorkflow
@@ -80,6 +85,8 @@ def create_app(
     mutation_coordinator: Any | None = None,
     milvus_client_factory: Any | None = None,
     lease_validation_transport: Any | None = None,
+    reranker: RerankerProvider | None = None,
+    reranker_model_factory: Any | None = None,
 ) -> FastAPI:
     """创建并组装 AI 服务。
 
@@ -109,6 +116,7 @@ def create_app(
     active_generations = ActiveGenerationRegistry()
     initial_etl_service = knowledge_etl_service
     initial_mutation_coordinator = mutation_coordinator
+    initial_reranker = reranker
     workflow = GenerationWorkflow(
         model=generation_model,
         tool_gateway=gateway,
@@ -127,10 +135,23 @@ def create_app(
         if config.customer_service_rag_enabled:
             resources.extend(
                 resource for resource in (
-                    initial_etl_service, initial_mutation_coordinator,
+                    initial_etl_service, initial_mutation_coordinator, initial_reranker,
                 ) if resource is not None
             )
         try:
+            if (
+                config.customer_service_rag_enabled
+                and config.rag_reranker_provider == "local_cross_encoder"
+                and initial_reranker is None
+            ):
+                factory_kwargs = {}
+                if reranker_model_factory is not None:
+                    factory_kwargs["model_factory"] = reranker_model_factory
+                local_reranker = await LocalCrossEncoderReranker.create(
+                    config, **factory_kwargs,
+                )
+                resources.append(local_reranker)
+                app.state.reranker = local_reranker
             if config.customer_service_rag_enabled and app.state.knowledge_etl_service is None:
                 coordinator = mutation_coordinator or SpringKnowledgeMutationCoordinator(
                     gateway_base_url=str(config.spring_gateway_base_url),
@@ -195,6 +216,7 @@ def create_app(
     app.state.workflow = workflow
     app.state.knowledge_etl_service = initial_etl_service
     app.state.knowledge_mutation_coordinator = initial_mutation_coordinator
+    app.state.reranker = initial_reranker or DisabledReranker()
 
     register_routes(
         app,

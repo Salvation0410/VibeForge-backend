@@ -85,6 +85,8 @@ class Settings(BaseSettings):
     rag_reranker_device: str = "cuda"
     rag_reranker_timeout_seconds: float = Field(default=5.0, gt=0, le=300)
     rag_reranker_batch_size: int = Field(default=4, ge=1, le=128)
+    rag_reranker_workers: int = Field(default=1, ge=1, le=8)
+    rag_reranker_max_concurrency: int = Field(default=1, ge=1, le=8)
 
     rag_oss_allowed_hosts: str = ""
     rag_download_max_bytes: int = Field(default=20971520, ge=1, le=104857600)
