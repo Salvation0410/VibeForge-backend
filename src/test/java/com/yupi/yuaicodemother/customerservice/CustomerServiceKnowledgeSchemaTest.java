@@ -120,11 +120,12 @@ class CustomerServiceKnowledgeSchemaTest {
         assertTrue(sql.contains("isDelete=0"));
         assertTrue(sql.contains("status='ACTIVE'"));
         assertTrue(sql.contains("indexedVersion=documentVersion"));
+        assertTrue(sql.contains("LIMIT #{limit}"));
     }
 
     private static String rebuildableQuery() throws Exception {
         Select select = CustomerServiceKnowledgeDocumentMapper.class
-                .getMethod("listAllRebuildable").getAnnotation(Select.class);
+                .getMethod("listRebuildableLimited", int.class).getAnnotation(Select.class);
         return select.value()[0];
     }
 

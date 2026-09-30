@@ -179,8 +179,9 @@ class CustomerServiceKnowledgeEtlWorkerTest {
     }
 
     @Test
-    void retryHandlerFailureFallsBackWithoutEscapingWorker() throws Exception {
+    void retryPersistenceFailureLeavesTaskReclaimableWithoutEscapingWorker() throws Exception {
         var task = task("INDEX");
+        task.setStatus("PROCESSING");
         when(coordinator.acquire(any(), any(), any(), any())).thenReturn(lease("INDEX"));
         when(documents.findIncludingDeleted(1)).thenReturn(document());
         when(documents.markIndexing(1, 1, 1)).thenReturn(1);
@@ -188,11 +189,14 @@ class CustomerServiceKnowledgeEtlWorkerTest {
         when(ai.index(any())).thenThrow(new CustomerServiceAiClient.CallException("TEMPORARY", true));
         when(outbox.retry(anyLong(), anyString(), anyString(), anyInt(), any(), anyString()))
                 .thenThrow(new IllegalStateException("database write failed"));
+        when(outbox.findClaimCandidates(any(), anyInt())).thenReturn(List.of(task));
+        when(outbox.claim(anyLong(), anyString(), any(), any())).thenReturn(1);
 
-        org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> worker.execute(task));
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(worker::poll);
 
-        verify(outbox).finish(eq(1L), anyString(), eq("FAILED"),
-                eq("KNOWLEDGE_WORKER_FAILURE_HANDLER_FAILED"));
+        verify(outbox, never()).finish(anyLong(), anyString(), anyString(), any());
+        verify(documents, never()).failIndex(anyLong(), anyLong(), anyLong(), anyString());
+        assertEquals("PROCESSING", task.getStatus());
     }
 
     @Test
@@ -249,15 +253,15 @@ class CustomerServiceKnowledgeEtlWorkerTest {
         var lease = new KnowledgeMutationCoordinator.Lease("collection:customer_service_knowledge", "op_rebuild", "REBUILD", 8, 2000000000, "proof");
         var active = document(); active.setStatus("ACTIVE");
         when(coordinator.acquire(eq("collection:customer_service_knowledge"), any(), eq("REBUILD"), any())).thenReturn(lease);
-        when(documents.listAllRebuildable()).thenReturn(List.of(active));
+        when(documents.listRebuildableLimited(1001)).thenReturn(List.of(active));
         when(oss.generateKnowledgeDownloadUrl("key")).thenReturn(new URL("https://example.com/rebuild"));
         when(ai.rebuild(any())).thenReturn(new CustomerServiceAiClient.RebuildResult(1, false));
         worker.execute(task);
         var order = inOrder(documents, outbox, coordinator, oss, ai);
-        order.verify(documents).listAllRebuildable();
+        order.verify(documents).listRebuildableLimited(1001);
         order.verify(outbox).refreshClaim(eq(1L), anyString(), eq(LocalDateTime.parse("2030-01-01T00:01:00")));
         order.verify(coordinator).acquire(eq("collection:customer_service_knowledge"), any(), eq("REBUILD"), any());
-        order.verify(documents).listAllRebuildable();
+        order.verify(documents).listRebuildableLimited(1001);
         order.verify(oss).generateKnowledgeDownloadUrl("key");
         order.verify(outbox).refreshClaim(eq(1L), anyString(), eq(LocalDateTime.parse("2030-01-01T00:01:00")));
         order.verify(ai).rebuild(argThat(request -> request.lease() == lease
@@ -271,7 +275,7 @@ class CustomerServiceKnowledgeEtlWorkerTest {
     void rebuildStopsWhenPreparationOutlivesClaimAndAnotherOwnerReclaimsIt() {
         MutableClock clock = new MutableClock(Instant.parse("2030-01-01T00:00:00Z"));
         worker = new CustomerServiceKnowledgeEtlWorker(documents, outbox, oss, ai, coordinator, props, clock);
-        when(documents.listAllRebuildable()).thenAnswer(invocation -> {
+        when(documents.listRebuildableLimited(1001)).thenAnswer(invocation -> {
             clock.advanceSeconds(61);
             return List.of();
         });
@@ -291,7 +295,7 @@ class CustomerServiceKnowledgeEtlWorkerTest {
         worker = new CustomerServiceKnowledgeEtlWorker(documents, outbox, oss, ai, coordinator, props, clock);
         var lease = new KnowledgeMutationCoordinator.Lease(
                 "collection:customer_service_knowledge", "op_rebuild", "REBUILD", 8, 2000000000, "proof");
-        when(documents.listAllRebuildable()).thenAnswer(invocation -> {
+        when(documents.listRebuildableLimited(1001)).thenAnswer(invocation -> {
             clock.advanceSeconds(61);
             return List.of();
         });
@@ -302,7 +306,7 @@ class CustomerServiceKnowledgeEtlWorkerTest {
         worker.execute(task("REBUILD"));
 
         var order = inOrder(documents, outbox, coordinator, ai);
-        order.verify(documents).listAllRebuildable();
+        order.verify(documents).listRebuildableLimited(1001);
         order.verify(outbox).refreshClaim(eq(1L), anyString(), eq(LocalDateTime.parse("2030-01-01T00:02:01")));
         order.verify(coordinator).acquire(eq("collection:customer_service_knowledge"), any(), eq("REBUILD"), any());
         order.verify(ai).rebuild(any());
@@ -319,7 +323,7 @@ class CustomerServiceKnowledgeEtlWorkerTest {
         replacement.setStatus("ACTIVE");
         replacement.setObjectKey("replacement-key");
         replacement.setContentHash("b".repeat(64));
-        when(documents.listAllRebuildable()).thenReturn(List.of(first), List.of(replacement));
+        when(documents.listRebuildableLimited(1001)).thenReturn(List.of(first), List.of(replacement));
         when(oss.generateKnowledgeDownloadUrl(any())).thenReturn(new URL("https://example.com/rebuild"));
         when(coordinator.acquire(any(), any(), eq("REBUILD"), any())).thenReturn(
                 new KnowledgeMutationCoordinator.Lease("collection:customer_service_knowledge",
@@ -327,7 +331,7 @@ class CustomerServiceKnowledgeEtlWorkerTest {
 
         worker.execute(task("REBUILD"));
 
-        verify(documents, times(2)).listAllRebuildable();
+        verify(documents, times(2)).listRebuildableLimited(1001);
         verify(ai, never()).rebuild(any());
         verify(outbox).retry(eq(1L), anyString(), eq("PENDING"), eq(1), any(),
                 eq("KNOWLEDGE_REBUILD_SNAPSHOT_CHANGED"));
@@ -339,11 +343,12 @@ class CustomerServiceKnowledgeEtlWorkerTest {
         props.setRebuildMaxDocuments(1);
         var first = document(); first.setStatus("ACTIVE");
         var second = document(); second.setId(2L); second.setStatus("ACTIVE");
-        when(documents.listAllRebuildable()).thenReturn(List.of(first, second));
+        when(documents.listRebuildableLimited(2)).thenReturn(List.of(first, second));
 
         worker.execute(task("REBUILD"));
 
         verifyNoInteractions(coordinator, ai, oss);
+        verify(documents).listRebuildableLimited(2);
         verify(outbox).retry(eq(1L), anyString(), eq("FAILED"), eq(1), any(),
                 eq("KNOWLEDGE_REBUILD_TOO_MANY_DOCUMENTS"));
     }

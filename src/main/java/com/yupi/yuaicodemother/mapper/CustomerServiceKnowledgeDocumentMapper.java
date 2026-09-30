@@ -26,8 +26,8 @@ public interface CustomerServiceKnowledgeDocumentMapper extends BaseMapper<Custo
 
     // OSS keeps only the current object. An older indexedVersion cannot be rebuilt after replacement,
     // so collection rebuild fails closed to documents whose current version is fully indexed and active.
-    @Select("SELECT * FROM customer_service_knowledge_document WHERE isDelete=0 AND status='ACTIVE' AND indexedVersion>0 AND indexedVersion=documentVersion ORDER BY id")
-    List<CustomerServiceKnowledgeDocument> listAllRebuildable();
+    @Select("SELECT * FROM customer_service_knowledge_document WHERE isDelete=0 AND status='ACTIVE' AND indexedVersion>0 AND indexedVersion=documentVersion ORDER BY id LIMIT #{limit}")
+    List<CustomerServiceKnowledgeDocument> listRebuildableLimited(@Param("limit") int limit);
 
     @Update("UPDATE customer_service_knowledge_document SET status='INDEXING',lastErrorCode=NULL WHERE id=#{id} AND documentVersion=#{version} AND etlVersion=#{etlVersion} AND status IN ('UPLOADED','FAILED','ACTIVE','INDEXING') AND isDelete=0")
     int markIndexing(@Param("id") long id, @Param("version") long version, @Param("etlVersion") long etlVersion);

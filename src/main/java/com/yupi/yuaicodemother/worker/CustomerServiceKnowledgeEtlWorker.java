@@ -8,6 +8,8 @@ import com.yupi.yuaicodemother.manager.OssManager;
 import com.yupi.yuaicodemother.model.entity.CustomerServiceKnowledgeDocument;
 import com.yupi.yuaicodemother.model.entity.CustomerServiceKnowledgeEtlOutbox;
 import com.yupi.yuaicodemother.service.KnowledgeMutationCoordinator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -23,6 +25,7 @@ import java.util.UUID;
 @Component
 @ConditionalOnProperty(prefix = "ai.customer-service", name = "enabled", havingValue = "true")
 public class CustomerServiceKnowledgeEtlWorker {
+    private static final Logger log = LoggerFactory.getLogger(CustomerServiceKnowledgeEtlWorker.class);
     private static final long MAX_RETRY_DELAY_SECONDS = 3600;
     private static final LocalDateTime MAX_DATABASE_TIME = LocalDateTime.of(9999, 12, 31, 23, 59, 59);
     private final CustomerServiceKnowledgeDocumentMapper documentMapper;
@@ -194,8 +197,10 @@ public class CustomerServiceKnowledgeEtlWorker {
     }
 
     private List<RebuildDocumentSnapshot> rebuildSnapshot() {
-        List<CustomerServiceKnowledgeDocument> documents = documentMapper.listAllRebuildable();
-        if (documents.size() > properties.getRebuildMaxDocuments())
+        int maximumDocuments = properties.getRebuildMaxDocuments();
+        int queryLimit = Math.addExact(maximumDocuments, 1);
+        List<CustomerServiceKnowledgeDocument> documents = documentMapper.listRebuildableLimited(queryLimit);
+        if (documents.size() > maximumDocuments)
             throw new CustomerServiceAiClient.CallException("KNOWLEDGE_REBUILD_TOO_MANY_DOCUMENTS", false);
         return documents.stream().map(document ->
                 new RebuildDocumentSnapshot(document.getId(), document.getDocumentVersion(), document.getEtlVersion(),
@@ -212,8 +217,9 @@ public class CustomerServiceKnowledgeEtlWorker {
                     computeRetryAt(attempts, retry), code);
             if (!retry && "INDEX".equals(task.getOperation()))
                 documentMapper.failIndex(task.getDocumentId(), task.getDocumentVersion(), task.getEtlVersion(), code);
-        } catch (RuntimeException ignored) {
-            finishSafely(task, "FAILED", "KNOWLEDGE_WORKER_FAILURE_HANDLER_FAILED");
+        } catch (RuntimeException persistenceError) {
+            log.warn("Knowledge worker failure state was not persisted; task remains reclaimable: taskId={}, operation={}, errorCode={}, persistenceError={}",
+                    task.getId(), task.getOperation(), code, persistenceError.getClass().getSimpleName());
         }
     }
 
