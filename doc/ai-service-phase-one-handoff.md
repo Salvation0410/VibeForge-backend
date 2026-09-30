@@ -44,15 +44,16 @@
 - Task 5 已完成 CloseAI Embedding Provider 和 Milvus versioned store。Provider 单例复用底层客户端，确定性批处理 document embedding，分别支持 document/query，严格校验数量、维度和有限数，并把供应商异常映射为不含密钥或响应正文的稳定错误。Milvus store 支持版本化 chunk/manifest、完整写后校验、旧版本保护、增量激活、全量 staging + alias 切换、确定性 tombstone、COSINE 分数语义、float32 canonicalization、分页读取和单文档 10000 条硬上限；同步 RPC 使用可配置 timeout，取消时 drain 已启动 RPC 后才释放 permit/本地锁，alias 状态不确定时保留 staging。完整 alias 参与业务集合 fingerprint，control collection 也包含完整 alias hash，长 alias 之间保持隔离。
 - Task 5 采用显式 fail-closed mutation lease。Spring/MySQL Outbox 是唯一允许承担跨实例 mutation coordinator 的组件；Python store 的 `upsert/delete/rebuild` 都要求不可伪造的 `scope / operation / fence / expiry / proof`，默认 coordinator 为 `DenyAll`。同一 document scope 串行，collection rebuild scope 与全部 document scope 互斥。Task 6 已通过认证内部接口原样传递 lease，并将同步 `MilvusClient` 构造移入线程 offload；Task 7 已实现 MySQL 签发、验证、global fencing 和冲突域，真实多实例行为仍待验收。
 - Task 5 提交链可概括为 `e052d20`、`6a6771f`、`6970873`、`2a865b6`、`a5841dd`、`a6ee768`。最终定向测试 49 项通过，完整 Python 测试 375 项通过、1 项跳过；`compileall`、`uv lock --check` 和 `git diff --check` 通过。测试使用 Fake CloseAI/Fake Milvus；真实 CloseAI 尚未调用，真实 Docker Milvus 的 schema、dynamic fields、Strong consistency、分页、批量写入、alias 切换和重启恢复仍待人工验证，真实 Spring/Python lease 集成仍待验收。
-- Task 6 已提供 Bearer 认证的 `POST /internal/v1/customer-service/knowledge:etl`、`POST /internal/v1/customer-service/knowledge:delete` 和只读 `GET /internal/v1/customer-service/health`。INDEX 完整串联安全下载、解析切分、Embedding、Milvus 版本写入和稳定响应，DELETE 调用同一 store 边界；请求中的 `scope / operationId / operation / fence / expiresAt / proof` 六个 lease 字段原样绑定到存储操作，不由 Python 补造或改写。
+- Python 内部 API 当前已提供 Bearer 认证的 `POST /internal/v1/customer-service/knowledge:etl`、`POST /internal/v1/customer-service/knowledge:delete`、`POST /internal/v1/customer-service/knowledge:rebuild` 和只读 `GET /internal/v1/customer-service/health`。INDEX 完整串联安全下载、解析切分、Embedding、Milvus 版本写入和稳定响应，DELETE 与 REBUILD 调用同一 store 边界；请求中的 `scope / operationId / operation / fence / expiresAt / proof` 六个 lease 字段原样绑定到存储操作，不由 Python 补造或改写。Java REBUILD 已有对应 Python 路由，不再因路由缺失而确定失败。
 - Spring lease adapter 对每次 mutation 使用 `POST /api/internal/customer-service/knowledge-mutation-leases:validate`，健康检查使用只读 `GET /api/internal/customer-service/knowledge-mutation-leases/health`；网络错误、非 2xx、超时、非法 JSON、字段不匹配和超过 64 KiB 的声明或流式响应均 fail-closed，且不记录响应正文。功能只在 `AI_SERVICE_CUSTOMER_SERVICE_RAG_ENABLED=true` 时装配外部 RAG 依赖；同步 Milvus 构造在线程中执行，取消时等待构造结束并关闭已创建资源。
 - CloseAI Embedding 使用自有同步和异步 HTTP clients，并在 provider 关闭时独立释放。Embedding 维度由 `AI_SERVICE_RAG_EMBEDDING_DIMENSION` 显式配置，默认 3072；单次 ETL 的默认预算为 8,000,000 个元素。REBUILD 每解析一份文档就立即检查累计 chunk、投影元素和默认 64 MiB UTF-8 chunk 文本预算，超限后不再下载下一份文档；Embedding 仅在全部预算预检通过后开始，因此预算失败时 provider 调用数为 0。provider 和 service 均复核实际返回维度。进程内 INDEX/REBUILD 默认并发为 1，等待或执行任务取消会释放 semaphore permit。
 - Task 6 提交链为 `172763a`、`4d9e56a`、`34633c9`、`b7e9ce5`、`e3d9bc3`、`70b3f68`。资源上限与配置定向测试分别 6 项、14 项通过；完整 Python 测试 435 项通过、1 项跳过，`compileall`、`uv lock --check` 和 `git diff --check` 均通过。测试使用 MockTransport、Fake CloseAI 和 Fake Milvus；Task 7 现已提供 Spring 内部 lease endpoints 和索引调度端，但真实 Spring/MySQL fencing、OSS、CloseAI、Milvus 和完整 E2E 均待人工验收。
 - Task 7 的 MySQL coordinator 使用 guard 表行锁分配全局单调 fence，并将 lease 审计写入独立表；HMAC proof 不入库。签名 lease 包含 `scope / operationId / operation / fence / expiresAt / proof` 六个字段，Spring 提供 Bearer 认证的内部 `validate` 与只读 `health` 接口，验证字段绑定、过期、撤销和 HMAC，异常时 fail-closed。初始化 SQL 与面向既有 Task 1 数据库的升级 SQL `sql/alter_customer_service_knowledge_task7.sql` 已同步。
 - Task 7 已实现知识文档 Service、outbox、管理员上传/替换/重索引/启停/删除/任务历史接口，以及 worker 的 claim、过期 reclaim、claim refresh、lease 内快照重验和版本 CAS。INDEX 成功与最终失败通过独立 Spring 事务 finalizer 原子更新文档和 outbox；重试基数、指数退避和 MySQL `DATETIME` 上限均有边界。对 Python 的 HTTP 调用使用覆盖响应头与完整响应体的整体超时，流式按字节限制响应并在超限或超时时取消订阅。
-- Task 7 的 REBUILD 全链路源码已闭合：Java 默认最多 1000 个文档，序列化后 UTF-8 JSON 最多 4 MiB，查询只读取 `max + 1` 条并在 lease 内重验；Python `/internal/v1/customer-service/knowledge:rebuild` 严格匹配 Java 请求/响应，原样验证 collection lease。Python 默认同样最多 1000 个文档，并限制累计 1,000,000 chunks、8,000,000 embedding elements 和 64 MiB UTF-8 chunk 文本；每份文档解析后立即检查，超限即停止后续下载且 provider 调用数为 0。Milvus 在幂等探测后先创建 staging，逐文档消费并按最多 100 个 chunk 分批写入/回读，逐文档验证 manifest，最终验证顺序 fingerprint 与计数并写 completion marker 后才切 alias；失败、第二批写入异常或取消均不替换旧 alias。空文档列表仍会发布同 schema 的空 collection；成功重放必须验证 completion marker，且不再次下载或请求 Embedding。
-- Task 7 最终聚焦套件 66 项通过，`mvn clean -DskipTests compile` 和 `git diff --check` 通过。上一轮完整 Maven 测试运行 252 项，仍在既有 `YuAiCodeMotherApplicationTests.contextLoads` 因缺少 `openAiChatModel` bean 报错；本轮未把该环境问题计为 Task 7 通过。`CustomerServiceKnowledgeMySqlIT` 需要 URL 与执行开关双 opt-in，本轮未运行，不能声称真实事务回滚、行锁或迁移已验证。
-- Task 7 的人工验收仍包括：在真实 MySQL 执行初始化/升级迁移，验证 guard 行锁、global fence、事务回滚、过期 reclaim 和多 Spring 实例竞争；验证真实私有 OSS 上传与签名下载；执行 Spring/Python lease、INDEX/DELETE/REBUILD 和失败恢复联调，以及真实 CloseAI/Milvus staging 与 alias 切换。
+- Task 7 的 REBUILD 全链路源码已闭合：Java 默认最多 1000 个文档，序列化后 UTF-8 JSON 最多 4 MiB，查询只读取 `max + 1` 条并在六字段 collection lease 内重验；Python `/internal/v1/customer-service/knowledge:rebuild` 严格匹配 Java 请求/响应。空文档列表会发布同 schema 的空 collection 并切换 alias，从而清除旧知识；无旧 alias 时使用配置模型和默认 3072 维。staging 由 alias、operationId/fence、ETL 版本和不含 signed URL 的文档 fingerprint 确定性派生；成功重放必须验证 completion marker，并在下载和 Embedding 前返回 `idempotent=true`，不会重复产生供应商费用。
+- REBUILD 每解析一份文档就立即检查累计 chunks、按默认 3072 维投影的 8,000,000 embedding elements 预算和默认 64 MiB UTF-8 chunk 文本预算；任一预算失败都停止后续下载且 provider 调用数为 0。Milvus 在幂等探测后先创建 staging，逐文档消费，chunk 每批最多 100 行并逐批 readback，逐文档验证 manifest，最终验证顺序 fingerprint 与计数并写 completion marker 后才切 alias。第二批写入失败、create/insert 期间取消或校验失败均保留旧 alias；清理前重新确认 alias、collection 存在性和本 operation/plan metadata，状态不确定时保留 staging。重建只纳入当前 `ACTIVE` 且 `indexedVersion=documentVersion` 的文档；替换失败后仍指向旧 `indexedVersion` 的文档继续被排除。
+- Task 7 最新 Python 全量测试为 467 项通过、1 项跳过，`compileall`、`uv lock --check` 和 `git diff --check` 通过；Java `CustomerServiceAiClientTest` 契约 focused 8 项和 `mvn clean -DskipTests compile` 在此前实现验证中通过，本次文档同步未重新执行 Java。`CustomerServiceKnowledgeMySqlIT` 仍需 URL 与执行开关双 opt-in，本轮未运行，不能声称真实事务回滚、行锁或迁移已验证。
+- Task 7 的人工验收仍包括：在真实 MySQL 执行初始化/升级迁移，验证 Spring/MySQL fencing、guard 行锁、事务回滚、过期 reclaim 和多 Spring 实例竞争；验证真实私有 OSS、CloseAI 和 Milvus；执行 Spring/Python lease、INDEX/DELETE/REBUILD、失败恢复与完整 E2E 联调。
 
 ### 已关闭的源码阻塞
 
@@ -328,7 +329,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 
 ## 6. 当前自动化验证证据
 
-下表优先记录 2026-09-29 当前分支的 fresh 结果；未在本轮重新执行的历史门禁显式标明，不能替代本轮 Vue 多 Agent 验证。
+下表优先记录当前分支的最新 fresh 结果；未在本轮重新执行的历史门禁显式标明，不能替代真实外部依赖验收。
 
 | 范围 | 命令 | 最新证据 | 能证明什么 |
 | --- | --- | --- | --- |
@@ -339,10 +340,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 | Redis opt-in 集成 | `powershell -NoProfile -File scripts/verify-langgraph-real-gate.ps1 -Execute -IncludeRedis` | 最近真实环境 6 项通过 | 跨客户端回放、唯一执行、冲突与不确定态 |
 | PowerShell 脚本 | `powershell -NoProfile -File scripts/ai-validation-scripts.tests.ps1` | Windows PowerShell 5.1 与 PowerShell 7 检查通过 | 验收脚本参数、认证和脱敏约束 |
 | 统一非外部数据库门禁 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1 -Execute` | 本轮未重新执行；此前历史基线为 6 个步骤通过 | 不能作为本轮新增多 Agent 测试数量的 fresh 证据 |
-| Python 编译 | `uv run python -m compileall -q src` | 2026-09-30 Task 6 最终 fresh：退出码 0，无输出 | 当前 Python 源码可完成字节码编译 |
-| Python 全量 | `uv run pytest` | 2026-09-30 Task 6 最终 fresh：435 项通过、1 项跳过、2 个依赖弃用警告 | 既有生成与质量阶段，以及客服知识 ETL、lease、资源生命周期、预算和 API 契约 |
-| Python 锁文件 | `uv lock --check` | 2026-09-30 Task 6 最终 fresh：退出码 0，解析 150 个包 | `uv.lock` 与项目依赖声明一致 |
-| 文档空白检查 | `git diff --check` | 2026-09-30 Task 6 交接同步 fresh：退出码 0，无空白错误；仅有 Git 的 LF/CRLF 工作树提示 | 本轮文档差异没有尾随空格等补丁错误 |
+| Python 编译 | `uv run python -m compileall -q src` | 2026-10-01 REBUILD 收尾 fresh：退出码 0，无输出 | 当前 Python 源码可完成字节码编译 |
+| Python 全量 | `uv run pytest` | 2026-10-01 REBUILD 收尾 fresh：467 项通过、1 项跳过、2 个依赖弃用警告 | 既有生成与质量阶段，以及客服知识 ETL、REBUILD、lease、流式 staging、预算和取消清理契约 |
+| Python 锁文件 | `uv lock --check` | 2026-10-01 REBUILD 收尾 fresh：退出码 0，解析 150 个包 | `uv.lock` 与项目依赖声明一致 |
+| 文档空白检查 | `git diff --check` | 2026-10-01 REBUILD 收尾 fresh：退出码 0，仅有 Git 的 LF/CRLF 工作树提示 | 本轮文档差异没有尾随空格等补丁错误 |
 | 当前工作树 | `git status --short` | 当前隔离分支工作树干净，最终提交后命令无输出 | 不把其他工作树或前端仓库状态混入本分支结论 |
 | 实现差异范围 | `git diff --stat b5c665d..HEAD` | 20 个文件，2510 行新增、57 行删除，覆盖 Python 生产代码、测试、配置和文档 | Vue 多 Agent 实施并非仅文档修改；范围以设计基线至当前 HEAD 的真实 Git 差异为准 |
 | PostgreSQL 默认门 | `uv run pytest tests/test_postgres_checkpoint_integration.py` | 默认 1 项跳过，不连接数据库 | opt-in 门禁不会误连本机数据库 |
