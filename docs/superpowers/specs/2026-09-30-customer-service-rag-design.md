@@ -139,6 +139,18 @@ Python 不读取业务 MySQL，不接收 Cookie、Session、用户角色、应�
 
 Spring 必须在同一个 MySQL 事务内更新文档状态并写入 Outbox。文件内容、签名 URL、Embedding、模型响应和堆栈不得写入 Outbox。
 
+### 4.3 跨实例 mutation coordinator
+
+用户确认的架构细化如下：Spring/MySQL Outbox 是客服知识库唯一的跨实例 mutation coordinator。Python 不得以进程内锁、Redis 临时锁或 Milvus 当前状态替代这一业务事实源。
+
+- Task 7 负责基于 MySQL claim/版本状态签发并验证不可伪造 lease，维护单调 fencing token 和冲突域。
+- lease 至少绑定 `scope / operation / fence / expiry / proof`。document scope 之间按同一 `documentId` 互斥；collection rebuild scope 与该知识库全部 document scope 互斥。
+- Task 6 的认证内部 ETL API 必须把 lease 原样、完整地传给 Python Milvus store，禁止 Python 自行补造或降级为本地锁。
+- Python store 的 `upsert_document_version`、`delete_document` 和 `rebuild_collection` 缺少、过期、伪造、撤销或 scope/operation/fence 不匹配的 lease 时一律 fail-closed；默认 coordinator 为 `DenyAll`。
+- permit 必须持续到已启动的同步 Milvus mutation RPC 得到确定结果后才能释放，避免取消请求时后台线程仍在写入而下一个持有者已经进入。
+
+Task 5 只实现上述 Python 契约和 fail-closed 边界。Task 6 的认证传递及 Task 7 的 MySQL 签发、验证和冲突仲裁尚未实现，不得描述为已有端到端索引能力。
+
 ## 5. 文件上传与 OSS
 
 管理员接口仅接受：
@@ -232,6 +244,15 @@ Python 是唯一允许写客服 Milvus collection 的组件：
 
 `documentId + documentVersion + etlVersion + embeddingModelVersion` 构成幂等边界。旧任务晚完成时不得覆盖新版本。
 
+Task 5 的实现对上述流程作了以下安全细化：
+
+- chunk、manifest、tombstone 和 collection metadata 都记录 mutation fence；删除先于 manifest 到达时也能用确定性 tombstone 阻止同版本随后发布。
+- 向量在写入和写后校验前统一 canonicalize 为 float32，避免真实 `FLOAT_VECTOR` round-trip 量化被误判为数据损坏。
+- 文档历史使用 Milvus query iterator 分页读取，并以 10000 条为 fail-closed 硬上限。
+- 所有同步 Milvus RPC 使用可配置 timeout。mutation RPC 由可追踪 task 执行并 shield；调用方取消后先等待底层 RPC 得到确定结果，再释放 permit 和本地锁并重新抛出取消。
+- staging 清理前必须重新读取 alias。readback 不确定或 staging 已成为当前 alias 目标时保留 staging，禁止误删正在服务的集合。
+- pymilvus 2.6 的 COSINE `distance` 按“数值越大越相似”解释；内部 `score` 保存相似度，语义距离为 `1 - score`。
+
 ## 7. Milvus 设计
 
 复用本机 Docker 中已有 Milvus。仓库只管理连接配置、collection schema、索引初始化和健康检查，不管理容器生命周期。
@@ -257,6 +278,8 @@ Python 是唯一允许写客服 Milvus collection 的组件：
 collection 必须按知识库、Embedding 模型、向量维度和 schema 版本隔离。模型或维度变化时创建新 collection，禁止原地混写。
 
 全量重建写入新的物理 collection，完成完整性验证后通过稳定 alias 原子切换。切换失败时旧 alias 继续服务。
+
+alias 必须符合 Milvus identifier 规则（首字符、字符集、最大 255 字符）。物理 canonical、staging 和 control 名使用同一稳定 base prefix 并为最长后缀预留空间；完整 alias 必须进入 canonical/staging fingerprint，control 名也必须包含完整 alias 的 hash。即使两个 255 字符 alias 的前 254 字符完全相同，三类物理名称和数据仍必须相互隔离，且 staging 名保持以 `canonical + "_staging_"` 开头。
 
 ## 8. Reranker
 
@@ -532,6 +555,7 @@ AI_SERVICE_RAG_DOWNLOAD_MAX_BYTES=20971520
 - Fake CloseAI Embedding，不在默认测试连接真实网络。
 - Embedding 维度、数量、NaN 和 Infinity 校验。
 - Fake Milvus 或受控测试容器覆盖幂等、旧版本保护和 alias 切换。
+- Fake Milvus 覆盖 float32 round-trip、取消期间 permit 保持、alias readback 不确定时保留 staging、分页/10000 条上限，以及长 alias 的业务/control 数据隔离。
 - Fake Reranker 覆盖排序、超时、OOM 和降级。
 - 引用只能属于最终 Top 3。
 - 文档 Prompt Injection 不得改变系统规则。
@@ -574,14 +598,15 @@ AI_SERVICE_RAG_DOWNLOAD_MAX_BYTES=20971520
 
 1. 真实私有 OSS 上传和短期签名 URL 下载。
 2. PDF、DOCX、Markdown、TXT 的真实解析和来源定位。
-3. CloseAI `text-embedding-3-large` 的维度、批量限制、限流和错误响应。
-4. 本机 Docker Milvus 的 collection、索引、查询、alias 切换和重启恢复。
+3. CloseAI `text-embedding-3-large` 的真实维度、批量限制、限流和错误响应。
+4. 本机 Docker Milvus 的 schema、dynamic fields、Strong consistency、分页、批量写入、collection/索引/查询、alias 切换和重启恢复。
 5. GPU 上 BGE Reranker 的显存、并发、P95 和 OOM 行为。
 6. Spring、Python、OSS、CloseAI、Milvus 和 Vue 的完整端到端问答。
 7. 文档替换失败时旧知识继续服务。
 8. Embedding 模型变更后的新 collection 全量重建和切换。
 9. 知识缺失、Prompt Injection、错误凭据、网络超时和依赖故障。
 10. 日志、错误响应和后台页面不泄露凭据、签名 URL 或知识全文。
+11. Task 6/7 完成后验证 Spring/MySQL lease 的认证传递、签发/验证、fencing、document/collection 冲突域和取消期间 permit 生命周期。
 
 未实际执行时必须明确标记待人工验证，不得声称 Docker、真实 CloseAI、GPU 或端到端流程通过。
 

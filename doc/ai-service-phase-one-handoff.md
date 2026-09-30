@@ -28,7 +28,7 @@
 
 ### 客服机器人 RAG 实施进度
 
-- 设计提交 `b61fc07`、实施计划提交 `be6b5db` 已完成；计划中的问答、Embedding、Milvus、Reranker 和前端能力不能据此视为已实现。
+- 设计提交 `b61fc07`、实施计划提交 `be6b5db` 已完成。当前仅 Task 1–5 已实现；Task 6 的认证 ETL API 与 lease 传递、Task 7 的 Spring/MySQL coordinator、Reranker、问答和前端能力仍未完成，不能从设计或计划文档推断为可用。
 - Task 1 的 MySQL 知识文档与 ETL outbox 表、对应 MyBatis-Flex 实体和 Mapper 已在提交 `8e18149` 完成。
 - Task 1 定向 schema 测试 2 项通过，`mvn clean -DskipTests compile` 通过，暂存差异的 `git diff --cached --check` 通过。仓库没有 `mvnw.cmd`，测试和编译使用系统 Maven；测试实际命令为 `mvn test -Dtest=CustomerServiceKnowledgeSchemaTest`。
 - 尚未在真实 MySQL 执行 DDL、CRUD 或并发任务认领验证，这些仍是人工待验收项。
@@ -40,7 +40,10 @@
 - Task 3 的 83 项定向测试、完整 Python 测试 271 项通过且 1 项跳过；`uv sync --frozen --python 3.12`、`compileall`、`uv lock --check` 和 `git diff --check` 均通过。仅验证依赖导入和 CUDA 可用性；没有下载或运行 BGE Reranker 模型，没有调用 CloseAI，也没有连接 Milvus。
 - Task 4 在 `51dac9d` 实现安全下载和文档解析，并由 `4e7d4a6`、`e5e7b8d` 修正标题与表格顺序、下载和取消边界。`KnowledgeDownloader` 仅允许配置白名单内的 HTTPS 主机，逐跳校验全部 DNS 结果为公网地址，并对 DNS、连接和读取分别设置超时；每次重定向独立创建客户端，以当前主机设置 Host 和 TLS SNI，避免同 IP 跨主机复用旧连接。下载按声明和实际字节数限额流式写入临时文件，核对 SHA-256，失败与解析完成后清理临时文件；错误、日志和返回元数据不包含签名 URL。
 - Task 4 支持 PDF、DOCX、Markdown、TXT 解析。PDF 保留页码并拒绝加密或无文本文件；Markdown/DOCX 保留真实标题层级，TXT 保留行范围，DOCX 普通、合并和嵌套表格按文档顺序提取并保留表格/行定位。`RecursiveCharacterTextSplitter` 默认分块 1000 字符、重叠 150 字符，生成稳定的 `documentId:documentVersion:index` chunk ID，按实际产出执行最多 10000 个 chunk 的上限。同步解析与切分在线程中执行，取消时等待工作线程结束再清理临时文件。
-- Task 4 定向测试 55 项通过，完整 Python 测试 326 项通过、1 项跳过；`compileall`、`uv lock --check` 和 `git diff --check` 通过。测试使用本地生成文档和模拟传输；真实 OSS 签名下载、真实 TLS/SNI 与同 IP 跨主机重定向，以及超时、大文件和取消压力仍待人工验证。首期不做 OCR，扫描 PDF 因无可提取文本而失败。Task 5 及后续 Embedding、Milvus、问答和前端链路尚未实现，客服问答与索引链路不可用。
+- Task 4 定向测试 55 项通过，完整 Python 测试 326 项通过、1 项跳过；`compileall`、`uv lock --check` 和 `git diff --check` 通过。测试使用本地生成文档和模拟传输；真实 OSS 签名下载、真实 TLS/SNI 与同 IP 跨主机重定向，以及超时、大文件和取消压力仍待人工验证。首期不做 OCR，扫描 PDF 因无可提取文本而失败。
+- Task 5 已完成 CloseAI Embedding Provider 和 Milvus versioned store。Provider 单例复用底层客户端，确定性批处理 document embedding，分别支持 document/query，严格校验数量、维度和有限数，并把供应商异常映射为不含密钥或响应正文的稳定错误。Milvus store 支持版本化 chunk/manifest、完整写后校验、旧版本保护、增量激活、全量 staging + alias 切换、确定性 tombstone、COSINE 分数语义、float32 canonicalization、分页读取和单文档 10000 条硬上限；同步 RPC 使用可配置 timeout，取消时 drain 已启动 RPC 后才释放 permit/本地锁，alias 状态不确定时保留 staging。完整 alias 参与业务集合 fingerprint，control collection 也包含完整 alias hash，长 alias 之间保持隔离。
+- Task 5 采用显式 fail-closed mutation lease。Spring/MySQL Outbox 是唯一允许承担跨实例 mutation coordinator 的组件；Python store 的 `upsert/delete/rebuild` 都要求不可伪造的 `scope / operation / fence / expiry / proof`，默认 coordinator 为 `DenyAll`。同一 document scope 串行，collection rebuild scope 与全部 document scope 互斥。Task 6 必须通过认证内部接口传递 lease，并将同步 `MilvusClient` 构造放入 async factory/offload；Task 7 必须负责 MySQL 签发、验证、fencing 和冲突域。Task 6/7 尚未实现，因此索引入口当前按设计 fail-closed，不可对外使用。
+- Task 5 提交链可概括为 `e052d20`、`6a6771f`、`6970873`、`2a865b6`、`a5841dd`、`a6ee768`。最终定向测试 49 项通过，完整 Python 测试 375 项通过、1 项跳过；`compileall`、`uv lock --check` 和 `git diff --check` 通过。测试使用 Fake CloseAI/Fake Milvus；真实 CloseAI 尚未调用，真实 Docker Milvus 的 schema、dynamic fields、Strong consistency、分页、批量写入、alias 切换和重启恢复仍待人工验证，Spring lease 集成也待 Task 6/7 完成后验收。
 
 ### 已关闭的源码阻塞
 
@@ -558,7 +561,7 @@ Vue 多 Agent 已于 2026-09-30 本地快进合并到 `dev`，合并后 HEAD 为
 - `doc/ai-service-langchain-langgraph-refactor-design.md`：重构架构与边界设计。
 - `docs/superpowers/specs/2026-09-29-postgres-checkpoint-design.md`：PostgreSQL checkpoint 迁移、故障语义和长期记忆决策。
 - `docs/superpowers/specs/2026-09-29-vue-multi-agent-quality-review-design.md`：Vue 三角色质量审查、F1 错误语义、repair 和 checkpoint 边界。
-- `docs/superpowers/specs/2026-09-30-customer-service-rag-design.md`：客服机器人、OSS 文档 ETL、CloseAI Embedding、Milvus 和 GPU Reranker 设计；目前 Task 1 数据库 schema、Task 2 私有 OSS 文档操作、Task 3 Python 依赖与配置、Task 4 安全下载与解析切分已实现，Task 5 及后续仍属规划。
+- `docs/superpowers/specs/2026-09-30-customer-service-rag-design.md`：客服机器人、OSS 文档 ETL、CloseAI Embedding、Milvus 和 GPU Reranker 设计；目前 Task 1–5 已实现，Task 6 的认证 ETL/lease 接线和 Task 7 的 Spring/MySQL coordinator 及后续能力仍属规划。
 - `docs/superpowers/specs/2026-09-21-bounded-streaming-simple-prompts-design.md`：有限流式窗口和简短优化提示设计。
 - `docs/superpowers/specs/2026-09-21-circular-preview-spinner-design.md`：预览加载图正圆修复设计。
 
