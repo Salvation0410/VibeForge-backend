@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import inspect
 import math
 from collections.abc import Callable, Sequence
 from typing import Any, Protocol
@@ -101,3 +103,22 @@ class CloseAIEmbeddingProvider:
         except Exception:
             raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_UNAVAILABLE") from None
         return self.validate([raw], expected_count=1)[0]
+
+    async def close(self) -> None:
+        """Close OpenAI-compatible sync and async HTTP clients when exposed."""
+
+        seen: set[int] = set()
+        for name in ("async_client", "client"):
+            resource = getattr(self._client, name, None)
+            if resource is None or id(resource) in seen:
+                continue
+            seen.add(id(resource))
+            close = getattr(resource, "aclose", None) or getattr(resource, "close", None)
+            if close is None:
+                continue
+            if inspect.iscoroutinefunction(close):
+                await close()
+            else:
+                result = await asyncio.to_thread(close)
+                if inspect.isawaitable(result):
+                    await result

@@ -463,7 +463,7 @@ async def test_etl_service_indexes_embedded_document_with_original_lease(setting
             })()
 
     lease = KnowledgeMutationLease(
-        scope="document:doc-1", operation_id="op-1", fence=9,
+        scope="document:doc-1", operation_id="op-1", operation="INDEX", fence=9,
         expires_at=4102444800.0, proof="secret-proof",
     )
     store = Store()
@@ -491,7 +491,7 @@ async def test_etl_service_delete_passes_original_lease(settings):
             self.call = (document_id, document_version, lease)
 
     lease = KnowledgeMutationLease(
-        scope="document:doc-1", operation_id="op-2", fence=10,
+        scope="document:doc-1", operation_id="op-2", operation="DELETE", fence=10,
         expires_at=4102444800.0, proof="secret-proof",
     )
     store = Store()
@@ -501,9 +501,9 @@ async def test_etl_service_delete_passes_original_lease(settings):
 
 
 @pytest.mark.asyncio
-async def test_etl_service_propagates_download_embedding_and_store_failures(settings, tmp_path):
+async def test_etl_service_propagates_download_and_embedding_failures(settings, tmp_path):
     lease = KnowledgeMutationLease(
-        scope="document:doc-1", operation_id="op-1", fence=1,
+        scope="document:doc-1", operation_id="op-1", operation="INDEX", fence=1,
         expires_at=time.time() + 60, proof="proof",
     )
 
@@ -550,13 +550,55 @@ async def test_etl_service_propagates_download_embedding_and_store_failures(sett
     assert not path.exists()
 
 
-def spring_lease_response(lease, *, operation="INDEX", **overrides):
+@pytest.mark.asyncio
+async def test_etl_service_propagates_store_failure(settings, tmp_path):
+    path = tmp_path / "store.txt"
+    path.write_text("content", encoding="utf-8")
+    lease = KnowledgeMutationLease(
+        scope="document:doc-1", operation_id="op-1", operation="INDEX",
+        fence=1, expires_at=time.time() + 60, proof="proof",
+    )
+
+    class Downloaded:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_):
+            path.unlink(missing_ok=True)
+        @property
+        def path(self):
+            return path
+
+    class Downloader:
+        async def download(self, *_args, **_kwargs):
+            return Downloaded()
+
+    class Embeddings:
+        async def embed_documents(self, _texts):
+            return [[0.1, 0.2]]
+
+    class Store:
+        async def upsert_document_version(self, _document, *, lease):
+            raise MilvusKnowledgeError("KNOWLEDGE_VECTOR_STORE_UNAVAILABLE")
+
+    service = KnowledgeEtlService(settings, Downloader(), Embeddings(), Store())
+    with pytest.raises(
+        MilvusKnowledgeError, match="KNOWLEDGE_VECTOR_STORE_UNAVAILABLE"
+    ):
+        await service.index(
+            document_id="doc-1", document_version=1, file_name="store.txt",
+            file_type="TXT", signed_url="https://oss.test/x", sha256="a" * 64,
+            etl_version="etl-v1", lease=lease,
+        )
+    assert not path.exists()
+
+
+def spring_lease_response(lease, **overrides):
     data = {
         "verified": True,
         "current": True,
         "scope": lease.scope,
         "operationId": lease.operation_id,
-        "operation": operation,
+        "operation": lease.operation,
         "fence": lease.fence,
         "expiresAt": lease.expires_at,
     }
@@ -567,7 +609,7 @@ def spring_lease_response(lease, *, operation="INDEX", **overrides):
 @pytest.mark.asyncio
 async def test_spring_coordinator_validates_on_hold_and_every_assertion():
     lease = KnowledgeMutationLease(
-        scope="document:doc-1", operation_id="op-1", fence=7,
+        scope="document:doc-1", operation_id="op-1", operation="INDEX", fence=7,
         expires_at=time.time() + 60, proof="never-log-this-proof",
     )
     requests = []
@@ -596,13 +638,64 @@ async def test_spring_coordinator_validates_on_hold_and_every_assertion():
 
 
 @pytest.mark.asyncio
+async def test_spring_coordinator_health_uses_read_only_endpoint():
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json={
+            "code": 0, "data": {"ready": True}, "message": "ok",
+        })
+
+    coordinator = SpringKnowledgeMutationCoordinator(
+        gateway_base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="spring-secret",
+        transport=httpx.MockTransport(handler),
+    )
+    assert await coordinator.ping()
+    await coordinator.close()
+    assert requests[0].method == "GET"
+    assert requests[0].url.path == (
+        "/api/internal/customer-service/knowledge-mutation-leases/health"
+    )
+    assert requests[0].content == b""
+
+
+@pytest.mark.asyncio
+async def test_spring_coordinator_rejects_internal_action_mismatch_before_network():
+    calls = 0
+
+    def handler(_request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(500)
+
+    lease = KnowledgeMutationLease(
+        scope="document:doc-1", operation_id="op-1", operation="DELETE", fence=7,
+        expires_at=time.time() + 60, proof="proof",
+    )
+    coordinator = SpringKnowledgeMutationCoordinator(
+        gateway_base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="spring-secret",
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(MilvusKnowledgeError, match="KNOWLEDGE_MUTATION_LEASE_INVALID"):
+        async with coordinator.hold(
+            lease, scope="document:doc-1", operation="upsert"
+        ):
+            pass
+    await coordinator.close()
+    assert calls == 0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("response", [
     httpx.Response(404),
     httpx.Response(200, json={"code": 0, "data": {"verified": False}}),
 ])
 async def test_spring_coordinator_fails_closed_without_leaking_response(response):
     lease = KnowledgeMutationLease(
-        scope="document:doc-1", operation_id="op-1", fence=7,
+        scope="document:doc-1", operation_id="op-1", operation="INDEX", fence=7,
         expires_at=time.time() + 60, proof="never-log-this-proof",
     )
     coordinator = SpringKnowledgeMutationCoordinator(
@@ -621,34 +714,69 @@ async def test_spring_coordinator_fails_closed_without_leaking_response(response
 
 
 @pytest.mark.asyncio
-async def test_spring_coordinator_detects_revocation_and_field_mismatch():
+@pytest.mark.parametrize("overrides", [
+    {"verified": False},
+    {"current": False},
+    {"scope": "document:other"},
+    {"operationId": "other-op"},
+    {"operation": "DELETE"},
+    {"fence": 8},
+    {"expiresAt": 1.0},
+])
+async def test_spring_coordinator_rejects_each_response_field_mismatch(overrides):
     lease = KnowledgeMutationLease(
-        scope="document:doc-1", operation_id="op-1", fence=7,
+        scope="document:doc-1", operation_id="op-1", operation="INDEX", fence=7,
         expires_at=time.time() + 60, proof="proof",
     )
-    responses = iter([
-        spring_lease_response(lease),
-        spring_lease_response(lease, current=False),
-    ])
     coordinator = SpringKnowledgeMutationCoordinator(
         gateway_base_url="http://spring.test/api/internal/ai-tools",
         bearer_token="spring-secret",
         transport=httpx.MockTransport(
-            lambda _request: httpx.Response(200, json=next(responses))
+            lambda _request: httpx.Response(
+                200, json=spring_lease_response(lease, **overrides)
+            )
         ),
     )
     with pytest.raises(MilvusKnowledgeError, match="KNOWLEDGE_MUTATION_LEASE_INVALID"):
         async with coordinator.hold(
             lease, scope="document:doc-1", operation="upsert"
-        ) as permit:
-            await permit.assert_current()
+        ):
+            pass
     await coordinator.close()
+
+
+@pytest.mark.asyncio
+async def test_spring_coordinator_rejects_non_json_and_logs_no_secrets(caplog):
+    lease = KnowledgeMutationLease(
+        scope="document:doc-1", operation_id="op-1", operation="INDEX", fence=7,
+        expires_at=time.time() + 60, proof="proof-secret-value",
+    )
+    coordinator = SpringKnowledgeMutationCoordinator(
+        gateway_base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="spring-token-secret",
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200, content=b"vendor body secret", headers={"content-type": "text/plain"}
+            )
+        ),
+    )
+    with caplog.at_level("DEBUG"):
+        with pytest.raises(MilvusKnowledgeError):
+            async with coordinator.hold(
+                lease, scope="document:doc-1", operation="upsert"
+            ):
+                pass
+    await coordinator.close()
+    for secret in (
+        "proof-secret-value", "spring-token-secret", "vendor body secret",
+    ):
+        assert secret not in caplog.text
 
 
 @pytest.mark.asyncio
 async def test_spring_coordinator_timeout_is_fail_closed():
     lease = KnowledgeMutationLease(
-        scope="document:doc-1", operation_id="op-1", fence=7,
+        scope="document:doc-1", operation_id="op-1", operation="INDEX", fence=7,
         expires_at=time.time() + 60, proof="proof",
     )
 

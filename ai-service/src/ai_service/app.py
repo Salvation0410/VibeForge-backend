@@ -28,6 +28,45 @@ from ai_service.orchestration.workflow import GenerationWorkflow
 from ai_service.orchestration.document_etl import KnowledgeEtlService
 
 
+async def _close_resource(resource: Any) -> None:
+    close = getattr(resource, "close", None)
+    if close is None:
+        return
+    if inspect.iscoroutinefunction(close):
+        await close()
+        return
+    result = await asyncio.to_thread(close)
+    if inspect.isawaitable(result):
+        await result
+
+
+async def _construct_in_thread(factory: Any, *args: Any, **kwargs: Any) -> Any:
+    """Finish an uncancellable constructor and close its result before propagating cancel."""
+
+    task = asyncio.create_task(asyncio.to_thread(factory, *args, **kwargs))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+        if not task.cancelled():
+            try:
+                resource = task.result()
+            except Exception:
+                pass
+            else:
+                try:
+                    await _close_resource(resource)
+                except Exception:
+                    pass
+        raise
+
+
 def create_app(
     *,
     settings: Settings | None = None,
@@ -69,6 +108,7 @@ def create_app(
     cancellations = CancellationRegistry()
     active_generations = ActiveGenerationRegistry()
     initial_etl_service = knowledge_etl_service
+    initial_mutation_coordinator = mutation_coordinator
     workflow = GenerationWorkflow(
         model=generation_model,
         tool_gateway=gateway,
@@ -83,11 +123,13 @@ def create_app(
         """管理 checkpoint 和 HTTP 工具客户端的启动与释放。"""
 
         await checkpoint_store.start()
-        resources: list[Any] = (
-            [initial_etl_service]
-            if config.customer_service_rag_enabled and initial_etl_service is not None
-            else []
-        )
+        resources: list[Any] = []
+        if config.customer_service_rag_enabled:
+            resources.extend(
+                resource for resource in (
+                    initial_etl_service, initial_mutation_coordinator,
+                ) if resource is not None
+            )
         try:
             if config.customer_service_rag_enabled and app.state.knowledge_etl_service is None:
                 coordinator = mutation_coordinator or SpringKnowledgeMutationCoordinator(
@@ -96,16 +138,17 @@ def create_app(
                     transport=lease_validation_transport,
                 )
                 resources.append(coordinator)
+                app.state.knowledge_mutation_coordinator = coordinator
                 downloader = knowledge_downloader or KnowledgeDownloader(config)
                 resources.append(downloader)
-                embeddings = embedding_provider or await asyncio.to_thread(
+                embeddings = embedding_provider or await _construct_in_thread(
                     CloseAIEmbeddingProvider, config
                 )
                 resources.append(embeddings)
                 store_kwargs = {"mutation_coordinator": coordinator}
                 if milvus_client_factory is not None:
                     store_kwargs["client_factory"] = milvus_client_factory
-                store = knowledge_store or await asyncio.to_thread(
+                store = knowledge_store or await _construct_in_thread(
                     MilvusKnowledgeStore, config, **store_kwargs
                 )
                 resources.append(store)
@@ -124,9 +167,7 @@ def create_app(
                     close = getattr(resource, "close", None)
                     if close is not None:
                         try:
-                            result = close()
-                            if inspect.isawaitable(result):
-                                await result
+                            await _close_resource(resource)
                         except BaseException as error:
                             if resource_error is None:
                                 resource_error = error
@@ -149,6 +190,7 @@ def create_app(
     app.state.active_generations = active_generations
     app.state.workflow = workflow
     app.state.knowledge_etl_service = initial_etl_service
+    app.state.knowledge_mutation_coordinator = initial_mutation_coordinator
 
     register_routes(
         app,

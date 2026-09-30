@@ -38,10 +38,13 @@ def generation_payload(code_gen_type: str) -> dict:
     }
 
 
-def knowledge_lease(operation_id="op-1", *, scope="document:doc-1") -> dict:
+def knowledge_lease(
+    operation_id="op-1", *, scope="document:doc-1", operation="INDEX",
+) -> dict:
     return {
         "scope": scope,
         "operationId": operation_id,
+        "operation": operation,
         "fence": 7,
         "expiresAt": time.time() + 300,
         "proof": "lease-proof-secret",
@@ -83,6 +86,16 @@ class FakeKnowledgeEtlService:
         self.delete_calls.append(kwargs)
         if self.error:
             raise self.error
+
+
+class FakeLeaseValidator:
+    def __init__(self, available=True):
+        self.available = available
+        self.pings = 0
+
+    async def ping(self):
+        self.pings += 1
+        return self.available
 
 
 def reviewer_result(
@@ -151,7 +164,7 @@ def test_customer_service_etl_requires_auth_and_disabled_is_stable(
     assert client.post(
         "/internal/v1/customer-service/knowledge:delete", json={
             "operation": "DELETE", "documentId": "doc-1", "documentVersion": 2,
-            "lease": knowledge_lease("op-2"),
+            "lease": knowledge_lease("op-2", operation="DELETE"),
         },
     ).status_code == 401
     assert client.get("/internal/v1/customer-service/health").status_code == 401
@@ -166,7 +179,10 @@ def test_customer_service_etl_requires_auth_and_disabled_is_stable(
 def test_customer_service_index_delete_and_health(app_factory, auth_headers, settings):
     settings.customer_service_rag_enabled = True
     service = FakeKnowledgeEtlService()
-    with TestClient(app_factory(knowledge_etl_service=service)) as client:
+    validator = FakeLeaseValidator()
+    with TestClient(app_factory(
+        knowledge_etl_service=service, mutation_coordinator=validator,
+    )) as client:
         response = client.post(
             "/internal/v1/customer-service/knowledge:etl",
             json=knowledge_etl_payload(), headers=auth_headers,
@@ -175,7 +191,8 @@ def test_customer_service_index_delete_and_health(app_factory, auth_headers, set
             "/internal/v1/customer-service/knowledge:delete",
             json={
                 "operation": "DELETE", "documentId": "doc-1",
-                "documentVersion": 2, "lease": knowledge_lease("op-2"),
+                "documentVersion": 2,
+                "lease": knowledge_lease("op-2", operation="DELETE"),
             },
             headers=auth_headers,
         )
@@ -189,12 +206,67 @@ def test_customer_service_index_delete_and_health(app_factory, auth_headers, set
         "documentVersion": 2, "chunkCount": 3, "idempotent": False,
     }
     assert service.index_calls[0]["lease"].proof == "lease-proof-secret"
+    assert service.index_calls[0]["lease"].operation == "INDEX"
     assert deleted.status_code == 200
     assert deleted.json()["operation"] == "DELETE"
     assert service.delete_calls[0]["lease"].operation_id == "op-2"
+    assert service.delete_calls[0]["lease"].operation == "DELETE"
     assert health.json() == {
         "enabled": True, "ready": True,
         "dependencies": {"etl": True, "milvus": True, "leaseValidator": True},
+    }
+    assert validator.pings == 1
+
+
+def test_customer_service_health_degrades_when_lease_validator_is_unavailable(
+    app_factory, auth_headers, settings,
+):
+    settings.customer_service_rag_enabled = True
+    validator = FakeLeaseValidator(available=False)
+    with TestClient(app_factory(
+        knowledge_etl_service=FakeKnowledgeEtlService(),
+        mutation_coordinator=validator,
+    )) as client:
+        response = client.get(
+            "/internal/v1/customer-service/health", headers=auth_headers,
+        )
+    assert response.status_code == 503
+    assert response.json() == {
+        "enabled": True, "ready": False,
+        "dependencies": {"etl": True, "milvus": True, "leaseValidator": False},
+    }
+    assert validator.pings == 1
+
+
+@pytest.mark.parametrize("failure", ["404", "timeout"])
+def test_customer_service_health_degrades_on_spring_validator_failure(
+    app_factory, auth_headers, settings, failure,
+):
+    settings.customer_service_rag_enabled = True
+
+    def handler(request):
+        if failure == "timeout":
+            raise httpx.ReadTimeout("vendor health body", request=request)
+        return httpx.Response(404, content=b"vendor health body")
+
+    from ai_service.infrastructure.spring_knowledge_lease import (
+        SpringKnowledgeMutationCoordinator,
+    )
+    coordinator = SpringKnowledgeMutationCoordinator(
+        gateway_base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="spring-secret",
+        transport=httpx.MockTransport(handler),
+    )
+    with TestClient(app_factory(
+        knowledge_etl_service=FakeKnowledgeEtlService(),
+        mutation_coordinator=coordinator,
+    )) as client:
+        response = client.get(
+            "/internal/v1/customer-service/health", headers=auth_headers,
+        )
+    assert response.status_code == 503
+    assert response.json()["dependencies"] == {
+        "etl": True, "milvus": True, "leaseValidator": False,
     }
 
 
@@ -243,17 +315,18 @@ def test_customer_service_errors_are_stable_and_redacted(
 
 
 def test_customer_service_unexpected_vendor_error_is_bounded_and_redacted(
-    app_factory, auth_headers, settings,
+    app_factory, auth_headers, settings, caplog,
 ):
     settings.customer_service_rag_enabled = True
     service = FakeKnowledgeEtlService(
         RuntimeError("vendor body signed-url-secret lease-proof-secret api-key")
     )
-    with TestClient(app_factory(knowledge_etl_service=service)) as client:
-        response = client.post(
-            "/internal/v1/customer-service/knowledge:etl",
-            json=knowledge_etl_payload(), headers=auth_headers,
-        )
+    with caplog.at_level(logging.DEBUG):
+        with TestClient(app_factory(knowledge_etl_service=service)) as client:
+            response = client.post(
+                "/internal/v1/customer-service/knowledge:etl",
+                json=knowledge_etl_payload(), headers=auth_headers,
+            )
     assert response.status_code == 500
     assert response.json() == {"error": {
         "code": "KNOWLEDGE_ETL_FAILED",
@@ -262,6 +335,11 @@ def test_customer_service_unexpected_vendor_error_is_bounded_and_redacted(
     assert len(response.text) < 256
     assert "vendor body" not in response.text
     assert "api-key" not in response.text
+    for secret in (
+        "signed-url-secret", "lease-proof-secret", "test-secret",
+        "vendor body", "api-key",
+    ):
+        assert secret not in caplog.text
 
 
 @pytest.mark.parametrize("field,value", [
@@ -288,6 +366,29 @@ def test_customer_service_etl_schema_boundaries(
     assert response.status_code == 422
     assert "signed-url-secret" not in response.text
     assert "lease-proof-secret" not in response.text
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda payload: payload["lease"].update(operation="DELETE"),
+    lambda payload: payload["lease"].update(operation="INVALID"),
+    lambda payload: payload["lease"].update(unexpected="value"),
+    lambda payload: payload.update(unexpected="value"),
+])
+def test_customer_service_rejects_lease_operation_mismatch_and_extra_fields(
+    app_factory, auth_headers, settings, mutate,
+):
+    settings.customer_service_rag_enabled = True
+    payload = knowledge_etl_payload()
+    mutate(payload)
+    with TestClient(app_factory(
+        knowledge_etl_service=FakeKnowledgeEtlService(),
+        mutation_coordinator=FakeLeaseValidator(),
+    )) as client:
+        response = client.post(
+            "/internal/v1/customer-service/knowledge:etl",
+            json=payload, headers=auth_headers,
+        )
+    assert response.status_code == 422
 
 
 def test_customer_service_disabled_does_not_initialize_dependencies(
@@ -356,6 +457,79 @@ async def test_milvus_constructor_is_offloaded_and_lifespan_closes_resources(
     await context.__aexit__(None, None, None)
     assert client.closed
     assert coordinator.closed
+
+
+@pytest.mark.asyncio
+async def test_startup_cancellation_drains_constructor_and_closes_created_client(
+    app_factory, settings,
+):
+    settings.customer_service_rag_enabled = True
+    started = threading.Event()
+    release = threading.Event()
+
+    class Client:
+        closed = False
+        def close(self):
+            self.closed = True
+
+    client = Client()
+
+    def factory(**_kwargs):
+        started.set()
+        release.wait(1)
+        return client
+
+    class Coordinator:
+        closed = False
+        async def close(self):
+            self.closed = True
+
+    coordinator = Coordinator()
+    app = app_factory(
+        knowledge_downloader=object(), embedding_provider=object(),
+        mutation_coordinator=coordinator, milvus_client_factory=factory,
+    )
+    context = app.router.lifespan_context(app)
+    enter = asyncio.create_task(context.__aenter__())
+    assert await asyncio.to_thread(started.wait, 0.3)
+    enter.cancel()
+    await asyncio.sleep(0.02)
+    assert not enter.done()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await enter
+    assert client.closed
+    assert coordinator.closed
+
+
+@pytest.mark.asyncio
+async def test_partial_startup_failure_closes_initialized_dependencies(
+    app_factory, settings,
+):
+    settings.customer_service_rag_enabled = True
+
+    class Closeable:
+        closed = False
+        async def close(self):
+            self.closed = True
+
+    coordinator = Closeable()
+    embeddings = Closeable()
+    downloader = Closeable()
+
+    def failing_factory(**_kwargs):
+        raise RuntimeError("milvus constructor vendor body")
+
+    app = app_factory(
+        knowledge_downloader=downloader, embedding_provider=embeddings,
+        mutation_coordinator=coordinator, milvus_client_factory=failing_factory,
+    )
+    context = app.router.lifespan_context(app)
+    with pytest.raises(MilvusKnowledgeError, match="KNOWLEDGE_VECTOR_STORE_UNAVAILABLE"):
+        await context.__aenter__()
+    assert coordinator.closed
+    assert embeddings.closed
+    assert downloader.closed
 
 
 def test_route_returns_supported_generation_type(app_factory, auth_headers):

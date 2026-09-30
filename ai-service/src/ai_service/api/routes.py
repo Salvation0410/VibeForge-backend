@@ -72,6 +72,7 @@ def _lease(value) -> KnowledgeMutationLease:
     return KnowledgeMutationLease(
         scope=value.scope,
         operation_id=value.operation_id,
+        operation=value.operation,
         fence=value.fence,
         expires_at=value.expires_at,
         proof=value.proof,
@@ -186,17 +187,29 @@ def register_routes(
     )
     async def customer_service_health(request: Request) -> JSONResponse:
         service = getattr(request.app.state, "knowledge_etl_service", None)
-        ready_state = False
+        coordinator = getattr(
+            request.app.state, "knowledge_mutation_coordinator", None
+        )
+        milvus_ready = False
+        validator_ready = False
         if customer_service_rag_enabled and service is not None:
             ping = getattr(service, "ping", None)
             try:
-                ready_state = True if ping is None else bool(await ping())
+                milvus_ready = True if ping is None else bool(await ping())
             except Exception:
-                ready_state = False
+                milvus_ready = False
+        if customer_service_rag_enabled and coordinator is not None:
+            ping = getattr(coordinator, "ping", None)
+            if ping is not None:
+                try:
+                    validator_ready = bool(await ping())
+                except Exception:
+                    validator_ready = False
+        ready_state = bool(service is not None and milvus_ready and validator_ready)
         dependencies = {
             "etl": service is not None,
-            "milvus": ready_state,
-            "leaseValidator": service is not None,
+            "milvus": milvus_ready,
+            "leaseValidator": validator_ready,
         }
         return JSONResponse({
             "enabled": customer_service_rag_enabled,

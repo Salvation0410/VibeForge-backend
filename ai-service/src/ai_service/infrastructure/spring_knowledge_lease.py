@@ -22,6 +22,13 @@ def _validation_url(gateway_base_url: str) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
 
 
+def _health_url(validation_url: str) -> str:
+    return validation_url.replace(
+        "/knowledge-mutation-leases:validate",
+        "/knowledge-mutation-leases/health",
+    )
+
+
 @dataclass(slots=True)
 class _SpringMutationPermit:
     coordinator: "SpringKnowledgeMutationCoordinator"
@@ -48,6 +55,7 @@ class SpringKnowledgeMutationCoordinator:
         timeout_seconds: float = 5.0,
     ) -> None:
         self._validation_url = _validation_url(gateway_base_url)
+        self._health_url = _health_url(self._validation_url)
         self._client = httpx.AsyncClient(
             headers={"Authorization": f"Bearer {bearer_token}"},
             transport=transport,
@@ -63,12 +71,12 @@ class SpringKnowledgeMutationCoordinator:
             "delete": "DELETE",
             "rebuild": "REBUILD",
         }.get(operation)
-        if external_operation is None:
+        if external_operation is None or lease.operation != external_operation:
             raise MilvusKnowledgeError("KNOWLEDGE_MUTATION_LEASE_INVALID")
         request = {
             "scope": lease.scope,
             "operationId": lease.operation_id,
-            "operation": external_operation,
+            "operation": lease.operation,
             "fence": lease.fence,
             "expiresAt": lease.expires_at,
             "proof": lease.proof,
@@ -86,7 +94,7 @@ class SpringKnowledgeMutationCoordinator:
                 or data.get("current") is not True
                 or data.get("scope") != scope
                 or data.get("operationId") != lease.operation_id
-                or data.get("operation") != external_operation
+                or data.get("operation") != lease.operation
                 or type(data.get("fence")) is not int
                 or data.get("fence") != lease.fence
                 or not isinstance(data.get("expiresAt"), (int, float))
@@ -95,6 +103,20 @@ class SpringKnowledgeMutationCoordinator:
                 raise ValueError
         except (httpx.HTTPError, ValueError, TypeError, KeyError):
             raise MilvusKnowledgeError("KNOWLEDGE_MUTATION_LEASE_INVALID") from None
+
+    async def ping(self) -> bool:
+        try:
+            response = await self._client.get(self._health_url)
+            response.raise_for_status()
+            payload = response.json()
+            return bool(
+                isinstance(payload, dict)
+                and payload.get("code") == 0
+                and isinstance(payload.get("data"), dict)
+                and payload["data"].get("ready") is True
+            )
+        except (httpx.HTTPError, ValueError, TypeError, KeyError):
+            return False
 
     @asynccontextmanager
     async def hold(

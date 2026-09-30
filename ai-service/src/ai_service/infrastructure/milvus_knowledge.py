@@ -11,7 +11,7 @@ import uuid
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, AsyncContextManager, Protocol
+from typing import Any, AsyncContextManager, Literal, Protocol
 
 from pymilvus import MilvusClient
 
@@ -51,6 +51,7 @@ class MilvusKnowledgeError(RuntimeError):
 class KnowledgeMutationLease:
     scope: str
     operation_id: str
+    operation: Literal["INDEX", "DELETE", "REBUILD"]
     fence: int
     expires_at: float
     proof: str
@@ -190,8 +191,14 @@ class MilvusKnowledgeStore:
     ) -> AsyncIterator[MutationPermit]:
         if lease is None:
             raise MilvusKnowledgeError("KNOWLEDGE_MUTATION_LEASE_REQUIRED")
+        expected_operation = {
+            "upsert": "INDEX",
+            "delete": "DELETE",
+            "rebuild": "REBUILD",
+        }.get(operation)
         if (
             lease.scope != scope or not lease.operation_id
+            or lease.operation != expected_operation
             or not isinstance(lease.fence, int) or lease.fence < 1
             or not lease.proof or lease.expires_at <= time.time()
         ):

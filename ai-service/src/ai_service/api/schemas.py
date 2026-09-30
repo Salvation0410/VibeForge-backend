@@ -87,10 +87,13 @@ class GenerationEvent(ApiModel):
 class KnowledgeMutationLeaseRequest(ApiModel):
     """Opaque Spring-issued lease. Python validates shape but never creates a substitute."""
 
+    model_config = ConfigDict(extra="forbid")
+
     scope: str = Field(min_length=1, max_length=256)
     operation_id: str = Field(
         min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$"
     )
+    operation: Literal["INDEX", "DELETE", "REBUILD"]
     fence: int = Field(ge=1, strict=True)
     expires_at: float = Field(gt=0, allow_inf_nan=False)
     proof: str = Field(min_length=1, max_length=4096, repr=False)
@@ -103,6 +106,8 @@ class KnowledgeMutationLeaseRequest(ApiModel):
 
 
 class KnowledgeEtlRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+
     operation: Literal["INDEX"]
     document_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
     document_version: int = Field(ge=1, strict=True)
@@ -148,12 +153,17 @@ class KnowledgeEtlRequest(ApiModel):
 
     @model_validator(mode="after")
     def validate_lease_scope(self) -> "KnowledgeEtlRequest":
-        if self.lease.scope != f"document:{self.document_id}":
+        if (
+            self.lease.scope != f"document:{self.document_id}"
+            or self.lease.operation != self.operation
+        ):
             raise ValueError("lease scope does not match document")
         return self
 
 
 class KnowledgeDeleteRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+
     operation: Literal["DELETE"]
     document_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
     document_version: int = Field(ge=1, strict=True)
@@ -161,7 +171,10 @@ class KnowledgeDeleteRequest(ApiModel):
 
     @model_validator(mode="after")
     def validate_lease_scope(self) -> "KnowledgeDeleteRequest":
-        if self.lease.scope != f"document:{self.document_id}":
+        if (
+            self.lease.scope != f"document:{self.document_id}"
+            or self.lease.operation != self.operation
+        ):
             raise ValueError("lease scope does not match document")
         return self
 

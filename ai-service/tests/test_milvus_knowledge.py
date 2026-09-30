@@ -114,6 +114,27 @@ async def test_closeai_errors_are_stable_and_do_not_leak_provider_details(settin
     assert response_body not in repr(caught.value)
 
 
+@pytest.mark.asyncio
+async def test_closeai_provider_closes_sync_and_async_http_clients(settings):
+    class AsyncClient:
+        closed = False
+        async def aclose(self):
+            self.closed = True
+
+    class SyncClient:
+        closed = False
+        def close(self):
+            self.closed = True
+
+    fake = FakeEmbeddings()
+    fake.async_client = AsyncClient()
+    fake.client = SyncClient()
+    embeddings, _ = provider(settings, fake)
+    await embeddings.close()
+    assert fake.async_client.closed
+    assert fake.client.closed
+
+
 class FakeMilvusClient:
     def __init__(self):
         self.collections: dict[str, list[dict]] = {}
@@ -395,9 +416,11 @@ def store(settings, client):
     )
 
 
-def lease(scope, fence=1, *, proof="valid-proof", expires_at=None):
+def lease(
+    scope, fence=1, *, proof="valid-proof", expires_at=None, operation="INDEX",
+):
     return KnowledgeMutationLease(
-        scope=scope, operation_id=f"operation-{fence}", fence=fence,
+        scope=scope, operation_id=f"operation-{fence}", operation=operation, fence=fence,
         expires_at=expires_at or time.time() + 60, proof=proof,
     )
 
@@ -412,14 +435,18 @@ async def index_document(knowledge, value, *, mutation_lease=None):
 async def delete_version(knowledge, document_id, version, *, mutation_lease=None):
     return await knowledge.delete_document(
         document_id, version,
-        lease=mutation_lease or lease(f"document:{document_id}", version),
+        lease=mutation_lease or lease(
+            f"document:{document_id}", version, operation="DELETE"
+        ),
     )
 
 
 async def rebuild(knowledge, values, *, mutation_lease=None, fence=100):
     return await knowledge.rebuild_collection(
         values,
-        lease=mutation_lease or lease("collection:customer_service_knowledge", fence),
+        lease=mutation_lease or lease(
+            "collection:customer_service_knowledge", fence, operation="REBUILD"
+        ),
     )
 
 
@@ -711,6 +738,7 @@ async def test_missing_invalid_expired_and_default_deny_leases_write_nothing(set
         await knowledge.upsert_document_version(value)
     for invalid in (
         lease("document:wrong", 1),
+        lease("document:doc-1", 1, operation="DELETE"),
         lease("document:doc-1", 1, proof="forged"),
         lease("document:doc-1", 1, expires_at=time.time() - 1),
     ):
@@ -741,7 +769,9 @@ async def test_revoked_permit_stops_before_manifest_and_alias_publication(settin
 async def test_delete_before_manifest_writes_deterministic_tombstone(settings):
     client = FakeMilvusClient()
     knowledge = store(settings, client)
-    await delete_version(knowledge, "doc-1", 1, mutation_lease=lease("document:doc-1", 7))
+    await delete_version(knowledge, "doc-1", 1, mutation_lease=lease(
+        "document:doc-1", 7, operation="DELETE"
+    ))
     control = client.collections[knowledge._control_collection_name()]
     assert len(control) == 1
     assert control[0]["id"] == knowledge._tombstone_id("doc-1", 1)
@@ -761,7 +791,9 @@ async def test_delete_and_converge_are_serialized_and_tombstone_wins(settings):
     index_task = asyncio.create_task(index_document(first, document()))
     assert await asyncio.to_thread(entered.wait, 1)
     delete_task = asyncio.create_task(
-        delete_version(second, "doc-1", 1, mutation_lease=lease("document:doc-1", 2))
+        delete_version(second, "doc-1", 1, mutation_lease=lease(
+            "document:doc-1", 2, operation="DELETE"
+        ))
     )
     await asyncio.sleep(0.02)
     assert not delete_task.done()
@@ -781,7 +813,7 @@ async def test_rebuild_scope_serializes_incremental_mutation(settings):
     client.coordinator.block_next = (entered, release)
     rebuild_task = asyncio.create_task(rebuild(
         rebuild_store, documents(document()), mutation_lease=lease(
-            "collection:customer_service_knowledge", 10
+            "collection:customer_service_knowledge", 10, operation="REBUILD"
         )
     ))
     assert await asyncio.to_thread(entered.wait, 1)
@@ -940,7 +972,7 @@ async def test_max_length_alias_can_rebuild_and_publish_staging(settings):
 
     result = await knowledge.rebuild_collection(
         documents(document()),
-        lease=lease(f"collection:{alias}", 100),
+        lease=lease(f"collection:{alias}", 100, operation="REBUILD"),
     )
 
     assert client.aliases[alias] == result.collection_name
@@ -976,14 +1008,18 @@ async def test_long_alias_fingerprints_keep_business_and_control_data_isolated(s
         document_id = f"doc-{index}"
         result = await knowledge.rebuild_collection(
             documents(document(document_id=document_id)),
-            lease=lease(f"collection:{alias}", 100 + index),
+            lease=lease(
+                f"collection:{alias}", 100 + index, operation="REBUILD"
+            ),
         )
         assert client.aliases[alias] == result.collection_name
         results = await knowledge.search([0.1, 0.2], 8)
         assert {item.document_id for item in results} == {document_id}
         await knowledge.delete_document(
             document_id, 99,
-            lease=lease(f"document:{document_id}", 200 + index),
+            lease=lease(
+                f"document:{document_id}", 200 + index, operation="DELETE"
+            ),
         )
 
     first_control, second_control = (
