@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import math
 import re
 import struct
@@ -15,6 +16,8 @@ from typing import Any, AsyncContextManager, Literal, Protocol
 from pymilvus import MilvusClient
 
 from ai_service.config import Settings
+
+logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
 _ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,128}")
@@ -213,6 +216,10 @@ class MilvusKnowledgeStore:
             raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_ALIAS_INVALID")
         self._schema_version = schema_version
         self._rpc_timeout = settings.milvus_rpc_timeout_seconds
+        self._retention_generations = settings.rag_collection_retention_generations
+        self._cleanup_grace_seconds = settings.rag_collection_cleanup_grace_seconds
+        self._cleanup_timeout_seconds = settings.rag_collection_cleanup_timeout_seconds
+        self._cleanup_scan_limit = settings.rag_collection_cleanup_scan_limit
         try:
             self._client = client_factory(
                 uri=settings.milvus_uri, token=settings.milvus_token,
@@ -371,6 +378,7 @@ class MilvusKnowledgeStore:
             "embeddingDimension": dimension,
             "schemaVersion": self._schema_version,
             "mutationFence": fence,
+            "createdAt": time.time(),
         }
         if rebuild is not None:
             lease, plan = rebuild
@@ -543,6 +551,90 @@ class MilvusKnowledgeStore:
         except (Exception, asyncio.CancelledError):
             # Cleanup is best effort. Any uncertain alias or ownership state preserves staging.
             return
+
+    async def _cleanup_retired_collections(
+        self, *, current: str, just_replaced: str | None,
+        model: str, dimension: int,
+    ) -> None:
+        """Best-effort bounded retention after publication; uncertainty preserves data."""
+
+        deadline = asyncio.get_running_loop().time() + self._cleanup_timeout_seconds
+
+        async def call(method: str, *args: object) -> Any:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise TimeoutError
+            return await self._call(
+                method, *args, timeout=min(self._rpc_timeout, remaining)
+            )
+
+        async def alias_target() -> str | None:
+            response = await call("list_aliases")
+            aliases = response.get("aliases", []) if isinstance(response, dict) else response
+            if not isinstance(aliases, list):
+                raise TypeError
+            if self._alias not in aliases:
+                return None
+            description = await call("describe_alias", self._alias)
+            target = description.get("collection_name") or description.get("collection")
+            if not target:
+                raise TypeError
+            return str(target)
+
+        try:
+            async with asyncio.timeout(self._cleanup_timeout_seconds):
+                canonical = self._collection_name(model, dimension)
+                names = await call("list_collections")
+                if not isinstance(names, list):
+                    raise TypeError
+                candidates = [
+                    name for name in names
+                    if isinstance(name, str) and (
+                        name == canonical or name.startswith(f"{canonical}_staging_")
+                    )
+                ]
+                if len(candidates) > self._cleanup_scan_limit:
+                    logger.warning(
+                        "customer-service collection cleanup scan limit exceeded"
+                    )
+                    return
+                controlled: list[tuple[float, str]] = []
+                for name in candidates:
+                    description = await call("describe_collection", name)
+                    metadata = self._metadata(description)
+                    created_at = metadata.get("createdAt")
+                    if (
+                        metadata.get("kind") != "customer-service-knowledge"
+                        or metadata.get("embeddingModelVersion") != model
+                        or metadata.get("embeddingDimension") != dimension
+                        or metadata.get("schemaVersion") != self._schema_version
+                        or not isinstance(created_at, (int, float))
+                        or not math.isfinite(float(created_at))
+                    ):
+                        continue
+                    controlled.append((float(created_at), name))
+                controlled.sort(reverse=True)
+                keep = {current}
+                if just_replaced is not None:
+                    keep.add(just_replaced)
+                for _, name in controlled:
+                    if len(keep) >= self._retention_generations:
+                        break
+                    keep.add(name)
+                cutoff = time.time() - self._cleanup_grace_seconds
+                for created_at, name in controlled:
+                    if name in keep or created_at >= cutoff:
+                        continue
+                    if await alias_target() != current:
+                        return
+                    await call("drop_collection", name)
+        except TimeoutError:
+            logger.warning("customer-service collection cleanup timed out")
+        except Exception:
+            logger.warning(
+                "customer-service collection cleanup deferred",
+                exc_info=False,
+            )
 
     @staticmethod
     def _validate_rebuild_plan(plan: RebuildPlan) -> None:
@@ -774,13 +866,16 @@ class MilvusKnowledgeStore:
         return all(actual.get(field) == expected[field]
                    for field in ("chunkIds", "expectedChunkCount") if field in expected)
 
-    async def _get_rows(self, collection: str, ids: list[str]) -> list[dict[str, Any]]:
+    async def _get_rows(
+        self, collection: str, ids: list[str], *,
+        output_fields: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
         for start in range(0, len(ids), _VERIFY_BATCH_SIZE):
             try:
                 result.extend(await self._call(
                     "get", collection, ids=ids[start:start + _VERIFY_BATCH_SIZE],
-                    output_fields=["*"], consistency_level="Strong",
+                    output_fields=output_fields or ["*"], consistency_level="Strong",
                 ))
             except Exception:
                 raise MilvusKnowledgeError("KNOWLEDGE_VECTOR_STORE_UNAVAILABLE") from None
@@ -818,6 +913,46 @@ class MilvusKnowledgeStore:
                 rows.extend(batch)
                 if len(rows) > _MAX_DOCUMENT_HISTORY_RECORDS:
                     raise MilvusKnowledgeError("KNOWLEDGE_DOCUMENT_HISTORY_LIMIT_EXCEEDED")
+            return rows
+        except MilvusKnowledgeError:
+            raise
+        except Exception:
+            raise MilvusKnowledgeError("KNOWLEDGE_VECTOR_STORE_UNAVAILABLE") from None
+        finally:
+            if iterator is not None:
+                try:
+                    await asyncio.to_thread(iterator.close)
+                except Exception:
+                    pass
+
+    async def _manifest_rows(
+        self, collection: str, document_id: str,
+    ) -> list[dict[str, Any]]:
+        iterator: Any = None
+        try:
+            iterator = await self._call(
+                "query_iterator", collection, batch_size=_VERIFY_BATCH_SIZE,
+                limit=_MAX_DOCUMENT_HISTORY_RECORDS + 1,
+                filter=(
+                    f'{self._document_filter(document_id)} and '
+                    'recordType == "manifest"'
+                ),
+                output_fields=[
+                    "id", "recordType", "documentId", "documentVersion",
+                    "isDeleted", "chunkIds", "expectedChunkCount",
+                ],
+                consistency_level="Strong",
+            )
+            rows: list[dict[str, Any]] = []
+            while True:
+                batch = await asyncio.to_thread(iterator.next)
+                if not batch:
+                    break
+                rows.extend(batch)
+                if len(rows) > _MAX_DOCUMENT_HISTORY_RECORDS:
+                    raise MilvusKnowledgeError(
+                        "KNOWLEDGE_DOCUMENT_HISTORY_LIMIT_EXCEEDED"
+                    )
             return rows
         except MilvusKnowledgeError:
             raise
@@ -993,10 +1128,10 @@ class MilvusKnowledgeStore:
     ) -> tuple[int, frozenset[str]] | None:
         """Prove the current version and its allowed physical row IDs."""
 
-        rows = await self._document_rows(collection, document_id)
+        manifests_source = await self._manifest_rows(collection, document_id)
         manifests: list[dict[str, Any]] = []
         versions: set[int] = set()
-        for row in rows:
+        for row in manifests_source:
             if row.get("recordType") != "manifest" or row.get("isDeleted") is True:
                 continue
             version = row.get("documentVersion")
@@ -1029,8 +1164,14 @@ class MilvusKnowledgeStore:
             or expected != len(chunk_ids)
         ):
             return None
+        chunk_rows = await self._get_rows(
+            collection, chunk_ids,
+            output_fields=[
+                "id", "recordType", "documentId", "documentVersion", "isActive",
+            ],
+        )
         by_id = {
-            row.get("id"): row for row in rows
+            row.get("id"): row for row in chunk_rows
             if row.get("recordType") == "chunk" and row.get("id") in chunk_ids
         }
         if set(by_id) != set(chunk_ids):
@@ -1281,6 +1422,10 @@ class MilvusKnowledgeStore:
                     switched = True
                 except MilvusKnowledgeError:
                     raise
+                await self._cleanup_retired_collections(
+                    current=collection, just_replaced=old,
+                    model=model, dimension=dimension,
+                )
                 return RebuildResult(
                     collection, document_count, chunk_count, False
                 )

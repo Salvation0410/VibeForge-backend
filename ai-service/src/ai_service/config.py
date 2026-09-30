@@ -79,6 +79,12 @@ class Settings(BaseSettings):
     rag_retrieval_top_k: int = Field(default=8, ge=1, le=100)
     rag_final_top_k: int = Field(default=3, ge=1, le=100)
     rag_min_rerank_score: float | None = Field(default=None, allow_inf_nan=False)
+    rag_answer_timeout_seconds: float = Field(default=60.0, gt=0, le=300)
+    rag_prompt_max_bytes: int = Field(default=16_384, ge=1024, le=1_000_000)
+    rag_collection_retention_generations: int = Field(default=2, ge=2, le=20)
+    rag_collection_cleanup_grace_seconds: float = Field(default=120.0, gt=0, le=86_400)
+    rag_collection_cleanup_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
+    rag_collection_cleanup_scan_limit: int = Field(default=100, ge=2, le=10_000)
 
     rag_reranker_provider: Literal["local_cross_encoder", "remote_api", "disabled"] = "local_cross_encoder"
     rag_reranker_model: str = Field(default="BAAI/bge-reranker-v2-m3", min_length=1)
@@ -120,6 +126,29 @@ class Settings(BaseSettings):
         ):
             raise ValueError(
                 "rag_min_rerank_score requires an enabled reranker provider"
+            )
+        if self.rag_collection_cleanup_grace_seconds <= max(
+            self.rag_answer_timeout_seconds, self.milvus_rpc_timeout_seconds,
+        ):
+            raise ValueError(
+                "rag_collection_cleanup_grace_seconds must exceed RAG request and "
+                "Milvus RPC timeouts"
+            )
+        if (
+            self.rag_collection_cleanup_timeout_seconds
+            >= self.rag_collection_cleanup_grace_seconds
+        ):
+            raise ValueError(
+                "rag_collection_cleanup_timeout_seconds must be less than "
+                "rag_collection_cleanup_grace_seconds"
+            )
+        if (
+            self.rag_collection_cleanup_scan_limit
+            < self.rag_collection_retention_generations
+        ):
+            raise ValueError(
+                "rag_collection_cleanup_scan_limit must be at least "
+                "rag_collection_retention_generations"
             )
         if self.customer_service_rag_enabled:
             for name in ("milvus_uri", "closeai_api_key", "closeai_base_url"):

@@ -32,6 +32,7 @@ from ai_service.orchestration.cancellation import CancellationRegistry
 from ai_service.orchestration.active_generations import ActiveGenerationRegistry
 from ai_service.orchestration.events import EventEmitter
 from ai_service.orchestration.workflow import GenerationWorkflow, _after_build
+from ai_service.api.routes import _run_customer_service_answer
 from conftest import FakeModel, FakeToolGateway, MemoryCheckpoint
 
 
@@ -280,6 +281,50 @@ def test_customer_service_no_answer_has_no_sources(
         "sources": [],
         "degraded": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_customer_service_disconnect_cancels_and_drains_service_task():
+    cancelled = asyncio.Event()
+
+    class BlockingService:
+        async def answer(self, _question):
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+    class DisconnectedRequest:
+        async def receive(self):
+            return {"type": "http.disconnect"}
+
+    with pytest.raises(asyncio.CancelledError):
+        await _run_customer_service_answer(
+            DisconnectedRequest(), BlockingService(), "question", timeout_seconds=1,
+        )
+    assert cancelled.is_set()
+
+
+@pytest.mark.asyncio
+async def test_customer_service_total_timeout_cancels_hanging_model_work():
+    cancelled = asyncio.Event()
+
+    class BlockingService:
+        async def answer(self, _question):
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+    class ConnectedRequest:
+        async def receive(self):
+            await asyncio.Event().wait()
+
+    with pytest.raises(CustomerServiceRagError, match="^CUSTOMER_SERVICE_TIMEOUT$"):
+        await _run_customer_service_answer(
+            ConnectedRequest(), BlockingService(), "question", timeout_seconds=0.02,
+        )
+    assert cancelled.is_set()
 
 
 def test_customer_service_etl_requires_auth_and_disabled_is_stable(

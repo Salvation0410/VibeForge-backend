@@ -176,6 +176,10 @@ Copy-Item .env.example .env
 
 `AI_SERVICE_RAG_MIN_RERANK_SCORE` 默认不设置，此时只对空检索结果执行拒答门。该阈值不得凭经验填写，必须在真实客服评估集上确定后再配置。启用阈值后，如果 Reranker 不可用，服务不会用量纲不同的 Milvus 分数替代阈值判断，而是保守返回无答案。`AI_SERVICE_RAG_RERANKER_PROVIDER=disabled` 是明确的运维模式，按 Milvus 原始顺序取前三且不标记运行时降级；disabled 模式禁止同时配置 rerank score 阈值。
 
+客服问答由 `AI_SERVICE_RAG_ANSWER_TIMEOUT_SECONDS` 限制完整 embedding、检索、重排和回答链路，客户端断开时同步取消在途任务。`AI_SERVICE_RAG_PROMPT_MAX_BYTES` 按最终 JSON 的 UTF-8 字节数限制模型输入，而不是按 Python 字符数估算。
+
+Milvus rebuild 默认通过 `AI_SERVICE_RAG_COLLECTION_RETENTION_GENERATIONS=2` 保留当前版本和一个回滚版本。更老的受控 collection 只有在 `createdAt` 早于 `AI_SERVICE_RAG_COLLECTION_CLEANUP_GRACE_SECONDS` 后才会 best-effort 删除；grace 必须严格大于客服总请求 timeout 和 Milvus RPC timeout。清理受 `AI_SERVICE_RAG_COLLECTION_CLEANUP_TIMEOUT_SECONDS=5` 总时限和 `AI_SERVICE_RAG_COLLECTION_CLEANUP_SCAN_LIMIT=100` 候选上限约束，超限直接保留全部候选，不创建后台任务。该策略依赖所有查询都受总 deadline 约束来覆盖跨实例读者，无法从 Milvus 直接证明当前没有读者。list、describe 或 alias readback 任一不确定都会保留 collection，并在后续 rebuild 再尝试清理。
+
 本机直接启动时，通常需要将 `.env` 中的 Spring 和 PostgreSQL 地址改为：
 
 ```dotenv

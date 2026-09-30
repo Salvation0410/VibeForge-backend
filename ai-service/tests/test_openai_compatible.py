@@ -44,6 +44,7 @@ class CapturingClient:
 def model_with_response(response_content: str) -> OpenAICompatibleModel:
     model = OpenAICompatibleModel.__new__(OpenAICompatibleModel)
     model._client = CapturingClient(response_content)
+    model._customer_service_prompt_max_bytes = 16_384
     return model
 
 
@@ -65,6 +66,7 @@ def test_model_client_receives_configured_max_tokens(monkeypatch):
     OpenAICompatibleModel(settings)
 
     assert captured["max_tokens"] == 4096
+    assert captured["timeout"] == 60.0
 
 
 @pytest.mark.asyncio
@@ -97,6 +99,7 @@ async def test_customer_service_answer_is_strict_and_uses_untrusted_data_prompt(
         '{"answered":true,"answer":"","citedChunkIds":["c1"]}',
         '{"answered":true,"answer":"x","citedChunkIds":[]}',
         '{"answered":true,"answer":"x","citedChunkIds":["c1"],"reasoning":"secret"}',
+        '```json\n{"answered":true,"answer":"x","citedChunkIds":["c1"]}\n```',
     ],
 )
 async def test_customer_service_answer_rejects_invalid_schema_and_citations(raw):

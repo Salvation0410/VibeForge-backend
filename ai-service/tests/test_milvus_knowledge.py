@@ -330,6 +330,7 @@ class FakeMilvusClient:
         self.search_calls: list[dict] = []
         self.query_calls: list[dict] = []
         self.get_calls: list[list[str]] = []
+        self.get_output_fields: list[list[str]] = []
         self.fail_alias_switch = False
         self.corrupt_next_insert = False
         self.corrupt_next_content = False
@@ -345,6 +346,7 @@ class FakeMilvusClient:
         self.coordinator = FakeMutationCoordinator()
         self.iterator_calls: list[dict] = []
         self.insert_sizes: list[int] = []
+        self.describe_calls: list[str] = []
 
     def has_collection(self, collection_name, **_kwargs):
         return collection_name in self.collections
@@ -360,6 +362,7 @@ class FakeMilvusClient:
             assert release.wait(2)
 
     def describe_collection(self, collection_name, **_kwargs):
+        self.describe_calls.append(collection_name)
         return {"collection_name": collection_name, "dimension": self.dimensions[collection_name],
                 "description": self.descriptions[collection_name]}
 
@@ -430,12 +433,16 @@ class FakeMilvusClient:
         rows = deepcopy(self.collections[self._resolve(collection_name)])
         return [row for row in rows if self._matches(row, filter)]
 
-    def query_iterator(self, collection_name, batch_size, limit, filter="", **_kwargs):
+    def query_iterator(
+        self, collection_name, batch_size, limit, filter="", output_fields=None,
+        **_kwargs,
+    ):
         self.iterator_calls.append({
             "collection_name": collection_name,
             "batch_size": batch_size,
             "limit": limit,
             "filter": filter,
+            "output_fields": list(output_fields or []),
         })
         rows = [deepcopy(row) for row in self.collections[self._resolve(collection_name)]
                 if self._matches(row, filter)][:limit]
@@ -443,6 +450,7 @@ class FakeMilvusClient:
 
     def get(self, collection_name, ids, output_fields=None, **_kwargs):
         self.get_calls.append(list(ids))
+        self.get_output_fields.append(list(output_fields or []))
         wanted = set(ids)
         return [deepcopy(row) for row in self.collections[self._resolve(collection_name)]
                 if row["id"] in wanted]
@@ -849,6 +857,29 @@ async def test_search_without_alias_fails_stably_before_vector_query(settings):
     assert client.search_calls == []
 
 
+@pytest.mark.asyncio
+async def test_search_manifest_proof_reads_only_bounded_scalar_fields(settings):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    for version in range(1, 20):
+        await index_document(knowledge, document(version=version))
+
+    results = await knowledge.search([0.1, 0.2], 8)
+
+    assert results
+    manifest_calls = [
+        call for call in client.iterator_calls
+        if 'recordType == "manifest"' in call["filter"]
+    ]
+    assert manifest_calls
+    assert all(call["limit"] == 10_001 for call in manifest_calls)
+    assert all("embedding" not in call["output_fields"] for call in manifest_calls)
+    assert all("content" not in call["output_fields"] for call in manifest_calls)
+    assert all(fields == [
+        "id", "recordType", "documentId", "documentVersion", "isActive",
+    ] for fields in client.get_output_fields[-1:])
+
+
 class Documents:
     def __init__(self, items):
         self.items = items
@@ -882,6 +913,190 @@ async def test_rebuild_validates_staging_then_atomically_switches_alias(settings
     active = [row for row in client.collections[result.collection_name]
               if row.get("recordType") == "chunk" and row["isActive"]]
     assert active and {row["documentVersion"] for row in active if row["documentId"] == "doc-1"} == {3}
+
+
+@pytest.mark.asyncio
+async def test_rebuild_retains_current_and_one_rollback_after_grace(
+    settings, monkeypatch,
+):
+    clock = [1_000.0]
+    monkeypatch.setattr(milvus_module.time, "time", lambda: clock[0])
+    settings.rag_collection_retention_generations = 2
+    settings.rag_collection_cleanup_grace_seconds = 61
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+
+    for version in range(1, 4):
+        value = document(version=version)
+        await rebuild(
+            knowledge, documents(value), document_count=1,
+            mutation_lease=lease(
+                f"collection:{settings.milvus_collection_alias}",
+                100 + version, operation="REBUILD",
+            ),
+            expected_documents=(value,),
+        )
+        clock[0] += 70
+
+    controlled = [
+        name for name in client.collections
+        if name.startswith(knowledge._collection_name("embedding-v1", 2))
+    ]
+    assert len(controlled) == 2
+    assert client.aliases[settings.milvus_collection_alias] in controlled
+
+
+@pytest.mark.asyncio
+async def test_rebuild_cleanup_preserves_generations_inside_grace(settings, monkeypatch):
+    clock = [2_000.0]
+    monkeypatch.setattr(milvus_module.time, "time", lambda: clock[0])
+    settings.rag_collection_cleanup_grace_seconds = 61
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+
+    for version in range(1, 4):
+        value = document(version=version)
+        await rebuild(
+            knowledge, documents(value), document_count=1,
+            mutation_lease=lease(
+                f"collection:{settings.milvus_collection_alias}",
+                200 + version, operation="REBUILD",
+            ),
+            expected_documents=(value,),
+        )
+        clock[0] += 10
+
+    controlled = [
+        name for name in client.collections
+        if name.startswith(knowledge._collection_name("embedding-v1", 2))
+    ]
+    assert len(controlled) == 3
+    assert client.aliases[settings.milvus_collection_alias] in controlled
+
+
+@pytest.mark.asyncio
+async def test_rebuild_cleanup_list_failure_is_deferred_and_retried(
+    settings, monkeypatch, caplog,
+):
+    clock = [3_000.0]
+    monkeypatch.setattr(milvus_module.time, "time", lambda: clock[0])
+    settings.rag_collection_cleanup_grace_seconds = 61
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    original_list = client.list_collections
+
+    first = document(version=1)
+    await rebuild(knowledge, documents(first), document_count=1,
+                  expected_documents=(first,))
+    clock[0] += 70
+    client.list_collections = lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("list"))
+    second = document(version=2)
+    result = await rebuild(
+        knowledge, documents(second), document_count=1,
+        mutation_lease=lease(
+            f"collection:{settings.milvus_collection_alias}", 302,
+            operation="REBUILD",
+        ), expected_documents=(second,),
+    )
+    assert client.aliases[settings.milvus_collection_alias] == result.collection_name
+    assert "cleanup deferred" in caplog.text
+    client.list_collections = original_list
+    clock[0] += 70
+    third = document(version=3)
+    await rebuild(
+        knowledge, documents(third), document_count=1,
+        mutation_lease=lease(
+            f"collection:{settings.milvus_collection_alias}", 303,
+            operation="REBUILD",
+        ), expected_documents=(third,),
+    )
+    assert len([
+        name for name in client.collections
+        if name.startswith(knowledge._collection_name("embedding-v1", 2))
+    ]) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("slow_method", ["describe", "drop"])
+async def test_rebuild_cleanup_timeout_preserves_success_current_and_rollback(
+    settings, monkeypatch, slow_method,
+):
+    clock = [4_000.0]
+    monkeypatch.setattr(milvus_module.time, "time", lambda: clock[0])
+    settings.rag_collection_cleanup_timeout_seconds = 0.02
+    settings.rag_collection_cleanup_grace_seconds = 61
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+
+    for version in range(1, 3):
+        value = document(version=version)
+        await rebuild(
+            knowledge, documents(value), document_count=1,
+            mutation_lease=lease(
+                f"collection:{settings.milvus_collection_alias}", 400 + version,
+                operation="REBUILD",
+            ), expected_documents=(value,),
+        )
+        clock[0] += 70
+
+    previous = client.aliases[settings.milvus_collection_alias]
+    if slow_method == "describe":
+        original_describe = client.describe_collection
+
+        def slow_current_describe(collection_name, timeout=None, **kwargs):
+            if client.aliases.get(settings.milvus_collection_alias) == collection_name:
+                time.sleep(float(timeout or 0.02) + 0.01)
+                raise TimeoutError
+            return original_describe(collection_name, timeout=timeout, **kwargs)
+
+        client.describe_collection = slow_current_describe
+    else:
+        def slow_drop(_collection_name, timeout=None, **_kwargs):
+            time.sleep(float(timeout or 0.02) + 0.01)
+            raise TimeoutError
+
+        client.drop_collection = slow_drop
+    current_document = document(version=3)
+    started = time.perf_counter()
+    result = await rebuild(
+        knowledge, documents(current_document), document_count=1,
+        mutation_lease=lease(
+            f"collection:{settings.milvus_collection_alias}", 403,
+            operation="REBUILD",
+        ), expected_documents=(current_document,),
+    )
+
+    assert time.perf_counter() - started < 0.5
+    assert result.collection_name == client.aliases[settings.milvus_collection_alias]
+    assert result.collection_name in client.collections
+    assert previous in client.collections
+
+
+@pytest.mark.asyncio
+async def test_rebuild_cleanup_scan_limit_skips_before_unbounded_describe(
+    settings, caplog,
+):
+    settings.rag_collection_cleanup_scan_limit = 3
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    canonical = knowledge._collection_name("embedding-v1", 2)
+    names = [f"{canonical}_staging_scan_{index}" for index in range(4)]
+    for index, name in enumerate(names):
+        client.collections[name] = []
+        client.dimensions[name] = 2
+        client.descriptions[name] = knowledge._collection_metadata(
+            "embedding-v1", 2, index + 1,
+        )
+    before = len(client.describe_calls)
+
+    await knowledge._cleanup_retired_collections(
+        current=names[-1], just_replaced=names[-2],
+        model="embedding-v1", dimension=2,
+    )
+
+    assert len(client.describe_calls) == before
+    assert set(names).issubset(client.collections)
+    assert "cleanup scan limit exceeded" in caplog.text
 
 
 @pytest.mark.asyncio

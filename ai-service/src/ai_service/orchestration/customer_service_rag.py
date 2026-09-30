@@ -11,6 +11,7 @@ from ai_service.infrastructure.milvus_knowledge import KnowledgeStore, Retrieved
 from ai_service.models.base import CustomerServiceContext, GenerationModel
 from ai_service.models.embeddings import EmbeddingProvider
 from ai_service.models.reranker import RerankedChunk, RerankerProvider
+from ai_service.prompts.customer_service import fit_customer_service_contexts
 
 
 MAX_QUESTION_CHARS = 4_000
@@ -65,6 +66,7 @@ class CustomerServiceRagService:
         self._final_top_k = min(settings.rag_final_top_k, MAX_CONTEXTS)
         self._min_rerank_score = settings.rag_min_rerank_score
         self._reranker_disabled = settings.rag_reranker_provider == "disabled"
+        self._prompt_max_bytes = settings.rag_prompt_max_bytes
         self._embeddings = embeddings
         self._store = store
         self._reranker = reranker
@@ -128,6 +130,20 @@ class CustomerServiceRagService:
                 return _no_answer(degraded=False)
 
         contexts, chunks_by_id = _bounded_contexts(ranked)
+        if not contexts:
+            return _no_answer(degraded=degraded)
+        fitted = fit_customer_service_contexts(
+            normalized_question, contexts, max_bytes=self._prompt_max_bytes,
+        )
+        if fitted is None:
+            return _no_answer(degraded=degraded)
+        contexts = [
+            CustomerServiceContext(chunk_id, content)
+            for chunk_id, content in fitted if content
+        ]
+        chunks_by_id = {
+            item.chunk_id: chunks_by_id[item.chunk_id] for item in contexts
+        }
         if not contexts:
             return _no_answer(degraded=degraded)
         try:

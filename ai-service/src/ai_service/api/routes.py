@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from typing import Any
@@ -87,6 +88,40 @@ def _lease(value) -> KnowledgeMutationLease:
         expires_at=value.expires_at,
         proof=value.proof,
     )
+
+
+async def _run_customer_service_answer(
+    request: Request, service: Any, question: str, *, timeout_seconds: float,
+) -> Any:
+    """Bound the whole RAG request and cancel it when the caller disconnects."""
+
+    answer_task = asyncio.create_task(service.answer(question))
+
+    async def wait_for_disconnect() -> None:
+        while True:
+            message = await request.receive()
+            if message.get("type") == "http.disconnect":
+                return
+
+    disconnect_task = asyncio.create_task(wait_for_disconnect())
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            done, _ = await asyncio.wait(
+                (answer_task, disconnect_task),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if disconnect_task in done:
+                answer_task.cancel()
+                await asyncio.gather(answer_task, return_exceptions=True)
+                raise asyncio.CancelledError
+            return await answer_task
+    except TimeoutError:
+        answer_task.cancel()
+        await asyncio.gather(answer_task, return_exceptions=True)
+        raise CustomerServiceRagError("CUSTOMER_SERVICE_TIMEOUT") from None
+    finally:
+        disconnect_task.cancel()
+        await asyncio.gather(disconnect_task, return_exceptions=True)
 
 
 def register_routes(
@@ -276,7 +311,10 @@ def register_routes(
         if not customer_service_rag_enabled or service is None:
             return _stable_error("CUSTOMER_SERVICE_RAG_DISABLED")
         try:
-            result = await service.answer(body.question)
+            result = await _run_customer_service_answer(
+                request, service, body.question,
+                timeout_seconds=request.app.state.settings.rag_answer_timeout_seconds,
+            )
             return CustomerServiceAnswerResponse(
                 answered=result.answered,
                 answer=result.answer,

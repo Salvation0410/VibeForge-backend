@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -253,6 +254,37 @@ async def test_prompt_injection_is_bounded_untrusted_context_data():
     assert len(context.content) <= 1_200
     assert len(result.sources[0].excerpt) <= 400
     assert result.sources[0].excerpt.isprintable()
+
+
+@pytest.mark.asyncio
+async def test_prompt_budget_uses_final_escaped_utf8_json_bytes():
+    content = ('中文"\\\n\u0001' * 400)
+    model = FakeAnswerModel(CustomerServiceModelAnswer(True, "Answer", ("c1",)))
+    await service(
+        chunks=[chunk("c1", "d1", content=content)],
+        model=model,
+        rag_prompt_max_bytes=1024,
+    ).answer("如何部署？")
+
+    contexts = model.calls[0][1]
+    payload = json.dumps({
+        "question": "如何部署？",
+        "contexts": [
+            {"chunkId": item.chunk_id, "content": item.content}
+            for item in contexts
+        ],
+    }, ensure_ascii=False, separators=(",", ":"))
+    assert len(payload.encode("utf-8")) <= 1024
+
+
+@pytest.mark.asyncio
+async def test_question_that_exhausts_prompt_byte_budget_skips_model():
+    model = FakeAnswerModel()
+    result = await service(
+        chunks=[chunk("c1", "d1")], model=model, rag_prompt_max_bytes=1024,
+    ).answer("问" * 400)
+    assert result.answered is False
+    assert model.calls == []
 
 
 @pytest.mark.asyncio

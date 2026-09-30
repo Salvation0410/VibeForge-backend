@@ -773,6 +773,12 @@ def test_customer_service_rag_defaults_are_disabled_and_bounded(monkeypatch):
     assert settings.rag_max_embedding_elements == 8_000_000
     assert settings.rag_etl_max_concurrency == 1
     assert settings.rag_min_rerank_score is None
+    assert settings.rag_answer_timeout_seconds == 60
+    assert settings.rag_prompt_max_bytes == 16_384
+    assert settings.rag_collection_retention_generations == 2
+    assert settings.rag_collection_cleanup_grace_seconds == 120
+    assert settings.rag_collection_cleanup_timeout_seconds == 5
+    assert settings.rag_collection_cleanup_scan_limit == 100
     assert settings.milvus_uri == "http://localhost:19530"
 
 
@@ -889,4 +895,26 @@ def test_disabled_reranker_rejects_rerank_score_threshold():
             rag_reranker_provider="disabled",
             rag_reranker_device="cpu",
             rag_min_rerank_score=0.5,
+        )
+
+
+def test_collection_cleanup_grace_must_exceed_request_and_rpc_timeouts():
+    with pytest.raises(ValidationError, match="rag_collection_cleanup_grace_seconds"):
+        _rag_settings(
+            rag_answer_timeout_seconds=60,
+            milvus_rpc_timeout_seconds=30,
+            rag_collection_cleanup_grace_seconds=60,
+        )
+
+
+def test_collection_cleanup_bounds_must_be_safe():
+    with pytest.raises(ValidationError, match="rag_collection_cleanup_scan_limit"):
+        _rag_settings(
+            rag_collection_retention_generations=5,
+            rag_collection_cleanup_scan_limit=4,
+        )
+    with pytest.raises(ValidationError, match="rag_collection_cleanup_timeout_seconds"):
+        _rag_settings(
+            rag_collection_cleanup_timeout_seconds=120,
+            rag_collection_cleanup_grace_seconds=120,
         )

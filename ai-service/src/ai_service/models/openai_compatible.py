@@ -51,12 +51,14 @@ class OpenAICompatibleModel:
     """基于 LangChain ChatOpenAI 的模型适配器，默认连接 DeepSeek 兼容接口。"""
 
     def __init__(self, settings: Settings):
+        self._customer_service_prompt_max_bytes = settings.rag_prompt_max_bytes
         self._client = ChatOpenAI(
             api_key=settings.model_api_key,
             base_url=settings.model_base_url,
             model=settings.model_name,
             temperature=settings.model_temperature,
             max_tokens=settings.model_max_tokens,
+            timeout=settings.rag_answer_timeout_seconds,
         )
 
     async def route(self, prompt: str) -> str:
@@ -141,11 +143,14 @@ class OpenAICompatibleModel:
 
         response = await self._client.ainvoke([
             SystemMessage(content=CUSTOMER_SERVICE_SYSTEM_PROMPT),
-            HumanMessage(content=customer_service_user_prompt(question, contexts)),
+            HumanMessage(content=customer_service_user_prompt(
+                question, contexts,
+                max_bytes=self._customer_service_prompt_max_bytes,
+            )),
         ])
         try:
             payload = _CustomerServiceAnswerPayload.model_validate_json(
-                _strip_json_fence(str(response.content))
+                str(response.content).strip()
             )
         except (ValidationError, json.JSONDecodeError):
             raise CustomerServiceModelOutputError() from None

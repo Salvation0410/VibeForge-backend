@@ -1,8 +1,17 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
+from typing import Protocol
 
-from ai_service.models.base import CustomerServiceContext
+
+class CustomerServiceContextLike(Protocol):
+    chunk_id: str
+    content: str
+
+
+class CustomerServicePromptBudgetError(ValueError):
+    pass
 
 
 CUSTOMER_SERVICE_SYSTEM_PROMPT = """You answer a single customer-service question.
@@ -21,14 +30,62 @@ For answered=false, answer must be empty and citedChunkIds must be empty.
 
 
 def customer_service_user_prompt(
-    question: str, contexts: list[CustomerServiceContext],
+    question: str,
+    contexts: Sequence[CustomerServiceContextLike],
+    *,
+    max_bytes: int | None = None,
 ) -> str:
     """Serialize data separately so retrieved text never becomes an instruction block."""
 
-    return json.dumps({
+    payload = json.dumps({
         "question": question,
         "contexts": [
             {"chunkId": item.chunk_id, "content": item.content}
             for item in contexts
         ],
     }, ensure_ascii=False, separators=(",", ":"))
+    if max_bytes is not None and len(payload.encode("utf-8")) > max_bytes:
+        raise CustomerServicePromptBudgetError("customer service prompt exceeds budget")
+    return payload
+
+
+def fit_customer_service_contexts(
+    question: str,
+    contexts: Sequence[CustomerServiceContextLike],
+    *,
+    max_bytes: int,
+) -> list[tuple[str, str]] | None:
+    """Fit the exact UTF-8 JSON payload without estimating escaped text size."""
+
+    values = [(item.chunk_id, item.content) for item in contexts]
+
+    def encoded(fraction: float) -> tuple[int, list[tuple[str, str]]]:
+        fitted = [
+            (chunk_id, content[: int(len(content) * fraction)])
+            for chunk_id, content in values
+        ]
+        payload = json.dumps({
+            "question": question,
+            "contexts": [
+                {"chunkId": chunk_id, "content": content}
+                for chunk_id, content in fitted
+            ],
+        }, ensure_ascii=False, separators=(",", ":"))
+        return len(payload.encode("utf-8")), fitted
+
+    minimum_size, _ = encoded(0.0)
+    if minimum_size > max_bytes:
+        return None
+    full_size, full = encoded(1.0)
+    if full_size <= max_bytes:
+        return full
+    low, high = 0.0, 1.0
+    best: list[tuple[str, str]] = []
+    for _ in range(32):
+        middle = (low + high) / 2
+        size, candidate = encoded(middle)
+        if size <= max_bytes:
+            low, best = middle, candidate
+        else:
+            high = middle
+    return best
