@@ -336,6 +336,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 | P0 | 停止、断线和失败终态 | 用户确认已完成，本轮未复测 | 取消不发布新版本，失败保留旧预览，迟到回调不刷新，终态唯一 |
 | P0 | 双 Spring 工具竞争 | 用户确认已完成，本轮未复测 | 同一作用域只执行一次，另一实例回放同一成功结果，新作用域探针保持独立 |
 | P0 | 双引擎摘要与 Legacy 回滚 | 用户确认已完成，本轮未复测 | 同一主体路由稳定，可比较摘要，可切回 Legacy 且取消语义一致 |
+| P0 | 真实 PostgreSQL checkpoint | 待人工执行 | 本机 Docker 中独立 `yu_ai_checkpoint` 初始化成功，opt-in 集成测试通过，`/health/ready` 正常，并覆盖 optional、required、disabled 三种模式 |
+| P0 | Vue 三 Reviewer 真实模型链路 | 待人工执行 | 首次生成、major 修复、取消、超时、非法输出和错误凭据均符合 F1/S1 约定，候选发布与旧预览语义正确 |
+| P0 | Spring/Python/Vue 完整 SSE 端到端 | 待人工执行 | 真实模型和真实工具网关下事件顺序、唯一终态、历史回源、单次预览刷新及失败保留旧版本均正确 |
+| P1 | 多 Agent 成本与质量对比 | 待人工执行 | 对比开关关闭/开启后的延迟、token、repair 次数、成功率和多轮需求回归识别质量，形成是否灰度开启的证据 |
 | P1 | 真实 Uvicorn/代理压力 | 待执行 | 无连接泄漏，慢流/背压可控，超时后线程与连接收敛 |
 | P1 | 真实 npm 长构建压力 | 待执行 | 取消/超时后无可复现残留 PID 或管道阻塞 |
 
@@ -404,6 +408,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 5. 在审查期间停止生成，确认取消传播到三个 Reviewer，终态为 cancelled，候选版本不发布且旧预览不刷新。
 6. 分别使用错误模型凭据、整体超时和非法模型输出，确认稳定错误码为 `MULTI_AGENT_REVIEW_MODEL_ERROR`、`MULTI_AGENT_REVIEW_TIMEOUT` 或 `MULTI_AGENT_REVIEW_INVALID_OUTPUT`，且不泄露供应商响应、凭据或源码。
 7. 对比开关关闭/开启后的端到端延迟、模型 token 消耗、repair 次数和成功率，评估测试环境灰度成本。
+8. 使用包含历史修改要求的多轮 Vue 会话，确认 Reviewer 只接收当前 prompt 的既定边界不会造成不可接受的需求回归漏检；若发现问题，先评估由 Spring 提供脱敏、结构化需求摘要，而不是直接放开 conversation。
+9. 在真实 Spring 工具网关下验证 `vue_source_snapshot` 的文件数量、单文件大小、总字符数和遍历上限，确认超限时稳定失败且不泄露源码或绝对路径。
+10. 完成 Spring -> Python NDJSON -> Spring SSE -> Vue 的完整链路验收，确认多 Agent 期间的 `node_status`、唯一终态、聊天历史回源和成功后单次预览刷新行为。
+
+人工验收完成后，应在脱敏记录中填写执行日期、环境版本、requestId、终态、稳定错误码、耗时和证据引用；不得只把本节复选项改成“已完成”而缺少可追溯证据。
 
 ### 7.8 Vue 多 Agent 功能回滚
 
@@ -489,7 +498,7 @@ Vue 多 Agent 是 Python LangGraph 内部的功能开关，回滚时保持 LangG
 | `553a8ca` | 迁移 AI checkpoint 到 PostgreSQL |
 | `ad4bbe9` | 增加 PostgreSQL checkpoint opt-in 集成测试 |
 
-Vue 多 Agent 提交位于 `codex/vue-multi-agent-quality-review`，设计基线为 `b5c665d`；其余历史交接提交来自原 `codex/langgraph-real-gate` 演进链。未经用户明确要求，不自动推送、合并、删除分支或清理工作树。
+Vue 多 Agent 已于 2026-09-30 本地快进合并到 `dev`，合并后 HEAD 为 `65c5ea7`，设计基线为 `b5c665d`；功能分支已删除，隔离 worktree 已归档，尚未推送远端。其余历史交接提交来自原 `codex/langgraph-real-gate` 演进链。未经用户明确要求，不自动推送远端或处理其他工作树。
 
 ## 10. 接手检查与禁止事项
 
@@ -525,6 +534,7 @@ Vue 多 Agent 提交位于 `codex/vue-multi-agent-quality-review`，设计基线
 - `doc/ai-service-langchain-langgraph-refactor-design.md`：重构架构与边界设计。
 - `docs/superpowers/specs/2026-09-29-postgres-checkpoint-design.md`：PostgreSQL checkpoint 迁移、故障语义和长期记忆决策。
 - `docs/superpowers/specs/2026-09-29-vue-multi-agent-quality-review-design.md`：Vue 三角色质量审查、F1 错误语义、repair 和 checkpoint 边界。
+- `docs/superpowers/specs/2026-09-30-customer-service-rag-design.md`：规划中的客服机器人、OSS 文档 ETL、CloseAI Embedding、Milvus 和 GPU Reranker 设计；尚未实施。
 - `docs/superpowers/specs/2026-09-21-bounded-streaming-simple-prompts-design.md`：有限流式窗口和简短优化提示设计。
 - `docs/superpowers/specs/2026-09-21-circular-preview-spinner-design.md`：预览加载图正圆修复设计。
 
