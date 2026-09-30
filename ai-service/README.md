@@ -172,7 +172,7 @@ Copy-Item .env.example .env
 | `AI_SERVICE_MULTI_AGENT_REVIEW_ENABLED` | 是否仅为 Vue 开启三角色质量审查 | `false` |
 | `AI_SERVICE_MULTI_AGENT_REVIEW_TIMEOUT_SECONDS` | 三个 Reviewer 共享的整体超时秒数 | `60` |
 
-客服 RAG 使用 `local_cross_encoder` 时，Reranker 在独立子进程中独占指定的模型与 GPU。服务通过 OS 文件锁强制同一 `model + device` 同时只有一个 owner；同机启动多个 Web worker 不会重复占用同一 GPU，而是让后启动实例以稳定 unavailable 失败。需要多 Web worker 时，应部署独立 Reranker 服务，或为每个实例分配不同 GPU，不要依赖进程内并发配置共享单卡。
+客服 RAG 使用 `local_cross_encoder` 时，Reranker 在独立子进程中独占指定的模型与 GPU。模型子进程通过 OS 级 ownership lock 强制同一 `model + device` 同时只有一个 owner；同机启动多个 Web worker 不会重复占用同一 GPU，而是让后启动实例以稳定 unavailable 失败。需要多 Web worker 时，应部署独立 Reranker 服务，或为每个实例分配不同 GPU，不要依赖进程内并发配置共享单卡。
 
 本机直接启动时，通常需要将 `.env` 中的 Spring 和 PostgreSQL 地址改为：
 

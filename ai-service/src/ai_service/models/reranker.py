@@ -13,7 +13,7 @@ import math
 import multiprocessing
 import os
 from pathlib import Path
-import tempfile
+import stat
 from typing import Any, Protocol
 import uuid
 
@@ -32,45 +32,83 @@ logger = logging.getLogger(__name__)
 
 
 class _GpuOwnerLock:
-    def __init__(self, handle: Any):
+    def __init__(self, handle: Any, *, windows: bool):
         self._handle = handle
+        self._windows = windows
 
     @classmethod
     def acquire(cls, model: str, device: str) -> _GpuOwnerLock:
         identity = hashlib.sha256(f"{model}\0{device}".encode()).hexdigest()
-        path = Path(tempfile.gettempdir()) / f"yu-ai-reranker-{identity}.lock"
-        handle = path.open("a+b")
+        if os.name == "nt":
+            import ctypes
+
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.CreateMutexW.argtypes = [
+                ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p,
+            ]
+            kernel32.CreateMutexW.restype = ctypes.c_void_p
+            kernel32.ReleaseMutex.argtypes = [ctypes.c_void_p]
+            kernel32.ReleaseMutex.restype = ctypes.c_bool
+            kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+            kernel32.CloseHandle.restype = ctypes.c_bool
+            handle = kernel32.CreateMutexW(None, True, f"Local\\yu-ai-reranker-{identity}")
+            if not handle:
+                raise RerankerError("CUSTOMER_SERVICE_RERANKER_UNAVAILABLE")
+            if ctypes.get_last_error() == 183:
+                kernel32.CloseHandle(handle)
+                raise RerankerError("CUSTOMER_SERVICE_RERANKER_UNAVAILABLE")
+            return cls((kernel32, handle), windows=True)
+
+        runtime = os.environ.get("XDG_RUNTIME_DIR")
+        private = Path.home() / ".cache" / "yu-ai-code-mother" / "locks"
+        directory: Path | None = None
+        for candidate in ([Path(runtime)] if runtime else []) + [private]:
+            try:
+                candidate.mkdir(mode=0o700, parents=True, exist_ok=True)
+                candidate_stat = candidate.lstat()
+                if (
+                    stat.S_ISDIR(candidate_stat.st_mode)
+                    and candidate_stat.st_uid == os.getuid()
+                    and not candidate_stat.st_mode & 0o077
+                ):
+                    directory = candidate
+                    break
+            except OSError:
+                continue
+        if directory is None:
+            raise RerankerError("CUSTOMER_SERVICE_RERANKER_UNAVAILABLE")
         try:
-            handle.seek(0)
-            if handle.read(1) == b"":
-                handle.write(b"0")
-                handle.flush()
-            handle.seek(0)
-            if os.name == "nt":
-                import msvcrt
-                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return cls(handle)
+            flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(directory / f"reranker-{identity}.lock", flags, 0o600)
+            file_stat = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(file_stat.st_mode)
+                or file_stat.st_uid != os.getuid()
+                or file_stat.st_mode & 0o077
+            ):
+                raise OSError
+            import fcntl
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return cls(descriptor, windows=False)
         except BaseException:
-            handle.close()
+            if "descriptor" in locals():
+                os.close(descriptor)
             raise RerankerError("CUSTOMER_SERVICE_RERANKER_UNAVAILABLE") from None
 
     def release(self) -> None:
         handle, self._handle = self._handle, None
         if handle is None:
             return
+        if self._windows:
+            kernel32, mutex = handle
+            kernel32.ReleaseMutex(mutex)
+            kernel32.CloseHandle(mutex)
+            return
         try:
-            handle.seek(0)
-            if os.name == "nt":
-                import msvcrt
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            import fcntl
+            fcntl.flock(handle, fcntl.LOCK_UN)
         finally:
-            handle.close()
+            os.close(handle)
 
 
 class RerankerError(RuntimeError):
@@ -305,7 +343,9 @@ def _reranker_worker_entry(connection: Any, config: dict[str, Any]) -> None:
     """Spawn-safe worker entry; model construction and ownership stay in this process."""
 
     owner: _ModelOwner | None = None
+    owner_lock: _GpuOwnerLock | None = None
     try:
+        owner_lock = _GpuOwnerLock.acquire(config["model_name"], config["device"])
         model = _load_flag_reranker(
             config["model_name"], use_fp16=True,
             devices=[config["device"]], normalize=False,
@@ -348,13 +388,15 @@ def _reranker_worker_entry(connection: Any, config: dict[str, Any]) -> None:
     except BaseException:
         try:
             connection.send({
-                "type": "failed", "code": "CUSTOMER_SERVICE_RERANKER_UNAVAILABLE",
+                "type": "load_error", "code": "CUSTOMER_SERVICE_RERANKER_UNAVAILABLE",
             })
         except BaseException:
             pass
     finally:
         if owner is not None:
             owner.release()
+        if owner_lock is not None:
+            owner_lock.release()
         try:
             connection.close()
         except BaseException:
@@ -365,14 +407,12 @@ class _ProcessReranker:
     def __init__(
         self, connection: Any, process: Any, *, batch_size: int,
         timeout_seconds: float, shutdown_seconds: float = SHUTDOWN_DRAIN_TIMEOUT_SECONDS,
-        owner_lock: _GpuOwnerLock,
     ) -> None:
         self._connection = connection
         self._process = process
         self._batch_size = batch_size
         self._timeout = timeout_seconds
         self._shutdown_seconds = shutdown_seconds
-        self._owner_lock = owner_lock
         self._lock = asyncio.Lock()
         self._state = "open"
         self._drains: set[asyncio.Task[None]] = set()
@@ -388,9 +428,6 @@ class _ProcessReranker:
         shutdown_seconds: float = SHUTDOWN_DRAIN_TIMEOUT_SECONDS,
     ) -> _ProcessReranker:
         ctx = context or multiprocessing.get_context("spawn")
-        owner_lock = _GpuOwnerLock.acquire(
-            settings.rag_reranker_model, settings.rag_reranker_device,
-        )
         parent = child = process = None
         started = False
         try:
@@ -410,7 +447,6 @@ class _ProcessReranker:
                 parent, process, batch_size=settings.rag_reranker_batch_size,
                 timeout_seconds=settings.rag_reranker_timeout_seconds,
                 shutdown_seconds=shutdown_seconds,
-                owner_lock=owner_lock,
             )
             response = await backend._receive(WORKER_STARTUP_TIMEOUT_SECONDS)
             if response != {"type": "ready"}:
@@ -434,7 +470,6 @@ class _ProcessReranker:
                     process.close()
             except BaseException:
                 pass
-            owner_lock.release()
             if isinstance(error, asyncio.CancelledError):
                 raise
             raise RerankerError("CUSTOMER_SERVICE_RERANKER_UNAVAILABLE") from None
@@ -619,7 +654,6 @@ class _ProcessReranker:
                 await self._abort_process()
             self._close_connection()
             self._finalize_process_handle()
-            self._owner_lock.release()
             self._state = "closed"
 
     async def close(self) -> None:

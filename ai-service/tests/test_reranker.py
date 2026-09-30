@@ -19,6 +19,7 @@ from ai_service.models.reranker import (
     DisabledReranker,
     LocalCrossEncoderReranker,
     RerankerError,
+    _GpuOwnerLock,
     _ProcessReranker,
     _SafeFlagRerankerAdapter,
 )
@@ -58,7 +59,13 @@ class FakeCrossEncoder:
         self.closed = True
 
 
-def protocol_test_worker(connection, _config):
+def protocol_test_worker(connection, config):
+    try:
+        owner_lock = _GpuOwnerLock.acquire(config["model_name"], config["device"])
+    except RerankerError:
+        connection.send({"type": "load_error", "code": "CUSTOMER_SERVICE_RERANKER_UNAVAILABLE"})
+        connection.close()
+        return
     connection.send({"type": "ready"})
     try:
         while True:
@@ -81,17 +88,37 @@ def protocol_test_worker(connection, _config):
             })
     finally:
         connection.close()
+        owner_lock.release()
 
 
-def startup_block_worker(_connection, _config):
-    while True:
-        time.sleep(1)
+def startup_block_worker(_connection, config):
+    owner_lock = _GpuOwnerLock.acquire(config["model_name"], config["device"])
+    try:
+        while True:
+            time.sleep(1)
+    finally:
+        owner_lock.release()
 
 
-def nonreading_worker(connection, _config):
+def nonreading_worker(connection, config):
+    owner_lock = _GpuOwnerLock.acquire(config["model_name"], config["device"])
     connection.send({"type": "ready"})
-    while True:
-        time.sleep(1)
+    try:
+        while True:
+            time.sleep(1)
+    finally:
+        owner_lock.release()
+
+
+def detached_owner_worker(connection, config):
+    owner_lock = _GpuOwnerLock.acquire(config["model_name"], config["device"])
+    connection.send({"type": "ready"})
+    connection.close()
+    try:
+        while True:
+            time.sleep(1)
+    finally:
+        owner_lock.release()
 
 
 @pytest.mark.asyncio
@@ -617,6 +644,47 @@ async def test_gpu_owner_lock_allows_different_model_keys():
     )
     await first.close()
     await second.close()
+
+
+@pytest.mark.asyncio
+async def test_gpu_lock_stays_with_detached_child_until_child_exits():
+    settings = rag_settings(rag_reranker_model="detached-owner-model")
+    context = multiprocessing.get_context("spawn")
+    parent, child = context.Pipe(duplex=True)
+    owner = context.Process(
+        target=detached_owner_worker,
+        args=(child, {
+            "model_name": settings.rag_reranker_model,
+            "device": settings.rag_reranker_device,
+        }),
+        daemon=True,
+    )
+    owner.start()
+    child.close()
+    try:
+        for _ in range(200):
+            if parent.poll(0):
+                break
+            await asyncio.sleep(0.005)
+        assert parent.recv() == {"type": "ready"}
+        parent.close()
+        with pytest.raises(RerankerError, match="CUSTOMER_SERVICE_RERANKER_UNAVAILABLE"):
+            await _ProcessReranker.start(
+                settings, worker_target=protocol_test_worker, shutdown_seconds=0.1,
+            )
+    finally:
+        if owner.is_alive():
+            owner.terminate()
+        owner.join(1)
+        if owner.is_alive():
+            owner.kill()
+            owner.join(1)
+        owner.close()
+
+    replacement = await _ProcessReranker.start(
+        settings, worker_target=protocol_test_worker, shutdown_seconds=0.1,
+    )
+    await replacement.close()
 
 
 @pytest.mark.asyncio
