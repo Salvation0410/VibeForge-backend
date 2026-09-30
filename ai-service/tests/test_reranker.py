@@ -230,6 +230,36 @@ async def test_close_waits_for_tracked_inference_drain():
 
 
 @pytest.mark.asyncio
+async def test_close_waits_for_normally_active_submitted_inference():
+    started = threading.Event()
+    release = threading.Event()
+
+    class BlockingModel:
+        closed = False
+
+        def compute_score(self, pairs):
+            started.set()
+            release.wait(1)
+            return [0.0] * len(pairs)
+
+        def close(self):
+            self.closed = True
+
+    model = BlockingModel()
+    reranker = LocalCrossEncoderReranker(model=model, timeout_seconds=1)
+    inference = asyncio.create_task(reranker.rerank("q", [chunk(0)], top_n=1))
+    assert await asyncio.to_thread(started.wait, 0.3)
+    closing = asyncio.create_task(reranker.close())
+    await asyncio.sleep(0.02)
+    assert not closing.done()
+    assert not model.closed
+    release.set()
+    await asyncio.wait_for(inference, 0.5)
+    await asyncio.wait_for(closing, 0.5)
+    assert model.closed
+
+
+@pytest.mark.asyncio
 async def test_close_timeout_is_bounded_and_later_releases_model(
     monkeypatch, caplog,
 ):
@@ -263,6 +293,46 @@ async def test_close_timeout_is_bounded_and_later_releases_model(
     assert reranker._late_cleanup is not None
     await asyncio.wait_for(reranker._late_cleanup, 0.5)
     assert model.closed
+
+
+@pytest.mark.asyncio
+async def test_shutdown_timeout_does_not_release_normally_active_model(
+    monkeypatch, caplog,
+):
+    started = threading.Event()
+    release = threading.Event()
+
+    class BlockingModel:
+        closed = False
+
+        def compute_score(self, pairs):
+            started.set()
+            release.wait(1)
+            assert not self.closed
+            return [0.0] * len(pairs)
+
+        def close(self):
+            self.closed = True
+
+    model = BlockingModel()
+    reranker = LocalCrossEncoderReranker(model=model, timeout_seconds=1)
+    monkeypatch.setattr(
+        "ai_service.models.reranker.SHUTDOWN_DRAIN_TIMEOUT_SECONDS", 0.02,
+    )
+    inference = asyncio.create_task(reranker.rerank("q", [chunk(0)], top_n=1))
+    assert await asyncio.to_thread(started.wait, 0.3)
+
+    await asyncio.wait_for(reranker.close(), 0.2)
+
+    assert "shutdown timed out" in caplog.text
+    assert not model.closed
+    assert not inference.done()
+    release.set()
+    await asyncio.wait_for(inference, 0.5)
+    assert reranker._late_cleanup is not None
+    await asyncio.wait_for(reranker._late_cleanup, 0.5)
+    assert model.closed
+    assert not reranker._active_inferences
 
 
 def test_safe_flag_adapter_stops_at_batch_one_oom_without_looping():

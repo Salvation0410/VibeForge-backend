@@ -266,6 +266,7 @@ class LocalCrossEncoderReranker:
         )
         self._closed = False
         self._close_lock = asyncio.Lock()
+        self._active_inferences: set[asyncio.Future[Any]] = set()
         self._inference_drains: set[asyncio.Task[None]] = set()
         self._late_cleanup: asyncio.Task[None] | None = None
 
@@ -381,6 +382,43 @@ class LocalCrossEncoderReranker:
         self._inference_drains.add(task)
         task.add_done_callback(self._inference_drains.discard)
 
+    def _track_inference(
+        self, future: asyncio.Future[Any], loop: asyncio.AbstractEventLoop,
+    ) -> None:
+        self._active_inferences.add(future)
+
+        def discard(completed: asyncio.Future[Any]) -> None:
+            try:
+                loop.call_soon_threadsafe(
+                    self._active_inferences.discard, completed,
+                )
+            except RuntimeError:
+                pass
+
+        future.add_done_callback(discard)
+
+    async def _await_active_inferences(self) -> None:
+        while self._active_inferences:
+            active = tuple(self._active_inferences)
+            await asyncio.gather(
+                *(asyncio.shield(future) for future in active),
+                return_exceptions=True,
+            )
+            self._active_inferences.difference_update(
+                future for future in active if future.done()
+            )
+
+    async def _await_inference_drains(self) -> None:
+        while self._inference_drains:
+            drains = tuple(self._inference_drains)
+            await asyncio.gather(
+                *(asyncio.shield(task) for task in drains),
+                return_exceptions=True,
+            )
+            self._inference_drains.difference_update(
+                task for task in drains if task.done()
+            )
+
     async def rerank(
         self, question: str, chunks: Sequence[RetrievedChunk], *, top_n: int,
     ) -> list[RerankedChunk]:
@@ -402,6 +440,7 @@ class LocalCrossEncoderReranker:
             future = loop.run_in_executor(
                 self._executor, self._score_batches, question, validated,
             )
+            self._track_inference(future, loop)
             try:
                 scores = await asyncio.wait_for(
                     asyncio.shield(future), timeout=max(0.0, deadline - loop.time()),
@@ -437,6 +476,8 @@ class LocalCrossEncoderReranker:
                     for _ in range(self._max_concurrency):
                         await self._semaphore.acquire()
                         acquired += 1
+                    await self._await_active_inferences()
+                    await self._await_inference_drains()
                     await asyncio.get_running_loop().run_in_executor(
                         self._executor, self._owner.release,
                     )
@@ -449,11 +490,12 @@ class LocalCrossEncoderReranker:
                 )
                 self._executor.shutdown(wait=False, cancel_futures=True)
                 async def cleanup_when_inference_finishes() -> None:
-                    if self._inference_drains:
-                        await asyncio.gather(
-                            *tuple(self._inference_drains), return_exceptions=True,
-                        )
+                    await self._await_inference_drains()
+                    await self._await_active_inferences()
                     await asyncio.to_thread(self._owner.release)
+                    await asyncio.to_thread(
+                        self._executor.shutdown, wait=True, cancel_futures=True,
+                    )
 
                 self._late_cleanup = asyncio.create_task(
                     cleanup_when_inference_finishes()
