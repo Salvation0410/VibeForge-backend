@@ -3,7 +3,18 @@ package com.yupi.yuaicodemother.manager;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.exception.ErrorCode;
 import org.springframework.web.multipart.MultipartFile;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
+import org.xml.sax.SAXException;
+import org.xml.sax.SAXParseException;
+import org.xml.sax.helpers.DefaultHandler;
 
+import javax.xml.XMLConstants;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -25,6 +36,7 @@ public final class KnowledgeDocumentFilePolicy {
     private static final int MAX_ZIP_ENTRIES = 1024;
     private static final long MAX_ZIP_ENTRY_BYTES = 32L * 1024 * 1024;
     private static final long MAX_ZIP_EXPANDED_BYTES = 64L * 1024 * 1024;
+    private static final int MAX_XML_PART_BYTES = 1024 * 1024;
     private static final Map<String, Set<String>> MIME_TYPES = Map.of(
             "pdf", Set.of("application/pdf"),
             "docx", Set.of("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
@@ -123,7 +135,7 @@ public final class KnowledgeDocumentFilePolicy {
         boolean document = false;
         int entries = 0;
         long totalExpanded = 0;
-        try (ZipInputStream zip = new ZipInputStream(new java.io.ByteArrayInputStream(bytes))) {
+        try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(bytes))) {
             ZipEntry entry;
             byte[] buffer = new byte[8192];
             while ((entry = zip.getNextEntry()) != null) {
@@ -131,12 +143,15 @@ public final class KnowledgeDocumentFilePolicy {
                     throw invalid("DOCX 压缩条目超限");
                 }
                 String name = entry.getName();
-                if (name.equals("[Content_Types].xml")) contentTypes = true;
+                boolean contentTypePart = name.equalsIgnoreCase("[Content_Types].xml");
+                boolean relationshipPart = name.toLowerCase(Locale.ROOT).endsWith(".rels");
+                if (contentTypePart) contentTypes = true;
                 if (name.equals("word/document.xml")) document = true;
                 if (name.toLowerCase(Locale.ROOT).endsWith("vbaproject.bin")) {
                     throw invalid("不支持含宏文档");
                 }
                 long entryExpanded = 0;
+                ByteArrayOutputStream xmlBytes = contentTypePart || relationshipPart ? new ByteArrayOutputStream() : null;
                 int count;
                 while ((count = zip.read(buffer)) != -1) {
                     entryExpanded += count;
@@ -144,6 +159,15 @@ public final class KnowledgeDocumentFilePolicy {
                     if (entryExpanded > MAX_ZIP_ENTRY_BYTES || totalExpanded > MAX_ZIP_EXPANDED_BYTES) {
                         throw invalid("DOCX 解压大小超限");
                     }
+                    if (xmlBytes != null) {
+                        if (entryExpanded > MAX_XML_PART_BYTES) {
+                            throw invalid("DOCX 元数据超限");
+                        }
+                        xmlBytes.write(buffer, 0, count);
+                    }
+                }
+                if (xmlBytes != null && containsMacroDeclaration(xmlBytes.toByteArray(), contentTypePart)) {
+                    throw invalid("不支持含宏文档");
                 }
                 zip.closeEntry();
             }
@@ -152,6 +176,49 @@ public final class KnowledgeDocumentFilePolicy {
         }
         if (!contentTypes || !document) {
             throw invalid("文件内容与类型不匹配");
+        }
+    }
+
+    private static boolean containsMacroDeclaration(byte[] xml, boolean contentTypesPart) {
+        Document document = parseSafeXml(xml);
+        NodeList elements = document.getElementsByTagName("*");
+        String attribute = contentTypesPart ? "ContentType" : "Type";
+        for (int index = 0; index < elements.getLength(); index++) {
+            String value = ((Element) elements.item(index)).getAttribute(attribute).toLowerCase(Locale.ROOT);
+            if (value.contains("macroenabled") || value.contains("vbaproject")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static Document parseSafeXml(byte[] xml) {
+        try {
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+            factory.setXIncludeAware(false);
+            factory.setExpandEntityReferences(false);
+            var builder = factory.newDocumentBuilder();
+            builder.setErrorHandler(new DefaultHandler() {
+                @Override
+                public void error(SAXParseException exception) throws SAXException {
+                    throw exception;
+                }
+
+                @Override
+                public void fatalError(SAXParseException exception) throws SAXException {
+                    throw exception;
+                }
+            });
+            return builder.parse(new ByteArrayInputStream(xml));
+        } catch (ParserConfigurationException | SAXException | IOException | IllegalArgumentException e) {
+            throw invalid("DOCX 元数据无效");
         }
     }
 

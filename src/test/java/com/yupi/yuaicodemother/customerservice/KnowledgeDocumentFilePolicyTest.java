@@ -77,6 +77,53 @@ class KnowledgeDocumentFilePolicyTest {
         assertInvalid("total.docx", docxMime(), zipWithTotalExpandedOverLimit());
     }
 
+    @Test
+    void rejectsMacroContentTypesEvenWhenPartHasAnInnocentName() throws Exception {
+        String macroMain = "<Types><Override PartName=\"/word/document.xml\" "
+                + "ContentType=\"application/vnd.ms-word.document.macroEnabled.main+xml\"/></Types>";
+        String vbaPart = "<Types><Override PartName=\"/word/payload.bin\" "
+                + "ContentType=\"application/vnd.ms-office.vbaProject\"/></Types>";
+        String defaultVba = "<Types><Default Extension=\"bin\" "
+                + "ContentType=\"application/vnd.ms-office.vbaProject\"/></Types>";
+        assertInvalid("macro.docx", docxMime(), zipWithXml(macroMain, null, null, null));
+        assertInvalid("macro.docx", docxMime(), zipWithXml(vbaPart, null, null, null));
+        assertInvalid("macro.docx", docxMime(), zipWithXml(defaultVba, null, null, null));
+    }
+
+    @Test
+    void rejectsVbaRelationshipRegardlessOfRelationshipFileLocation() throws Exception {
+        String vbaRelationship = "<Relationships><Relationship Id=\"rId1\" "
+                + "Type=\"http://schemas.microsoft.com/office/2006/relationships/vbaProject\" "
+                + "Target=\"payload.bin\"/></Relationships>";
+        assertInvalid("root.docx", docxMime(), zipWithXml("<Types/>", "_rels/.rels", vbaRelationship, null));
+        assertInvalid("document.docx", docxMime(), zipWithXml("<Types/>",
+                "word/_rels/document.xml.rels", vbaRelationship, null));
+        assertInvalid("nested.docx", docxMime(), zipWithXml("<Types/>",
+                "custom/_rels/custom.xml.rels", vbaRelationship, null));
+    }
+
+    @Test
+    void rejectsXmlExternalEntitiesAndOversizedMetadata() throws Exception {
+        String xxe = "<!DOCTYPE Types [<!ENTITY secret SYSTEM \"file:///C:/private-secret\">]>"
+                + "<Types><Override ContentType=\"&secret;\"/></Types>";
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> policy.validate(file("xxe.docx", docxMime(), zipWithXml(xxe, null, null, null))));
+        assertFalse(error.getMessage().contains("private-secret"));
+        assertInvalid("huge-metadata.docx", docxMime(), zipWithXml(
+                "<Types><!--" + "x".repeat(1024 * 1024) + "--></Types>", null, null, null));
+    }
+
+    @Test
+    void acceptsOrdinaryDocxRelationships() throws Exception {
+        String contentTypes = "<Types><Override PartName=\"/word/document.xml\" "
+                + "ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/></Types>";
+        String relationships = "<Relationships><Relationship Id=\"rId1\" "
+                + "Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" "
+                + "Target=\"styles.xml\"/></Relationships>";
+        assertAccepted("ordinary.docx", docxMime(), zipWithXml(contentTypes,
+                "word/_rels/document.xml.rels", relationships, null), "docx");
+    }
+
     private void assertAccepted(String name, String mime, byte[] bytes, String type) throws Exception {
         var result = policy.validate(file(name, mime, bytes));
         assertEquals(name, result.displayName());
@@ -143,6 +190,20 @@ class KnowledgeDocumentFilePolicyTest {
                 for (int mb = 0; mb < 23; mb++) zip.write(block);
                 zip.closeEntry();
             }
+        }
+        return output.toByteArray();
+    }
+
+    private static byte[] zipWithXml(String contentTypes, String relationshipName,
+                                     String relationships, byte[] payload) throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(output)) {
+            addEntry(zip, "[Content_Types].xml", contentTypes.getBytes(StandardCharsets.UTF_8));
+            addEntry(zip, "word/document.xml", "<document/>".getBytes(StandardCharsets.UTF_8));
+            if (relationshipName != null) {
+                addEntry(zip, relationshipName, relationships.getBytes(StandardCharsets.UTF_8));
+            }
+            if (payload != null) addEntry(zip, "word/payload.bin", payload);
         }
         return output.toByteArray();
     }
