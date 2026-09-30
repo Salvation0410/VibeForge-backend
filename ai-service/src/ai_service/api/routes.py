@@ -5,6 +5,8 @@ import uuid
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from ai_service.api.schemas import (
@@ -12,14 +14,68 @@ from ai_service.api.schemas import (
     CancelResponse,
     CodeGenType,
     GenerationRequest,
+    KnowledgeDeleteRequest,
+    KnowledgeEtlRequest,
+    KnowledgeEtlResponse,
     RouteRequest,
     RouteResponse,
 )
 from ai_service.infrastructure.checkpoint import CheckpointStore
+from ai_service.infrastructure.knowledge_download import KnowledgeDownloadError
+from ai_service.infrastructure.milvus_knowledge import (
+    KnowledgeMutationLease,
+    MilvusKnowledgeError,
+)
 from ai_service.models.base import GenerationModel
+from ai_service.models.embeddings import EmbeddingOutputError
 from ai_service.orchestration.cancellation import CancellationRegistry
 from ai_service.orchestration.active_generations import ActiveGenerationRegistry
 from ai_service.orchestration.workflow import GenerationWorkflow
+from ai_service.orchestration.document_etl import DocumentETLError
+
+
+_CUSTOMER_SERVICE_ERROR_STATUS = {
+    "CUSTOMER_SERVICE_RAG_DISABLED": 503,
+    "KNOWLEDGE_STALE_VERSION": 409,
+    "KNOWLEDGE_VERSION_CONFLICT": 409,
+    "KNOWLEDGE_DOCUMENT_DISABLED": 409,
+    "KNOWLEDGE_MUTATION_LEASE_REQUIRED": 409,
+    "KNOWLEDGE_MUTATION_LEASE_INVALID": 409,
+    "KNOWLEDGE_DOWNLOAD_INVALID_REQUEST": 400,
+    "KNOWLEDGE_DOWNLOAD_TARGET_REJECTED": 400,
+    "KNOWLEDGE_DOWNLOAD_HASH_MISMATCH": 422,
+    "KNOWLEDGE_DOCUMENT_INVALID": 422,
+    "KNOWLEDGE_DOCUMENT_EMPTY": 422,
+    "KNOWLEDGE_DOCUMENT_ENCRYPTED": 422,
+    "KNOWLEDGE_DOCUMENT_UNSUPPORTED": 422,
+    "KNOWLEDGE_DOCUMENT_TOO_LARGE": 422,
+}
+
+
+def _stable_error(code: str, *, status_code: int | None = None) -> JSONResponse:
+    bounded_code = code if code.isascii() and 0 < len(code) <= 128 else "KNOWLEDGE_ETL_FAILED"
+    status = status_code or _CUSTOMER_SERVICE_ERROR_STATUS.get(bounded_code, 503)
+    messages = {
+        "CUSTOMER_SERVICE_RAG_DISABLED": "Customer service knowledge is disabled",
+        "KNOWLEDGE_STALE_VERSION": "Document version is stale",
+        "INVALID_REQUEST": "Request validation failed",
+    }
+    return JSONResponse(
+        {"error": {"code": bounded_code, "message": messages.get(
+            bounded_code, "Knowledge operation failed"
+        )}},
+        status_code=status,
+    )
+
+
+def _lease(value) -> KnowledgeMutationLease:
+    return KnowledgeMutationLease(
+        scope=value.scope,
+        operation_id=value.operation_id,
+        fence=value.fence,
+        expires_at=value.expires_at,
+        proof=value.proof,
+    )
 
 
 def register_routes(
@@ -31,8 +87,18 @@ def register_routes(
     cancellations: CancellationRegistry,
     active_generations: ActiveGenerationRegistry,
     require_internal_auth: Any,
+    customer_service_rag_enabled: bool = False,
 ) -> None:
     """注册健康检查和内部生成接口，所有运行依赖由应用工厂显式传入。"""
+
+    async def validation_error_handler(
+        request: Request, error: RequestValidationError,
+    ) -> JSONResponse:
+        if request.url.path.startswith("/internal/v1/customer-service/"):
+            return _stable_error("INVALID_REQUEST", status_code=422)
+        return await request_validation_exception_handler(request, error)
+
+    app.add_exception_handler(RequestValidationError, validation_error_handler)
 
     @app.get("/internal/v1/health/live")
     @app.get("/health/live")
@@ -49,6 +115,94 @@ def register_routes(
         ready_state = await checkpoint_store.ping()
         body = {"status": "ready" if ready_state else "not_ready", "checkpoint": ready_state}
         return JSONResponse(body, status_code=200 if ready_state else 503)
+
+    @app.post(
+        "/internal/v1/customer-service/knowledge:etl",
+        response_model=KnowledgeEtlResponse,
+        response_model_by_alias=True,
+        dependencies=[Depends(require_internal_auth)],
+        responses={400: {"description": "Invalid request"}, 409: {"description": "Conflict"}},
+    )
+    async def knowledge_etl(body: KnowledgeEtlRequest, request: Request):
+        service = getattr(request.app.state, "knowledge_etl_service", None)
+        if not customer_service_rag_enabled or service is None:
+            return _stable_error("CUSTOMER_SERVICE_RAG_DISABLED")
+        try:
+            result = await service.index(
+                document_id=body.document_id,
+                document_version=body.document_version,
+                file_name=body.file_name,
+                file_type=body.file_type,
+                signed_url=str(body.signed_url),
+                sha256=body.sha256,
+                etl_version=body.etl_version,
+                lease=_lease(body.lease),
+            )
+            return KnowledgeEtlResponse(
+                operation="INDEX",
+                document_id=result.document_id,
+                document_version=result.document_version,
+                chunk_count=result.chunk_count,
+                idempotent=result.idempotent,
+            )
+        except (
+            KnowledgeDownloadError, DocumentETLError,
+            EmbeddingOutputError, MilvusKnowledgeError,
+        ) as error:
+            return _stable_error(error.code)
+        except Exception:
+            return _stable_error("KNOWLEDGE_ETL_FAILED", status_code=500)
+
+    @app.post(
+        "/internal/v1/customer-service/knowledge:delete",
+        response_model=KnowledgeEtlResponse,
+        response_model_by_alias=True,
+        dependencies=[Depends(require_internal_auth)],
+    )
+    async def knowledge_delete(body: KnowledgeDeleteRequest, request: Request):
+        service = getattr(request.app.state, "knowledge_etl_service", None)
+        if not customer_service_rag_enabled or service is None:
+            return _stable_error("CUSTOMER_SERVICE_RAG_DISABLED")
+        try:
+            await service.delete(
+                document_id=body.document_id,
+                document_version=body.document_version,
+                lease=_lease(body.lease),
+            )
+            return KnowledgeEtlResponse(
+                operation="DELETE",
+                document_id=body.document_id,
+                document_version=body.document_version,
+                chunk_count=0,
+            )
+        except MilvusKnowledgeError as error:
+            return _stable_error(error.code)
+        except Exception:
+            return _stable_error("KNOWLEDGE_ETL_FAILED", status_code=500)
+
+    @app.get(
+        "/internal/v1/customer-service/health",
+        dependencies=[Depends(require_internal_auth)],
+    )
+    async def customer_service_health(request: Request) -> JSONResponse:
+        service = getattr(request.app.state, "knowledge_etl_service", None)
+        ready_state = False
+        if customer_service_rag_enabled and service is not None:
+            ping = getattr(service, "ping", None)
+            try:
+                ready_state = True if ping is None else bool(await ping())
+            except Exception:
+                ready_state = False
+        dependencies = {
+            "etl": service is not None,
+            "milvus": ready_state,
+            "leaseValidator": service is not None,
+        }
+        return JSONResponse({
+            "enabled": customer_service_rag_enabled,
+            "ready": ready_state,
+            "dependencies": dependencies,
+        }, status_code=200 if ready_state or not customer_service_rag_enabled else 503)
 
     @app.post(
         "/internal/v1/route",

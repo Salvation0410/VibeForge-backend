@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from enum import StrEnum
+import time
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ApiModel(BaseModel):
@@ -80,4 +82,110 @@ class GenerationEvent(ApiModel):
     node: str
     data: dict[str, Any] = Field(default_factory=dict)
     error: EventError | None = None
+
+
+class KnowledgeMutationLeaseRequest(ApiModel):
+    """Opaque Spring-issued lease. Python validates shape but never creates a substitute."""
+
+    scope: str = Field(min_length=1, max_length=256)
+    operation_id: str = Field(
+        min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$"
+    )
+    fence: int = Field(ge=1, strict=True)
+    expires_at: float = Field(gt=0, allow_inf_nan=False)
+    proof: str = Field(min_length=1, max_length=4096, repr=False)
+
+    @model_validator(mode="after")
+    def validate_expiry(self) -> "KnowledgeMutationLeaseRequest":
+        if not self.proof.strip() or self.expires_at <= time.time():
+            raise ValueError("lease is expired")
+        return self
+
+
+class KnowledgeEtlRequest(ApiModel):
+    operation: Literal["INDEX"]
+    document_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+    document_version: int = Field(ge=1, strict=True)
+    file_name: str = Field(min_length=1, max_length=255)
+    file_type: Literal["PDF", "DOCX", "MD", "TXT"]
+    signed_url: str = Field(min_length=1, max_length=4096, repr=False)
+    sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
+    etl_version: str = Field(min_length=1, max_length=128)
+    lease: KnowledgeMutationLeaseRequest
+
+    @field_validator("file_name")
+    @classmethod
+    def validate_file_name(cls, value: str) -> str:
+        if (
+            "://" in value or "?" in value or "#" in value
+            or "/" in value or "\\" in value
+            or any(ord(character) < 32 for character in value)
+        ):
+            raise ValueError("invalid file name")
+        return value
+
+    @field_validator("sha256")
+    @classmethod
+    def normalize_sha256(cls, value: str) -> str:
+        return value.lower()
+
+    @field_validator("signed_url")
+    @classmethod
+    def validate_signed_url(cls, value: str) -> str:
+        try:
+            parsed = urlsplit(value)
+            port = parsed.port
+        except ValueError:
+            raise ValueError("invalid signed URL") from None
+        if (
+            parsed.scheme != "https" or not parsed.hostname
+            or parsed.username is not None or parsed.password is not None
+            or port not in (None, 443) or parsed.fragment
+            or "\\" in value or any(ord(character) < 32 for character in value)
+        ):
+            raise ValueError("signed URL must use HTTPS")
+        return value
+
+    @model_validator(mode="after")
+    def validate_lease_scope(self) -> "KnowledgeEtlRequest":
+        if self.lease.scope != f"document:{self.document_id}":
+            raise ValueError("lease scope does not match document")
+        return self
+
+
+class KnowledgeDeleteRequest(ApiModel):
+    operation: Literal["DELETE"]
+    document_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+    document_version: int = Field(ge=1, strict=True)
+    lease: KnowledgeMutationLeaseRequest
+
+    @model_validator(mode="after")
+    def validate_lease_scope(self) -> "KnowledgeDeleteRequest":
+        if self.lease.scope != f"document:{self.document_id}":
+            raise ValueError("lease scope does not match document")
+        return self
+
+
+class KnowledgeEtlResponse(ApiModel):
+    operation: Literal["INDEX", "DELETE"]
+    status: Literal["SUCCEEDED"] = "SUCCEEDED"
+    document_id: str
+    document_version: int
+    chunk_count: int = Field(ge=0)
+    idempotent: bool = False
+
+
+class StableErrorDetail(ApiModel):
+    code: str = Field(min_length=1, max_length=128)
+    message: str = Field(min_length=1, max_length=256)
+
+
+class StableErrorResponse(ApiModel):
+    error: StableErrorDetail
+
+
+class CustomerServiceHealthResponse(ApiModel):
+    enabled: bool
+    ready: bool
+    dependencies: dict[str, bool]
 

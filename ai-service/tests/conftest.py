@@ -168,12 +168,13 @@ def settings() -> Settings:
 
 @pytest.fixture
 def app_factory(settings: Settings):
-    def factory(*, model=None, gateway=None, checkpoint=None):
+    def factory(*, model=None, gateway=None, checkpoint=None, **kwargs):
         return create_app(
             settings=settings,
             model=model or FakeModel(),
             tool_gateway=gateway or FakeToolGateway(),
             checkpoint=checkpoint or MemoryCheckpoint(),
+            **kwargs,
         )
 
     return factory

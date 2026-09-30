@@ -1,6 +1,9 @@
 import asyncio
+import hashlib
 import json
 import logging
+import threading
+import time
 
 import httpx
 import pytest
@@ -9,6 +12,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from ai_service.api.schemas import CodeGenType, GenerationRequest
 from ai_service.infrastructure.spring_tools import SpringToolGateway
+from ai_service.infrastructure.milvus_knowledge import MilvusKnowledgeError
 from ai_service.models.base import ModelTurn, ToolCall
 from ai_service.models.quality_review import (
     IssueSeverity,
@@ -32,6 +36,53 @@ def generation_payload(code_gen_type: str) -> dict:
         "codeGenType": code_gen_type,
         "conversation": [{"role": "user", "content": "previous detail"}],
     }
+
+
+def knowledge_lease(operation_id="op-1", *, scope="document:doc-1") -> dict:
+    return {
+        "scope": scope,
+        "operationId": operation_id,
+        "fence": 7,
+        "expiresAt": time.time() + 300,
+        "proof": "lease-proof-secret",
+    }
+
+
+def knowledge_etl_payload() -> dict:
+    return {
+        "operation": "INDEX",
+        "documentId": "doc-1",
+        "documentVersion": 2,
+        "fileName": "manual.txt",
+        "fileType": "TXT",
+        "signedUrl": "https://oss.example.test/manual?Signature=signed-url-secret",
+        "sha256": hashlib.sha256(b"knowledge").hexdigest(),
+        "etlVersion": "etl-v1",
+        "lease": knowledge_lease(),
+    }
+
+
+class FakeKnowledgeEtlService:
+    def __init__(self, error=None):
+        self.error = error
+        self.index_calls = []
+        self.delete_calls = []
+
+    async def index(self, **kwargs):
+        self.index_calls.append(kwargs)
+        if self.error:
+            raise self.error
+        return type("Result", (), {
+            "document_id": kwargs["document_id"],
+            "document_version": kwargs["document_version"],
+            "chunk_count": 3,
+            "idempotent": False,
+        })()
+
+    async def delete(self, **kwargs):
+        self.delete_calls.append(kwargs)
+        if self.error:
+            raise self.error
 
 
 def reviewer_result(
@@ -87,6 +138,224 @@ def test_authentication_is_required(app_factory, auth_headers):
     assert client.post(
         "/internal/v1/route", json={"prompt": "site"}, headers=auth_headers
     ).status_code == 200
+
+
+def test_customer_service_etl_requires_auth_and_disabled_is_stable(
+    app_factory, auth_headers,
+):
+    payload = knowledge_etl_payload()
+    client = TestClient(app_factory())
+    assert client.post(
+        "/internal/v1/customer-service/knowledge:etl", json=payload,
+    ).status_code == 401
+    assert client.post(
+        "/internal/v1/customer-service/knowledge:delete", json={
+            "operation": "DELETE", "documentId": "doc-1", "documentVersion": 2,
+            "lease": knowledge_lease("op-2"),
+        },
+    ).status_code == 401
+    assert client.get("/internal/v1/customer-service/health").status_code == 401
+    response = client.post(
+        "/internal/v1/customer-service/knowledge:etl", json=payload,
+        headers=auth_headers,
+    )
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "CUSTOMER_SERVICE_RAG_DISABLED"
+
+
+def test_customer_service_index_delete_and_health(app_factory, auth_headers, settings):
+    settings.customer_service_rag_enabled = True
+    service = FakeKnowledgeEtlService()
+    with TestClient(app_factory(knowledge_etl_service=service)) as client:
+        response = client.post(
+            "/internal/v1/customer-service/knowledge:etl",
+            json=knowledge_etl_payload(), headers=auth_headers,
+        )
+        deleted = client.post(
+            "/internal/v1/customer-service/knowledge:delete",
+            json={
+                "operation": "DELETE", "documentId": "doc-1",
+                "documentVersion": 2, "lease": knowledge_lease("op-2"),
+            },
+            headers=auth_headers,
+        )
+        health = client.get(
+            "/internal/v1/customer-service/health", headers=auth_headers,
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "operation": "INDEX", "status": "SUCCEEDED", "documentId": "doc-1",
+        "documentVersion": 2, "chunkCount": 3, "idempotent": False,
+    }
+    assert service.index_calls[0]["lease"].proof == "lease-proof-secret"
+    assert deleted.status_code == 200
+    assert deleted.json()["operation"] == "DELETE"
+    assert service.delete_calls[0]["lease"].operation_id == "op-2"
+    assert health.json() == {
+        "enabled": True, "ready": True,
+        "dependencies": {"etl": True, "milvus": True, "leaseValidator": True},
+    }
+
+
+def test_customer_service_repeated_index_reports_store_idempotency(
+    app_factory, auth_headers, settings,
+):
+    settings.customer_service_rag_enabled = True
+
+    class IdempotentService(FakeKnowledgeEtlService):
+        async def index(self, **kwargs):
+            result = await super().index(**kwargs)
+            result.idempotent = len(self.index_calls) > 1
+            return result
+
+    service = IdempotentService()
+    with TestClient(app_factory(knowledge_etl_service=service)) as client:
+        first = client.post(
+            "/internal/v1/customer-service/knowledge:etl",
+            json=knowledge_etl_payload(), headers=auth_headers,
+        )
+        second = client.post(
+            "/internal/v1/customer-service/knowledge:etl",
+            json=knowledge_etl_payload(), headers=auth_headers,
+        )
+    assert first.json()["idempotent"] is False
+    assert second.json()["idempotent"] is True
+
+
+def test_customer_service_errors_are_stable_and_redacted(
+    app_factory, auth_headers, settings,
+):
+    settings.customer_service_rag_enabled = True
+    secret_url = knowledge_etl_payload()["signedUrl"]
+    service = FakeKnowledgeEtlService(
+        MilvusKnowledgeError("KNOWLEDGE_STALE_VERSION")
+    )
+    with TestClient(app_factory(knowledge_etl_service=service)) as client:
+        response = client.post(
+            "/internal/v1/customer-service/knowledge:etl",
+            json=knowledge_etl_payload(), headers=auth_headers,
+        )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "KNOWLEDGE_STALE_VERSION"
+    assert secret_url not in response.text
+    assert "lease-proof-secret" not in response.text
+
+
+def test_customer_service_unexpected_vendor_error_is_bounded_and_redacted(
+    app_factory, auth_headers, settings,
+):
+    settings.customer_service_rag_enabled = True
+    service = FakeKnowledgeEtlService(
+        RuntimeError("vendor body signed-url-secret lease-proof-secret api-key")
+    )
+    with TestClient(app_factory(knowledge_etl_service=service)) as client:
+        response = client.post(
+            "/internal/v1/customer-service/knowledge:etl",
+            json=knowledge_etl_payload(), headers=auth_headers,
+        )
+    assert response.status_code == 500
+    assert response.json() == {"error": {
+        "code": "KNOWLEDGE_ETL_FAILED",
+        "message": "Knowledge operation failed",
+    }}
+    assert len(response.text) < 256
+    assert "vendor body" not in response.text
+    assert "api-key" not in response.text
+
+
+@pytest.mark.parametrize("field,value", [
+    ("documentId", "x" * 129),
+    ("fileName", "x" * 256),
+    ("fileType", "HTML"),
+    ("signedUrl", "http://oss.example.test/file"),
+    ("sha256", "not-a-sha"),
+    ("lease", {**knowledge_lease(), "expiresAt": 1}),
+    ("lease", {**knowledge_lease(), "scope": "document:other"}),
+    ("lease", {**knowledge_lease(), "operationId": "x" * 129}),
+])
+def test_customer_service_etl_schema_boundaries(
+    app_factory, auth_headers, settings, field, value,
+):
+    settings.customer_service_rag_enabled = True
+    payload = knowledge_etl_payload()
+    payload[field] = value
+    with TestClient(app_factory(knowledge_etl_service=FakeKnowledgeEtlService())) as client:
+        response = client.post(
+            "/internal/v1/customer-service/knowledge:etl",
+            json=payload, headers=auth_headers,
+        )
+    assert response.status_code == 422
+    assert "signed-url-secret" not in response.text
+    assert "lease-proof-secret" not in response.text
+
+
+def test_customer_service_disabled_does_not_initialize_dependencies(
+    app_factory, settings,
+):
+    settings.customer_service_rag_enabled = False
+    calls = []
+    with TestClient(app_factory(
+        milvus_client_factory=lambda **_kwargs: calls.append("milvus"),
+    )):
+        pass
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_milvus_constructor_is_offloaded_and_lifespan_closes_resources(
+    app_factory, settings,
+):
+    settings.customer_service_rag_enabled = True
+    started = threading.Event()
+    release = threading.Event()
+    heartbeat = asyncio.Event()
+
+    class Client:
+        closed = False
+        def close(self):
+            self.closed = True
+
+    client = Client()
+
+    def factory(**_kwargs):
+        started.set()
+        release.wait(1)
+        return client
+
+    class Coordinator:
+        closed = False
+        async def close(self):
+            self.closed = True
+
+    coordinator = Coordinator()
+    app = app_factory(
+        knowledge_downloader=object(), embedding_provider=object(),
+        mutation_coordinator=coordinator, milvus_client_factory=factory,
+    )
+    context = app.router.lifespan_context(app)
+
+    async def mark_heartbeat():
+        await asyncio.sleep(0.02)
+        heartbeat.set()
+
+    timer = threading.Timer(0.5, release.set)
+    timer.start()
+    enter = asyncio.create_task(context.__aenter__())
+    ticker = asyncio.create_task(mark_heartbeat())
+    try:
+        assert await asyncio.to_thread(started.wait, 0.3)
+        await asyncio.wait_for(heartbeat.wait(), 0.2)
+        assert not enter.done()
+        release.set()
+        await enter
+    finally:
+        release.set()
+        timer.cancel()
+        await ticker
+    await context.__aexit__(None, None, None)
+    assert client.closed
+    assert coordinator.closed
 
 
 def test_route_returns_supported_generation_type(app_factory, auth_headers):

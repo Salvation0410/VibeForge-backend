@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import asyncio
+import inspect
 from typing import Any
 
 from fastapi import FastAPI
@@ -14,11 +16,16 @@ from ai_service.infrastructure.checkpoint import (
 )
 from ai_service.infrastructure.postgres_checkpoint import PostgresCheckpoint
 from ai_service.infrastructure.spring_tools import SpringToolGateway
+from ai_service.infrastructure.knowledge_download import KnowledgeDownloader
+from ai_service.infrastructure.milvus_knowledge import MilvusKnowledgeStore
+from ai_service.infrastructure.spring_knowledge_lease import SpringKnowledgeMutationCoordinator
 from ai_service.models.base import GenerationModel
+from ai_service.models.embeddings import CloseAIEmbeddingProvider
 from ai_service.models.openai_compatible import OpenAICompatibleModel
 from ai_service.orchestration.cancellation import CancellationRegistry
 from ai_service.orchestration.active_generations import ActiveGenerationRegistry
 from ai_service.orchestration.workflow import GenerationWorkflow
+from ai_service.orchestration.document_etl import KnowledgeEtlService
 
 
 def create_app(
@@ -27,6 +34,13 @@ def create_app(
     model: GenerationModel | None = None,
     tool_gateway: Any | None = None,
     checkpoint: CheckpointStore | None = None,
+    knowledge_etl_service: Any | None = None,
+    knowledge_downloader: Any | None = None,
+    embedding_provider: Any | None = None,
+    knowledge_store: Any | None = None,
+    mutation_coordinator: Any | None = None,
+    milvus_client_factory: Any | None = None,
+    lease_validation_transport: Any | None = None,
 ) -> FastAPI:
     """创建并组装 AI 服务。
 
@@ -54,6 +68,7 @@ def create_app(
     )
     cancellations = CancellationRegistry()
     active_generations = ActiveGenerationRegistry()
+    initial_etl_service = knowledge_etl_service
     workflow = GenerationWorkflow(
         model=generation_model,
         tool_gateway=gateway,
@@ -68,13 +83,62 @@ def create_app(
         """管理 checkpoint 和 HTTP 工具客户端的启动与释放。"""
 
         await checkpoint_store.start()
+        resources: list[Any] = (
+            [initial_etl_service]
+            if config.customer_service_rag_enabled and initial_etl_service is not None
+            else []
+        )
         try:
+            if config.customer_service_rag_enabled and app.state.knowledge_etl_service is None:
+                coordinator = mutation_coordinator or SpringKnowledgeMutationCoordinator(
+                    gateway_base_url=str(config.spring_gateway_base_url),
+                    bearer_token=config.spring_gateway_bearer_token,
+                    transport=lease_validation_transport,
+                )
+                resources.append(coordinator)
+                downloader = knowledge_downloader or KnowledgeDownloader(config)
+                resources.append(downloader)
+                embeddings = embedding_provider or await asyncio.to_thread(
+                    CloseAIEmbeddingProvider, config
+                )
+                resources.append(embeddings)
+                store_kwargs = {"mutation_coordinator": coordinator}
+                if milvus_client_factory is not None:
+                    store_kwargs["client_factory"] = milvus_client_factory
+                store = knowledge_store or await asyncio.to_thread(
+                    MilvusKnowledgeStore, config, **store_kwargs
+                )
+                resources.append(store)
+                app.state.knowledge_etl_service = KnowledgeEtlService(
+                    config, downloader, embeddings, store
+                )
             yield
         finally:
-            await checkpoint_store.close()
-            close = getattr(gateway, "close", None)
-            if close is not None:
-                await close()
+            try:
+                seen: set[int] = set()
+                resource_error: BaseException | None = None
+                for resource in reversed(resources):
+                    if id(resource) in seen:
+                        continue
+                    seen.add(id(resource))
+                    close = getattr(resource, "close", None)
+                    if close is not None:
+                        try:
+                            result = close()
+                            if inspect.isawaitable(result):
+                                await result
+                        except BaseException as error:
+                            if resource_error is None:
+                                resource_error = error
+                if resource_error is not None:
+                    raise resource_error
+            finally:
+                try:
+                    await checkpoint_store.close()
+                finally:
+                    close = getattr(gateway, "close", None)
+                    if close is not None:
+                        await close()
 
     app = FastAPI(title="yu-ai-service", version="0.1.0", lifespan=lifespan)
     app.state.settings = config
@@ -84,6 +148,7 @@ def create_app(
     app.state.cancellations = cancellations
     app.state.active_generations = active_generations
     app.state.workflow = workflow
+    app.state.knowledge_etl_service = initial_etl_service
 
     register_routes(
         app,
@@ -93,5 +158,6 @@ def create_app(
         cancellations=cancellations,
         active_generations=active_generations,
         require_internal_auth=create_internal_auth_dependency(config.internal_bearer_token),
+        customer_service_rag_enabled=config.customer_service_rag_enabled,
     )
     return app

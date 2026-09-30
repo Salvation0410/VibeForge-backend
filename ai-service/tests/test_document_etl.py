@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 import threading
+import time
 import zipfile
 
+import httpx
 import pytest
 from docx import Document
 from pypdf import PdfWriter
@@ -15,11 +19,18 @@ import ai_service.orchestration.document_etl as document_etl
 
 from ai_service.orchestration.document_etl import (
     DocumentETLError,
+    KnowledgeEtlService,
     ParsedSection,
     parse_document,
     split_sections,
     parse_and_split_download,
 )
+from ai_service.infrastructure.milvus_knowledge import KnowledgeMutationLease
+from ai_service.infrastructure.milvus_knowledge import MilvusKnowledgeError
+from ai_service.infrastructure.spring_knowledge_lease import (
+    SpringKnowledgeMutationCoordinator,
+)
+from ai_service.models.embeddings import EmbeddingOutputError
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "knowledge"
@@ -412,3 +423,248 @@ async def test_cancel_waits_for_parser_before_temp_cleanup(settings, tmp_path, m
     with pytest.raises(asyncio.CancelledError):
         await task
     assert cleaned and not path.exists()
+
+
+@pytest.mark.asyncio
+async def test_etl_service_indexes_embedded_document_with_original_lease(settings, tmp_path):
+    path = tmp_path / "knowledge.txt"
+    content = b"refund policy"
+    path.write_bytes(content)
+
+    class Downloaded:
+        def __init__(self):
+            self.path = path
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_):
+            self.path.unlink(missing_ok=True)
+
+    class Downloader:
+        async def download(self, url, *, expected_sha256, max_bytes):
+            assert url == "https://oss.example.test/file?Signature=secret"
+            assert expected_sha256 == hashlib.sha256(content).hexdigest()
+            assert max_bytes == settings.rag_download_max_bytes
+            return Downloaded()
+
+    class Embeddings:
+        async def embed_documents(self, texts):
+            assert texts == ["refund policy"]
+            return [[0.25, 0.75]]
+
+    class Store:
+        async def upsert_document_version(self, document, *, lease):
+            self.document = document
+            self.lease = lease
+            return type("Result", (), {
+                "document_id": document.document_id,
+                "document_version": document.document_version,
+                "chunk_count": len(document.chunks),
+                "idempotent": False,
+            })()
+
+    lease = KnowledgeMutationLease(
+        scope="document:doc-1", operation_id="op-1", fence=9,
+        expires_at=4102444800.0, proof="secret-proof",
+    )
+    store = Store()
+    service = KnowledgeEtlService(settings, Downloader(), Embeddings(), store)
+    result = await service.index(
+        document_id="doc-1", document_version=2, file_name="knowledge.txt",
+        file_type="TXT", signed_url="https://oss.example.test/file?Signature=secret",
+        sha256=hashlib.sha256(content).hexdigest(), etl_version="etl-v1", lease=lease,
+    )
+
+    assert result.chunk_count == 1
+    assert store.lease is lease
+    assert store.document.embedding_model_version == settings.rag_embedding_model
+    assert store.document.content_hash == hashlib.sha256(content).hexdigest()
+    assert store.document.chunks[0].content_hash == hashlib.sha256(
+        b"refund policy"
+    ).hexdigest()
+    assert not path.exists()
+
+
+@pytest.mark.asyncio
+async def test_etl_service_delete_passes_original_lease(settings):
+    class Store:
+        async def delete_document(self, document_id, document_version, *, lease):
+            self.call = (document_id, document_version, lease)
+
+    lease = KnowledgeMutationLease(
+        scope="document:doc-1", operation_id="op-2", fence=10,
+        expires_at=4102444800.0, proof="secret-proof",
+    )
+    store = Store()
+    service = KnowledgeEtlService(settings, object(), object(), store)
+    await service.delete(document_id="doc-1", document_version=2, lease=lease)
+    assert store.call == ("doc-1", 2, lease)
+
+
+@pytest.mark.asyncio
+async def test_etl_service_propagates_download_embedding_and_store_failures(settings, tmp_path):
+    lease = KnowledgeMutationLease(
+        scope="document:doc-1", operation_id="op-1", fence=1,
+        expires_at=time.time() + 60, proof="proof",
+    )
+
+    class FailingDownloader:
+        async def download(self, *_args, **_kwargs):
+            from ai_service.infrastructure.knowledge_download import KnowledgeDownloadError
+            raise KnowledgeDownloadError("KNOWLEDGE_DOWNLOAD_TIMEOUT")
+
+    service = KnowledgeEtlService(settings, FailingDownloader(), object(), object())
+    with pytest.raises(RuntimeError, match="KNOWLEDGE_DOWNLOAD_TIMEOUT"):
+        await service.index(
+            document_id="doc-1", document_version=1, file_name="x.txt",
+            file_type="TXT", signed_url="https://oss.test/x", sha256="a" * 64,
+            etl_version="etl-v1", lease=lease,
+        )
+
+    path = tmp_path / "x.txt"
+    path.write_text("content", encoding="utf-8")
+
+    class Downloaded:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_):
+            path.unlink(missing_ok=True)
+        @property
+        def path(self):
+            return path
+
+    class Downloader:
+        async def download(self, *_args, **_kwargs):
+            return Downloaded()
+
+    class FailingEmbeddings:
+        async def embed_documents(self, _texts):
+            raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_UNAVAILABLE")
+
+    service = KnowledgeEtlService(settings, Downloader(), FailingEmbeddings(), object())
+    with pytest.raises(EmbeddingOutputError, match="KNOWLEDGE_EMBEDDING_UNAVAILABLE"):
+        await service.index(
+            document_id="doc-1", document_version=1, file_name="x.txt",
+            file_type="TXT", signed_url="https://oss.test/x", sha256="a" * 64,
+            etl_version="etl-v1", lease=lease,
+        )
+    assert not path.exists()
+
+
+def spring_lease_response(lease, *, operation="INDEX", **overrides):
+    data = {
+        "verified": True,
+        "current": True,
+        "scope": lease.scope,
+        "operationId": lease.operation_id,
+        "operation": operation,
+        "fence": lease.fence,
+        "expiresAt": lease.expires_at,
+    }
+    data.update(overrides)
+    return {"code": 0, "data": data, "message": "ok"}
+
+
+@pytest.mark.asyncio
+async def test_spring_coordinator_validates_on_hold_and_every_assertion():
+    lease = KnowledgeMutationLease(
+        scope="document:doc-1", operation_id="op-1", fence=7,
+        expires_at=time.time() + 60, proof="never-log-this-proof",
+    )
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json=spring_lease_response(lease))
+
+    coordinator = SpringKnowledgeMutationCoordinator(
+        gateway_base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="spring-secret",
+        transport=httpx.MockTransport(handler),
+    )
+    async with coordinator.hold(
+        lease, scope="document:doc-1", operation="upsert"
+    ) as permit:
+        await permit.assert_current()
+    await coordinator.close()
+
+    assert len(requests) == 2
+    assert requests[0] == {
+        "scope": "document:doc-1", "operationId": "op-1",
+        "operation": "INDEX", "fence": 7,
+        "expiresAt": lease.expires_at, "proof": "never-log-this-proof",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("response", [
+    httpx.Response(404),
+    httpx.Response(200, json={"code": 0, "data": {"verified": False}}),
+])
+async def test_spring_coordinator_fails_closed_without_leaking_response(response):
+    lease = KnowledgeMutationLease(
+        scope="document:doc-1", operation_id="op-1", fence=7,
+        expires_at=time.time() + 60, proof="never-log-this-proof",
+    )
+    coordinator = SpringKnowledgeMutationCoordinator(
+        gateway_base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="spring-secret",
+        transport=httpx.MockTransport(lambda _request: response),
+    )
+    with pytest.raises(MilvusKnowledgeError) as caught:
+        async with coordinator.hold(
+            lease, scope="document:doc-1", operation="upsert"
+        ):
+            pass
+    await coordinator.close()
+    assert str(caught.value) == "KNOWLEDGE_MUTATION_LEASE_INVALID"
+    assert "never-log-this-proof" not in repr(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_spring_coordinator_detects_revocation_and_field_mismatch():
+    lease = KnowledgeMutationLease(
+        scope="document:doc-1", operation_id="op-1", fence=7,
+        expires_at=time.time() + 60, proof="proof",
+    )
+    responses = iter([
+        spring_lease_response(lease),
+        spring_lease_response(lease, current=False),
+    ])
+    coordinator = SpringKnowledgeMutationCoordinator(
+        gateway_base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="spring-secret",
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(200, json=next(responses))
+        ),
+    )
+    with pytest.raises(MilvusKnowledgeError, match="KNOWLEDGE_MUTATION_LEASE_INVALID"):
+        async with coordinator.hold(
+            lease, scope="document:doc-1", operation="upsert"
+        ) as permit:
+            await permit.assert_current()
+    await coordinator.close()
+
+
+@pytest.mark.asyncio
+async def test_spring_coordinator_timeout_is_fail_closed():
+    lease = KnowledgeMutationLease(
+        scope="document:doc-1", operation_id="op-1", fence=7,
+        expires_at=time.time() + 60, proof="proof",
+    )
+
+    def timeout(request):
+        raise httpx.ReadTimeout("vendor body and secret proof", request=request)
+
+    coordinator = SpringKnowledgeMutationCoordinator(
+        gateway_base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="spring-secret",
+        transport=httpx.MockTransport(timeout),
+    )
+    with pytest.raises(MilvusKnowledgeError) as caught:
+        async with coordinator.hold(
+            lease, scope="document:doc-1", operation="upsert"
+        ):
+            pass
+    await coordinator.close()
+    assert str(caught.value) == "KNOWLEDGE_MUTATION_LEASE_INVALID"
+    assert "vendor body" not in repr(caught.value)

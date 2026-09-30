@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import re
 import unicodedata
 import zipfile
@@ -14,6 +15,13 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 
 from ai_service.config import Settings
+from ai_service.infrastructure.milvus_knowledge import (
+    IndexedChunk,
+    IndexedDocument,
+    KnowledgeMutationLease,
+    KnowledgeStore,
+)
+from ai_service.models.embeddings import EmbeddingProvider
 
 
 # Limits also apply after decompression and text extraction, where input byte limits alone do not help.
@@ -337,3 +345,74 @@ async def parse_and_split_download(
             except Exception:
                 pass
             raise
+
+
+class KnowledgeEtlService:
+    """Compose download, parsing, embedding, and the version-aware knowledge store."""
+
+    def __init__(
+        self,
+        settings: Settings,
+        downloader: object,
+        embeddings: EmbeddingProvider,
+        store: KnowledgeStore,
+    ) -> None:
+        self._settings = settings
+        self._downloader = downloader
+        self._embeddings = embeddings
+        self._store = store
+
+    async def index(
+        self, *, document_id: str, document_version: int, file_name: str,
+        file_type: str, signed_url: str, sha256: str, etl_version: str,
+        lease: KnowledgeMutationLease,
+    ):
+        downloaded = await self._downloader.download(
+            signed_url,
+            expected_sha256=sha256,
+            max_bytes=self._settings.rag_download_max_bytes,
+        )
+        chunks = await parse_and_split_download(
+            downloaded,
+            file_type=file_type,
+            document_id=document_id,
+            document_version=document_version,
+            source_name=file_name,
+            settings=self._settings,
+        )
+        vectors = await self._embeddings.embed_documents(
+            [chunk.content for chunk in chunks]
+        )
+        indexed_chunks = tuple(
+            IndexedChunk(
+                chunk_id=chunk.chunk_id,
+                chunk_index=chunk.chunk_index,
+                content=chunk.content,
+                source_locator=chunk.source_locator,
+                content_hash=hashlib.sha256(chunk.content.encode("utf-8")).hexdigest(),
+                embedding=vector,
+            )
+            for chunk, vector in zip(chunks, vectors, strict=True)
+        )
+        document = IndexedDocument(
+            document_id=document_id,
+            document_version=document_version,
+            etl_version=etl_version,
+            embedding_model_version=self._settings.rag_embedding_model,
+            file_name=file_name,
+            file_type=file_type.lower(),
+            content_hash=sha256,
+            chunks=indexed_chunks,
+        )
+        return await self._store.upsert_document_version(document, lease=lease)
+
+    async def delete(
+        self, *, document_id: str, document_version: int,
+        lease: KnowledgeMutationLease,
+    ) -> None:
+        await self._store.delete_document(
+            document_id, document_version, lease=lease
+        )
+
+    async def ping(self) -> bool:
+        return await self._store.ping()
