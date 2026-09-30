@@ -7,7 +7,6 @@ import math
 import re
 import struct
 import time
-import uuid
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
@@ -141,6 +140,16 @@ class RebuildResult:
     collection_name: str
     document_count: int
     chunk_count: int
+    idempotent: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class RebuildPlan:
+    embedding_model_version: str
+    embedding_dimension: int
+    etl_version: str
+    document_count: int
+    document_fingerprint: str
 
 
 class KnowledgeStore(Protocol):
@@ -155,6 +164,7 @@ class KnowledgeStore(Protocol):
     async def rebuild_collection(
         self, documents: AsyncIterator[IndexedDocument], *,
         lease: KnowledgeMutationLease | None = None,
+        plan: RebuildPlan,
     ) -> RebuildResult: ...
     async def ping(self) -> bool: ...
 
@@ -320,14 +330,27 @@ class MilvusKnowledgeStore:
             raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_ALIAS_INVALID")
         return name
 
-    def _collection_metadata(self, model: str, dimension: int, fence: int) -> str:
-        return json.dumps({
+    def _collection_metadata(
+        self, model: str, dimension: int, fence: int, *,
+        rebuild: tuple[KnowledgeMutationLease, RebuildPlan, int] | None = None,
+    ) -> str:
+        metadata = {
             "kind": "customer-service-knowledge",
             "embeddingModelVersion": model,
             "embeddingDimension": dimension,
             "schemaVersion": self._schema_version,
             "mutationFence": fence,
-        }, sort_keys=True, separators=(",", ":"))
+        }
+        if rebuild is not None:
+            lease, plan, chunk_count = rebuild
+            metadata.update({
+                "rebuildOperationId": lease.operation_id,
+                "rebuildFingerprint": plan.document_fingerprint,
+                "rebuildEtlVersion": plan.etl_version,
+                "rebuildDocumentCount": plan.document_count,
+                "rebuildChunkCount": chunk_count,
+            })
+        return json.dumps(metadata, sort_keys=True, separators=(",", ":"))
 
     async def _alias_target(self) -> str | None:
         try:
@@ -387,7 +410,8 @@ class MilvusKnowledgeStore:
             raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_MISMATCH")
 
     async def _ensure_collection(
-        self, name: str, model: str, dimension: int, fence: int
+        self, name: str, model: str, dimension: int, fence: int, *,
+        rebuild: tuple[KnowledgeMutationLease, RebuildPlan, int] | None = None,
     ) -> None:
         try:
             if not await self._call("has_collection", name):
@@ -397,7 +421,9 @@ class MilvusKnowledgeStore:
                         id_type="string", vector_field_name="embedding", metric_type="COSINE",
                         auto_id=False, max_length=64, enable_dynamic_field=True,
                         consistency_level="Strong",
-                        description=self._collection_metadata(model, dimension, fence),
+                        description=self._collection_metadata(
+                            model, dimension, fence, rebuild=rebuild
+                        ),
                     )
                 except Exception:
                     if not await self._call("has_collection", name):
@@ -405,6 +431,61 @@ class MilvusKnowledgeStore:
         except Exception:
             raise MilvusKnowledgeError("KNOWLEDGE_VECTOR_STORE_UNAVAILABLE") from None
         await self._validate_collection(name, model, dimension)
+
+    @staticmethod
+    def _metadata(description: dict[str, Any]) -> dict[str, Any]:
+        try:
+            value = json.loads(description.get("description", ""))
+        except (TypeError, ValueError):
+            raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_MISMATCH") from None
+        if not isinstance(value, dict):
+            raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_MISMATCH")
+        return value
+
+    def _rebuild_collection_name(
+        self, model: str, dimension: int, lease: KnowledgeMutationLease,
+        plan: RebuildPlan,
+    ) -> str:
+        identity = hashlib.sha256(
+            f"rebuild\0{self._alias}\0{model}\0{dimension}\0{self._schema_version}"
+            f"\0{lease.operation_id}\0{lease.fence}\0{plan.etl_version}"
+            f"\0{plan.document_fingerprint}".encode()
+        ).hexdigest()[:12]
+        return self._collection_name(
+            model, dimension, suffix=f"_staging_{identity}"
+        )
+
+    async def _validate_rebuild_collection(
+        self, collection: str, model: str, dimension: int,
+        lease: KnowledgeMutationLease, plan: RebuildPlan,
+    ) -> int:
+        await self._validate_collection(collection, model, dimension)
+        metadata = self._metadata(await self._describe_collection(collection))
+        expected = {
+            "mutationFence": lease.fence,
+            "rebuildOperationId": lease.operation_id,
+            "rebuildFingerprint": plan.document_fingerprint,
+            "rebuildEtlVersion": plan.etl_version,
+            "rebuildDocumentCount": plan.document_count,
+        }
+        if any(metadata.get(key) != value for key, value in expected.items()):
+            raise MilvusKnowledgeError("KNOWLEDGE_REBUILD_STAGING_CONFLICT")
+        chunk_count = metadata.get("rebuildChunkCount")
+        if not isinstance(chunk_count, int) or chunk_count < 0:
+            raise MilvusKnowledgeError("KNOWLEDGE_REBUILD_STAGING_CONFLICT")
+        return chunk_count
+
+    @staticmethod
+    def _validate_rebuild_plan(plan: RebuildPlan) -> None:
+        if (
+            not plan.embedding_model_version
+            or not isinstance(plan.embedding_dimension, int)
+            or plan.embedding_dimension < 1
+            or not plan.etl_version or len(plan.etl_version) > 128
+            or not isinstance(plan.document_count, int) or plan.document_count < 0
+            or not re.fullmatch(r"[0-9a-f]{64}", plan.document_fingerprint)
+        ):
+            raise MilvusKnowledgeError("KNOWLEDGE_REBUILD_PLAN_INVALID")
 
     @staticmethod
     def _identity(document: IndexedDocument) -> str:
@@ -866,34 +947,73 @@ class MilvusKnowledgeStore:
     async def rebuild_collection(
         self, documents: AsyncIterator[IndexedDocument], *,
         lease: KnowledgeMutationLease | None = None,
+        plan: RebuildPlan,
     ) -> RebuildResult:
+        self._validate_rebuild_plan(plan)
         scope = f"collection:{self._alias}"
         async with self._mutation(lease, scope=scope, operation="rebuild") as permit:
-            docs = [document async for document in documents]
-            return await self._rebuild_collection(docs, permit)
+            assert lease is not None
+            return await self._rebuild_collection(documents, permit, lease, plan)
 
     async def _rebuild_collection(
-        self, docs: list[IndexedDocument], permit: MutationPermit,
+        self, documents: AsyncIterator[IndexedDocument], permit: MutationPermit,
+        lease: KnowledgeMutationLease, plan: RebuildPlan,
     ) -> RebuildResult:
-        if not docs:
-            raise MilvusKnowledgeError("KNOWLEDGE_DOCUMENT_INVALID")
-        dimensions = {self._validate_document(document) for document in docs}
-        models = {document.embedding_model_version for document in docs}
-        if len(dimensions) != 1 or len(models) != 1:
-            raise MilvusKnowledgeError("KNOWLEDGE_EMBEDDING_DIMENSION_MISMATCH")
-        if len({document.document_id for document in docs}) != len(docs):
-            raise MilvusKnowledgeError("KNOWLEDGE_VERSION_CONFLICT")
-        dimension, model = dimensions.pop(), models.pop()
-        collection = self._collection_name(model, dimension,
-                                           suffix=f"_staging_{uuid.uuid4().hex[:12]}")
         async with self._write_lock:
             old = await self._alias_target()
-            switched = False
-            try:
-                await self._assert_permit(permit)
-                await self._ensure_collection(
-                    collection, model, dimension, permit.fence
+            model = plan.embedding_model_version
+            dimension = plan.embedding_dimension
+            if plan.document_count == 0 and old is not None:
+                description = await self._describe_collection(old)
+                metadata = self._metadata(description)
+                inherited_model = metadata.get("embeddingModelVersion")
+                inherited_dimension = metadata.get("embeddingDimension")
+                if not isinstance(inherited_model, str) or not isinstance(
+                    inherited_dimension, int
+                ):
+                    raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_MISMATCH")
+                await self._validate_collection(
+                    old, inherited_model, inherited_dimension
                 )
+                model, dimension = inherited_model, inherited_dimension
+            collection = self._rebuild_collection_name(
+                model, dimension, lease, plan
+            )
+            if old == collection:
+                chunk_count = await self._validate_rebuild_collection(
+                    collection, model, dimension, lease, plan
+                )
+                return RebuildResult(
+                    collection, plan.document_count, chunk_count, True
+                )
+
+            switched = False
+            created = False
+            try:
+                if await self._call("has_collection", collection):
+                    await self._validate_rebuild_collection(
+                        collection, model, dimension, lease, plan
+                    )
+                    await self._assert_permit(permit)
+                    await self._call("drop_collection", collection)
+
+                docs = [] if plan.document_count == 0 else [
+                    document async for document in documents
+                ]
+                if len(docs) != plan.document_count:
+                    raise MilvusKnowledgeError("KNOWLEDGE_REBUILD_PLAN_INVALID")
+                if docs:
+                    dimensions = {
+                        self._validate_document(document) for document in docs
+                    }
+                    models = {document.embedding_model_version for document in docs}
+                    if dimensions != {dimension} or models != {model}:
+                        raise MilvusKnowledgeError(
+                            "KNOWLEDGE_EMBEDDING_DIMENSION_MISMATCH"
+                        )
+                    if len({document.document_id for document in docs}) != len(docs):
+                        raise MilvusKnowledgeError("KNOWLEDGE_VERSION_CONFLICT")
+
                 chunks: list[dict[str, Any]] = []
                 manifests: list[dict[str, Any]] = []
                 for document in docs:
@@ -908,6 +1028,16 @@ class MilvusKnowledgeStore:
                     manifests.append(self._manifest_row(
                         document, dimension, rows, fence=permit.fence
                     ))
+
+                await self._assert_permit(permit)
+                await self._ensure_collection(
+                    collection, model, dimension, permit.fence,
+                    rebuild=(lease, plan, len(chunks)),
+                )
+                created = True
+                await self._validate_rebuild_collection(
+                    collection, model, dimension, lease, plan
+                )
                 all_rows = [*chunks, *manifests]
                 for start in range(0, len(all_rows), _VERIFY_BATCH_SIZE):
                     await self._assert_permit(permit)
@@ -921,9 +1051,9 @@ class MilvusKnowledgeStore:
                     switched = True
                 except MilvusKnowledgeError:
                     raise
-                return RebuildResult(collection, len(docs), len(chunks))
+                return RebuildResult(collection, len(docs), len(chunks), False)
             finally:
-                if not switched:
+                if created and not switched:
                     try:
                         current = await self._alias_target()
                         if current != collection and await self._call(

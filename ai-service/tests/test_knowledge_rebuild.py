@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from ai_service.infrastructure.milvus_knowledge import (
     KnowledgeMutationLease,
     MilvusKnowledgeError,
+    RebuildPlan,
     RebuildResult,
 )
 from ai_service.models.embeddings import EmbeddingOutputError
@@ -65,7 +66,7 @@ class FakeRebuildService:
         self.calls.append(kwargs)
         if self.error is not None:
             raise self.error
-        return RebuildResult("staging-v1", len(kwargs["documents"]), 2)
+        return RebuildResult("staging-v1", len(kwargs["documents"]), 2, False)
 
 
 def test_rebuild_requires_auth_and_feature_enablement(app_factory, auth_headers):
@@ -122,6 +123,34 @@ def test_rebuild_response_and_request_match_java_contract(
         payload["lease"]["expiresAt"],
         "rebuild-proof-secret",
     )
+
+
+def test_empty_rebuild_matches_java_contract_and_propagates_idempotency(
+    app_factory, auth_headers, settings,
+):
+    settings.customer_service_rag_enabled = True
+
+    class Service(FakeRebuildService):
+        async def rebuild(self, **kwargs):
+            self.calls.append(kwargs)
+            return RebuildResult("empty-staging", 0, 0, True)
+
+    service = Service()
+    payload = rebuild_payload()
+    payload["documents"] = []
+    with TestClient(app_factory(knowledge_etl_service=service)) as client:
+        response = client.post(
+            "/internal/v1/customer-service/knowledge:rebuild",
+            json=payload,
+            headers=auth_headers,
+        )
+    assert response.status_code == 200
+    assert response.json() == {
+        "operation": "REBUILD", "status": "SUCCEEDED",
+        "collectionAlias": "customer_service_knowledge", "etlVersion": "etl-v1",
+        "documentCount": 0, "idempotent": True,
+    }
+    assert service.calls[0]["documents"] == []
 
 
 @pytest.mark.parametrize("mutate", [
@@ -246,10 +275,11 @@ async def test_rebuild_processes_two_documents_sequentially_and_passes_lease(
             return [[0.1, 0.2] for _ in texts]
 
     class Store:
-        async def rebuild_collection(self, documents, *, lease):
+        async def rebuild_collection(self, documents, *, lease, plan):
             self.lease = lease
+            self.plan = plan
             self.documents = [document async for document in documents]
-            return RebuildResult("staging-v1", len(self.documents), 2)
+            return RebuildResult("staging-v1", len(self.documents), 2, False)
 
     store = Store()
     service = KnowledgeEtlService(settings, Downloader(), Embeddings(), store)
@@ -266,9 +296,49 @@ async def test_rebuild_processes_two_documents_sequentially_and_passes_lease(
     assert result.document_count == 2
     assert [document.document_id for document in store.documents] == ["doc-1", "doc-2"]
     assert store.lease is lease
+    assert store.plan == RebuildPlan(
+        embedding_model_version=settings.rag_embedding_model,
+        embedding_dimension=settings.rag_embedding_dimension,
+        etl_version="etl-v1", document_count=2,
+        document_fingerprint=store.plan.document_fingerprint,
+    )
     assert cleanups == ["one.txt", "two.txt"]
     assert max_active_downloads == 1
     assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.asyncio
+async def test_rebuild_idempotent_result_skips_download_and_embedding(settings):
+    class Downloader:
+        calls = 0
+        async def download(self, *_args, **_kwargs):
+            self.calls += 1
+            raise AssertionError("idempotent replay downloaded a document")
+
+    class Embeddings:
+        calls = 0
+        async def embed_documents(self, *_args, **_kwargs):
+            self.calls += 1
+            raise AssertionError("idempotent replay requested embeddings")
+
+    class Store:
+        async def rebuild_collection(self, documents, *, lease, plan):
+            self.plan = plan
+            return RebuildResult("existing-staging", 2, 4, True)
+
+    downloader, embeddings, store = Downloader(), Embeddings(), Store()
+    service = KnowledgeEtlService(settings, downloader, embeddings, store)
+    result = await service.rebuild(
+        documents=rebuild_payload()["documents"], etl_version="etl-v1",
+        lease=KnowledgeMutationLease(
+            "collection:customer_service_knowledge", "op", "REBUILD", 1,
+            time.time() + 300, "proof",
+        ),
+    )
+    assert result.idempotent
+    assert downloader.calls == 0
+    assert embeddings.calls == 0
+    assert store.plan.document_count == 2
 
 
 @pytest.mark.asyncio
@@ -289,10 +359,10 @@ async def test_rebuild_document_failure_prevents_store_completion_and_cleans_tem
 
     class Store:
         completed = False
-        async def rebuild_collection(self, documents, *, lease):
+        async def rebuild_collection(self, documents, *, lease, plan):
             [document async for document in documents]
             self.completed = True
-            return RebuildResult("should-not-switch", 2, 2)
+            return RebuildResult("should-not-switch", 2, 2, False)
 
     store = Store()
     service = KnowledgeEtlService(settings, Downloader(), Embeddings(), store)
@@ -322,15 +392,18 @@ async def test_rebuild_total_embedding_budget_is_fail_closed(settings, tmp_path)
             return Downloaded(path, cleanups)
 
     class Embeddings:
+        calls = 0
         async def embed_documents(self, texts, **_kwargs):
+            self.calls += 1
             return [[0.1, 0.2] for _ in texts]
 
     class Store:
-        async def rebuild_collection(self, documents, *, lease):
+        async def rebuild_collection(self, documents, *, lease, plan):
             [document async for document in documents]
             raise AssertionError("budget failure should originate from iterator")
 
-    service = KnowledgeEtlService(settings, Downloader(), Embeddings(), Store())
+    embeddings = Embeddings()
+    service = KnowledgeEtlService(settings, Downloader(), embeddings, Store())
     with pytest.raises(
         EmbeddingOutputError, match="KNOWLEDGE_EMBEDDING_BUDGET_EXCEEDED"
     ):
@@ -342,6 +415,7 @@ async def test_rebuild_total_embedding_budget_is_fail_closed(settings, tmp_path)
                 time.time() + 300, "proof",
             ),
         )
+    assert embeddings.calls == 0
     assert cleanups == ["one.txt", "two.txt"]
 
 
@@ -361,7 +435,7 @@ async def test_rebuild_total_chunk_budget_is_fail_closed(settings, tmp_path):
             return [[0.1, 0.2] for _ in texts]
 
     class Store:
-        async def rebuild_collection(self, documents, *, lease):
+        async def rebuild_collection(self, documents, *, lease, plan):
             [document async for document in documents]
 
     service = KnowledgeEtlService(settings, Downloader(), Embeddings(), Store())
@@ -396,7 +470,7 @@ async def test_rebuild_cancellation_cleans_current_temp_file(settings, tmp_path)
             await asyncio.Event().wait()
 
     class Store:
-        async def rebuild_collection(self, documents, *, lease):
+        async def rebuild_collection(self, documents, *, lease, plan):
             [document async for document in documents]
 
     service = KnowledgeEtlService(settings, Downloader(), Embeddings(), Store())
@@ -412,5 +486,5 @@ async def test_rebuild_cancellation_cleans_current_temp_file(settings, tmp_path)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert cleanups == ["one.txt"]
+    assert cleanups == ["one.txt", "one.txt"]
     assert not list(tmp_path.iterdir())

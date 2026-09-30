@@ -163,6 +163,7 @@ def settings() -> Settings:
         spring_gateway_bearer_token="spring-secret",
         checkpoint_enabled=False,
         checkpoint_required=False,
+        rag_embedding_dimension=2,
     )
 
 

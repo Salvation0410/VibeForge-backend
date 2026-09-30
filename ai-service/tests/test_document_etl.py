@@ -595,7 +595,7 @@ async def test_etl_service_propagates_store_failure(settings, tmp_path):
 
 @pytest.mark.asyncio
 async def test_etl_service_budget_exceeded_does_not_call_store(settings, tmp_path):
-    settings.rag_max_embedding_elements = 2
+    settings.rag_max_embedding_elements = 1
     path = tmp_path / "budget.txt"
     path.write_text("content", encoding="utf-8")
 
@@ -637,8 +637,73 @@ async def test_etl_service_budget_exceeded_does_not_call_store(settings, tmp_pat
             file_type="TXT", signed_url="https://oss.test/x", sha256="a" * 64,
             etl_version="etl-v1", lease=lease,
         )
-    assert embeddings.calls == 1
+    assert embeddings.calls == 0
     assert not store.called
+
+
+@pytest.mark.asyncio
+async def test_index_budget_is_rejected_before_embedding_provider_call(settings, tmp_path):
+    settings.rag_embedding_dimension = 3072
+    settings.rag_max_embedding_elements = 3000
+    path = tmp_path / "budget.txt"
+    path.write_text("content", encoding="utf-8")
+
+    class Downloaded:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_): path.unlink(missing_ok=True)
+        @property
+        def path(self): return path
+
+    class Downloader:
+        async def download(self, *_args, **_kwargs): return Downloaded()
+
+    class Embeddings:
+        calls = 0
+        async def embed_documents(self, *_args, **_kwargs):
+            self.calls += 1
+            return [[0.1] * 3072]
+
+    embeddings = Embeddings()
+    service = KnowledgeEtlService(settings, Downloader(), embeddings, object())
+    with pytest.raises(EmbeddingOutputError, match="KNOWLEDGE_EMBEDDING_BUDGET_EXCEEDED"):
+        await service.index(
+            document_id="doc-1", document_version=1, file_name="budget.txt",
+            file_type="TXT", signed_url="https://oss.test/x", sha256="a" * 64,
+            etl_version="etl-v1", lease=KnowledgeMutationLease(
+                "document:doc-1", "op", "INDEX", 1, time.time() + 60, "proof"
+            ),
+        )
+    assert embeddings.calls == 0
+    assert not path.exists()
+
+
+@pytest.mark.asyncio
+async def test_index_rejects_provider_dimension_mismatch(settings, tmp_path):
+    settings.rag_embedding_dimension = 3
+    path = tmp_path / "dimension.txt"
+    path.write_text("content", encoding="utf-8")
+
+    class Downloaded:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_): path.unlink(missing_ok=True)
+        @property
+        def path(self): return path
+
+    class Downloader:
+        async def download(self, *_args, **_kwargs): return Downloaded()
+
+    class Embeddings:
+        async def embed_documents(self, *_args, **_kwargs): return [[0.1, 0.2]]
+
+    service = KnowledgeEtlService(settings, Downloader(), Embeddings(), object())
+    with pytest.raises(EmbeddingOutputError, match="KNOWLEDGE_EMBEDDING_DIMENSION_MISMATCH"):
+        await service.index(
+            document_id="doc-1", document_version=1, file_name="dimension.txt",
+            file_type="TXT", signed_url="https://oss.test/x", sha256="a" * 64,
+            etl_version="etl-v1", lease=KnowledgeMutationLease(
+                "document:doc-1", "op", "INDEX", 1, time.time() + 60, "proof"
+            ),
+        )
 
 
 @pytest.mark.asyncio

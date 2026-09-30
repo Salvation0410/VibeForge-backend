@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import struct
 import threading
@@ -24,6 +25,7 @@ from ai_service.infrastructure.milvus_knowledge import (
     KnowledgeMutationLease,
     MilvusKnowledgeError,
     MilvusKnowledgeStore,
+    RebuildPlan,
 )
 from ai_service.models.embeddings import CloseAIEmbeddingProvider, EmbeddingOutputError
 
@@ -84,12 +86,26 @@ async def test_closeai_embeddings_initialize_once_and_batch_documents(settings):
 
 @pytest.mark.asyncio
 async def test_closeai_embedding_budget_stops_before_later_batches(settings):
+    settings.rag_embedding_dimension = 3
     fake = FakeEmbeddings(document_responses=[[[1, 0, 0], [0, 1, 0]]])
     embeddings, _ = provider(settings, fake)
     with pytest.raises(
         EmbeddingOutputError, match="KNOWLEDGE_EMBEDDING_BUDGET_EXCEEDED"
     ):
         await embeddings.embed_documents(["a", "b", "c"], max_elements=8)
+    assert fake.document_calls == []
+    await embeddings.close()
+
+
+@pytest.mark.asyncio
+async def test_closeai_rejects_actual_dimension_different_from_config(settings):
+    settings.rag_embedding_dimension = 2
+    fake = FakeEmbeddings(document_responses=[[[1, 0, 0], [0, 1, 0]]])
+    embeddings, _ = provider(settings, fake)
+    with pytest.raises(
+        EmbeddingOutputError, match="KNOWLEDGE_EMBEDDING_DIMENSION_MISMATCH"
+    ):
+        await embeddings.embed_documents(["a", "b"])
     assert fake.document_calls == [["a", "b"]]
     await embeddings.close()
 
@@ -610,11 +626,17 @@ async def delete_version(knowledge, document_id, version, *, mutation_lease=None
     )
 
 
-async def rebuild(knowledge, values, *, mutation_lease=None, fence=100):
+async def rebuild(knowledge, values, *, mutation_lease=None, fence=100, document_count=1):
+    mutation_lease = mutation_lease or lease(
+        "collection:customer_service_knowledge", fence, operation="REBUILD"
+    )
     return await knowledge.rebuild_collection(
         values,
-        lease=mutation_lease or lease(
-            "collection:customer_service_knowledge", fence, operation="REBUILD"
+        lease=mutation_lease,
+        plan=RebuildPlan(
+            embedding_model_version="embedding-v1", embedding_dimension=2,
+            etl_version="etl-v1", document_count=document_count,
+            document_fingerprint="f" * 64,
         ),
     )
 
@@ -697,7 +719,10 @@ async def test_rebuild_validates_staging_then_atomically_switches_alias(settings
     await index_document(knowledge, document())
     old_collection = client.aliases[settings.milvus_collection_alias]
 
-    result = await rebuild(knowledge, documents(document(version=2), document(document_id="doc-2")))
+    result = await rebuild(
+        knowledge, documents(document(version=2), document(document_id="doc-2")),
+        document_count=2,
+    )
     assert result.chunk_count == 4 and result.document_count == 2
     assert client.aliases[settings.milvus_collection_alias] == result.collection_name
     assert result.collection_name != old_collection
@@ -738,6 +763,114 @@ async def test_rebuild_integrity_or_alias_failure_keeps_old_alias(settings):
     assert str(caught.value) == "KNOWLEDGE_ALIAS_SWITCH_FAILED"
     assert "provider response" not in repr(caught.value)
     assert client.aliases[alias] == old_collection
+
+
+@pytest.mark.asyncio
+async def test_empty_rebuild_clears_old_alias_with_inherited_schema(settings):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    await index_document(knowledge, document())
+    alias = settings.milvus_collection_alias
+    old = client.aliases[alias]
+
+    result = await rebuild(knowledge, documents(), document_count=0)
+
+    assert result.document_count == 0
+    assert result.chunk_count == 0
+    assert not result.idempotent
+    assert client.aliases[alias] == result.collection_name
+    assert result.collection_name != old
+    assert client.dimensions[result.collection_name] == 2
+    assert await knowledge.search([0.1, 0.2], 8) == []
+
+
+@pytest.mark.asyncio
+async def test_empty_rebuild_without_alias_uses_configured_model_and_dimension(settings):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    mutation_lease = lease(
+        "collection:customer_service_knowledge", 101, operation="REBUILD"
+    )
+    plan = RebuildPlan(
+        embedding_model_version=settings.rag_embedding_model,
+        embedding_dimension=3072,
+        etl_version="etl-v1", document_count=0,
+        document_fingerprint="0" * 64,
+    )
+
+    result = await knowledge.rebuild_collection(
+        documents(), lease=mutation_lease, plan=plan,
+    )
+
+    assert result.document_count == 0
+    assert client.dimensions[result.collection_name] == 3072
+    metadata = json.loads(client.descriptions[result.collection_name])
+    assert metadata["embeddingModelVersion"] == settings.rag_embedding_model
+    assert metadata["embeddingDimension"] == 3072
+
+
+@pytest.mark.asyncio
+async def test_rebuild_replay_is_idempotent_without_consuming_documents(settings):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    mutation_lease = lease(
+        "collection:customer_service_knowledge", 102, operation="REBUILD"
+    )
+    plan = RebuildPlan(
+        embedding_model_version="embedding-v1", embedding_dimension=2,
+        etl_version="etl-v1", document_count=1,
+        document_fingerprint="1" * 64,
+    )
+    first = await knowledge.rebuild_collection(
+        documents(document()), lease=mutation_lease, plan=plan,
+    )
+
+    async def must_not_consume():
+        raise AssertionError("idempotent replay consumed documents")
+        yield document()
+
+    replay = await knowledge.rebuild_collection(
+        must_not_consume(), lease=mutation_lease, plan=plan,
+    )
+
+    assert replay.collection_name == first.collection_name
+    assert replay.document_count == 1
+    assert replay.chunk_count == 2
+    assert replay.idempotent
+
+
+@pytest.mark.asyncio
+async def test_rebuild_rejects_polluted_deterministic_staging(settings):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    mutation_lease = lease(
+        "collection:customer_service_knowledge", 103, operation="REBUILD"
+    )
+    plan = RebuildPlan(
+        embedding_model_version="embedding-v1", embedding_dimension=2,
+        etl_version="etl-v1", document_count=1,
+        document_fingerprint="2" * 64,
+    )
+    staging = knowledge._rebuild_collection_name(
+        "embedding-v1", 2, mutation_lease, plan
+    )
+    client.create_collection(
+        staging, 2,
+        description=knowledge._collection_metadata(
+            "embedding-v1", 2, mutation_lease.fence
+        ),
+    )
+
+    async def must_not_consume():
+        raise AssertionError("polluted staging consumed documents")
+        yield document()
+
+    with pytest.raises(
+        MilvusKnowledgeError, match="^KNOWLEDGE_REBUILD_STAGING_CONFLICT$"
+    ):
+        await knowledge.rebuild_collection(
+            must_not_consume(), lease=mutation_lease, plan=plan,
+        )
 
 
 @pytest.mark.asyncio
@@ -845,7 +978,10 @@ async def test_document_and_chunk_ids_reject_filter_metacharacters(settings, inv
 async def test_rebuild_verifies_known_primary_keys_without_unbounded_query(settings):
     client = FakeMilvusClient()
     knowledge = store(settings, client)
-    await rebuild(knowledge, documents(document(), document(document_id="doc-2")))
+    await rebuild(
+        knowledge, documents(document(), document(document_id="doc-2")),
+        document_count=2,
+    )
     assert len(client.get_calls) >= 1
     assert not any(call["filter"] == "" for call in client.query_calls)
 
@@ -1142,6 +1278,7 @@ async def test_max_length_alias_can_rebuild_and_publish_staging(settings):
     result = await knowledge.rebuild_collection(
         documents(document()),
         lease=lease(f"collection:{alias}", 100, operation="REBUILD"),
+        plan=RebuildPlan("embedding-v1", 2, "etl-v1", 1, "a" * 64),
     )
 
     assert client.aliases[alias] == result.collection_name
@@ -1179,6 +1316,9 @@ async def test_long_alias_fingerprints_keep_business_and_control_data_isolated(s
             documents(document(document_id=document_id)),
             lease=lease(
                 f"collection:{alias}", 100 + index, operation="REBUILD"
+            ),
+            plan=RebuildPlan(
+                "embedding-v1", 2, "etl-v1", 1, f"{index}" * 64
             ),
         )
         assert client.aliases[alias] == result.collection_name

@@ -234,6 +234,11 @@ class CustomerServiceAiClientTest {
             var result = client.rebuild(new CustomerServiceAiClient.RebuildRequest(
                     "customer_service_knowledge", rebuildDocuments, "9", rebuildLease));
             assertEquals(2, result.documentCount());
+            responseBody.set("{\"operation\":\"REBUILD\",\"status\":\"SUCCEEDED\",\"collectionAlias\":\"customer_service_knowledge\",\"etlVersion\":\"9\",\"documentCount\":0,\"idempotent\":true}");
+            var emptyResult = client.rebuild(new CustomerServiceAiClient.RebuildRequest(
+                    "customer_service_knowledge", List.of(), "9", rebuildLease));
+            assertEquals(0, emptyResult.documentCount());
+            assertTrue(emptyResult.idempotent());
             responseBody.set("{\"operation\":\"REBUILD\",\"status\":\"SUCCEEDED\",\"collectionAlias\":\"other\",\"etlVersion\":\"9\",\"documentCount\":2,\"idempotent\":false}");
             assertThrows(CustomerServiceAiClient.CallException.class, () -> client.rebuild(
                     new CustomerServiceAiClient.RebuildRequest("customer_service_knowledge", rebuildDocuments, "9", rebuildLease)));

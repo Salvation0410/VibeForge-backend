@@ -61,6 +61,7 @@ class CloseAIEmbeddingProvider:
         http_async_client_factory: Callable[..., httpx.AsyncClient] = httpx.AsyncClient,
     ) -> None:
         self._batch_size = settings.rag_embedding_batch_size
+        self._dimension = settings.rag_embedding_dimension
         self._http_client: httpx.Client | None = None
         self._http_async_client: httpx.AsyncClient | None = None
         try:
@@ -124,7 +125,10 @@ class CloseAIEmbeddingProvider:
             raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_INVALID_INPUT")
         if not texts:
             return []
-        if max_elements is not None and len(texts) > max_elements:
+        if (
+            max_elements is not None
+            and len(texts) * self._dimension > max_elements
+        ):
             raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_BUDGET_EXCEEDED")
         output: list[list[float]] = []
         dimension: int | None = None
@@ -138,6 +142,8 @@ class CloseAIEmbeddingProvider:
             except Exception:
                 raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_UNAVAILABLE") from None
             vectors = self.validate(raw, expected_count=len(batch))
+            if any(len(vector) != self._dimension for vector in vectors):
+                raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_DIMENSION_MISMATCH")
             if dimension is None:
                 dimension = len(vectors[0])
                 if (
@@ -164,7 +170,10 @@ class CloseAIEmbeddingProvider:
             raise
         except Exception:
             raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_UNAVAILABLE") from None
-        return self.validate([raw], expected_count=1)[0]
+        vector = self.validate([raw], expected_count=1)[0]
+        if len(vector) != self._dimension:
+            raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_DIMENSION_MISMATCH")
+        return vector
 
     async def close(self) -> None:
         """Close the HTTP clients explicitly owned by this provider."""

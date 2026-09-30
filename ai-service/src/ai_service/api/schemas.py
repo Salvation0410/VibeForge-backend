@@ -212,7 +212,7 @@ class KnowledgeRebuildRequest(ApiModel):
     collection_alias: str = Field(
         min_length=1, max_length=255, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$"
     )
-    documents: list[KnowledgeRebuildDocument] = Field(min_length=1, max_length=10_000)
+    documents: list[KnowledgeRebuildDocument] = Field(max_length=10_000)
     etl_version: str = Field(min_length=1, max_length=128)
     lease: KnowledgeMutationLeaseRequest
 

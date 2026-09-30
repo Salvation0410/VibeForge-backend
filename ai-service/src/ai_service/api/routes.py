@@ -212,6 +212,7 @@ def register_routes(
                 collection_alias=body.collection_alias,
                 etl_version=body.etl_version,
                 document_count=result.document_count,
+                idempotent=result.idempotent,
             )
         except (
             KnowledgeDownloadError, DocumentETLError,

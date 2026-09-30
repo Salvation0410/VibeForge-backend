@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import re
 import unicodedata
 import zipfile
@@ -20,6 +21,7 @@ from ai_service.infrastructure.milvus_knowledge import (
     IndexedDocument,
     KnowledgeMutationLease,
     KnowledgeStore,
+    RebuildPlan,
 )
 from ai_service.models.embeddings import EmbeddingOutputError, EmbeddingProvider
 
@@ -401,18 +403,21 @@ class KnowledgeEtlService:
             source_name=file_name,
             settings=self._settings,
         )
-        if len(chunks) > self._settings.rag_max_embedding_elements:
+        dimension = self._settings.rag_embedding_dimension
+        if len(chunks) * dimension > self._settings.rag_max_embedding_elements:
             raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_BUDGET_EXCEEDED")
         vectors = await self._embeddings.embed_documents(
             [chunk.content for chunk in chunks],
             max_elements=self._settings.rag_max_embedding_elements,
         )
+        if len(vectors) != len(chunks):
+            raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_COUNT_MISMATCH")
         try:
-            total_elements = sum(len(vector) for vector in vectors)
+            wrong_dimension = any(len(vector) != dimension for vector in vectors)
         except TypeError:
             raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_INVALID_OUTPUT") from None
-        if total_elements > self._settings.rag_max_embedding_elements:
-            raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_BUDGET_EXCEEDED")
+        if wrong_dimension:
+            raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_DIMENSION_MISMATCH")
         indexed_chunks = tuple(
             IndexedChunk(
                 chunk_id=chunk.chunk_id,
@@ -450,7 +455,6 @@ class KnowledgeEtlService:
     ):
         async with self._semaphore:
             total_chunks = 0
-            total_embedding_elements = 0
 
             def field(document: Any, name: str) -> Any:
                 if isinstance(document, Mapping):
@@ -460,8 +464,32 @@ class KnowledgeEtlService:
                     return document[camel]
                 return getattr(document, name)
 
+            fingerprint_documents = sorted(({
+                "documentId": field(item, "document_id"),
+                "documentVersion": field(item, "document_version"),
+                "fileName": field(item, "file_name"),
+                "fileType": field(item, "file_type"),
+                "sha256": field(item, "sha256"),
+            } for item in documents), key=lambda value: value["documentId"])
+            fingerprint = hashlib.sha256(json.dumps(
+                {
+                    "collectionAlias": self._settings.milvus_collection_alias,
+                    "etlVersion": etl_version,
+                    "documents": fingerprint_documents,
+                },
+                sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+            ).encode()).hexdigest()
+            plan = RebuildPlan(
+                embedding_model_version=self._settings.rag_embedding_model,
+                embedding_dimension=self._settings.rag_embedding_dimension,
+                etl_version=etl_version,
+                document_count=len(documents),
+                document_fingerprint=fingerprint,
+            )
+
             async def indexed_documents() -> AsyncIterator[IndexedDocument]:
-                nonlocal total_chunks, total_embedding_elements
+                nonlocal total_chunks
+                prepared: list[tuple[Any, tuple[KnowledgeChunk, ...]]] = []
                 for item in documents:
                     document_id = field(item, "document_id")
                     document_version = field(item, "document_version")
@@ -485,29 +513,48 @@ class KnowledgeEtlService:
                     total_chunks += len(chunks)
                     if total_chunks > self._settings.rag_rebuild_max_chunks:
                         raise DocumentETLError("KNOWLEDGE_REBUILD_TOO_MANY_CHUNKS")
-                    remaining = (
-                        self._settings.rag_max_embedding_elements
-                        - total_embedding_elements
+                    prepared.append((item, chunks))
+
+                if (
+                    total_chunks * self._settings.rag_embedding_dimension
+                    > self._settings.rag_max_embedding_elements
+                ):
+                    raise EmbeddingOutputError(
+                        "KNOWLEDGE_EMBEDDING_BUDGET_EXCEEDED"
                     )
-                    if len(chunks) > remaining:
-                        raise EmbeddingOutputError(
-                            "KNOWLEDGE_EMBEDDING_BUDGET_EXCEEDED"
-                        )
+
+                embedded_chunks = 0
+                for item, chunks in prepared:
+                    document_id = field(item, "document_id")
+                    document_version = field(item, "document_version")
+                    file_name = field(item, "file_name")
+                    file_type = field(item, "file_type")
+                    sha256 = field(item, "sha256")
+                    remaining = self._settings.rag_max_embedding_elements - (
+                        embedded_chunks * self._settings.rag_embedding_dimension
+                    )
                     vectors = await self._embeddings.embed_documents(
                         [chunk.content for chunk in chunks],
                         max_elements=remaining,
                     )
+                    if len(vectors) != len(chunks):
+                        raise EmbeddingOutputError(
+                            "KNOWLEDGE_EMBEDDING_COUNT_MISMATCH"
+                        )
                     try:
-                        elements = sum(len(vector) for vector in vectors)
+                        wrong_dimension = any(
+                            len(vector) != self._settings.rag_embedding_dimension
+                            for vector in vectors
+                        )
                     except TypeError:
                         raise EmbeddingOutputError(
                             "KNOWLEDGE_EMBEDDING_INVALID_OUTPUT"
                         ) from None
-                    total_embedding_elements += elements
-                    if total_embedding_elements > self._settings.rag_max_embedding_elements:
+                    if wrong_dimension:
                         raise EmbeddingOutputError(
-                            "KNOWLEDGE_EMBEDDING_BUDGET_EXCEEDED"
+                            "KNOWLEDGE_EMBEDDING_DIMENSION_MISMATCH"
                         )
+                    embedded_chunks += len(chunks)
                     try:
                         indexed_chunks = tuple(
                             IndexedChunk(
@@ -538,7 +585,7 @@ class KnowledgeEtlService:
                     )
 
             return await self._store.rebuild_collection(
-                indexed_documents(), lease=lease
+                indexed_documents(), lease=lease, plan=plan
             )
 
     async def ping(self) -> bool:
