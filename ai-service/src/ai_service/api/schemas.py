@@ -260,3 +260,32 @@ class CustomerServiceHealthResponse(ApiModel):
     ready: bool
     dependencies: dict[str, bool]
 
+
+class CustomerServiceAnswerRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(min_length=1, max_length=4_000)
+
+    @field_validator("question")
+    @classmethod
+    def reject_blank_question(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("question must not be blank")
+        return value
+
+
+class CustomerServiceSourceResponse(ApiModel):
+    document_id: str = Field(min_length=1, max_length=128)
+    document_name: str = Field(min_length=1, max_length=255)
+    document_version: int = Field(ge=1)
+    chunk_id: str = Field(min_length=1, max_length=512)
+    locator: str = Field(max_length=500)
+    excerpt: str = Field(max_length=400)
+
+
+class CustomerServiceAnswerResponse(ApiModel):
+    answered: bool
+    answer: str = Field(max_length=4_000)
+    sources: list[CustomerServiceSourceResponse] = Field(max_length=3)
+    degraded: bool
+

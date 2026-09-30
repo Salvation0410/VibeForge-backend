@@ -7,6 +7,10 @@ from ai_service.prompts.review import (
     quality_review_system_prompt,
 )
 from ai_service.prompts.routing import ROUTING_SYSTEM_PROMPT
+from ai_service.prompts.customer_service import (
+    CUSTOMER_SERVICE_SYSTEM_PROMPT,
+    customer_service_user_prompt,
+)
 
 __all__ = [
     "REPAIR_SYSTEM_PROMPT",
@@ -14,4 +18,6 @@ __all__ = [
     "ROUTING_SYSTEM_PROMPT",
     "generation_system_prompt",
     "quality_review_system_prompt",
+    "CUSTOMER_SERVICE_SYSTEM_PROMPT",
+    "customer_service_user_prompt",
 ]

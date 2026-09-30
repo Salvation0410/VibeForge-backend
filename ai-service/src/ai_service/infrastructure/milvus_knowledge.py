@@ -31,7 +31,7 @@ _MAX_DOCUMENT_HISTORY_RECORDS = 10_000
 _OUTPUT_FIELDS = [
     "chunkId", "documentId", "documentVersion", "chunkIndex", "etlVersion",
     "embeddingModelVersion", "fileName", "fileType", "sourceLocator", "content",
-    "contentHash", "embeddingDimension", "schemaVersion",
+    "contentHash", "embeddingDimension", "schemaVersion", "isActive",
 ]
 _VERIFIED_FIELDS = {
     "id", "recordType", "chunkId", "documentId", "documentVersion", "chunkIndex",
@@ -162,6 +162,8 @@ class RetrievedChunk:
     content_hash: str
     distance: float
     score: float
+    is_active: bool = True
+    current_document_version: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1011,6 +1013,8 @@ class MilvusKnowledgeStore:
                     int(entity["documentVersion"]), int(entity["chunkIndex"]),
                     str(entity["content"]), str(entity["fileName"]), str(entity["fileType"]),
                     str(entity["sourceLocator"]), str(entity["contentHash"]), distance, score,
+                    bool(entity.get("isActive", True)),
+                    int(entity.get("currentDocumentVersion", entity["documentVersion"])),
                 ))
             return output
         except MilvusKnowledgeError:

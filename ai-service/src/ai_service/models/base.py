@@ -24,6 +24,23 @@ class ModelTurn:
     token_usage: dict[str, int] = field(default_factory=dict)
 
 
+@dataclass(frozen=True, slots=True)
+class CustomerServiceContext:
+    """A bounded, untrusted knowledge fragment presented to the answer model."""
+
+    chunk_id: str
+    content: str
+
+
+@dataclass(frozen=True, slots=True)
+class CustomerServiceModelAnswer:
+    """Strict answer contract returned by the customer-service model adapter."""
+
+    answered: bool
+    answer: str
+    cited_chunk_ids: tuple[str, ...]
+
+
 class GenerationModel(Protocol):
     """编排层依赖的模型能力协议，用于隔离具体模型供应商。"""
 
@@ -50,4 +67,12 @@ class GenerationModel(Protocol):
 
     async def repair(self, artifact: str, context: dict[str, Any]) -> ModelTurn:
         """根据验证与构建上下文修复产物，并保留模型结束元数据。"""
+        ...
+
+    async def answer_customer_service(
+        self,
+        question: str,
+        contexts: list[CustomerServiceContext],
+    ) -> CustomerServiceModelAnswer:
+        """Answer one question using only the supplied knowledge fragments."""
         ...

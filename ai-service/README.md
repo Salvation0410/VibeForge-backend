@@ -174,6 +174,8 @@ Copy-Item .env.example .env
 
 客服 RAG 使用 `local_cross_encoder` 时，Reranker 在独立子进程中独占指定的模型与 GPU。模型子进程通过 OS 级 ownership lock 强制同一 `model + device` 同时只有一个 owner；同机启动多个 Web worker 不会重复占用同一 GPU，而是让后启动实例以稳定 unavailable 失败。需要多 Web worker 时，应部署独立 Reranker 服务，或为每个实例分配不同 GPU，不要依赖进程内并发配置共享单卡。
 
+`AI_SERVICE_RAG_MIN_RERANK_SCORE` 默认不设置，此时只对空检索结果执行拒答门。该阈值不得凭经验填写，必须在真实客服评估集上确定后再配置。启用阈值后，如果 Reranker 不可用，服务不会用量纲不同的 Milvus 分数替代阈值判断，而是保守返回无答案；将 `AI_SERVICE_RAG_RERANKER_PROVIDER=disabled` 视为明确的运维模式，按 Milvus 原始顺序取前三且不标记运行时降级。
+
 本机直接启动时，通常需要将 `.env` 中的 Spring 和 PostgreSQL 地址改为：
 
 ```dotenv

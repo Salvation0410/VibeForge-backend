@@ -31,6 +31,7 @@ from ai_service.orchestration.cancellation import CancellationRegistry
 from ai_service.orchestration.active_generations import ActiveGenerationRegistry
 from ai_service.orchestration.workflow import GenerationWorkflow
 from ai_service.orchestration.document_etl import KnowledgeEtlService
+from ai_service.orchestration.customer_service_rag import CustomerServiceRagService
 
 
 async def _close_resource(resource: Any) -> None:
@@ -87,6 +88,7 @@ def create_app(
     lease_validation_transport: Any | None = None,
     reranker: RerankerProvider | None = None,
     reranker_model_factory: Any | None = None,
+    customer_service_rag_service: Any | None = None,
 ) -> FastAPI:
     """创建并组装 AI 服务。
 
@@ -117,6 +119,7 @@ def create_app(
     initial_etl_service = knowledge_etl_service
     initial_mutation_coordinator = mutation_coordinator
     initial_reranker = reranker
+    initial_rag_service = customer_service_rag_service
     workflow = GenerationWorkflow(
         model=generation_model,
         tool_gateway=gateway,
@@ -180,6 +183,20 @@ def create_app(
                     store,
                     semaphore=asyncio.Semaphore(config.rag_etl_max_concurrency),
                 )
+                if app.state.customer_service_rag_service is None:
+                    app.state.customer_service_rag_service = CustomerServiceRagService(
+                        config, embeddings, store, app.state.reranker, generation_model,
+                    )
+            elif (
+                config.customer_service_rag_enabled
+                and app.state.customer_service_rag_service is None
+                and embedding_provider is not None
+                and knowledge_store is not None
+            ):
+                app.state.customer_service_rag_service = CustomerServiceRagService(
+                    config, embedding_provider, knowledge_store,
+                    app.state.reranker, generation_model,
+                )
             yield
         finally:
             try:
@@ -217,6 +234,7 @@ def create_app(
     app.state.knowledge_etl_service = initial_etl_service
     app.state.knowledge_mutation_coordinator = initial_mutation_coordinator
     app.state.reranker = initial_reranker or DisabledReranker()
+    app.state.customer_service_rag_service = initial_rag_service
 
     register_routes(
         app,

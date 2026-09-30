@@ -15,6 +15,11 @@ from ai_service.api.schemas import CodeGenType, GenerationRequest
 from ai_service.infrastructure.spring_tools import SpringToolGateway
 from ai_service.infrastructure.milvus_knowledge import MilvusKnowledgeError
 from ai_service.orchestration.document_etl import KnowledgeEtlService
+from ai_service.orchestration.customer_service_rag import (
+    CustomerServiceAnswer,
+    CustomerServiceRagError,
+    CustomerServiceSource,
+)
 from ai_service.models.base import ModelTurn, ToolCall
 from ai_service.models.quality_review import (
     IssueSeverity,
@@ -100,6 +105,27 @@ class FakeLeaseValidator:
         return self.available
 
 
+class FakeCustomerServiceRag:
+    def __init__(self, result=None, error=None):
+        self.result = result or CustomerServiceAnswer(
+            answered=True,
+            answer="Click Deploy.",
+            sources=(CustomerServiceSource(
+                document_id="doc-1", document_name="guide.md", document_version=2,
+                chunk_id="c1", locator="Deployment", excerpt="Click Deploy.",
+            ),),
+            degraded=False,
+        )
+        self.error = error
+        self.questions = []
+
+    async def answer(self, question):
+        self.questions.append(question)
+        if self.error:
+            raise self.error
+        return self.result
+
+
 def reviewer_result(
     role: ReviewerRole,
     *,
@@ -153,6 +179,103 @@ def test_authentication_is_required(app_factory, auth_headers):
     assert client.post(
         "/internal/v1/route", json={"prompt": "site"}, headers=auth_headers
     ).status_code == 200
+
+
+def test_customer_service_answer_auth_disabled_and_question_bounds(
+    app_factory, auth_headers, settings,
+):
+    path = "/internal/v1/customer-service/answers"
+    with TestClient(app_factory(customer_service_rag_service=FakeCustomerServiceRag())) as client:
+        assert client.post(path, json={"question": "hello"}).status_code == 401
+        disabled = client.post(path, json={"question": "hello"}, headers=auth_headers)
+        assert disabled.status_code == 503
+        assert disabled.json()["error"]["code"] == "CUSTOMER_SERVICE_RAG_DISABLED"
+
+    settings.customer_service_rag_enabled = True
+    service = FakeCustomerServiceRag()
+    with TestClient(app_factory(
+        customer_service_rag_service=service,
+        knowledge_etl_service=FakeKnowledgeEtlService(),
+    )) as client:
+        for question in ("   ", "x" * 4001):
+            response = client.post(path, json={"question": question}, headers=auth_headers)
+            assert response.status_code == 422
+            assert response.json()["error"]["code"] == "INVALID_REQUEST"
+    assert service.questions == []
+
+
+def test_customer_service_answer_response_is_bounded_and_has_no_raw_fields(
+    app_factory, auth_headers, settings,
+):
+    settings.customer_service_rag_enabled = True
+    service = FakeCustomerServiceRag()
+    checkpoint = MemoryCheckpoint()
+    with TestClient(app_factory(
+        customer_service_rag_service=service, checkpoint=checkpoint,
+        knowledge_etl_service=FakeKnowledgeEtlService(),
+    )) as client:
+        response = client.post(
+            "/internal/v1/customer-service/answers",
+            json={"question": "How do I deploy?"}, headers=auth_headers,
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "answered": True,
+        "answer": "Click Deploy.",
+        "sources": [{
+            "documentId": "doc-1", "documentName": "guide.md", "documentVersion": 2,
+            "chunkId": "c1", "locator": "Deployment", "excerpt": "Click Deploy.",
+        }],
+        "degraded": False,
+    }
+    assert checkpoint.saved == {}
+    assert "score" not in response.text.lower()
+    assert "prompt" not in response.text.lower()
+    assert "reasoning" not in response.text.lower()
+
+
+def test_customer_service_answer_unavailable_is_stable_and_redacted(
+    app_factory, auth_headers, settings,
+):
+    settings.customer_service_rag_enabled = True
+    service = FakeCustomerServiceRag(
+        error=CustomerServiceRagError("CUSTOMER_SERVICE_UNAVAILABLE")
+    )
+    with TestClient(app_factory(
+        customer_service_rag_service=service,
+        knowledge_etl_service=FakeKnowledgeEtlService(),
+    )) as client:
+        response = client.post(
+            "/internal/v1/customer-service/answers",
+            json={"question": "secret query"}, headers=auth_headers,
+        )
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "CUSTOMER_SERVICE_UNAVAILABLE"
+    assert "secret query" not in response.text
+
+
+def test_customer_service_no_answer_has_no_sources(
+    app_factory, auth_headers, settings,
+):
+    settings.customer_service_rag_enabled = True
+    service = FakeCustomerServiceRag(result=CustomerServiceAnswer(
+        answered=False, answer="暂未找到足够依据回答该问题。", sources=(), degraded=True,
+    ))
+    with TestClient(app_factory(
+        customer_service_rag_service=service,
+        knowledge_etl_service=FakeKnowledgeEtlService(),
+    )) as client:
+        response = client.post(
+            "/internal/v1/customer-service/answers",
+            json={"question": "unknown"}, headers=auth_headers,
+        )
+    assert response.json() == {
+        "answered": False,
+        "answer": "暂未找到足够依据回答该问题。",
+        "sources": [],
+        "degraded": True,
+    }
 
 
 def test_customer_service_etl_requires_auth_and_disabled_is_stable(

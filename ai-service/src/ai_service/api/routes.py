@@ -13,6 +13,9 @@ from ai_service.api.schemas import (
     CancelRequest,
     CancelResponse,
     CodeGenType,
+    CustomerServiceAnswerRequest,
+    CustomerServiceAnswerResponse,
+    CustomerServiceSourceResponse,
     GenerationRequest,
     KnowledgeDeleteRequest,
     KnowledgeEtlRequest,
@@ -34,6 +37,7 @@ from ai_service.orchestration.cancellation import CancellationRegistry
 from ai_service.orchestration.active_generations import ActiveGenerationRegistry
 from ai_service.orchestration.workflow import GenerationWorkflow
 from ai_service.orchestration.document_etl import DocumentETLError
+from ai_service.orchestration.customer_service_rag import CustomerServiceRagError
 
 
 _CUSTOMER_SERVICE_ERROR_STATUS = {
@@ -258,6 +262,38 @@ def register_routes(
             "ready": ready_state,
             "dependencies": dependencies,
         }, status_code=200 if ready_state or not customer_service_rag_enabled else 503)
+
+    @app.post(
+        "/internal/v1/customer-service/answers",
+        response_model=CustomerServiceAnswerResponse,
+        response_model_by_alias=True,
+        dependencies=[Depends(require_internal_auth)],
+    )
+    async def customer_service_answer(
+        body: CustomerServiceAnswerRequest, request: Request,
+    ):
+        service = getattr(request.app.state, "customer_service_rag_service", None)
+        if not customer_service_rag_enabled or service is None:
+            return _stable_error("CUSTOMER_SERVICE_RAG_DISABLED")
+        try:
+            result = await service.answer(body.question)
+            return CustomerServiceAnswerResponse(
+                answered=result.answered,
+                answer=result.answer,
+                sources=[CustomerServiceSourceResponse(
+                    document_id=item.document_id,
+                    document_name=item.document_name,
+                    document_version=item.document_version,
+                    chunk_id=item.chunk_id,
+                    locator=item.locator,
+                    excerpt=item.excerpt,
+                ) for item in result.sources[:3]],
+                degraded=result.degraded,
+            )
+        except CustomerServiceRagError as error:
+            return _stable_error(error.code)
+        except Exception:
+            return _stable_error("CUSTOMER_SERVICE_UNAVAILABLE")
 
     @app.post(
         "/internal/v1/route",
