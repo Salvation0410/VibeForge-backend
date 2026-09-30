@@ -713,6 +713,8 @@ Stage only customer-service Spring files, application configuration, and tests:
 git commit -m "feat: manage customer service knowledge documents"
 ```
 
+**完成状态（2026-09-30）：** Task 7 的 Spring/MySQL 文档管理、Outbox claim、全局 guard + 审计 lease、HMAC proof、内部验证接口、INDEX/DELETE worker 和管理员接口已实现。proof 不使用新的配置明文，而是从现有 `ai.token` 加固定上下文经 SHA-256 派生 HMAC-SHA256 密钥，proof 不落库也不记日志。collection rebuild 被建模为独立 `REBUILD` outbox，worker 执行期持有 collection lease 并调用 `/internal/v1/customer-service/knowledge:rebuild`；Task 6 尚未提供该 Python endpoint，因此当前真实 rebuild 会 fail-closed 而不会误报完成。需在后续修复中补齐 Python staging + alias 原子发布接口。
+
 ### Task 8: Implement Local GPU Reranker
 
 **Files:**

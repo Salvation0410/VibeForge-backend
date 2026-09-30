@@ -50,6 +50,17 @@ logging:
 
 # AI 引擎：legacy 保持本地链路；langgraph 全量切换；gray 按白名单/比例切换。
 ai:
+  customer-service:
+    enabled: ${AI_CUSTOMER_SERVICE_ENABLED:false}
+    service-url: ${AI_CUSTOMER_SERVICE_SERVICE_URL:http://localhost:8000}
+    timeout-seconds: ${AI_CUSTOMER_SERVICE_TIMEOUT_SECONDS:30}
+    poll-interval-millis: ${AI_CUSTOMER_SERVICE_POLL_INTERVAL_MILLIS:5000}
+    batch-size: ${AI_CUSTOMER_SERVICE_BATCH_SIZE:10}
+    claim-timeout-seconds: ${AI_CUSTOMER_SERVICE_CLAIM_TIMEOUT_SECONDS:60}
+    lease-timeout-seconds: ${AI_CUSTOMER_SERVICE_LEASE_TIMEOUT_SECONDS:45}
+    retry-max: ${AI_CUSTOMER_SERVICE_RETRY_MAX:5}
+    retry-base-delay-seconds: ${AI_CUSTOMER_SERVICE_RETRY_BASE_DELAY_SECONDS:5}
+    max-response-bytes: ${AI_CUSTOMER_SERVICE_MAX_RESPONSE_BYTES:65536}
   html-artifact:
     enabled: ${AI_HTML_SMOKE_TEST_ENABLED:true}
     required: ${AI_HTML_SMOKE_TEST_REQUIRED:true}

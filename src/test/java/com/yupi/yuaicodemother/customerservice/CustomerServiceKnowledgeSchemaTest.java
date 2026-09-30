@@ -26,6 +26,8 @@ class CustomerServiceKnowledgeSchemaTest {
         assertTrue(Pattern.compile("(?i)`?contentHash`?\\s+CHAR\\(64\\)").matcher(table).find(),
                 "contentHash must store a SHA-256 hex digest");
         assertFalse(table.toUpperCase().contains("AUTO_INCREMENT"), "Snowflake IDs must be assigned by Java");
+        assertTrue(table.contains("uk_knowledge_document_active_hash"),
+                "active document hashes need a database uniqueness backstop");
     }
 
     @Test
@@ -44,6 +46,19 @@ class CustomerServiceKnowledgeSchemaTest {
         assertFalse(table.toUpperCase().contains("FOREIGN KEY"));
         assertFalse(Pattern.compile("(?m)^\\s*`?isDelete`?\\s+").matcher(table).find(),
                 "Outbox jobs must remain visible");
+    }
+
+    @Test
+    void mutationCoordinatorUsesGlobalGuardAndAuditableLeaseTable() throws IOException {
+        String sql = Files.readString(MIGRATION);
+        String guard = tableDefinition("customer_service_knowledge_mutation_guard");
+        String lease = tableDefinition("customer_service_knowledge_mutation_lease");
+        assertColumn(guard, "nextFence");
+        for (String column : new String[]{"operationId", "scope", "operation", "fence", "expiresAt", "revokedAt"}) {
+            assertColumn(lease, column);
+        }
+        assertFalse(lease.toLowerCase().contains("proof"), "HMAC proofs must never be stored");
+        assertTrue(sql.contains("INSERT IGNORE INTO customer_service_knowledge_mutation_guard"));
     }
 
     private static String tableDefinition(String name) throws IOException {
