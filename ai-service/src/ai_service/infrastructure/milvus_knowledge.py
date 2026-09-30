@@ -26,6 +26,7 @@ _COLLECTION_BASE_LENGTH = _MAX_MILVUS_IDENTIFIER_LENGTH - max(
     len("_mutation_control_v1_000000000000"),
 )
 _VERIFY_BATCH_SIZE = 256
+_REBUILD_INSERT_BATCH_SIZE = 100
 _MAX_DOCUMENT_HISTORY_RECORDS = 10_000
 _OUTPUT_FIELDS = [
     "chunkId", "documentId", "documentVersion", "chunkIndex", "etlVersion",
@@ -37,7 +38,35 @@ _VERIFIED_FIELDS = {
     "etlVersion", "embeddingModelVersion", "fileName", "fileType", "sourceLocator",
     "content", "contentHash", "documentContentHash", "embeddingDimension",
     "schemaVersion", "mutationFence", "isActive", "embedding",
+    "rebuildFingerprint", "actualDocumentCount", "actualChunkCount",
 }
+
+
+class RebuildFingerprint:
+    """Order-sensitive, incremental fingerprint shared by planning and storage."""
+
+    def __init__(self, collection_alias: str, etl_version: str) -> None:
+        self._hasher = hashlib.sha256()
+        self._add("customer-service-rebuild-v1")
+        self._add(collection_alias)
+        self._add(etl_version)
+
+    def _add(self, value: object) -> None:
+        encoded = str(value).encode("utf-8")
+        self._hasher.update(len(encoded).to_bytes(8, "big"))
+        self._hasher.update(encoded)
+
+    def add_document(
+        self, *, document_id: str, document_version: int, file_name: str,
+        file_type: str, content_hash: str,
+    ) -> None:
+        for value in (
+            document_id, document_version, file_name, file_type.lower(), content_hash,
+        ):
+            self._add(value)
+
+    def hexdigest(self) -> str:
+        return self._hasher.hexdigest()
 
 
 class MilvusKnowledgeError(RuntimeError):
@@ -332,7 +361,7 @@ class MilvusKnowledgeStore:
 
     def _collection_metadata(
         self, model: str, dimension: int, fence: int, *,
-        rebuild: tuple[KnowledgeMutationLease, RebuildPlan, int] | None = None,
+        rebuild: tuple[KnowledgeMutationLease, RebuildPlan] | None = None,
     ) -> str:
         metadata = {
             "kind": "customer-service-knowledge",
@@ -342,13 +371,12 @@ class MilvusKnowledgeStore:
             "mutationFence": fence,
         }
         if rebuild is not None:
-            lease, plan, chunk_count = rebuild
+            lease, plan = rebuild
             metadata.update({
                 "rebuildOperationId": lease.operation_id,
                 "rebuildFingerprint": plan.document_fingerprint,
                 "rebuildEtlVersion": plan.etl_version,
                 "rebuildDocumentCount": plan.document_count,
-                "rebuildChunkCount": chunk_count,
             })
         return json.dumps(metadata, sort_keys=True, separators=(",", ":"))
 
@@ -411,7 +439,7 @@ class MilvusKnowledgeStore:
 
     async def _ensure_collection(
         self, name: str, model: str, dimension: int, fence: int, *,
-        rebuild: tuple[KnowledgeMutationLease, RebuildPlan, int] | None = None,
+        rebuild: tuple[KnowledgeMutationLease, RebuildPlan] | None = None,
     ) -> None:
         try:
             if not await self._call("has_collection", name):
@@ -458,7 +486,7 @@ class MilvusKnowledgeStore:
     async def _validate_rebuild_collection(
         self, collection: str, model: str, dimension: int,
         lease: KnowledgeMutationLease, plan: RebuildPlan,
-    ) -> int:
+    ) -> None:
         await self._validate_collection(collection, model, dimension)
         metadata = self._metadata(await self._describe_collection(collection))
         expected = {
@@ -470,10 +498,6 @@ class MilvusKnowledgeStore:
         }
         if any(metadata.get(key) != value for key, value in expected.items()):
             raise MilvusKnowledgeError("KNOWLEDGE_REBUILD_STAGING_CONFLICT")
-        chunk_count = metadata.get("rebuildChunkCount")
-        if not isinstance(chunk_count, int) or chunk_count < 0:
-            raise MilvusKnowledgeError("KNOWLEDGE_REBUILD_STAGING_CONFLICT")
-        return chunk_count
 
     @staticmethod
     def _validate_rebuild_plan(plan: RebuildPlan) -> None:
@@ -495,7 +519,8 @@ class MilvusKnowledgeStore:
         )
 
     def _chunk_rows(
-        self, document: IndexedDocument, dimension: int, *, active: bool, fence: int
+        self, document: IndexedDocument, dimension: int, *, active: bool, fence: int,
+        chunks: Sequence[IndexedChunk] | None = None,
     ) -> list[dict[str, Any]]:
         identity = self._identity(document)
         return [{
@@ -510,7 +535,7 @@ class MilvusKnowledgeStore:
             "embeddingDimension": dimension, "schemaVersion": self._schema_version,
             "mutationFence": fence, "isActive": active,
             "embedding": self._canonical_vector(chunk.embedding),
-        } for chunk in document.chunks]
+        } for chunk in (document.chunks if chunks is None else chunks)]
 
     def _manifest_row(
         self, document: IndexedDocument, dimension: int, chunks: list[dict[str, Any]],
@@ -531,6 +556,50 @@ class MilvusKnowledgeStore:
             "embedding": [0.0] * dimension, "chunkIds": chunk_ids,
             "expectedChunkCount": len(chunk_ids), "mutationFence": fence,
         }
+
+    def _rebuild_completion_row(
+        self, model: str, dimension: int, lease: KnowledgeMutationLease,
+        plan: RebuildPlan, document_count: int, chunk_count: int,
+    ) -> dict[str, Any]:
+        identity = (
+            f"rebuild-complete\0{self._alias}\0{lease.operation_id}\0{lease.fence}"
+            f"\0{plan.document_fingerprint}"
+        )
+        return {
+            "id": hashlib.sha256(identity.encode()).hexdigest(),
+            "recordType": "rebuild_complete", "chunkId": "rebuild_complete",
+            "documentId": "", "documentVersion": 0, "chunkIndex": -2,
+            "etlVersion": plan.etl_version, "embeddingModelVersion": model,
+            "fileName": "", "fileType": "", "sourceLocator": "rebuild_complete",
+            "content": "rebuild_complete", "contentHash": plan.document_fingerprint,
+            "documentContentHash": plan.document_fingerprint,
+            "embeddingDimension": dimension, "schemaVersion": self._schema_version,
+            "mutationFence": lease.fence, "isActive": False,
+            "embedding": [0.0] * dimension,
+            "rebuildFingerprint": plan.document_fingerprint,
+            "actualDocumentCount": document_count,
+            "actualChunkCount": chunk_count,
+        }
+
+    async def _validated_rebuild_completion(
+        self, collection: str, model: str, dimension: int,
+        lease: KnowledgeMutationLease, plan: RebuildPlan,
+    ) -> dict[str, Any]:
+        expected = self._rebuild_completion_row(
+            model, dimension, lease, plan, plan.document_count, 0
+        )
+        rows = await self._get_rows(collection, [expected["id"]])
+        if len(rows) != 1:
+            raise MilvusKnowledgeError("KNOWLEDGE_STAGING_INCOMPLETE")
+        actual = rows[0]
+        chunk_count = actual.get("actualChunkCount")
+        expected["actualChunkCount"] = chunk_count
+        if (
+            not isinstance(chunk_count, int) or chunk_count < 0
+            or not self._rows_match(actual, expected)
+        ):
+            raise MilvusKnowledgeError("KNOWLEDGE_STAGING_INCOMPLETE")
+        return actual
 
     @staticmethod
     def _document_filter(document_id: str) -> str:
@@ -980,11 +1049,15 @@ class MilvusKnowledgeStore:
                 model, dimension, lease, plan
             )
             if old == collection:
-                chunk_count = await self._validate_rebuild_collection(
+                await self._validate_rebuild_collection(
+                    collection, model, dimension, lease, plan
+                )
+                completion = await self._validated_rebuild_completion(
                     collection, model, dimension, lease, plan
                 )
                 return RebuildResult(
-                    collection, plan.document_count, chunk_count, True
+                    collection, plan.document_count,
+                    int(completion["actualChunkCount"]), True,
                 )
 
             switched = False
@@ -996,54 +1069,85 @@ class MilvusKnowledgeStore:
                     )
                     await self._assert_permit(permit)
                     await self._call("drop_collection", collection)
-
-                docs = [] if plan.document_count == 0 else [
-                    document async for document in documents
-                ]
-                if len(docs) != plan.document_count:
-                    raise MilvusKnowledgeError("KNOWLEDGE_REBUILD_PLAN_INVALID")
-                if docs:
-                    dimensions = {
-                        self._validate_document(document) for document in docs
-                    }
-                    models = {document.embedding_model_version for document in docs}
-                    if dimensions != {dimension} or models != {model}:
-                        raise MilvusKnowledgeError(
-                            "KNOWLEDGE_EMBEDDING_DIMENSION_MISMATCH"
-                        )
-                    if len({document.document_id for document in docs}) != len(docs):
-                        raise MilvusKnowledgeError("KNOWLEDGE_VERSION_CONFLICT")
-
-                chunks: list[dict[str, Any]] = []
-                manifests: list[dict[str, Any]] = []
-                for document in docs:
-                    if document.document_version in await self._tombstoned_versions(
-                        document.document_id, {document.document_version}
-                    ):
-                        raise MilvusKnowledgeError("KNOWLEDGE_DOCUMENT_DISABLED")
-                    rows = self._chunk_rows(
-                        document, dimension, active=True, fence=permit.fence
-                    )
-                    chunks.extend(rows)
-                    manifests.append(self._manifest_row(
-                        document, dimension, rows, fence=permit.fence
-                    ))
-
                 await self._assert_permit(permit)
                 await self._ensure_collection(
                     collection, model, dimension, permit.fence,
-                    rebuild=(lease, plan, len(chunks)),
+                    rebuild=(lease, plan),
                 )
                 created = True
                 await self._validate_rebuild_collection(
                     collection, model, dimension, lease, plan
                 )
-                all_rows = [*chunks, *manifests]
-                for start in range(0, len(all_rows), _VERIFY_BATCH_SIZE):
+
+                document_count = 0
+                chunk_count = 0
+                document_ids: set[str] = set()
+                fingerprint = RebuildFingerprint(self._alias, plan.etl_version)
+                async for document in documents:
+                    document_count += 1
+                    if document_count > plan.document_count:
+                        raise MilvusKnowledgeError("KNOWLEDGE_REBUILD_PLAN_INVALID")
+                    document_dimension = self._validate_document(document)
+                    if (
+                        document_dimension != dimension
+                        or document.embedding_model_version != model
+                    ):
+                        raise MilvusKnowledgeError(
+                            "KNOWLEDGE_EMBEDDING_DIMENSION_MISMATCH"
+                        )
+                    if document.etl_version != plan.etl_version:
+                        raise MilvusKnowledgeError("KNOWLEDGE_REBUILD_PLAN_INVALID")
+                    if document.document_id in document_ids:
+                        raise MilvusKnowledgeError("KNOWLEDGE_VERSION_CONFLICT")
+                    document_ids.add(document.document_id)
+                    fingerprint.add_document(
+                        document_id=document.document_id,
+                        document_version=document.document_version,
+                        file_name=document.file_name,
+                        file_type=document.file_type,
+                        content_hash=document.content_hash,
+                    )
+                    if document.document_version in await self._tombstoned_versions(
+                        document.document_id, {document.document_version}
+                    ):
+                        raise MilvusKnowledgeError("KNOWLEDGE_DOCUMENT_DISABLED")
+                    chunk_ids: list[dict[str, str]] = []
+                    for start in range(
+                        0, len(document.chunks), _REBUILD_INSERT_BATCH_SIZE
+                    ):
+                        rows = self._chunk_rows(
+                            document, dimension, active=True, fence=permit.fence,
+                            chunks=document.chunks[
+                                start:start + _REBUILD_INSERT_BATCH_SIZE
+                            ],
+                        )
+                        chunk_ids.extend({"id": row["id"]} for row in rows)
+                        await self._assert_permit(permit)
+                        await self._write_exact("insert", collection, rows)
+                        if not await self._verify_rows(collection, rows):
+                            raise MilvusKnowledgeError(
+                                "KNOWLEDGE_STAGING_INCOMPLETE"
+                            )
+                        chunk_count += len(rows)
+                    manifest = self._manifest_row(
+                        document, dimension, chunk_ids, fence=permit.fence
+                    )
                     await self._assert_permit(permit)
-                    await self._write_exact("insert", collection,
-                                            all_rows[start:start + _VERIFY_BATCH_SIZE])
-                if not await self._verify_rows(collection, all_rows):
+                    await self._write_exact("insert", collection, [manifest])
+                    if not await self._verify_rows(collection, [manifest]):
+                        raise MilvusKnowledgeError("KNOWLEDGE_STAGING_INCOMPLETE")
+
+                if (
+                    document_count != plan.document_count
+                    or fingerprint.hexdigest() != plan.document_fingerprint
+                ):
+                    raise MilvusKnowledgeError("KNOWLEDGE_REBUILD_PLAN_INVALID")
+                completion = self._rebuild_completion_row(
+                    model, dimension, lease, plan, document_count, chunk_count
+                )
+                await self._assert_permit(permit)
+                await self._write_exact("insert", collection, [completion])
+                if not await self._verify_rows(collection, [completion]):
                     raise MilvusKnowledgeError("KNOWLEDGE_STAGING_INCOMPLETE")
                 try:
                     await self._assert_permit(permit)
@@ -1051,7 +1155,9 @@ class MilvusKnowledgeStore:
                     switched = True
                 except MilvusKnowledgeError:
                     raise
-                return RebuildResult(collection, len(docs), len(chunks), False)
+                return RebuildResult(
+                    collection, document_count, chunk_count, False
+                )
             finally:
                 if created and not switched:
                     try:

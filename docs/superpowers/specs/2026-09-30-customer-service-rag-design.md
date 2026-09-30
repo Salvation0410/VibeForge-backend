@@ -243,7 +243,7 @@ AI_SERVICE_RAG_CHUNK_OVERLAP=150
 
 Embedding 返回后必须校验数量、维度和所有值均为有限数。密钥不得进入日志、异常、测试快照或 Git。
 
-单个 ETL 默认最多生成 8,000,000 个 embedding float 元素，覆盖 2,000,000 字符上限按 1000/150 切分、使用 3072 维模型时约 7,230,000 个元素的正常范围，同时拒绝接近 10,000 chunks 的极端峰值。8,000,000 个元素若按 Python `list[float]` 的对象与引用开销保守估算约为 256 MiB；这是防 OOM 的近似预算，不是精确 RSS。配置显式声明 embedding dimension，默认 3072；INDEX 在调用 provider 前、REBUILD 在所有文档完成下载解析和分块后，先用 `chunkCount * configuredDimension` 核对总预算，超限时不得发起任何 embedding 请求。Provider 和 service 都必须再验证实际返回向量维度与配置完全一致。进程内共享 semaphore 默认只允许 1 个 INDEX/REBUILD ETL 执行，等待或执行任务取消时必须自动释放 permit。只有后续改为流式 staging、避免整份向量同时驻留 Python 堆后，才考虑提高默认并发。功能关闭时不得初始化 semaphore 或任何 RAG 外部依赖。
+单个 ETL 默认最多生成 8,000,000 个 embedding float 元素，覆盖 2,000,000 字符上限按 1000/150 切分、使用 3072 维模型时约 7,230,000 个元素的正常范围，同时拒绝接近 10,000 chunks 的极端峰值。8,000,000 个元素若按 Python `list[float]` 的对象与引用开销保守估算约为 256 MiB；这是防 OOM 的近似预算，不是精确 RSS。配置显式声明 embedding dimension，默认 3072。REBUILD 另设默认 64 MiB 的累计 UTF-8 chunk 文本预算；每份文档解析分块后立即累计 chunk、投影 embedding elements 和文本字节，任一超限即停止，且不得继续下载下一份文档。Embedding 仍在全部文档预算预检通过后才开始，因此任何累计预算失败都不会调用 provider。Provider 和 service 都必须再验证实际返回向量维度与配置完全一致。进程内共享 semaphore 默认只允许 1 个 INDEX/REBUILD ETL 执行，等待或执行任务取消时必须自动释放 permit。功能关闭时不得初始化 semaphore 或任何 RAG 外部依赖。
 
 ### 6.4 Load
 
@@ -290,7 +290,7 @@ Task 5 的实现对上述流程作了以下安全细化：
 
 collection 必须按知识库、Embedding 模型、向量维度和 schema 版本隔离。模型或维度变化时创建新 collection，禁止原地混写。
 
-全量重建写入新的物理 collection，完成完整性验证后通过稳定 alias 原子切换。切换失败时旧 alias 继续服务。空文档集合是合法重建：已有 alias 时继承并验证受控 collection 的模型、维度和 schema；首次空重建使用配置模型、维度和当前 schema 创建空 staging 后切换 alias，从而清空旧知识。重建 staging 名由 alias、lease operationId/fence、ETL 版本和不含 signed URL 的文档集 fingerprint 确定性派生，metadata 保存同一身份与预期计数；成功重放在下载和 embedding 前直接返回 `idempotent=true`，失败残留仅在 metadata 完全匹配时允许清理重建，冲突 metadata 必须 fail-closed。
+全量重建写入新的物理 collection，完成完整性验证后通过稳定 alias 原子切换。切换失败时旧 alias 继续服务。空文档集合是合法重建：已有 alias 时继承并验证受控 collection 的模型、维度和 schema；首次空重建使用配置模型、维度和当前 schema 创建空 staging 后切换 alias，从而清空旧知识。重建 staging 名由 alias、lease operationId/fence、ETL 版本和不含 signed URL 的文档集 fingerprint 确定性派生，metadata 保存同一身份与预期计数。通过幂等探测后先创建并验证 staging，再逐文档消费异步迭代器；chunk 固定按最多 100 行写入、canonicalize 并逐批 readback，manifest 逐文档写入验证，不保留全量 rows。全部文档的顺序 fingerprint、文档数和 chunk 数验证完成后写入并回读 completion marker，只有 marker 成功才切 alias；幂等重放也必须验证 marker，不能只信 metadata。失败或取消沿既有 alias readback 语义清理或保留 staging，旧 alias 不被半成品覆盖。
 
 alias 必须符合 Milvus identifier 规则（首字符、字符集、最大 255 字符）。物理 canonical、staging 和 control 名使用同一稳定 base prefix 并为最长后缀预留空间；完整 alias 必须进入 canonical/staging fingerprint，control 名也必须包含完整 alias 的 hash。即使两个 255 字符 alias 的前 254 字符完全相同，三类物理名称和数据仍必须相互隔离，且 staging 名保持以 `canonical + "_staging_"` 开头。
 
@@ -506,6 +506,7 @@ AI_SERVICE_CLOSEAI_API_KEY=
 AI_SERVICE_CLOSEAI_BASE_URL=
 AI_SERVICE_RAG_EMBEDDING_MODEL=openai:text-embedding-3-large
 AI_SERVICE_RAG_EMBEDDING_BATCH_SIZE=
+AI_SERVICE_RAG_REBUILD_MAX_TEXT_BYTES=67108864
 
 AI_SERVICE_MILVUS_URI=
 AI_SERVICE_MILVUS_TOKEN=

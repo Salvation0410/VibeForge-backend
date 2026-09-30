@@ -16,7 +16,7 @@ from ai_service.infrastructure.milvus_knowledge import (
     RebuildResult,
 )
 from ai_service.models.embeddings import EmbeddingOutputError
-from ai_service.orchestration.document_etl import KnowledgeEtlService
+from ai_service.orchestration.document_etl import DocumentETLError, KnowledgeEtlService
 
 
 def rebuild_lease(*, alias: str = "customer_service_knowledge") -> dict:
@@ -232,6 +232,24 @@ def test_rebuild_fails_closed_when_spring_validator_is_unavailable(
     assert response.json()["error"]["code"] == "KNOWLEDGE_MUTATION_LEASE_INVALID"
 
 
+def test_rebuild_text_budget_error_is_a_stable_validation_response(
+    app_factory, auth_headers, settings,
+):
+    settings.customer_service_rag_enabled = True
+    service = FakeRebuildService(
+        DocumentETLError("KNOWLEDGE_REBUILD_TEXT_BUDGET_EXCEEDED")
+    )
+    with TestClient(app_factory(knowledge_etl_service=service)) as client:
+        response = client.post(
+            "/internal/v1/customer-service/knowledge:rebuild",
+            json=rebuild_payload(), headers=auth_headers,
+        )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == (
+        "KNOWLEDGE_REBUILD_TEXT_BUDGET_EXCEEDED"
+    )
+
+
 class Downloaded:
     def __init__(self, path: Path, cleanups: list[str], on_exit=None):
         self.path = path
@@ -386,7 +404,9 @@ async def test_rebuild_total_embedding_budget_is_fail_closed(settings, tmp_path)
     cleanups: list[str] = []
 
     class Downloader:
+        calls = 0
         async def download(self, url, **_kwargs):
+            self.calls += 1
             path = tmp_path / ("one.txt" if "/one?" in url else "two.txt")
             path.write_text(path.stem, encoding="utf-8")
             return Downloaded(path, cleanups)
@@ -402,10 +422,60 @@ async def test_rebuild_total_embedding_budget_is_fail_closed(settings, tmp_path)
             [document async for document in documents]
             raise AssertionError("budget failure should originate from iterator")
 
-    embeddings = Embeddings()
-    service = KnowledgeEtlService(settings, Downloader(), embeddings, Store())
+    downloader, embeddings = Downloader(), Embeddings()
+    service = KnowledgeEtlService(settings, downloader, embeddings, Store())
+    payload_documents = rebuild_payload()["documents"]
+    payload_documents.append({
+        "documentId": "doc-3",
+        "documentVersion": 1,
+        "fileName": "three.txt",
+        "fileType": "TXT",
+        "signedUrl": "https://oss.example.test/three?Signature=secret-three",
+        "sha256": hashlib.sha256(b"third").hexdigest(),
+    })
     with pytest.raises(
         EmbeddingOutputError, match="KNOWLEDGE_EMBEDDING_BUDGET_EXCEEDED"
+    ):
+        await service.rebuild(
+            documents=payload_documents,
+            etl_version="etl-v1",
+            lease=KnowledgeMutationLease(
+                "collection:customer_service_knowledge", "op", "REBUILD", 1,
+                time.time() + 300, "proof",
+            ),
+        )
+    assert embeddings.calls == 0
+    assert downloader.calls == 2
+    assert cleanups == ["one.txt", "two.txt"]
+
+
+@pytest.mark.asyncio
+async def test_rebuild_text_byte_budget_stops_before_next_download(settings, tmp_path):
+    settings.rag_rebuild_max_text_bytes = 4
+    cleanups: list[str] = []
+
+    class Downloader:
+        calls = 0
+        async def download(self, url, **_kwargs):
+            self.calls += 1
+            path = tmp_path / ("one.txt" if "/one?" in url else "two.txt")
+            path.write_text("你好", encoding="utf-8")
+            return Downloaded(path, cleanups)
+
+    class Embeddings:
+        calls = 0
+        async def embed_documents(self, texts, **_kwargs):
+            self.calls += 1
+            return [[0.1, 0.2] for _ in texts]
+
+    class Store:
+        async def rebuild_collection(self, documents, *, lease, plan):
+            [document async for document in documents]
+
+    downloader, embeddings = Downloader(), Embeddings()
+    service = KnowledgeEtlService(settings, downloader, embeddings, Store())
+    with pytest.raises(
+        DocumentETLError, match="^KNOWLEDGE_REBUILD_TEXT_BUDGET_EXCEEDED$"
     ):
         await service.rebuild(
             documents=rebuild_payload()["documents"],
@@ -415,8 +485,9 @@ async def test_rebuild_total_embedding_budget_is_fail_closed(settings, tmp_path)
                 time.time() + 300, "proof",
             ),
         )
+    assert downloader.calls == 1
     assert embeddings.calls == 0
-    assert cleanups == ["one.txt", "two.txt"]
+    assert cleanups == ["one.txt"]
 
 
 @pytest.mark.asyncio

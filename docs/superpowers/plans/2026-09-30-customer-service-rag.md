@@ -541,6 +541,7 @@ Store document/version/chunk metadata, enforce a single vector dimension per col
 - `upsert/delete/rebuild` 显式要求不可伪造的 `scope / operation / fence / expiry / proof`；默认 `DenyAllKnowledgeMutationCoordinator`，缺失、伪造、过期、撤销或不匹配一律 fail-closed。
 - 同一 document scope 串行；collection rebuild scope 与全部 document scope 互斥。进程内 `asyncio.Lock` 仅是优化，不承担跨实例正确性。
 - versioned chunk/manifest、旧版本保护、写后 readback、增量收敛、全量 staging + alias、确定性 tombstone，以及 fence metadata。
+- REBUILD 在幂等探测后先创建 staging，逐文档消费异步迭代器，chunk 每批最多 100 行且逐批 readback；文档 manifest 分别验证，全部计数和顺序 fingerprint 匹配后才写 completion marker 并切 alias，不在内存中汇总全部 rows。
 - 写入与校验统一 float32 canonicalization；文档历史使用 query iterator 分页并设置 10000 条硬上限。
 - 同步 RPC 使用可配置 timeout；取消时 shield 并 drain 已启动 RPC，确定结束后才释放 permit/锁。所有 drop 前 readback alias，不确定时保留 staging。
 - pymilvus 2.6 COSINE `distance` 按相似度处理；完整 alias 进入 canonical/staging fingerprint，control 名包含完整 alias hash，所有派生名合法且不超过 255 字符。
@@ -713,7 +714,7 @@ Stage only customer-service Spring files, application configuration, and tests:
 git commit -m "feat: manage customer service knowledge documents"
 ```
 
-**完成状态（2026-10-01）：** Task 7 的 Spring/MySQL 文档管理、Outbox claim、全局 guard + 审计 lease、HMAC proof、内部验证接口、INDEX/DELETE worker 和管理员接口已实现。proof 不使用新的配置明文，而是从现有 `ai.token` 加固定上下文经 SHA-256 派生 HMAC-SHA256 密钥，proof 不落库也不记日志。collection rebuild 被建模为独立 `REBUILD` outbox，worker 执行期持有 collection lease 并调用 `/internal/v1/customer-service/knowledge:rebuild`。Python 端现已补齐该 Bearer 认证 endpoint：严格匹配 Java camelCase 契约，原样传递六字段 collection lease，在 permit 生命周期内逐文档下载、解析并复用 Task 5 staging + alias 原子发布；文档数、累计 chunk 和累计 embedding elements 均有 fail-closed 上限。后续审查补齐空集合清空发布、默认 3072 维的 provider 前预算检查、实际维度强校验和确定性 staging 幂等身份；成功重放在下载/Embedding 前返回真实 `idempotent=true`。真实 Spring/Python/OSS/CloseAI/Milvus 联调仍待独立验收。
+**完成状态（2026-10-01）：** Task 7 的 Spring/MySQL 文档管理、Outbox claim、全局 guard + 审计 lease、HMAC proof、内部验证接口、INDEX/DELETE worker 和管理员接口已实现。proof 不使用新的配置明文，而是从现有 `ai.token` 加固定上下文经 SHA-256 派生 HMAC-SHA256 密钥，proof 不落库也不记日志。collection rebuild 被建模为独立 `REBUILD` outbox，worker 执行期持有 collection lease 并调用 `/internal/v1/customer-service/knowledge:rebuild`。Python 端现已补齐该 Bearer 认证 endpoint：严格匹配 Java camelCase 契约，原样传递六字段 collection lease，在 permit 生命周期内逐文档下载、解析并复用 Task 5 staging + alias 原子发布；每份文档解析后立即检查累计 chunk、embedding elements 和默认 64 MiB UTF-8 文本预算，超限时不下载下一份文档且不调用 provider。Milvus staging 逐文档消费，chunk 每批最多 100 行并逐批回读，最后以 completion marker 守护 alias 切换和幂等回放。空集合、失败和取消继续保留旧 alias。真实 Spring/Python/OSS/CloseAI/Milvus 联调仍待独立验收。
 
 Task 7 后续审查修复增加了已存量 Task 1 表的独立 MySQL 8 升级脚本 `sql/alter_customer_service_knowledge_task7.sql`，其在建立活动 hash 唯一索引前显式输出重复预检结果，并通过 `information_schema` 选择幂等 DDL。collection scope 与 Python 统一为 `collection:<alias>`，alias 默认 `customer_service_knowledge`。启用功能时，Spring 会在启动阶段拒绝不足以覆盖请求准备与 Python timeout 的 claim/lease 配置。可选真实 MySQL 测试 `CustomerServiceKnowledgeMySqlIT` 只能对专用临时库运行：设置 `CUSTOMER_SERVICE_MYSQL_IT_URL/USER/PASSWORD`，再执行 `mvn -Dtest=CustomerServiceKnowledgeMySqlIT test`。
 

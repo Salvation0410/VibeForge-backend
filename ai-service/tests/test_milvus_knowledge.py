@@ -25,6 +25,7 @@ from ai_service.infrastructure.milvus_knowledge import (
     KnowledgeMutationLease,
     MilvusKnowledgeError,
     MilvusKnowledgeStore,
+    RebuildFingerprint,
     RebuildPlan,
 )
 from ai_service.models.embeddings import CloseAIEmbeddingProvider, EmbeddingOutputError
@@ -342,6 +343,7 @@ class FakeMilvusClient:
         self.block_next_alias_switch: tuple[threading.Event, threading.Event] | None = None
         self.coordinator = FakeMutationCoordinator()
         self.iterator_calls: list[dict] = []
+        self.insert_sizes: list[int] = []
 
     def has_collection(self, collection_name, **_kwargs):
         return collection_name in self.collections
@@ -371,6 +373,7 @@ class FakeMilvusClient:
                 row["embedding"] = [cls._float32(value) for value in row["embedding"]]
 
     def insert(self, collection_name, data, **_kwargs):
+        self.insert_sizes.append(len(data))
         rows = deepcopy(data)
         self._round_trip_vectors(rows)
         if self.corrupt_next_insert and rows:
@@ -626,7 +629,23 @@ async def delete_version(knowledge, document_id, version, *, mutation_lease=None
     )
 
 
-async def rebuild(knowledge, values, *, mutation_lease=None, fence=100, document_count=1):
+def rebuild_fingerprint(items, *, alias="customer_service_knowledge", etl="etl-v1"):
+    fingerprint = RebuildFingerprint(alias, etl)
+    for item in items:
+        fingerprint.add_document(
+            document_id=item.document_id,
+            document_version=item.document_version,
+            file_name=item.file_name,
+            file_type=item.file_type,
+            content_hash=item.content_hash,
+        )
+    return fingerprint.hexdigest()
+
+
+async def rebuild(
+    knowledge, values, *, mutation_lease=None, fence=100, document_count=1,
+    expected_documents=None,
+):
     mutation_lease = mutation_lease or lease(
         "collection:customer_service_knowledge", fence, operation="REBUILD"
     )
@@ -636,7 +655,11 @@ async def rebuild(knowledge, values, *, mutation_lease=None, fence=100, document
         plan=RebuildPlan(
             embedding_model_version="embedding-v1", embedding_dimension=2,
             etl_version="etl-v1", document_count=document_count,
-            document_fingerprint="f" * 64,
+            document_fingerprint=rebuild_fingerprint(
+                expected_documents
+                if expected_documents is not None
+                else getattr(values, "items", ())
+            ),
         ),
     )
 
@@ -707,9 +730,17 @@ async def test_delete_disables_version_and_search_only_returns_active_metadata(s
         await index_document(knowledge, document())
 
 
-async def documents(*items: IndexedDocument) -> AsyncIterator[IndexedDocument]:
-    for item in items:
-        yield item
+class Documents:
+    def __init__(self, items):
+        self.items = items
+
+    async def __aiter__(self):
+        for item in self.items:
+            yield item
+
+
+def documents(*items: IndexedDocument) -> AsyncIterator[IndexedDocument]:
+    return Documents(items)
 
 
 @pytest.mark.asyncio
@@ -732,6 +763,68 @@ async def test_rebuild_validates_staging_then_atomically_switches_alias(settings
     active = [row for row in client.collections[result.collection_name]
               if row.get("recordType") == "chunk" and row["isActive"]]
     assert active and {row["documentVersion"] for row in active if row["documentId"] == "doc-1"} == {3}
+
+
+@pytest.mark.asyncio
+async def test_rebuild_inserts_bounded_batches_and_consumes_progressively(settings):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    first = document(document_id="doc-1")
+    first = replace(first, chunks=tuple(
+        replace(
+            first.chunks[0], chunk_id=f"doc-1:1:{index}", chunk_index=index,
+            content=f"content-{index}", content_hash=f"hash-{index}",
+        )
+        for index in range(205)
+    ))
+
+    async def progressive_documents():
+        yield first
+        assert client.insert_sizes == [100, 100, 5, 1]
+        yield document(document_id="doc-2")
+
+    result = await rebuild(
+        knowledge, progressive_documents(), document_count=2,
+        expected_documents=(first, document(document_id="doc-2")),
+    )
+
+    assert result.chunk_count == 207
+    assert max(client.insert_sizes) <= 100
+    assert client.insert_sizes == [100, 100, 5, 1, 2, 1, 1]
+
+
+@pytest.mark.asyncio
+async def test_rebuild_second_batch_failure_preserves_old_alias(settings):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    await index_document(knowledge, document())
+    alias = settings.milvus_collection_alias
+    old = client.aliases[alias]
+    value = document(version=2)
+    value = replace(value, chunks=tuple(
+        replace(
+            value.chunks[0], chunk_id=f"doc-1:2:{index}", chunk_index=index,
+            content=f"content-{index}", content_hash=f"hash-{index}",
+        )
+        for index in range(150)
+    ))
+    original_insert = client.insert
+    calls = 0
+
+    def fail_second_insert(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("second batch failed")
+        return original_insert(*args, **kwargs)
+
+    client.insert = fail_second_insert
+    with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_VECTOR_WRITE_FAILED$"):
+        await rebuild(knowledge, documents(value))
+
+    assert calls == 2
+    assert client.aliases[alias] == old
+    assert all("_staging_" not in name for name in client.collections)
 
 
 @pytest.mark.asyncio
@@ -795,7 +888,7 @@ async def test_empty_rebuild_without_alias_uses_configured_model_and_dimension(s
         embedding_model_version=settings.rag_embedding_model,
         embedding_dimension=3072,
         etl_version="etl-v1", document_count=0,
-        document_fingerprint="0" * 64,
+        document_fingerprint=rebuild_fingerprint(()),
     )
 
     result = await knowledge.rebuild_collection(
@@ -819,7 +912,7 @@ async def test_rebuild_replay_is_idempotent_without_consuming_documents(settings
     plan = RebuildPlan(
         embedding_model_version="embedding-v1", embedding_dimension=2,
         etl_version="etl-v1", document_count=1,
-        document_fingerprint="1" * 64,
+        document_fingerprint=rebuild_fingerprint((document(),)),
     )
     first = await knowledge.rebuild_collection(
         documents(document()), lease=mutation_lease, plan=plan,
@@ -837,6 +930,8 @@ async def test_rebuild_replay_is_idempotent_without_consuming_documents(settings
     assert replay.document_count == 1
     assert replay.chunk_count == 2
     assert replay.idempotent
+    rows = client.collections[first.collection_name]
+    assert len([row for row in rows if row.get("recordType") == "rebuild_complete"]) == 1
 
 
 @pytest.mark.asyncio
@@ -1227,6 +1322,51 @@ async def test_cancellation_during_alias_switch_preserves_active_staging(setting
     assert staging in client.collections
 
 
+@pytest.mark.asyncio
+async def test_cancellation_during_rebuild_insert_keeps_old_alias_and_cleans_staging(
+    settings,
+):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    await index_document(knowledge, document())
+    alias = settings.milvus_collection_alias
+    old = client.aliases[alias]
+    value = document(version=2)
+    value = replace(value, chunks=tuple(
+        replace(
+            value.chunks[0], chunk_id=f"doc-1:2:{index}", chunk_index=index,
+            content=f"content-{index}", content_hash=f"hash-{index}",
+        )
+        for index in range(150)
+    ))
+    started, release = threading.Event(), threading.Event()
+    original_insert = client.insert
+    calls = 0
+
+    def block_second_insert(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            started.set()
+            assert release.wait(2)
+        return original_insert(*args, **kwargs)
+
+    client.insert = block_second_insert
+    task = asyncio.create_task(rebuild(knowledge, documents(value)))
+    assert await asyncio.to_thread(started.wait, 1)
+    task.cancel()
+    await asyncio.sleep(0.02)
+
+    assert client.aliases[alias] == old
+    assert not task.done()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert client.aliases[alias] == old
+    assert all("_staging_" not in name for name in client.collections)
+
+
 @pytest.mark.parametrize(
     "alias",
     ["1knowledge", "-knowledge", "knowledge-name", "知识库", "a" * 256],
@@ -1275,10 +1415,14 @@ async def test_max_length_alias_can_rebuild_and_publish_staging(settings):
         mutation_coordinator=client.coordinator,
     )
 
+    value = document()
     result = await knowledge.rebuild_collection(
-        documents(document()),
+        documents(value),
         lease=lease(f"collection:{alias}", 100, operation="REBUILD"),
-        plan=RebuildPlan("embedding-v1", 2, "etl-v1", 1, "a" * 64),
+        plan=RebuildPlan(
+            "embedding-v1", 2, "etl-v1", 1,
+            rebuild_fingerprint((value,), alias=alias),
+        ),
     )
 
     assert client.aliases[alias] == result.collection_name
@@ -1312,13 +1456,15 @@ async def test_long_alias_fingerprints_keep_business_and_control_data_isolated(s
 
     for index, (alias, knowledge) in enumerate(zip(aliases, stores), start=1):
         document_id = f"doc-{index}"
+        value = document(document_id=document_id)
         result = await knowledge.rebuild_collection(
-            documents(document(document_id=document_id)),
+            documents(value),
             lease=lease(
                 f"collection:{alias}", 100 + index, operation="REBUILD"
             ),
             plan=RebuildPlan(
-                "embedding-v1", 2, "etl-v1", 1, f"{index}" * 64
+                "embedding-v1", 2, "etl-v1", 1,
+                rebuild_fingerprint((value,), alias=alias),
             ),
         )
         assert client.aliases[alias] == result.collection_name

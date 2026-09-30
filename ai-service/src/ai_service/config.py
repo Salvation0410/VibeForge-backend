@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     rag_etl_max_concurrency: int = Field(default=1, ge=1, le=32)
     rag_rebuild_max_documents: int = Field(default=1000, ge=1, le=10_000)
     rag_rebuild_max_chunks: int = Field(default=1_000_000, ge=1, le=1_000_000)
+    rag_rebuild_max_text_bytes: int = Field(
+        default=64 * 1024 * 1024, ge=1, le=1024 * 1024 * 1024
+    )
 
     milvus_uri: str = "http://localhost:19530"
     milvus_token: str = Field(default="", repr=False)
