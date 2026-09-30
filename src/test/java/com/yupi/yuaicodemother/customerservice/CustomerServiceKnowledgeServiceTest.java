@@ -89,6 +89,18 @@ class CustomerServiceKnowledgeServiceTest {
         verify(documents, never()).listAllActive();
     }
 
+    @Test
+    void replacementAndDetailRejectSoftDeletedDocument() {
+        var deleted = document(9, 3, 2); deleted.setIsDelete(1);
+        when(documents.findIncludingDeletedForUpdate(9)).thenReturn(deleted);
+        when(documents.findIncludingDeleted(9)).thenReturn(deleted);
+        assertThrows(RuntimeException.class, () -> service.upload(
+                new MockMultipartFile("file", "guide.txt", "text/plain", "data".getBytes()), 9L, 7));
+        assertThrows(RuntimeException.class, () -> service.detail(9));
+        verify(oss).deleteKnowledgeObject(any());
+        verify(documents, never()).update(any());
+    }
+
     private static CustomerServiceKnowledgeDocument document(long id, long version, long indexed) {
         var document = new CustomerServiceKnowledgeDocument();
         document.setId(id);

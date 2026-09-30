@@ -87,6 +87,45 @@ class CustomerServiceKnowledgeEtlWorkerTest {
     }
 
     @Test
+    void transientIndexFailureCanReenterIndexingAndThenSucceed() throws Exception {
+        var task = task("INDEX");
+        var lease = lease("INDEX");
+        when(coordinator.acquire(any(), any(), any(), any())).thenReturn(lease);
+        var document = document(); document.setStatus("INDEXING");
+        when(documents.findIncludingDeleted(1)).thenReturn(document);
+        when(documents.markIndexing(1, 1, 1)).thenReturn(1);
+        when(oss.generateKnowledgeDownloadUrl(any())).thenReturn(new URL("https://example.com/short"));
+        when(ai.index(any())).thenThrow(new CustomerServiceAiClient.CallException("TEMPORARY", true))
+                .thenReturn(new CustomerServiceAiClient.Result(2, false));
+        when(documents.completeIndex(1, 1, 1, 2)).thenReturn(1);
+
+        worker.execute(task);
+        task.setRetryCount(1);
+        worker.execute(task);
+
+        verify(ai, times(2)).index(any());
+        verify(documents).completeIndex(1, 1, 1, 2);
+        verify(outbox).finish(eq(1L), anyString(), eq("SUCCEEDED"), isNull());
+    }
+
+    @Test
+    void expiredProcessingClaimCanReenterIndexing() throws Exception {
+        var task = task("INDEX"); task.setStatus("PROCESSING");
+        var document = document(); document.setStatus("INDEXING");
+        when(outbox.findClaimCandidates(any(), anyInt())).thenReturn(List.of(task));
+        when(outbox.claim(anyLong(), anyString(), any(), any())).thenReturn(1);
+        when(coordinator.acquire(any(), any(), any(), any())).thenReturn(lease("INDEX"));
+        when(documents.findIncludingDeleted(1)).thenReturn(document);
+        when(documents.markIndexing(1, 1, 1)).thenReturn(1);
+        when(oss.generateKnowledgeDownloadUrl(any())).thenReturn(new URL("https://example.com/short"));
+        when(ai.index(any())).thenReturn(new CustomerServiceAiClient.Result(1, false));
+        when(documents.completeIndex(1, 1, 1, 1)).thenReturn(1);
+        worker.poll();
+        verify(ai).index(any());
+        verify(outbox).finish(eq(1L), anyString(), eq("SUCCEEDED"), isNull());
+    }
+
+    @Test
     void workerIsFeatureConditional() {
         ConditionalOnProperty condition = CustomerServiceKnowledgeEtlWorker.class.getAnnotation(ConditionalOnProperty.class);
         org.junit.jupiter.api.Assertions.assertNotNull(condition);
@@ -98,13 +137,14 @@ class CustomerServiceKnowledgeEtlWorkerTest {
     void rebuildHoldsCollectionLeaseForPythonCall() {
         var task = task("REBUILD");
         task.setDocumentId(0L); task.setDocumentVersion(0L);
-        var lease = new KnowledgeMutationCoordinator.Lease("collection", "op_rebuild", "REBUILD", 8, 2000000000, "proof");
-        when(coordinator.acquire(eq("collection"), any(), eq("REBUILD"), any())).thenReturn(lease);
+        var lease = new KnowledgeMutationCoordinator.Lease("collection:customer_service_knowledge", "op_rebuild", "REBUILD", 8, 2000000000, "proof");
+        when(coordinator.acquire(eq("collection:customer_service_knowledge"), any(), eq("REBUILD"), any())).thenReturn(lease);
         when(documents.listAllActive()).thenReturn(List.of());
-        when(ai.rebuild(any())).thenReturn(new CustomerServiceAiClient.Result(0, false));
+        when(ai.rebuild(any())).thenReturn(new CustomerServiceAiClient.RebuildResult(0, false));
         worker.execute(task);
-        var order = inOrder(coordinator, ai, outbox);
-        order.verify(coordinator).acquire(eq("collection"), any(), eq("REBUILD"), any());
+        var order = inOrder(documents, coordinator, ai, outbox);
+        order.verify(documents).listAllActive();
+        order.verify(coordinator).acquire(eq("collection:customer_service_knowledge"), any(), eq("REBUILD"), any());
         order.verify(ai).rebuild(argThat(request -> request.lease() == lease));
         order.verify(outbox).finish(eq(1L), anyString(), eq("SUCCEEDED"), isNull());
         order.verify(coordinator).revoke(lease);

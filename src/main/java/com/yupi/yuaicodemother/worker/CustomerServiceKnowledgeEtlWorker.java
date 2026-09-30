@@ -62,15 +62,17 @@ public class CustomerServiceKnowledgeEtlWorker {
     }
 
     public void execute(CustomerServiceKnowledgeEtlOutbox task) {
-        String scope = "REBUILD".equals(task.getOperation()) ? "collection" : "document:" + task.getDocumentId();
         String operationId = "task_" + task.getId() + "_" + UUID.randomUUID().toString().replace("-", "");
         KnowledgeMutationCoordinator.Lease lease = null;
         try {
+            PreparedRebuild preparedRebuild = "REBUILD".equals(task.getOperation()) ? prepareRebuild(task) : null;
+            String scope = "REBUILD".equals(task.getOperation())
+                    ? "collection:" + properties.getCollectionAlias() : "document:" + task.getDocumentId();
             lease = coordinator.acquire(scope, operationId, task.getOperation(), owner);
             switch (task.getOperation()) {
                 case "INDEX" -> executeIndex(task, lease);
                 case "DELETE" -> executeDelete(task, lease);
-                case "REBUILD" -> executeRebuild(task, lease);
+                case "REBUILD" -> executeRebuild(preparedRebuild, lease);
                 default -> throw new CustomerServiceAiClient.CallException("KNOWLEDGE_TASK_OPERATION_INVALID", false);
             }
             outboxMapper.finish(task.getId(), owner, "SUCCEEDED", null);
@@ -110,12 +112,17 @@ public class CustomerServiceKnowledgeEtlWorker {
                 String.valueOf(task.getDocumentId()), task.getDocumentVersion(), lease));
     }
 
-    private void executeRebuild(CustomerServiceKnowledgeEtlOutbox task, KnowledgeMutationCoordinator.Lease lease) {
+    private PreparedRebuild prepareRebuild(CustomerServiceKnowledgeEtlOutbox task) {
         List<CustomerServiceAiClient.RebuildDocument> documents = documentMapper.listAllActive().stream().map(document ->
                 new CustomerServiceAiClient.RebuildDocument(String.valueOf(document.getId()), document.getDocumentVersion(),
                         document.getName(), document.getFileType(),
                         ossManager.generateKnowledgeDownloadUrl(document.getObjectKey()).toString(), document.getContentHash())).toList();
-        aiClient.rebuild(new CustomerServiceAiClient.RebuildRequest(documents, String.valueOf(task.getEtlVersion()), lease));
+        return new PreparedRebuild(documents, String.valueOf(task.getEtlVersion()));
+    }
+
+    private void executeRebuild(PreparedRebuild prepared, KnowledgeMutationCoordinator.Lease lease) {
+        aiClient.rebuild(new CustomerServiceAiClient.RebuildRequest(properties.getCollectionAlias(),
+                prepared.documents(), prepared.etlVersion(), lease));
     }
 
     private void fail(CustomerServiceKnowledgeEtlOutbox task, String code, boolean transientFailure) {
@@ -136,4 +143,5 @@ public class CustomerServiceKnowledgeEtlWorker {
     }
 
     private static final class StaleTaskException extends RuntimeException { }
+    private record PreparedRebuild(List<CustomerServiceAiClient.RebuildDocument> documents, String etlVersion) { }
 }

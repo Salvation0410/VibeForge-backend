@@ -20,6 +20,7 @@ import java.util.List;
 
 @Component
 public class CustomerServiceAiClient {
+    private static final int MAX_CHUNK_COUNT = 1_000_000;
     private final CustomerServiceProperties properties;
     private final AiEngineProperties aiProperties;
     private final ObjectMapper objectMapper;
@@ -38,9 +39,30 @@ public class CustomerServiceAiClient {
         this.httpClient = httpClient;
     }
 
-    public Result index(IndexRequest request) { return call("/internal/v1/customer-service/knowledge:etl", request); }
-    public Result delete(DeleteRequest request) { return call("/internal/v1/customer-service/knowledge:delete", request); }
-    public Result rebuild(RebuildRequest request) { return call("/internal/v1/customer-service/knowledge:rebuild", request); }
+    public Result index(IndexRequest request) {
+        JsonNode payload = call("/internal/v1/customer-service/knowledge:etl", request);
+        validateDocumentResponse(payload, "INDEX", request.documentId(), request.documentVersion());
+        int chunkCount = requiredInt(payload, "chunkCount", 0, MAX_CHUNK_COUNT);
+        return new Result(chunkCount, requiredBoolean(payload, "idempotent"));
+    }
+
+    public Result delete(DeleteRequest request) {
+        JsonNode payload = call("/internal/v1/customer-service/knowledge:delete", request);
+        validateDocumentResponse(payload, "DELETE", request.documentId(), request.documentVersion());
+        if (requiredInt(payload, "chunkCount", 0, MAX_CHUNK_COUNT) != 0) invalidResponse();
+        return new Result(0, requiredBoolean(payload, "idempotent"));
+    }
+
+    public RebuildResult rebuild(RebuildRequest request) {
+        JsonNode payload = call("/internal/v1/customer-service/knowledge:rebuild", request);
+        requireText(payload, "operation", "REBUILD");
+        requireText(payload, "status", "SUCCEEDED");
+        requireText(payload, "collectionAlias", request.collectionAlias());
+        requireText(payload, "etlVersion", request.etlVersion());
+        int documentCount = requiredInt(payload, "documentCount", 0, 1_000_000);
+        if (documentCount != request.documents().size()) invalidResponse();
+        return new RebuildResult(documentCount, requiredBoolean(payload, "idempotent"));
+    }
 
     public boolean health() {
         try {
@@ -53,28 +75,79 @@ public class CustomerServiceAiClient {
         }
     }
 
-    private Result call(String path, Object body) {
+    private JsonNode call(String path, Object body) {
         try {
             String json = objectMapper.writeValueAsString(body);
             HttpRequest request = baseRequest(path).header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8)).build();
             HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
             byte[] bytes = readBounded(response.body());
-            JsonNode payload = objectMapper.readTree(bytes);
-            if (response.statusCode() / 100 != 2 || payload.has("error")) {
-                String code = payload.path("error").path("code").asText("KNOWLEDGE_AI_HTTP_" + response.statusCode());
+            if (response.statusCode() / 100 != 2) {
+                String code = errorCode(bytes, "KNOWLEDGE_AI_HTTP_" + response.statusCode());
                 boolean transientFailure = response.statusCode() >= 500 || response.statusCode() == 408 || response.statusCode() == 429;
                 throw new CallException(code, transientFailure);
             }
-            return new Result(payload.path("chunkCount").asInt(0), payload.path("idempotent").asBoolean(false));
+            JsonNode payload = objectMapper.readTree(bytes);
+            if (payload == null || !payload.isObject() || payload.has("error")) {
+                throw new CallException(payload == null ? "KNOWLEDGE_AI_RESPONSE_INVALID"
+                        : stableErrorCode(payload, "KNOWLEDGE_AI_RESPONSE_INVALID"), false);
+            }
+            return payload;
         } catch (CallException error) {
             throw error;
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
             throw new CallException("KNOWLEDGE_AI_INTERRUPTED", true);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException error) {
+            throw new CallException("KNOWLEDGE_AI_RESPONSE_INVALID", false);
         } catch (Exception error) {
             throw new CallException("KNOWLEDGE_AI_UNAVAILABLE", true);
         }
+    }
+
+    private String errorCode(byte[] bytes, String fallback) {
+        try {
+            JsonNode payload = objectMapper.readTree(bytes);
+            return stableErrorCode(payload, fallback);
+        } catch (Exception ignored) {
+            return fallback;
+        }
+    }
+
+    private static String stableErrorCode(JsonNode payload, String fallback) {
+        String code = payload == null ? "" : payload.path("error").path("code").asText("");
+        return code.matches("[A-Z][A-Z0-9_]{0,127}") ? code : fallback;
+    }
+
+    private static void validateDocumentResponse(JsonNode payload, String operation,
+                                                 String documentId, long documentVersion) {
+        requireText(payload, "operation", operation);
+        requireText(payload, "status", "SUCCEEDED");
+        requireText(payload, "documentId", documentId);
+        JsonNode version = payload.get("documentVersion");
+        if (version == null || !version.isIntegralNumber() || version.longValue() != documentVersion) invalidResponse();
+    }
+
+    private static void requireText(JsonNode payload, String field, String expected) {
+        JsonNode value = payload.get(field);
+        if (value == null || !value.isTextual() || !expected.equals(value.textValue())) invalidResponse();
+    }
+
+    private static int requiredInt(JsonNode payload, String field, int minimum, int maximum) {
+        JsonNode value = payload.get(field);
+        if (value == null || !value.isIntegralNumber() || !value.canConvertToInt()
+                || value.intValue() < minimum || value.intValue() > maximum) invalidResponse();
+        return value.intValue();
+    }
+
+    private static boolean requiredBoolean(JsonNode payload, String field) {
+        JsonNode value = payload.get(field);
+        if (value == null || !value.isBoolean()) invalidResponse();
+        return value.booleanValue();
+    }
+
+    private static void invalidResponse() {
+        throw new CallException("KNOWLEDGE_AI_RESPONSE_INVALID", false);
     }
 
     private HttpRequest.Builder baseRequest(String path) {
@@ -110,12 +183,13 @@ public class CustomerServiceAiClient {
     }
     public record RebuildDocument(String documentId, long documentVersion, String fileName, String fileType,
                                   String signedUrl, String sha256) { }
-    public record RebuildRequest(List<RebuildDocument> documents, String etlVersion,
+    public record RebuildRequest(String collectionAlias, List<RebuildDocument> documents, String etlVersion,
                                  KnowledgeMutationCoordinator.Lease lease) {
         @JsonProperty("operation")
         public String operation() { return "REBUILD"; }
     }
     public record Result(int chunkCount, boolean idempotent) { }
+    public record RebuildResult(int documentCount, boolean idempotent) { }
 
     public static final class CallException extends RuntimeException {
         private final String code;

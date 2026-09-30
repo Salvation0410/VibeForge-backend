@@ -51,7 +51,7 @@ public class KnowledgeMutationCoordinator {
         LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
         Long fence = mapper.lockNextFence();
         if (fence == null || fence < 1) throw new IllegalStateException("KNOWLEDGE_MUTATION_COORDINATOR_NOT_READY");
-        long conflicts = "collection".equals(scope)
+        long conflicts = scope.startsWith("collection:")
                 ? mapper.countCollectionConflicts(now)
                 : mapper.countDocumentConflicts(scope, now);
         if (conflicts > 0) throw new IllegalStateException("KNOWLEDGE_MUTATION_SCOPE_BUSY");
@@ -132,15 +132,19 @@ public class KnowledgeMutationCoordinator {
         return scope + "\n" + operationId + "\n" + operation + "\n" + fence + "\n" + expiresAt;
     }
 
-    private static void validateFields(String scope, String operationId, String operation, String owner) {
-        if (scope == null || (!"collection".equals(scope) && !scope.matches("document:[A-Za-z0-9_-]{1,128}")))
+    private void validateFields(String scope, String operationId, String operation, String owner) {
+        if (scope == null || (!scope.matches("collection:[A-Za-z_][A-Za-z0-9_]{0,244}")
+                && !scope.matches("document:[A-Za-z0-9_-]{1,128}")))
             throw new IllegalArgumentException("invalid mutation scope");
         if (operationId == null || !operationId.matches("[A-Za-z0-9_-]{1,128}"))
             throw new IllegalArgumentException("invalid operation id");
         if (!OPERATIONS.contains(operation) || owner == null || owner.isBlank())
             throw new IllegalArgumentException("invalid mutation operation");
-        if (("collection".equals(scope)) != "REBUILD".equals(operation))
+        if ((scope.startsWith("collection:")) != "REBUILD".equals(operation))
             throw new IllegalArgumentException("mutation scope and operation mismatch");
+        if (scope.startsWith("collection:")
+                && !scope.equals("collection:" + properties.getCollectionAlias()))
+            throw new IllegalArgumentException("mutation collection alias mismatch");
     }
 
     public record Lease(String scope, String operationId, String operation, long fence, long expiresAt,

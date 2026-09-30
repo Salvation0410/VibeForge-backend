@@ -27,7 +27,7 @@ public interface CustomerServiceKnowledgeDocumentMapper extends BaseMapper<Custo
     @Select("SELECT * FROM customer_service_knowledge_document WHERE isDelete=0 ORDER BY id")
     List<CustomerServiceKnowledgeDocument> listAllActive();
 
-    @Update("UPDATE customer_service_knowledge_document SET status='INDEXING',lastErrorCode=NULL WHERE id=#{id} AND documentVersion=#{version} AND etlVersion=#{etlVersion} AND status IN ('UPLOADED','FAILED','ACTIVE')")
+    @Update("UPDATE customer_service_knowledge_document SET status='INDEXING',lastErrorCode=NULL WHERE id=#{id} AND documentVersion=#{version} AND etlVersion=#{etlVersion} AND status IN ('UPLOADED','FAILED','ACTIVE','INDEXING') AND isDelete=0")
     int markIndexing(@Param("id") long id, @Param("version") long version, @Param("etlVersion") long etlVersion);
 
     @Update("UPDATE customer_service_knowledge_document SET indexedVersion=#{version},chunkCount=#{chunkCount},status='ACTIVE',lastErrorCode=NULL WHERE id=#{id} AND documentVersion=#{version} AND etlVersion=#{etlVersion} AND status='INDEXING' AND isDelete=0")

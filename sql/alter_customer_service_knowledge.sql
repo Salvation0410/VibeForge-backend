@@ -57,7 +57,7 @@ INSERT IGNORE INTO customer_service_knowledge_mutation_guard(id, nextFence) VALU
 CREATE TABLE IF NOT EXISTS customer_service_knowledge_mutation_lease
 (
     operationId VARCHAR(128) NOT NULL PRIMARY KEY COMMENT '不可重用的变更操作ID',
-    scope       VARCHAR(256) NOT NULL COMMENT 'document:<id>或collection',
+    scope       VARCHAR(256) NOT NULL COMMENT 'document:<id>或collection:<alias>',
     operation   VARCHAR(16)  NOT NULL COMMENT 'INDEX/DELETE/REBUILD',
     fence       BIGINT       NOT NULL COMMENT '全局单调fencing token',
     expiresAt   DATETIME     NOT NULL COMMENT '租约截止时间',

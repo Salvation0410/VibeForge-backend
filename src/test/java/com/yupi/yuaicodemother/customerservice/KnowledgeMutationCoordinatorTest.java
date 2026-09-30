@@ -84,6 +84,17 @@ class KnowledgeMutationCoordinatorTest {
         ai.setToken("test-secret");
         assertThrows(IllegalStateException.class, () -> new KnowledgeMutationCoordinator(
                 mapper, ai, new CustomerServiceProperties(), Clock.systemUTC())
-                .acquire("collection", "op_2", "REBUILD", "worker"));
+                .acquire("collection:customer_service_knowledge", "op_2", "REBUILD", "worker"));
+    }
+
+    @Test
+    void rebuildScopeMustUseConfiguredPythonAlias() {
+        var mapper = mock(CustomerServiceKnowledgeMutationLeaseMapper.class);
+        var ai = new AiEngineProperties(); ai.setToken("test-secret");
+        var properties = new CustomerServiceProperties(); properties.setCollectionAlias("configured_alias");
+        var coordinator = new KnowledgeMutationCoordinator(mapper, ai, properties, Clock.systemUTC());
+        assertThrows(IllegalArgumentException.class,
+                () -> coordinator.acquire("collection:other_alias", "op_alias", "REBUILD", "worker"));
+        verifyNoInteractions(mapper);
     }
 }

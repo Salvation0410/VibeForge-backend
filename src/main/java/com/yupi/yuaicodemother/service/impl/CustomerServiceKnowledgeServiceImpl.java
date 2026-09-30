@@ -58,6 +58,7 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
                 document.setIsDelete(0);
             } else {
                 document = requireDocumentForUpdate(replacementId);
+                ensureNotDeleted(document);
                 document.setDocumentVersion(document.getDocumentVersion() + 1);
                 document.setEtlVersion(document.getEtlVersion() + 1);
             }
@@ -101,7 +102,11 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
     }
 
     @Override
-    public CustomerServiceKnowledgeDocumentVO detail(long id) { return toVO(requireDocument(id)); }
+    public CustomerServiceKnowledgeDocumentVO detail(long id) {
+        CustomerServiceKnowledgeDocument document = requireDocument(id);
+        ensureNotDeleted(document);
+        return toVO(document);
+    }
 
     @Override
     @Transactional

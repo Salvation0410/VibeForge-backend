@@ -7,6 +7,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import com.yupi.yuaicodemother.mapper.CustomerServiceKnowledgeDocumentMapper;
+import org.apache.ibatis.annotations.Update;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -59,6 +61,25 @@ class CustomerServiceKnowledgeSchemaTest {
         }
         assertFalse(lease.toLowerCase().contains("proof"), "HMAC proofs must never be stored");
         assertTrue(sql.contains("INSERT IGNORE INTO customer_service_knowledge_mutation_guard"));
+    }
+
+    @Test
+    void task7UpgradeMigrationHandlesExistingTaskOneSchema() throws Exception {
+        Path upgrade = Path.of("sql", "alter_customer_service_knowledge_task7.sql");
+        String sql = Files.readString(upgrade);
+        assertTrue(sql.contains("information_schema.COLUMNS"));
+        assertTrue(sql.contains("information_schema.STATISTICS"));
+        assertTrue(sql.contains("uk_knowledge_document_active_hash"));
+        assertTrue(sql.contains("customer_service_knowledge_mutation_guard"));
+        assertTrue(sql.contains("customer_service_knowledge_mutation_lease"));
+        assertTrue(sql.toLowerCase().contains("duplicate"));
+    }
+
+    @Test
+    void indexingTransitionExplicitlyAllowsIdempotentReentry() throws Exception {
+        Update update = CustomerServiceKnowledgeDocumentMapper.class
+                .getMethod("markIndexing", long.class, long.class, long.class).getAnnotation(Update.class);
+        assertTrue(update.value()[0].contains("'INDEXING'"));
     }
 
     private static String tableDefinition(String name) throws IOException {

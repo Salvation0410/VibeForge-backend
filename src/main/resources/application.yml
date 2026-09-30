@@ -54,6 +54,8 @@ ai:
     enabled: ${AI_CUSTOMER_SERVICE_ENABLED:false}
     service-url: ${AI_CUSTOMER_SERVICE_SERVICE_URL:http://localhost:8000}
     timeout-seconds: ${AI_CUSTOMER_SERVICE_TIMEOUT_SECONDS:30}
+    collection-alias: ${AI_CUSTOMER_SERVICE_COLLECTION_ALIAS:customer_service_knowledge}
+    request-preparation-margin-seconds: ${AI_CUSTOMER_SERVICE_REQUEST_PREPARATION_MARGIN_SECONDS:10}
     poll-interval-millis: ${AI_CUSTOMER_SERVICE_POLL_INTERVAL_MILLIS:5000}
     batch-size: ${AI_CUSTOMER_SERVICE_BATCH_SIZE:10}
     claim-timeout-seconds: ${AI_CUSTOMER_SERVICE_CLAIM_TIMEOUT_SECONDS:60}

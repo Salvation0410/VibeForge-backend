@@ -19,7 +19,7 @@ public interface CustomerServiceKnowledgeMutationLeaseMapper extends BaseMapper<
     @Update("UPDATE customer_service_knowledge_mutation_guard SET nextFence=nextFence+1 WHERE id=1 AND nextFence=#{fence}")
     int advanceFence(@Param("fence") long fence);
 
-    @Select("SELECT COUNT(*) FROM customer_service_knowledge_mutation_lease WHERE revokedAt IS NULL AND expiresAt>#{now} AND (scope=#{scope} OR scope='collection')")
+    @Select("SELECT COUNT(*) FROM customer_service_knowledge_mutation_lease WHERE revokedAt IS NULL AND expiresAt>#{now} AND (scope=#{scope} OR operation='REBUILD')")
     long countDocumentConflicts(@Param("scope") String scope, @Param("now") LocalDateTime now);
 
     @Select("SELECT COUNT(*) FROM customer_service_knowledge_mutation_lease WHERE revokedAt IS NULL AND expiresAt>#{now}")
