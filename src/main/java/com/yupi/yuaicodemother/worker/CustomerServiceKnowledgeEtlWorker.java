@@ -54,10 +54,11 @@ public class CustomerServiceKnowledgeEtlWorker {
 
     @Scheduled(fixedDelayString = "${ai.customer-service.poll-interval-millis:5000}")
     public void poll() {
-        LocalDateTime now = now();
-        for (CustomerServiceKnowledgeEtlOutbox task : outboxMapper.findClaimCandidates(now, properties.getBatchSize())) {
-            LocalDateTime deadline = now.plusSeconds(Math.max(1, properties.getClaimTimeoutSeconds()));
-            if (outboxMapper.claim(task.getId(), owner, now, deadline) == 1) execute(task);
+        LocalDateTime scanNow = now();
+        for (CustomerServiceKnowledgeEtlOutbox task : outboxMapper.findClaimCandidates(scanNow, properties.getBatchSize())) {
+            LocalDateTime claimNow = now();
+            LocalDateTime deadline = claimNow.plusSeconds(Math.max(1, properties.getClaimTimeoutSeconds()));
+            if (outboxMapper.claim(task.getId(), owner, claimNow, deadline) == 1) execute(task);
         }
     }
 
@@ -65,17 +66,20 @@ public class CustomerServiceKnowledgeEtlWorker {
         String operationId = "task_" + task.getId() + "_" + UUID.randomUUID().toString().replace("-", "");
         KnowledgeMutationCoordinator.Lease lease = null;
         try {
-            PreparedRebuild preparedRebuild = "REBUILD".equals(task.getOperation()) ? prepareRebuild(task) : null;
+            PreparedOperation prepared = prepare(task);
+            refreshClaim(task);
             String scope = "REBUILD".equals(task.getOperation())
                     ? "collection:" + properties.getCollectionAlias() : "document:" + task.getDocumentId();
             lease = coordinator.acquire(scope, operationId, task.getOperation(), owner);
             switch (task.getOperation()) {
-                case "INDEX" -> executeIndex(task, lease);
+                case "INDEX" -> executeIndex(task, (PreparedIndex) prepared, lease);
                 case "DELETE" -> executeDelete(task, lease);
-                case "REBUILD" -> executeRebuild(preparedRebuild, lease);
+                case "REBUILD" -> executeRebuild((PreparedRebuild) prepared, lease);
                 default -> throw new CustomerServiceAiClient.CallException("KNOWLEDGE_TASK_OPERATION_INVALID", false);
             }
             outboxMapper.finish(task.getId(), owner, "SUCCEEDED", null);
+        } catch (LostClaimException ignored) {
+            // Another worker reclaimed the task while this worker was preparing the request.
         } catch (StaleTaskException error) {
             outboxMapper.finish(task.getId(), owner, "SKIPPED", "KNOWLEDGE_TASK_STALE");
         } catch (CustomerServiceAiClient.CallException error) {
@@ -89,25 +93,49 @@ public class CustomerServiceKnowledgeEtlWorker {
         }
     }
 
-    private void executeIndex(CustomerServiceKnowledgeEtlOutbox task, KnowledgeMutationCoordinator.Lease lease) {
+    private PreparedOperation prepare(CustomerServiceKnowledgeEtlOutbox task) {
+        return switch (task.getOperation()) {
+            case "INDEX" -> prepareIndex(task);
+            case "DELETE" -> prepareDelete(task);
+            case "REBUILD" -> prepareRebuild(task);
+            default -> throw new CustomerServiceAiClient.CallException("KNOWLEDGE_TASK_OPERATION_INVALID", false);
+        };
+    }
+
+    private PreparedIndex prepareIndex(CustomerServiceKnowledgeEtlOutbox task) {
         CustomerServiceKnowledgeDocument document = documentMapper.findIncludingDeleted(task.getDocumentId());
         if (document == null || !task.getDocumentVersion().equals(document.getDocumentVersion())
                 || !task.getEtlVersion().equals(document.getEtlVersion()) || Integer.valueOf(1).equals(document.getIsDelete())) {
             throw new StaleTaskException();
         }
+        String signedUrl = ossManager.generateKnowledgeDownloadUrl(document.getObjectKey()).toString();
+        return new PreparedIndex(document, signedUrl);
+    }
+
+    private PreparedDelete prepareDelete(CustomerServiceKnowledgeEtlOutbox task) {
+        CustomerServiceKnowledgeDocument document = documentMapper.findIncludingDeleted(task.getDocumentId());
+        if (document == null || !task.getEtlVersion().equals(document.getEtlVersion())) throw new StaleTaskException();
+        return new PreparedDelete();
+    }
+
+    private void refreshClaim(CustomerServiceKnowledgeEtlOutbox task) {
+        LocalDateTime deadline = now().plusSeconds(Math.max(1, properties.getClaimTimeoutSeconds()));
+        if (outboxMapper.refreshClaim(task.getId(), owner, deadline) != 1) throw new LostClaimException();
+    }
+
+    private void executeIndex(CustomerServiceKnowledgeEtlOutbox task, PreparedIndex prepared,
+                              KnowledgeMutationCoordinator.Lease lease) {
+        CustomerServiceKnowledgeDocument document = prepared.document();
         if (documentMapper.markIndexing(document.getId(), task.getDocumentVersion(), task.getEtlVersion()) != 1)
             throw new StaleTaskException();
-        String signedUrl = ossManager.generateKnowledgeDownloadUrl(document.getObjectKey()).toString();
         CustomerServiceAiClient.Result result = aiClient.index(new CustomerServiceAiClient.IndexRequest(
                 String.valueOf(document.getId()), task.getDocumentVersion(), document.getName(), document.getFileType(),
-                signedUrl, document.getContentHash(), String.valueOf(task.getEtlVersion()), lease));
+                prepared.signedUrl(), document.getContentHash(), String.valueOf(task.getEtlVersion()), lease));
         if (documentMapper.completeIndex(document.getId(), task.getDocumentVersion(), task.getEtlVersion(), result.chunkCount()) != 1)
             throw new StaleTaskException();
     }
 
     private void executeDelete(CustomerServiceKnowledgeEtlOutbox task, KnowledgeMutationCoordinator.Lease lease) {
-        CustomerServiceKnowledgeDocument document = documentMapper.findIncludingDeleted(task.getDocumentId());
-        if (document == null || !task.getEtlVersion().equals(document.getEtlVersion())) throw new StaleTaskException();
         aiClient.delete(new CustomerServiceAiClient.DeleteRequest(
                 String.valueOf(task.getDocumentId()), task.getDocumentVersion(), lease));
     }
@@ -143,5 +171,10 @@ public class CustomerServiceKnowledgeEtlWorker {
     }
 
     private static final class StaleTaskException extends RuntimeException { }
-    private record PreparedRebuild(List<CustomerServiceAiClient.RebuildDocument> documents, String etlVersion) { }
+    private static final class LostClaimException extends RuntimeException { }
+    private interface PreparedOperation { }
+    private record PreparedIndex(CustomerServiceKnowledgeDocument document, String signedUrl) implements PreparedOperation { }
+    private record PreparedDelete() implements PreparedOperation { }
+    private record PreparedRebuild(List<CustomerServiceAiClient.RebuildDocument> documents,
+                                   String etlVersion) implements PreparedOperation { }
 }

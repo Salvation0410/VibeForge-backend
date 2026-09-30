@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import com.yupi.yuaicodemother.mapper.CustomerServiceKnowledgeDocumentMapper;
+import com.yupi.yuaicodemother.mapper.CustomerServiceKnowledgeEtlOutboxMapper;
 import org.apache.ibatis.annotations.Update;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -27,6 +28,8 @@ class CustomerServiceKnowledgeSchemaTest {
         }
         assertTrue(Pattern.compile("(?i)`?contentHash`?\\s+CHAR\\(64\\)").matcher(table).find(),
                 "contentHash must store a SHA-256 hex digest");
+        assertTrue(Pattern.compile("(?i)`?lastErrorCode`?\\s+VARCHAR\\(128\\)").matcher(table).find(),
+                "document error codes must preserve the Python 128-character contract");
         assertFalse(table.toUpperCase().contains("AUTO_INCREMENT"), "Snowflake IDs must be assigned by Java");
         assertTrue(table.contains("uk_knowledge_document_active_hash"),
                 "active document hashes need a database uniqueness backstop");
@@ -48,6 +51,8 @@ class CustomerServiceKnowledgeSchemaTest {
         assertFalse(table.toUpperCase().contains("FOREIGN KEY"));
         assertFalse(Pattern.compile("(?m)^\\s*`?isDelete`?\\s+").matcher(table).find(),
                 "Outbox jobs must remain visible");
+        assertTrue(Pattern.compile("(?i)`?lastErrorCode`?\\s+VARCHAR\\(128\\)").matcher(table).find(),
+                "outbox error codes must preserve the Python 128-character contract");
     }
 
     @Test
@@ -73,6 +78,10 @@ class CustomerServiceKnowledgeSchemaTest {
         assertTrue(sql.contains("customer_service_knowledge_mutation_guard"));
         assertTrue(sql.contains("customer_service_knowledge_mutation_lease"));
         assertTrue(sql.toLowerCase().contains("duplicate"));
+        assertTrue(Pattern.compile("(?i)ALTER TABLE customer_service_knowledge_document MODIFY COLUMN lastErrorCode VARCHAR\\(128\\)")
+                .matcher(sql).find());
+        assertTrue(Pattern.compile("(?i)ALTER TABLE customer_service_knowledge_etl_outbox MODIFY COLUMN lastErrorCode VARCHAR\\(128\\)")
+                .matcher(sql).find());
     }
 
     @Test
@@ -80,6 +89,16 @@ class CustomerServiceKnowledgeSchemaTest {
         Update update = CustomerServiceKnowledgeDocumentMapper.class
                 .getMethod("markIndexing", long.class, long.class, long.class).getAnnotation(Update.class);
         assertTrue(update.value()[0].contains("'INDEXING'"));
+    }
+
+    @Test
+    void claimRefreshRequiresCurrentProcessingOwner() throws Exception {
+        Update update = CustomerServiceKnowledgeEtlOutboxMapper.class
+                .getMethod("refreshClaim", long.class, String.class, java.time.LocalDateTime.class)
+                .getAnnotation(Update.class);
+        String sql = update.value()[0];
+        assertTrue(sql.contains("status='PROCESSING'"));
+        assertTrue(sql.contains("processingOwner=#{owner}"));
     }
 
     private static String tableDefinition(String name) throws IOException {

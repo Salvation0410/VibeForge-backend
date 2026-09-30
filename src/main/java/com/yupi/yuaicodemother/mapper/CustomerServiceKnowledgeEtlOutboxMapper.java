@@ -17,6 +17,10 @@ public interface CustomerServiceKnowledgeEtlOutboxMapper extends BaseMapper<Cust
     int claim(@Param("id") long id, @Param("owner") String owner, @Param("now") LocalDateTime now,
               @Param("deadline") LocalDateTime deadline);
 
+    @Update("UPDATE customer_service_knowledge_etl_outbox SET processingDeadline=#{deadline} WHERE id=#{id} AND status='PROCESSING' AND processingOwner=#{owner}")
+    int refreshClaim(@Param("id") long id, @Param("owner") String owner,
+                     @Param("deadline") LocalDateTime deadline);
+
     @Update("UPDATE customer_service_knowledge_etl_outbox SET status=#{status},lastErrorCode=#{code},processingOwner=NULL,processingDeadline=NULL WHERE id=#{id} AND status='PROCESSING' AND processingOwner=#{owner}")
     int finish(@Param("id") long id, @Param("owner") String owner, @Param("status") String status,
                @Param("code") String code);

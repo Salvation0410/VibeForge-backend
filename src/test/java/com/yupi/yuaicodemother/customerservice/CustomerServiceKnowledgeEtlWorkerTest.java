@@ -16,9 +16,12 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import java.net.URL;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -34,6 +37,7 @@ class CustomerServiceKnowledgeEtlWorkerTest {
     @BeforeEach
     void setUp() {
         props.setRetryMax(5);
+        when(outbox.refreshClaim(anyLong(), anyString(), any())).thenReturn(1);
         worker = new CustomerServiceKnowledgeEtlWorker(documents, outbox, oss, ai, coordinator, props,
                 Clock.fixed(Instant.parse("2030-01-01T00:00:00Z"), ZoneOffset.UTC));
     }
@@ -47,6 +51,35 @@ class CustomerServiceKnowledgeEtlWorkerTest {
     }
 
     @Test
+    void eachCandidateReceivesFullClaimTtlAfterPreviousTaskRunsSlowly() {
+        MutableClock clock = new MutableClock(Instant.parse("2030-01-01T00:00:00Z"));
+        var first = task("INDEX");
+        var second = task("INDEX"); second.setId(2L);
+        when(outbox.findClaimCandidates(any(), anyInt())).thenReturn(List.of(first, second));
+        when(outbox.claim(anyLong(), anyString(), any(), any())).thenReturn(1);
+        var pollingWorker = spy(new CustomerServiceKnowledgeEtlWorker(
+                documents, outbox, oss, ai, coordinator, props, clock));
+        doAnswer(invocation -> {
+            if (((CustomerServiceKnowledgeEtlOutbox) invocation.getArgument(0)).getId() == 1L) {
+                clock.advanceSeconds(45);
+            }
+            return null;
+        }).when(pollingWorker).execute(any());
+
+        pollingWorker.poll();
+
+        var claimNow = org.mockito.ArgumentCaptor.forClass(LocalDateTime.class);
+        var deadline = org.mockito.ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(outbox, times(2)).claim(anyLong(), anyString(), claimNow.capture(), deadline.capture());
+        assertEquals(List.of(
+                LocalDateTime.parse("2030-01-01T00:00:00"),
+                LocalDateTime.parse("2030-01-01T00:00:45")), claimNow.getAllValues());
+        assertEquals(List.of(
+                LocalDateTime.parse("2030-01-01T00:01:00"),
+                LocalDateTime.parse("2030-01-01T00:01:45")), deadline.getAllValues());
+    }
+
+    @Test
     void staleVersionIsSkippedWithoutCallingPython() {
         var task = task("INDEX");
         var lease = lease("INDEX");
@@ -57,7 +90,7 @@ class CustomerServiceKnowledgeEtlWorkerTest {
         worker.execute(task);
         verify(outbox).finish(eq(1L), anyString(), eq("SKIPPED"), eq("KNOWLEDGE_TASK_STALE"));
         verifyNoInteractions(ai);
-        verify(coordinator).revoke(lease);
+        verifyNoInteractions(coordinator);
     }
 
     @Test
@@ -142,12 +175,55 @@ class CustomerServiceKnowledgeEtlWorkerTest {
         when(documents.listAllActive()).thenReturn(List.of());
         when(ai.rebuild(any())).thenReturn(new CustomerServiceAiClient.RebuildResult(0, false));
         worker.execute(task);
-        var order = inOrder(documents, coordinator, ai, outbox);
+        var order = inOrder(documents, outbox, coordinator, ai);
         order.verify(documents).listAllActive();
+        order.verify(outbox).refreshClaim(eq(1L), anyString(), eq(LocalDateTime.parse("2030-01-01T00:01:00")));
         order.verify(coordinator).acquire(eq("collection:customer_service_knowledge"), any(), eq("REBUILD"), any());
         order.verify(ai).rebuild(argThat(request -> request.lease() == lease));
         order.verify(outbox).finish(eq(1L), anyString(), eq("SUCCEEDED"), isNull());
         order.verify(coordinator).revoke(lease);
+    }
+
+    @Test
+    void rebuildStopsWhenPreparationOutlivesClaimAndAnotherOwnerReclaimsIt() {
+        MutableClock clock = new MutableClock(Instant.parse("2030-01-01T00:00:00Z"));
+        worker = new CustomerServiceKnowledgeEtlWorker(documents, outbox, oss, ai, coordinator, props, clock);
+        when(documents.listAllActive()).thenAnswer(invocation -> {
+            clock.advanceSeconds(61);
+            return List.of();
+        });
+        when(outbox.refreshClaim(anyLong(), anyString(), any())).thenReturn(0);
+
+        worker.execute(task("REBUILD"));
+
+        verify(outbox).refreshClaim(eq(1L), anyString(), eq(LocalDateTime.parse("2030-01-01T00:02:01")));
+        verifyNoInteractions(coordinator, ai);
+        verify(outbox, never()).finish(anyLong(), anyString(), anyString(), any());
+        verify(outbox, never()).retry(anyLong(), anyString(), anyString(), anyInt(), any(), anyString());
+    }
+
+    @Test
+    void rebuildContinuesAfterSlowPreparationWhenClaimRefreshStillOwnsTask() {
+        MutableClock clock = new MutableClock(Instant.parse("2030-01-01T00:00:00Z"));
+        worker = new CustomerServiceKnowledgeEtlWorker(documents, outbox, oss, ai, coordinator, props, clock);
+        var lease = new KnowledgeMutationCoordinator.Lease(
+                "collection:customer_service_knowledge", "op_rebuild", "REBUILD", 8, 2000000000, "proof");
+        when(documents.listAllActive()).thenAnswer(invocation -> {
+            clock.advanceSeconds(61);
+            return List.of();
+        });
+        when(outbox.refreshClaim(anyLong(), anyString(), any())).thenReturn(1);
+        when(coordinator.acquire(any(), any(), any(), any())).thenReturn(lease);
+        when(ai.rebuild(any())).thenReturn(new CustomerServiceAiClient.RebuildResult(0, false));
+
+        worker.execute(task("REBUILD"));
+
+        var order = inOrder(documents, outbox, coordinator, ai);
+        order.verify(documents).listAllActive();
+        order.verify(outbox).refreshClaim(eq(1L), anyString(), eq(LocalDateTime.parse("2030-01-01T00:02:01")));
+        order.verify(coordinator).acquire(eq("collection:customer_service_knowledge"), any(), eq("REBUILD"), any());
+        order.verify(ai).rebuild(any());
+        order.verify(outbox).finish(eq(1L), anyString(), eq("SUCCEEDED"), isNull());
     }
 
     private static CustomerServiceKnowledgeEtlOutbox task(String operation) {
@@ -164,5 +240,22 @@ class CustomerServiceKnowledgeEtlWorkerTest {
     }
     private static KnowledgeMutationCoordinator.Lease lease(String operation) {
         return new KnowledgeMutationCoordinator.Lease("document:1", "op_1", operation, 1, 2000000000, "proof");
+    }
+
+    private static final class MutableClock extends Clock {
+        private Instant instant;
+
+        private MutableClock(Instant instant) { this.instant = instant; }
+
+        private void advanceSeconds(long seconds) { instant = instant.plusSeconds(seconds); }
+
+        @Override
+        public ZoneId getZone() { return ZoneOffset.UTC; }
+
+        @Override
+        public Clock withZone(ZoneId zone) { return this; }
+
+        @Override
+        public Instant instant() { return instant; }
     }
 }

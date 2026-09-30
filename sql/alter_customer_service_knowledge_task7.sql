@@ -34,6 +34,32 @@ PREPARE cs_stmt FROM @cs_ddl;
 EXECUTE cs_stmt;
 DEALLOCATE PREPARE cs_stmt;
 
+SET @cs_ddl = IF(
+    EXISTS(SELECT 1 FROM information_schema.COLUMNS
+           WHERE TABLE_SCHEMA = @cs_schema
+             AND TABLE_NAME = 'customer_service_knowledge_document'
+             AND COLUMN_NAME = 'lastErrorCode'
+             AND CHARACTER_MAXIMUM_LENGTH = 128),
+    'SELECT 1',
+    'ALTER TABLE customer_service_knowledge_document MODIFY COLUMN lastErrorCode VARCHAR(128) NULL COMMENT ''latest processing error code'''
+);
+PREPARE cs_stmt FROM @cs_ddl;
+EXECUTE cs_stmt;
+DEALLOCATE PREPARE cs_stmt;
+
+SET @cs_ddl = IF(
+    EXISTS(SELECT 1 FROM information_schema.COLUMNS
+           WHERE TABLE_SCHEMA = @cs_schema
+             AND TABLE_NAME = 'customer_service_knowledge_etl_outbox'
+             AND COLUMN_NAME = 'lastErrorCode'
+             AND CHARACTER_MAXIMUM_LENGTH = 128),
+    'SELECT 1',
+    'ALTER TABLE customer_service_knowledge_etl_outbox MODIFY COLUMN lastErrorCode VARCHAR(128) NULL COMMENT ''latest processing error code'''
+);
+PREPARE cs_stmt FROM @cs_ddl;
+EXECUTE cs_stmt;
+DEALLOCATE PREPARE cs_stmt;
+
 CREATE TABLE IF NOT EXISTS customer_service_knowledge_mutation_guard
 (
     id         TINYINT  NOT NULL PRIMARY KEY,
