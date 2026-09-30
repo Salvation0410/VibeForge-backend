@@ -28,7 +28,7 @@
 
 ### 客服机器人 RAG 实施进度
 
-- 设计提交 `b61fc07`、实施计划提交 `be6b5db` 已完成。当前 Task 1–6 已实现；Task 7 的 Spring/MySQL coordinator、Reranker、问答和前端能力仍未完成，不能从设计或计划文档推断为可用。
+- 设计提交 `b61fc07`、实施计划提交 `be6b5db` 已完成。当前 Task 1–7 的源码已实现，其中 Task 7 是 Spring/MySQL 知识文档管理、mutation coordinator 和 ETL worker；Reranker、问答和前端能力仍未完成，且 Task 7 仍有下述真实环境验收门和 REBUILD 跨服务缺口，不能据此推断整套客服机器人可用。
 - Task 1 的 MySQL 知识文档与 ETL outbox 表、对应 MyBatis-Flex 实体和 Mapper 已在提交 `8e18149` 完成。
 - Task 1 定向 schema 测试 2 项通过，`mvn clean -DskipTests compile` 通过，暂存差异的 `git diff --cached --check` 通过。仓库没有 `mvnw.cmd`，测试和编译使用系统 Maven；测试实际命令为 `mvn test -Dtest=CustomerServiceKnowledgeSchemaTest`。
 - 尚未在真实 MySQL 执行 DDL、CRUD 或并发任务认领验证，这些仍是人工待验收项。
@@ -42,13 +42,17 @@
 - Task 4 支持 PDF、DOCX、Markdown、TXT 解析。PDF 保留页码并拒绝加密或无文本文件；Markdown/DOCX 保留真实标题层级，TXT 保留行范围，DOCX 普通、合并和嵌套表格按文档顺序提取并保留表格/行定位。`RecursiveCharacterTextSplitter` 默认分块 1000 字符、重叠 150 字符，生成稳定的 `documentId:documentVersion:index` chunk ID，按实际产出执行最多 10000 个 chunk 的上限。同步解析与切分在线程中执行，取消时等待工作线程结束再清理临时文件。
 - Task 4 定向测试 55 项通过，完整 Python 测试 326 项通过、1 项跳过；`compileall`、`uv lock --check` 和 `git diff --check` 通过。测试使用本地生成文档和模拟传输；真实 OSS 签名下载、真实 TLS/SNI 与同 IP 跨主机重定向，以及超时、大文件和取消压力仍待人工验证。首期不做 OCR，扫描 PDF 因无可提取文本而失败。
 - Task 5 已完成 CloseAI Embedding Provider 和 Milvus versioned store。Provider 单例复用底层客户端，确定性批处理 document embedding，分别支持 document/query，严格校验数量、维度和有限数，并把供应商异常映射为不含密钥或响应正文的稳定错误。Milvus store 支持版本化 chunk/manifest、完整写后校验、旧版本保护、增量激活、全量 staging + alias 切换、确定性 tombstone、COSINE 分数语义、float32 canonicalization、分页读取和单文档 10000 条硬上限；同步 RPC 使用可配置 timeout，取消时 drain 已启动 RPC 后才释放 permit/本地锁，alias 状态不确定时保留 staging。完整 alias 参与业务集合 fingerprint，control collection 也包含完整 alias hash，长 alias 之间保持隔离。
-- Task 5 采用显式 fail-closed mutation lease。Spring/MySQL Outbox 是唯一允许承担跨实例 mutation coordinator 的组件；Python store 的 `upsert/delete/rebuild` 都要求不可伪造的 `scope / operation / fence / expiry / proof`，默认 coordinator 为 `DenyAll`。同一 document scope 串行，collection rebuild scope 与全部 document scope 互斥。Task 6 已通过认证内部接口原样传递 lease，并将同步 `MilvusClient` 构造移入线程 offload；Task 7 仍必须负责 MySQL 签发、验证、fencing 和冲突域。
-- Task 5 提交链可概括为 `e052d20`、`6a6771f`、`6970873`、`2a865b6`、`a5841dd`、`a6ee768`。最终定向测试 49 项通过，完整 Python 测试 375 项通过、1 项跳过；`compileall`、`uv lock --check` 和 `git diff --check` 通过。测试使用 Fake CloseAI/Fake Milvus；真实 CloseAI 尚未调用，真实 Docker Milvus 的 schema、dynamic fields、Strong consistency、分页、批量写入、alias 切换和重启恢复仍待人工验证，真实 Spring lease 集成待 Task 7 完成后验收。
+- Task 5 采用显式 fail-closed mutation lease。Spring/MySQL Outbox 是唯一允许承担跨实例 mutation coordinator 的组件；Python store 的 `upsert/delete/rebuild` 都要求不可伪造的 `scope / operation / fence / expiry / proof`，默认 coordinator 为 `DenyAll`。同一 document scope 串行，collection rebuild scope 与全部 document scope 互斥。Task 6 已通过认证内部接口原样传递 lease，并将同步 `MilvusClient` 构造移入线程 offload；Task 7 已实现 MySQL 签发、验证、global fencing 和冲突域，真实多实例行为仍待验收。
+- Task 5 提交链可概括为 `e052d20`、`6a6771f`、`6970873`、`2a865b6`、`a5841dd`、`a6ee768`。最终定向测试 49 项通过，完整 Python 测试 375 项通过、1 项跳过；`compileall`、`uv lock --check` 和 `git diff --check` 通过。测试使用 Fake CloseAI/Fake Milvus；真实 CloseAI 尚未调用，真实 Docker Milvus 的 schema、dynamic fields、Strong consistency、分页、批量写入、alias 切换和重启恢复仍待人工验证，真实 Spring/Python lease 集成仍待验收。
 - Task 6 已提供 Bearer 认证的 `POST /internal/v1/customer-service/knowledge:etl`、`POST /internal/v1/customer-service/knowledge:delete` 和只读 `GET /internal/v1/customer-service/health`。INDEX 完整串联安全下载、解析切分、Embedding、Milvus 版本写入和稳定响应，DELETE 调用同一 store 边界；请求中的 `scope / operationId / operation / fence / expiresAt / proof` 六个 lease 字段原样绑定到存储操作，不由 Python 补造或改写。
 - Spring lease adapter 对每次 mutation 使用 `POST /api/internal/customer-service/knowledge-mutation-leases:validate`，健康检查使用只读 `GET /api/internal/customer-service/knowledge-mutation-leases/health`；网络错误、非 2xx、超时、非法 JSON、字段不匹配和超过 64 KiB 的声明或流式响应均 fail-closed，且不记录响应正文。功能只在 `AI_SERVICE_CUSTOMER_SERVICE_RAG_ENABLED=true` 时装配外部 RAG 依赖；同步 Milvus 构造在线程中执行，取消时等待构造结束并关闭已创建资源。
 - CloseAI Embedding 使用自有同步和异步 HTTP clients，并在 provider 关闭时独立释放。单次 ETL 的默认 embedding 预算为 8,000,000 个元素，provider 在首批推断维度后、请求后续批次前执行投影检查，service 在写入前复核实际总量；进程内 INDEX 默认并发为 1，等待或执行任务取消会释放 semaphore permit。
-- Task 6 提交链为 `172763a`、`4d9e56a`、`34633c9`、`b7e9ce5`、`e3d9bc3`、`70b3f68`。资源上限与配置定向测试分别 6 项、14 项通过；完整 Python 测试 435 项通过、1 项跳过，`compileall`、`uv lock --check` 和 `git diff --check` 均通过。测试使用 MockTransport、Fake CloseAI 和 Fake Milvus；Task 7 的真实 Spring endpoints 尚未实现，因此真实索引入口仍不可用。真实 Spring/MySQL fencing、OSS、CloseAI、Milvus 和完整 E2E 均待人工验收。
-- Task 7 的 Spring ETL worker 对 REBUILD fail-closed：`AI_CUSTOMER_SERVICE_REBUILD_MAX_DOCUMENTS` 默认限制 1000 个文档，`AI_CUSTOMER_SERVICE_REBUILD_MAX_REQUEST_BYTES` 默认限制序列化后的 4 MiB UTF-8 JSON；超过任一预算都不会发起 Python 请求。对 Python 的 HTTP 调用使用覆盖响应头和完整响应体的整体超时，并在读取期间按字节限制响应、超限或超时时取消订阅；默认最大响应为 64 KiB。`AI_CUSTOMER_SERVICE_RETRY_BASE_DELAY_SECONDS` 只接受 1–3600 秒，指数退避最终限制为 3600 秒，重试时间不会超过 MySQL `DATETIME` 上限。Python Task 6 尚未提供 `/internal/v1/customer-service/knowledge:rebuild`，因此真实 REBUILD 仍不可用。
+- Task 6 提交链为 `172763a`、`4d9e56a`、`34633c9`、`b7e9ce5`、`e3d9bc3`、`70b3f68`。资源上限与配置定向测试分别 6 项、14 项通过；完整 Python 测试 435 项通过、1 项跳过，`compileall`、`uv lock --check` 和 `git diff --check` 均通过。测试使用 MockTransport、Fake CloseAI 和 Fake Milvus；Task 7 现已提供 Spring 内部 lease endpoints 和索引调度端，但真实 Spring/MySQL fencing、OSS、CloseAI、Milvus 和完整 E2E 均待人工验收。
+- Task 7 的 MySQL coordinator 使用 guard 表行锁分配全局单调 fence，并将 lease 审计写入独立表；HMAC proof 不入库。签名 lease 包含 `scope / operationId / operation / fence / expiresAt / proof` 六个字段，Spring 提供 Bearer 认证的内部 `validate` 与只读 `health` 接口，验证字段绑定、过期、撤销和 HMAC，异常时 fail-closed。初始化 SQL 与面向既有 Task 1 数据库的升级 SQL `sql/alter_customer_service_knowledge_task7.sql` 已同步。
+- Task 7 已实现知识文档 Service、outbox、管理员上传/替换/重索引/启停/删除/任务历史接口，以及 worker 的 claim、过期 reclaim、claim refresh、lease 内快照重验和版本 CAS。INDEX 成功与最终失败通过独立 Spring 事务 finalizer 原子更新文档和 outbox；重试基数、指数退避和 MySQL `DATETIME` 上限均有边界。对 Python 的 HTTP 调用使用覆盖响应头与完整响应体的整体超时，流式按字节限制响应并在超限或超时时取消订阅。
+- Task 7 的 REBUILD 继续 fail-closed：默认最多 1000 个文档，序列化后 UTF-8 JSON 最多 4 MiB，查询只读取 `max + 1` 条并在 lease 内重验。由于 Python 仍缺少 `/internal/v1/customer-service/knowledge:rebuild`，Java REBUILD 当前不可用；同时重建只纳入当前 `ACTIVE` 且 `indexedVersion=documentVersion` 的文档，发生替换失败而仅保留旧 `indexedVersion` 的文档会被排除，不能把旧对象误当成可重建来源。
+- Task 7 最终聚焦套件 66 项通过，`mvn clean -DskipTests compile` 和 `git diff --check` 通过。上一轮完整 Maven 测试运行 252 项，仍在既有 `YuAiCodeMotherApplicationTests.contextLoads` 因缺少 `openAiChatModel` bean 报错；本轮未把该环境问题计为 Task 7 通过。`CustomerServiceKnowledgeMySqlIT` 需要 URL 与执行开关双 opt-in，本轮未运行，不能声称真实事务回滚、行锁或迁移已验证。
+- Task 7 的人工验收仍包括：在真实 MySQL 执行初始化/升级迁移，验证 guard 行锁、global fence、事务回滚、过期 reclaim 和多 Spring 实例竞争；验证真实私有 OSS 上传与签名下载；在 Python 路由齐备后执行 Spring/Python lease、INDEX/DELETE/REBUILD 和失败恢复联调。
 
 ### 已关闭的源码阻塞
 
@@ -575,7 +579,7 @@ Vue 多 Agent 已于 2026-09-30 本地快进合并到 `dev`，合并后 HEAD 为
 - `doc/ai-service-langchain-langgraph-refactor-design.md`：重构架构与边界设计。
 - `docs/superpowers/specs/2026-09-29-postgres-checkpoint-design.md`：PostgreSQL checkpoint 迁移、故障语义和长期记忆决策。
 - `docs/superpowers/specs/2026-09-29-vue-multi-agent-quality-review-design.md`：Vue 三角色质量审查、F1 错误语义、repair 和 checkpoint 边界。
-- `docs/superpowers/specs/2026-09-30-customer-service-rag-design.md`：客服机器人、OSS 文档 ETL、CloseAI Embedding、Milvus 和 GPU Reranker 设计；目前 Task 1–6 已实现，Task 7 的 Spring/MySQL coordinator 及后续能力仍属规划。Task 7 完成前真实索引入口不可用。
+- `docs/superpowers/specs/2026-09-30-customer-service-rag-design.md`：客服机器人、OSS 文档 ETL、CloseAI Embedding、Milvus 和 GPU Reranker 设计；目前 Task 1–7 的源码已实现，Task 7 的真实 MySQL/OSS/多实例与 Spring/Python 联调仍待验收，Python REBUILD 路由及后续 Reranker、问答和前端能力仍未完成。
 - `docs/superpowers/specs/2026-09-21-bounded-streaming-simple-prompts-design.md`：有限流式窗口和简短优化提示设计。
 - `docs/superpowers/specs/2026-09-21-circular-preview-spinner-design.md`：预览加载图正圆修复设计。
 
