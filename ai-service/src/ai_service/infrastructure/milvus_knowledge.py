@@ -723,8 +723,10 @@ class MilvusKnowledgeStore:
                         pass
 
         async def marker_batch(
-            control: str, cursor: str,
+            control: str, cursor: str, limit: int,
         ) -> list[dict[str, Any]]:
+            if limit <= 0:
+                return []
             base_filter = (
                 'recordType == "collection_retirement" and '
                 f'aliasHash == "{self._alias_hash()}"'
@@ -737,12 +739,12 @@ class MilvusKnowledgeStore:
             if cursor:
                 after_filter += f' and id > "{cursor}"'
             rows = await query_control_rows(
-                control, after_filter, self._cleanup_scan_limit, fields,
+                control, after_filter, limit, fields,
             )
-            if cursor and len(rows) < self._cleanup_scan_limit:
+            if cursor and len(rows) < limit:
                 wrapped = await query_control_rows(
                     control, base_filter,
-                    self._cleanup_scan_limit - len(rows), fields,
+                    limit - len(rows), fields,
                 )
                 seen = {str(row.get("id")) for row in rows}
                 rows.extend(
@@ -750,7 +752,7 @@ class MilvusKnowledgeStore:
                     if str(row.get("id")) not in seen
                     and str(row.get("id", "")) <= cursor
                 )
-            return rows[:self._cleanup_scan_limit]
+            return rows[:limit]
 
         try:
             async with asyncio.timeout(self._cleanup_timeout_seconds):
@@ -766,8 +768,9 @@ class MilvusKnowledgeStore:
                         "retentionComplete", "retentionGenerations",
                     ],
                 )
-                protected: list[str] = []
+                claimed_protected: list[str] = []
                 stored_generations: int | None = None
+                stored_complete: bool | None = None
                 if (
                     len(retention_rows) == 1
                     and retention_rows[0].get("recordType")
@@ -776,10 +779,16 @@ class MilvusKnowledgeStore:
                         retention_rows[0].get("protectedCollections"), list
                     )
                 ):
-                    protected = [
+                    claimed_protected = [
                         name for name in retention_rows[0]["protectedCollections"]
                         if isinstance(name, str)
-                    ][:self._retention_generations - 1]
+                    ]
+                    if isinstance(
+                        retention_rows[0].get("retentionComplete"), bool
+                    ):
+                        stored_complete = bool(
+                            retention_rows[0]["retentionComplete"]
+                        )
                     if isinstance(
                         retention_rows[0].get("retentionGenerations"), int
                     ):
@@ -787,16 +796,79 @@ class MilvusKnowledgeStore:
                             retention_rows[0]["retentionGenerations"]
                         )
                 if just_replaced is not None:
-                    protected = [
+                    claimed_protected = [
                         just_replaced,
-                        *(name for name in protected if name != just_replaced),
-                    ][:self._retention_generations - 1]
+                        *(name for name in claimed_protected if name != just_replaced),
+                    ]
+
+                distinct_claims: list[str] = []
+                seen_claims: set[str] = set()
+                for name in claimed_protected:
+                    if name not in seen_claims:
+                        seen_claims.add(name)
+                        distinct_claims.append(name)
+
+                protected: list[str] = []
+                owned_count = 0
+                retention_uncertain = False
+                validation_count = 0
+                target_count = self._retention_generations - 1
+                for name in distinct_claims:
+                    if len(protected) >= target_count:
+                        break
+                    if validation_count >= self._cleanup_scan_limit:
+                        retention_uncertain = True
+                        break
+                    validation_count += 1
+                    try:
+                        if not await call("has_collection", name):
+                            continue
+                        description = await call("describe_collection", name)
+                        metadata = self._metadata(description)
+                    except TimeoutError:
+                        raise
+                    except Exception:
+                        protected.append(name)
+                        retention_uncertain = True
+                        logger.warning(
+                            "customer-service protected collection validation "
+                            "is uncertain; cleanup remains disabled"
+                        )
+                        continue
+                    owned = (
+                        metadata.get("kind") == "customer-service-knowledge"
+                        and metadata.get("aliasHash") == self._alias_hash()
+                        and metadata.get("schemaVersion") == self._schema_version
+                        and isinstance(
+                            metadata.get("embeddingModelVersion"), str
+                        )
+                        and bool(metadata["embeddingModelVersion"])
+                        and isinstance(
+                            metadata.get("embeddingDimension"), int
+                        )
+                        and metadata["embeddingDimension"] > 0
+                        and self._described_dimension(description)
+                        == metadata["embeddingDimension"]
+                        and isinstance(metadata.get("mutationFence"), int)
+                        and metadata["mutationFence"] >= 1
+                    )
+                    protected.append(name)
+                    if owned:
+                        owned_count += 1
+                    else:
+                        retention_uncertain = True
+                        logger.warning(
+                            "customer-service protected collection ownership "
+                            "is uncertain; cleanup remains disabled"
+                        )
                 retention_complete = (
-                    len(protected) >= self._retention_generations - 1
+                    not retention_uncertain and owned_count >= target_count
                 )
                 if (
                     just_replaced is not None
                     or stored_generations != self._retention_generations
+                    or protected != claimed_protected
+                    or stored_complete != retention_complete
                 ):
                     retention_row = {
                         "id": self._retention_state_id(),
@@ -832,7 +904,10 @@ class MilvusKnowledgeStore:
                     and isinstance(cursor_rows[0].get("cursorMarkerId"), str)
                 ):
                     cursor = str(cursor_rows[0]["cursorMarkerId"])
-                marker_rows = await marker_batch(control, cursor)
+                marker_rows = await marker_batch(
+                    control, cursor,
+                    self._cleanup_scan_limit - validation_count,
+                )
                 cutoff = time.time() - self._cleanup_grace_seconds
                 for marker in marker_rows:
                     name = marker.get("collectionName")
@@ -883,7 +958,11 @@ class MilvusKnowledgeStore:
                         ("recordType", "cursorMarkerId", "aliasHash", "schemaVersion"),
                     )
 
-                discovery_budget = self._cleanup_scan_limit - len(marker_rows)
+                discovery_budget = (
+                    self._cleanup_scan_limit
+                    - validation_count
+                    - len(marker_rows)
+                )
                 if discovery_budget <= 0:
                     return
                 names = await call("list_collections")

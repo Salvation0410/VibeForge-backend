@@ -1074,6 +1074,132 @@ async def test_retention_state_rebinds_when_generation_config_changes(
     assert len(state["protectedCollections"]) == 1
 
 
+async def run_retention_state_validation_case(
+    settings, protected, *, mismatched=(), describe_failure=(), fence=900,
+):
+    settings.rag_collection_retention_generations = 4
+    settings.rag_collection_cleanup_grace_seconds = 1
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    current = knowledge._collection_name("embedding-v1", 2, suffix="_staging_current")
+    candidate = knowledge._collection_name(
+        "embedding-v1", 2, suffix="_staging_candidate"
+    )
+    for index, name in enumerate({current, candidate, *protected} - {"missing"}):
+        client.collections[name] = []
+        client.dimensions[name] = 2
+        metadata = json.loads(knowledge._collection_metadata(
+            "embedding-v1", 2, index + 1,
+        ))
+        if name in mismatched:
+            metadata["aliasHash"] = "wrong-alias"
+        client.descriptions[name] = json.dumps(metadata)
+    client.aliases[settings.milvus_collection_alias] = current
+    original_describe = client.describe_collection
+
+    def describe_collection(collection_name, **kwargs):
+        if collection_name in describe_failure:
+            raise RuntimeError("protected description unavailable")
+        return original_describe(collection_name, **kwargs)
+
+    client.describe_collection = describe_collection
+    control = await knowledge._ensure_control_collection(fence)
+    client.collections[control].extend((
+        {
+            "id": knowledge._retention_state_id(),
+            "recordType": "collection_retention_state",
+            "protectedCollections": list(protected),
+            "retentionComplete": True, "retentionGenerations": 4,
+            "aliasHash": knowledge._alias_hash(),
+            "mutationFence": fence, "schemaVersion": 1,
+            "isActive": False, "embedding": [0.0],
+        },
+        {
+            "id": knowledge._retirement_id(candidate),
+            "recordType": "collection_retirement",
+            "collectionName": candidate, "retiredAt": 1.0,
+            "aliasHash": knowledge._alias_hash(),
+            "mutationFence": fence, "schemaVersion": 1,
+            "isActive": False, "embedding": [0.0],
+        },
+    ))
+    await knowledge._cleanup_retired_collections(
+        current=current, just_replaced=None,
+        model="embedding-v1", dimension=2,
+        permit=FakeMutationPermit(client.coordinator, lease(
+            f"collection:{settings.milvus_collection_alias}", fence + 1,
+            operation="REBUILD",
+        )),
+    )
+    state = next(
+        row for row in client.collections[control]
+        if row.get("recordType") == "collection_retention_state"
+    )
+    return client, knowledge, state, candidate
+
+
+@pytest.mark.asyncio
+async def test_retention_state_deduplicates_and_removes_missing_before_counting(
+    settings, monkeypatch,
+):
+    monkeypatch.setattr(milvus_module.time, "time", lambda: 10_000.0)
+    owned = "customer_service_knowledge_owned"
+    client, _, state, candidate = await run_retention_state_validation_case(
+        settings, [owned, owned, "missing"],
+    )
+
+    assert state["protectedCollections"] == [owned]
+    assert state["retentionComplete"] is False
+    assert candidate in client.collections
+
+
+@pytest.mark.asyncio
+async def test_retention_state_requires_three_owned_rollback_collections(
+    settings, monkeypatch,
+):
+    monkeypatch.setattr(milvus_module.time, "time", lambda: 10_000.0)
+    protected = [f"customer_service_knowledge_owned_{index}" for index in range(3)]
+    client, _, state, candidate = await run_retention_state_validation_case(
+        settings, protected, fence=910,
+    )
+
+    assert state["protectedCollections"] == protected
+    assert state["retentionComplete"] is True
+    assert candidate not in client.collections
+
+
+@pytest.mark.asyncio
+async def test_retention_state_alias_mismatch_blocks_all_deletion(
+    settings, monkeypatch,
+):
+    monkeypatch.setattr(milvus_module.time, "time", lambda: 10_000.0)
+    protected = [f"customer_service_knowledge_owned_{index}" for index in range(3)]
+    client, _, state, candidate = await run_retention_state_validation_case(
+        settings, protected, mismatched={protected[1]}, fence=920,
+    )
+
+    assert state["protectedCollections"] == protected
+    assert state["retentionComplete"] is False
+    assert candidate in client.collections
+
+
+@pytest.mark.asyncio
+async def test_retention_state_rpc_uncertainty_blocks_all_deletion(
+    settings, monkeypatch, caplog,
+):
+    monkeypatch.setattr(milvus_module.time, "time", lambda: 10_000.0)
+    protected = [f"customer_service_knowledge_owned_{index}" for index in range(3)]
+    client, _, state, candidate = await run_retention_state_validation_case(
+        settings, protected, describe_failure={protected[1]}, fence=930,
+    )
+
+    assert state["protectedCollections"] == protected
+    assert state["retentionComplete"] is False
+    assert candidate in client.collections
+    assert "protected collection validation is uncertain" in caplog.text
+    assert "protected description unavailable" not in caplog.text
+
+
 @pytest.mark.asyncio
 async def test_rebuild_cleanup_preserves_generations_inside_grace(settings, monkeypatch):
     clock = [2_000.0]
@@ -1426,7 +1552,7 @@ async def test_rebuild_cleanup_scan_limit_advances_markers_and_deletes_in_batche
     } for name in names[:-2])
 
     remaining_counts = []
-    for fence in range(100, 110):
+    for fence in range(100, 111):
         before = len(client.describe_calls)
         await knowledge._cleanup_retired_collections(
             current=names[-1], just_replaced=None,
@@ -1513,7 +1639,7 @@ async def test_cleanup_large_namespace_reads_only_one_marker_batch_per_round(
             row.get("recordType") == "collection_retirement"
             for row in client.collections[knowledge._control_collection_name()]
         ))
-    assert remaining_counts == [9_898, 9_798, 9_698]
+    assert remaining_counts == [9_899, 9_800, 9_701]
 
 
 @pytest.mark.asyncio
