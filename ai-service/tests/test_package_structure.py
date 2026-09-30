@@ -1,5 +1,9 @@
 """职责分包的导入契约测试。"""
 
+import sys
+
+import pytest
+
 
 def test_public_modules_can_be_imported_from_new_packages():
     """确保启动入口和四类职责模块均可独立加载。"""
@@ -46,3 +50,10 @@ def test_customer_service_rag_dependencies_can_be_imported():
     assert FlagReranker
     assert PdfReader
     assert Document
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows CUDA wheel contract")
+def test_windows_reranker_runtime_uses_cuda_torch():
+    import torch
+
+    assert torch.version.cuda == "12.4"
