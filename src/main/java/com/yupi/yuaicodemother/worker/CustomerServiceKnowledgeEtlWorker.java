@@ -185,7 +185,7 @@ public class CustomerServiceKnowledgeEtlWorker {
     }
 
     private List<RebuildDocumentSnapshot> rebuildSnapshot() {
-        return documentMapper.listAllActive().stream().map(document ->
+        return documentMapper.listAllRebuildable().stream().map(document ->
                 new RebuildDocumentSnapshot(document.getId(), document.getDocumentVersion(), document.getEtlVersion(),
                         document.getIndexedVersion(), document.getName(), document.getFileType(), document.getObjectKey(),
                         document.getContentHash(), document.getStatus(), document.getIsDelete())).toList();

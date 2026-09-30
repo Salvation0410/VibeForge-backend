@@ -9,6 +9,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import com.yupi.yuaicodemother.mapper.CustomerServiceKnowledgeDocumentMapper;
 import com.yupi.yuaicodemother.mapper.CustomerServiceKnowledgeEtlOutboxMapper;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -99,6 +100,32 @@ class CustomerServiceKnowledgeSchemaTest {
         String sql = update.value()[0];
         assertTrue(sql.contains("status='PROCESSING'"));
         assertTrue(sql.contains("processingOwner=#{owner}"));
+    }
+
+    @Test
+    void rebuildQueryExcludesDisabledDocuments() throws Exception {
+        assertTrue(rebuildableQuery().contains("status='ACTIVE'"));
+    }
+
+    @Test
+    void rebuildQueryExcludesFailedReplacementWithOnlyOldIndexedVersion() throws Exception {
+        String sql = rebuildableQuery();
+        assertTrue(sql.contains("indexedVersion>0"));
+        assertTrue(sql.contains("indexedVersion=documentVersion"));
+    }
+
+    @Test
+    void rebuildQueryIncludesOnlyCurrentActiveDocuments() throws Exception {
+        String sql = rebuildableQuery();
+        assertTrue(sql.contains("isDelete=0"));
+        assertTrue(sql.contains("status='ACTIVE'"));
+        assertTrue(sql.contains("indexedVersion=documentVersion"));
+    }
+
+    private static String rebuildableQuery() throws Exception {
+        Select select = CustomerServiceKnowledgeDocumentMapper.class
+                .getMethod("listAllRebuildable").getAnnotation(Select.class);
+        return select.value()[0];
     }
 
     private static String tableDefinition(String name) throws IOException {

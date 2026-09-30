@@ -86,7 +86,7 @@ class CustomerServiceKnowledgeServiceTest {
         assertEquals(1, service.rebuild(7));
         verify(outbox).insert(argThat(task -> "REBUILD".equals(task.getOperation())
                 && task.getDocumentId() == 0 && task.getDocumentVersion() == 0));
-        verify(documents, never()).listAllActive();
+        verify(documents, never()).listAllRebuildable();
     }
 
     @Test
