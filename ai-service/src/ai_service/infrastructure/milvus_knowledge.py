@@ -499,6 +499,49 @@ class MilvusKnowledgeStore:
         if any(metadata.get(key) != value for key, value in expected.items()):
             raise MilvusKnowledgeError("KNOWLEDGE_REBUILD_STAGING_CONFLICT")
 
+    async def _cleanup_rebuild_candidate(
+        self, collection: str, lease: KnowledgeMutationLease,
+        plan: RebuildPlan, model: str, dimension: int, *,
+        known_absent_before_create: bool,
+    ) -> None:
+        try:
+            if collection != self._rebuild_collection_name(
+                model, dimension, lease, plan
+            ):
+                return
+            if await self._alias_target() == collection:
+                return
+            if not await self._call("has_collection", collection):
+                return
+            description = await self._describe_collection(collection)
+            raw_metadata = description.get("description", "")
+            if not raw_metadata and known_absent_before_create:
+                owned = True
+            else:
+                try:
+                    metadata = json.loads(raw_metadata)
+                except (TypeError, ValueError):
+                    return
+                expected = {
+                    "kind": "customer-service-knowledge",
+                    "embeddingModelVersion": model,
+                    "embeddingDimension": dimension,
+                    "schemaVersion": self._schema_version,
+                    "mutationFence": lease.fence,
+                    "rebuildOperationId": lease.operation_id,
+                    "rebuildFingerprint": plan.document_fingerprint,
+                    "rebuildEtlVersion": plan.etl_version,
+                    "rebuildDocumentCount": plan.document_count,
+                }
+                owned = isinstance(metadata, dict) and all(
+                    metadata.get(key) == value for key, value in expected.items()
+                )
+            if owned:
+                await self._call("drop_collection", collection)
+        except (Exception, asyncio.CancelledError):
+            # Cleanup is best effort. Any uncertain alias or ownership state preserves staging.
+            return
+
     @staticmethod
     def _validate_rebuild_plan(plan: RebuildPlan) -> None:
         if (
@@ -1061,7 +1104,7 @@ class MilvusKnowledgeStore:
                 )
 
             switched = False
-            created = False
+            cleanup_candidate = False
             try:
                 if await self._call("has_collection", collection):
                     await self._validate_rebuild_collection(
@@ -1069,12 +1112,12 @@ class MilvusKnowledgeStore:
                     )
                     await self._assert_permit(permit)
                     await self._call("drop_collection", collection)
+                cleanup_candidate = True
                 await self._assert_permit(permit)
                 await self._ensure_collection(
                     collection, model, dimension, permit.fence,
                     rebuild=(lease, plan),
                 )
-                created = True
                 await self._validate_rebuild_collection(
                     collection, model, dimension, lease, plan
                 )
@@ -1159,15 +1202,11 @@ class MilvusKnowledgeStore:
                     collection, document_count, chunk_count, False
                 )
             finally:
-                if created and not switched:
-                    try:
-                        current = await self._alias_target()
-                        if current != collection and await self._call(
-                            "has_collection", collection
-                        ):
-                            await self._call("drop_collection", collection)
-                    except (Exception, asyncio.CancelledError):
-                        pass
+                if cleanup_candidate and not switched:
+                    await self._cleanup_rebuild_candidate(
+                        collection, lease, plan, model, dimension,
+                        known_absent_before_create=True,
+                    )
 
     async def ping(self) -> bool:
         try:

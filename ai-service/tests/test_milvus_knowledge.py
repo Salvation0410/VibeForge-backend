@@ -340,6 +340,7 @@ class FakeMilvusClient:
         self.partial_active_upsert_count: int | None = None
         self.before_old_activation: tuple[threading.Event, threading.Event] | None = None
         self.block_next_upsert: tuple[threading.Event, threading.Event] | None = None
+        self.block_next_create: tuple[threading.Event, threading.Event] | None = None
         self.block_next_alias_switch: tuple[threading.Event, threading.Event] | None = None
         self.coordinator = FakeMutationCoordinator()
         self.iterator_calls: list[dict] = []
@@ -352,6 +353,11 @@ class FakeMilvusClient:
         self.collections[collection_name] = []
         self.dimensions[collection_name] = dimension
         self.descriptions[collection_name] = kwargs.get("description", "")
+        if self.block_next_create:
+            started, release = self.block_next_create
+            self.block_next_create = None
+            started.set()
+            assert release.wait(2)
 
     def describe_collection(self, collection_name, **_kwargs):
         return {"collection_name": collection_name, "dimension": self.dimensions[collection_name],
@@ -1362,6 +1368,66 @@ async def test_cancellation_during_rebuild_insert_keeps_old_alias_and_cleans_sta
     release.set()
     with pytest.raises(asyncio.CancelledError):
         await task
+
+    assert client.aliases[alias] == old
+    assert all("_staging_" not in name for name in client.collections)
+
+
+@pytest.mark.asyncio
+async def test_cancellation_after_rebuild_create_cleans_new_staging(settings):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    await index_document(knowledge, document())
+    alias = settings.milvus_collection_alias
+    old = client.aliases[alias]
+    started, release = threading.Event(), threading.Event()
+    client.block_next_create = (started, release)
+
+    task = asyncio.create_task(rebuild(
+        knowledge, documents(document(version=2)), fence=104,
+    ))
+    assert await asyncio.to_thread(started.wait, 1)
+    task.cancel()
+    await asyncio.sleep(0.02)
+
+    assert client.aliases[alias] == old
+    assert not task.done()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert client.aliases[alias] == old
+    assert all("_staging_" not in name for name in client.collections)
+
+
+@pytest.mark.asyncio
+async def test_rebuild_validation_failure_after_create_cleans_new_staging(
+    settings, monkeypatch,
+):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    await index_document(knowledge, document())
+    alias = settings.milvus_collection_alias
+    old = client.aliases[alias]
+    original = knowledge._validate_rebuild_collection
+    calls = 0
+
+    async def fail_first_validation(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise MilvusKnowledgeError("KNOWLEDGE_REBUILD_STAGING_CONFLICT")
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        knowledge, "_validate_rebuild_collection", fail_first_validation
+    )
+    with pytest.raises(
+        MilvusKnowledgeError, match="^KNOWLEDGE_REBUILD_STAGING_CONFLICT$"
+    ):
+        await rebuild(
+            knowledge, documents(document(version=2)), fence=105,
+        )
 
     assert client.aliases[alias] == old
     assert all("_staging_" not in name for name in client.collections)
