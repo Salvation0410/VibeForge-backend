@@ -127,12 +127,12 @@ class Settings(BaseSettings):
             raise ValueError(
                 "rag_min_rerank_score requires an enabled reranker provider"
             )
-        if self.rag_collection_cleanup_grace_seconds <= max(
-            self.rag_answer_timeout_seconds, self.milvus_rpc_timeout_seconds,
+        if self.rag_collection_cleanup_grace_seconds <= (
+            self.rag_answer_timeout_seconds + self.milvus_rpc_timeout_seconds + 1
         ):
             raise ValueError(
-                "rag_collection_cleanup_grace_seconds must exceed RAG request and "
-                "Milvus RPC timeouts"
+                "rag_collection_cleanup_grace_seconds must exceed the combined "
+                "RAG request and Milvus RPC cancellation-drain timeouts plus margin"
             )
         if (
             self.rag_collection_cleanup_timeout_seconds

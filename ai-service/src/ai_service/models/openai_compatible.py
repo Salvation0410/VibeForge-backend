@@ -58,7 +58,6 @@ class OpenAICompatibleModel:
             model=settings.model_name,
             temperature=settings.model_temperature,
             max_tokens=settings.model_max_tokens,
-            timeout=settings.rag_answer_timeout_seconds,
         )
 
     async def route(self, prompt: str) -> str:

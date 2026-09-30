@@ -61,12 +61,14 @@ def test_model_client_receives_configured_max_tokens(monkeypatch):
         spring_gateway_base_url="http://spring.test",
         spring_gateway_bearer_token="gateway-token",
         model_max_tokens=4096,
+        rag_answer_timeout_seconds=17,
     )
 
     OpenAICompatibleModel(settings)
 
     assert captured["max_tokens"] == 4096
-    assert captured["timeout"] == 60.0
+    assert "timeout" not in captured
+    assert "request_timeout" not in captured
 
 
 @pytest.mark.asyncio

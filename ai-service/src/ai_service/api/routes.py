@@ -104,6 +104,23 @@ async def _run_customer_service_answer(
                 return
 
     disconnect_task = asyncio.create_task(wait_for_disconnect())
+
+    async def cancel_and_drain() -> None:
+        for task in (answer_task, disconnect_task):
+            if not task.done():
+                task.cancel()
+        gathering = asyncio.gather(
+            answer_task, disconnect_task, return_exceptions=True,
+        )
+        interrupted: asyncio.CancelledError | None = None
+        while not gathering.done():
+            try:
+                await asyncio.shield(gathering)
+            except asyncio.CancelledError as error:
+                interrupted = error
+        if interrupted is not None:
+            raise interrupted
+
     try:
         async with asyncio.timeout(timeout_seconds):
             done, _ = await asyncio.wait(
@@ -116,12 +133,9 @@ async def _run_customer_service_answer(
                 raise asyncio.CancelledError
             return await answer_task
     except TimeoutError:
-        answer_task.cancel()
-        await asyncio.gather(answer_task, return_exceptions=True)
         raise CustomerServiceRagError("CUSTOMER_SERVICE_TIMEOUT") from None
     finally:
-        disconnect_task.cancel()
-        await asyncio.gather(disconnect_task, return_exceptions=True)
+        await cancel_and_drain()
 
 
 def register_routes(

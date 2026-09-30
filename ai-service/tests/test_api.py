@@ -327,6 +327,45 @@ async def test_customer_service_total_timeout_cancels_hanging_model_work():
     assert cancelled.is_set()
 
 
+@pytest.mark.asyncio
+async def test_customer_service_route_cancellation_drains_all_children():
+    answer_started = asyncio.Event()
+    answer_cancelled = asyncio.Event()
+    receive_cancelled = asyncio.Event()
+    children: list[asyncio.Task] = []
+
+    class BlockingService:
+        async def answer(self, _question):
+            try:
+                children.append(asyncio.current_task())
+                answer_started.set()
+                await asyncio.Event().wait()
+            finally:
+                answer_cancelled.set()
+
+    class ConnectedRequest:
+        async def receive(self):
+            try:
+                children.append(asyncio.current_task())
+                await asyncio.Event().wait()
+            finally:
+                receive_cancelled.set()
+
+    route_task = asyncio.create_task(_run_customer_service_answer(
+        ConnectedRequest(), BlockingService(), "question", timeout_seconds=1,
+    ))
+    await answer_started.wait()
+    route_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await route_task
+
+    assert answer_cancelled.is_set()
+    assert receive_cancelled.is_set()
+    assert route_task.done()
+    assert len(children) == 2
+    assert all(task.done() for task in children)
+
+
 def test_customer_service_etl_requires_auth_and_disabled_is_stable(
     app_factory, auth_headers,
 ):

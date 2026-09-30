@@ -903,8 +903,14 @@ def test_collection_cleanup_grace_must_exceed_request_and_rpc_timeouts():
         _rag_settings(
             rag_answer_timeout_seconds=60,
             milvus_rpc_timeout_seconds=30,
-            rag_collection_cleanup_grace_seconds=60,
+            rag_collection_cleanup_grace_seconds=91,
         )
+    settings = _rag_settings(
+        rag_answer_timeout_seconds=60,
+        milvus_rpc_timeout_seconds=30,
+        rag_collection_cleanup_grace_seconds=92,
+    )
+    assert settings.rag_collection_cleanup_grace_seconds == 92
 
 
 def test_collection_cleanup_bounds_must_be_safe():

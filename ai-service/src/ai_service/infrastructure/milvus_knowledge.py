@@ -275,8 +275,16 @@ class MilvusKnowledgeStore:
 
     async def _call(self, method: str, *args: object, **kwargs: object) -> Any:
         kwargs.setdefault("timeout", self._rpc_timeout)
+        return await self._thread_call(
+            getattr(self._client, method), *args, **kwargs
+        )
+
+    @staticmethod
+    async def _thread_call(
+        function: Callable[..., Any], *args: object, **kwargs: object,
+    ) -> Any:
         task = asyncio.create_task(
-            asyncio.to_thread(getattr(self._client, method), *args, **kwargs)
+            asyncio.to_thread(function, *args, **kwargs)
         )
         try:
             return await asyncio.shield(task)
@@ -378,7 +386,6 @@ class MilvusKnowledgeStore:
             "embeddingDimension": dimension,
             "schemaVersion": self._schema_version,
             "mutationFence": fence,
-            "createdAt": time.time(),
         }
         if rebuild is not None:
             lease, plan = rebuild
@@ -554,18 +561,21 @@ class MilvusKnowledgeStore:
 
     async def _cleanup_retired_collections(
         self, *, current: str, just_replaced: str | None,
-        model: str, dimension: int,
+        model: str, dimension: int, fence: int,
     ) -> None:
         """Best-effort bounded retention after publication; uncertainty preserves data."""
 
         deadline = asyncio.get_running_loop().time() + self._cleanup_timeout_seconds
 
-        async def call(method: str, *args: object) -> Any:
+        async def call(
+            method: str, *args: object, **kwargs: object,
+        ) -> Any:
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
                 raise TimeoutError
+            kwargs["timeout"] = min(self._rpc_timeout, remaining)
             return await self._call(
-                method, *args, timeout=min(self._rpc_timeout, remaining)
+                method, *args, **kwargs,
             )
 
         async def alias_target() -> str | None:
@@ -581,9 +591,101 @@ class MilvusKnowledgeStore:
                 raise TypeError
             return str(target)
 
+        async def ensure_control_collection() -> str:
+            name = self._control_collection_name()
+            if not await call("has_collection", name):
+                description = json.dumps({
+                    "kind": "customer-service-knowledge-mutation-control",
+                    "schemaVersion": self._schema_version,
+                    "mutationFence": fence,
+                }, sort_keys=True, separators=(",", ":"))
+                try:
+                    await call(
+                        "create_collection", name, dimension=1,
+                        primary_field_name="id", id_type="string",
+                        vector_field_name="embedding", metric_type="COSINE",
+                        auto_id=False, max_length=64, enable_dynamic_field=True,
+                        consistency_level="Strong", description=description,
+                    )
+                except Exception:
+                    if not await call("has_collection", name):
+                        raise
+            description = await call("describe_collection", name)
+            metadata = self._metadata(description)
+            if (
+                self._described_dimension(description) != 1
+                or metadata.get("kind")
+                != "customer-service-knowledge-mutation-control"
+                or metadata.get("schemaVersion") != self._schema_version
+            ):
+                raise TypeError
+            return name
+
+        async def control_rows(
+            control: str, ids: list[str], output_fields: list[str],
+        ) -> list[dict[str, Any]]:
+            rows: list[dict[str, Any]] = []
+            for start in range(0, len(ids), _VERIFY_BATCH_SIZE):
+                rows.extend(await call(
+                    "get", control, ids=ids[start:start + _VERIFY_BATCH_SIZE],
+                    output_fields=output_fields, consistency_level="Strong",
+                ))
+            return rows
+
+        async def upsert_control_row(
+            control: str, row: dict[str, Any], verified_fields: tuple[str, ...],
+        ) -> None:
+            result = await call("upsert", control, data=[row])
+            if self._write_count(result, "upsert") != 1:
+                raise TypeError
+            actual = await control_rows(
+                control, [str(row["id"])], ["id", *verified_fields],
+            )
+            if len(actual) != 1 or any(
+                actual[0].get(field) != row[field]
+                for field in ("id", *verified_fields)
+            ):
+                raise TypeError
+
+        async def retirement_marker(
+            control: str, collection: str, retired_at: float,
+        ) -> dict[str, Any]:
+            row = {
+                "id": self._retirement_id(collection),
+                "recordType": "collection_retirement",
+                "collectionName": collection,
+                "retiredAt": retired_at,
+                "mutationFence": fence,
+                "schemaVersion": self._schema_version,
+                "isActive": False,
+                "embedding": [0.0],
+            }
+            await upsert_control_row(
+                control, row,
+                ("recordType", "collectionName", "retiredAt", "schemaVersion"),
+            )
+            return row
+
         try:
             async with asyncio.timeout(self._cleanup_timeout_seconds):
                 canonical = self._collection_name(model, dimension)
+                control = await ensure_control_collection()
+                existing_replaced: list[dict[str, Any]] = []
+                if just_replaced is not None:
+                    existing_replaced = await control_rows(
+                        control, [self._retirement_id(just_replaced)],
+                        ["id", "recordType", "collectionName", "retiredAt"],
+                    )
+                    if not any(
+                        row.get("recordType") == "collection_retirement"
+                        and row.get("collectionName") == just_replaced
+                        and isinstance(row.get("retiredAt"), (int, float))
+                        and math.isfinite(float(row["retiredAt"]))
+                        for row in existing_replaced
+                    ):
+                        await retirement_marker(
+                            control, just_replaced, time.time(),
+                        )
                 names = await call("list_collections")
                 if not isinstance(names, list):
                     raise TypeError
@@ -593,41 +695,93 @@ class MilvusKnowledgeStore:
                         name == canonical or name.startswith(f"{canonical}_staging_")
                     )
                 ]
-                if len(candidates) > self._cleanup_scan_limit:
-                    logger.warning(
-                        "customer-service collection cleanup scan limit exceeded"
-                    )
+                candidates.sort()
+                marker_ids = [self._retirement_id(name) for name in candidates]
+                marker_rows = await control_rows(
+                    control, marker_ids,
+                    ["id", "recordType", "collectionName", "retiredAt"],
+                )
+                markers = {
+                    str(row.get("collectionName")): row
+                    for row in marker_rows
+                    if row.get("recordType") == "collection_retirement"
+                    and isinstance(row.get("collectionName"), str)
+                    and isinstance(row.get("retiredAt"), (int, float))
+                    and math.isfinite(float(row["retiredAt"]))
+                }
+                keep = {current}
+                if just_replaced is not None:
+                    keep.add(just_replaced)
+                retired_newest_first = sorted(
+                    markers.values(),
+                    key=lambda row: (float(row["retiredAt"]), str(row["collectionName"])),
+                    reverse=True,
+                )
+                for marker in retired_newest_first:
+                    if len(keep) >= self._retention_generations:
+                        break
+                    keep.add(str(marker["collectionName"]))
+
+                processable = [name for name in candidates if name not in keep]
+                if not processable:
                     return
-                controlled: list[tuple[float, str]] = []
-                for name in candidates:
+                cursor_rows = await control_rows(
+                    control, [self._cleanup_cursor_id()],
+                    ["id", "recordType", "cursorCollectionName"],
+                )
+                cursor = None
+                if (
+                    len(cursor_rows) == 1
+                    and cursor_rows[0].get("recordType") == "collection_cleanup_cursor"
+                    and isinstance(cursor_rows[0].get("cursorCollectionName"), str)
+                ):
+                    cursor = str(cursor_rows[0]["cursorCollectionName"])
+                start = 0
+                if cursor is not None:
+                    start = next(
+                        (index for index, name in enumerate(processable) if name > cursor),
+                        0,
+                    )
+                ordered = processable[start:] + processable[:start]
+                batch = ordered[:self._cleanup_scan_limit]
+                cutoff = time.time() - self._cleanup_grace_seconds
+                for name in batch:
                     description = await call("describe_collection", name)
                     metadata = self._metadata(description)
-                    created_at = metadata.get("createdAt")
                     if (
                         metadata.get("kind") != "customer-service-knowledge"
                         or metadata.get("embeddingModelVersion") != model
                         or metadata.get("embeddingDimension") != dimension
                         or metadata.get("schemaVersion") != self._schema_version
-                        or not isinstance(created_at, (int, float))
-                        or not math.isfinite(float(created_at))
                     ):
                         continue
-                    controlled.append((float(created_at), name))
-                controlled.sort(reverse=True)
-                keep = {current}
-                if just_replaced is not None:
-                    keep.add(just_replaced)
-                for _, name in controlled:
-                    if len(keep) >= self._retention_generations:
-                        break
-                    keep.add(name)
-                cutoff = time.time() - self._cleanup_grace_seconds
-                for created_at, name in controlled:
-                    if name in keep or created_at >= cutoff:
+                    marker = markers.get(name)
+                    if marker is None:
+                        markers[name] = await retirement_marker(
+                            control, name, time.time(),
+                        )
+                        continue
+                    if float(marker["retiredAt"]) >= cutoff:
                         continue
                     if await alias_target() != current:
                         return
                     await call("drop_collection", name)
+                    await call(
+                        "delete", control, ids=[self._retirement_id(name)],
+                    )
+                cursor_row = {
+                    "id": self._cleanup_cursor_id(),
+                    "recordType": "collection_cleanup_cursor",
+                    "cursorCollectionName": batch[-1],
+                    "mutationFence": fence,
+                    "schemaVersion": self._schema_version,
+                    "isActive": False,
+                    "embedding": [0.0],
+                }
+                await upsert_control_row(
+                    control, cursor_row,
+                    ("recordType", "cursorCollectionName", "schemaVersion"),
+                )
         except TimeoutError:
             logger.warning("customer-service collection cleanup timed out")
         except Exception:
@@ -754,6 +908,17 @@ class MilvusKnowledgeStore:
     def _tombstone_id(document_id: str, document_version: int) -> str:
         return hashlib.sha256(
             f"knowledge-tombstone\0{document_id}\0{document_version}".encode()
+        ).hexdigest()
+
+    @staticmethod
+    def _retirement_id(collection: str) -> str:
+        return hashlib.sha256(
+            f"knowledge-collection-retirement\0{collection}".encode()
+        ).hexdigest()
+
+    def _cleanup_cursor_id(self) -> str:
+        return hashlib.sha256(
+            f"knowledge-collection-cleanup-cursor\0{self._alias}".encode()
         ).hexdigest()
 
     async def _ensure_control_collection(self, fence: int) -> str:
@@ -907,7 +1072,7 @@ class MilvusKnowledgeStore:
             )
             rows: list[dict[str, Any]] = []
             while True:
-                batch = await asyncio.to_thread(iterator.next)
+                batch = await self._thread_call(iterator.next)
                 if not batch:
                     break
                 rows.extend(batch)
@@ -921,7 +1086,7 @@ class MilvusKnowledgeStore:
         finally:
             if iterator is not None:
                 try:
-                    await asyncio.to_thread(iterator.close)
+                    await self._thread_call(iterator.close)
                 except Exception:
                     pass
 
@@ -945,7 +1110,7 @@ class MilvusKnowledgeStore:
             )
             rows: list[dict[str, Any]] = []
             while True:
-                batch = await asyncio.to_thread(iterator.next)
+                batch = await self._thread_call(iterator.next)
                 if not batch:
                     break
                 rows.extend(batch)
@@ -961,7 +1126,7 @@ class MilvusKnowledgeStore:
         finally:
             if iterator is not None:
                 try:
-                    await asyncio.to_thread(iterator.close)
+                    await self._thread_call(iterator.close)
                 except Exception:
                     pass
 
@@ -1424,7 +1589,7 @@ class MilvusKnowledgeStore:
                     raise
                 await self._cleanup_retired_collections(
                     current=collection, just_replaced=old,
-                    model=model, dimension=dimension,
+                    model=model, dimension=dimension, fence=permit.fence,
                 )
                 return RebuildResult(
                     collection, document_count, chunk_count, False
