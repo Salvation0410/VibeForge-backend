@@ -17,6 +17,8 @@ from ai_service.api.schemas import (
     KnowledgeDeleteRequest,
     KnowledgeEtlRequest,
     KnowledgeEtlResponse,
+    KnowledgeRebuildRequest,
+    KnowledgeRebuildResponse,
     RouteRequest,
     RouteResponse,
 )
@@ -50,6 +52,8 @@ _CUSTOMER_SERVICE_ERROR_STATUS = {
     "KNOWLEDGE_DOCUMENT_UNSUPPORTED": 422,
     "KNOWLEDGE_DOCUMENT_TOO_LARGE": 422,
     "KNOWLEDGE_EMBEDDING_BUDGET_EXCEEDED": 422,
+    "KNOWLEDGE_REBUILD_TOO_MANY_DOCUMENTS": 422,
+    "KNOWLEDGE_REBUILD_TOO_MANY_CHUNKS": 422,
 }
 
 
@@ -181,6 +185,41 @@ def register_routes(
             return _stable_error(error.code)
         except Exception:
             return _stable_error("KNOWLEDGE_ETL_FAILED", status_code=500)
+
+    @app.post(
+        "/internal/v1/customer-service/knowledge:rebuild",
+        response_model=KnowledgeRebuildResponse,
+        response_model_by_alias=True,
+        dependencies=[Depends(require_internal_auth)],
+    )
+    async def knowledge_rebuild(body: KnowledgeRebuildRequest, request: Request):
+        service = getattr(request.app.state, "knowledge_etl_service", None)
+        if not customer_service_rag_enabled or service is None:
+            return _stable_error("CUSTOMER_SERVICE_RAG_DISABLED")
+        settings = request.app.state.settings
+        if body.collection_alias != settings.milvus_collection_alias:
+            return _stable_error("INVALID_REQUEST", status_code=422)
+        if len(body.documents) > settings.rag_rebuild_max_documents:
+            return _stable_error("KNOWLEDGE_REBUILD_TOO_MANY_DOCUMENTS")
+        try:
+            result = await service.rebuild(
+                documents=body.documents,
+                etl_version=body.etl_version,
+                lease=_lease(body.lease),
+            )
+            return KnowledgeRebuildResponse(
+                operation="REBUILD",
+                collection_alias=body.collection_alias,
+                etl_version=body.etl_version,
+                document_count=result.document_count,
+            )
+        except (
+            KnowledgeDownloadError, DocumentETLError,
+            EmbeddingOutputError, MilvusKnowledgeError,
+        ) as error:
+            return _stable_error(error.code)
+        except Exception:
+            return _stable_error("KNOWLEDGE_REBUILD_FAILED", status_code=500)
 
     @app.get(
         "/internal/v1/customer-service/health",

@@ -179,12 +179,70 @@ class KnowledgeDeleteRequest(ApiModel):
         return self
 
 
+class KnowledgeRebuildDocument(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+    document_version: int = Field(ge=1, strict=True)
+    file_name: str = Field(min_length=1, max_length=255)
+    file_type: Literal["PDF", "DOCX", "MD", "TXT"]
+    signed_url: str = Field(min_length=1, max_length=4096, repr=False)
+    sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
+
+    @field_validator("file_name")
+    @classmethod
+    def validate_file_name(cls, value: str) -> str:
+        return KnowledgeEtlRequest.validate_file_name(value)
+
+    @field_validator("sha256")
+    @classmethod
+    def normalize_sha256(cls, value: str) -> str:
+        return value.lower()
+
+    @field_validator("signed_url")
+    @classmethod
+    def validate_signed_url(cls, value: str) -> str:
+        return KnowledgeEtlRequest.validate_signed_url(value)
+
+
+class KnowledgeRebuildRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation: Literal["REBUILD"]
+    collection_alias: str = Field(
+        min_length=1, max_length=255, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$"
+    )
+    documents: list[KnowledgeRebuildDocument] = Field(min_length=1, max_length=10_000)
+    etl_version: str = Field(min_length=1, max_length=128)
+    lease: KnowledgeMutationLeaseRequest
+
+    @model_validator(mode="after")
+    def validate_lease_scope(self) -> "KnowledgeRebuildRequest":
+        if (
+            self.lease.scope != f"collection:{self.collection_alias}"
+            or self.lease.operation != self.operation
+        ):
+            raise ValueError("lease scope does not match collection")
+        if len({item.document_id for item in self.documents}) != len(self.documents):
+            raise ValueError("duplicate document id")
+        return self
+
+
 class KnowledgeEtlResponse(ApiModel):
     operation: Literal["INDEX", "DELETE"]
     status: Literal["SUCCEEDED"] = "SUCCEEDED"
     document_id: str
     document_version: int
     chunk_count: int = Field(ge=0)
+    idempotent: bool = False
+
+
+class KnowledgeRebuildResponse(ApiModel):
+    operation: Literal["REBUILD"]
+    status: Literal["SUCCEEDED"] = "SUCCEEDED"
+    collection_alias: str
+    etl_version: str
+    document_count: int = Field(ge=0, le=1_000_000)
     idempotent: bool = False
 
 

@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     rag_embedding_batch_size: int = Field(default=32, ge=1, le=256)
     rag_max_embedding_elements: int = Field(default=8_000_000, ge=1, le=100_000_000)
     rag_etl_max_concurrency: int = Field(default=1, ge=1, le=32)
+    rag_rebuild_max_documents: int = Field(default=1000, ge=1, le=10_000)
+    rag_rebuild_max_chunks: int = Field(default=1_000_000, ge=1, le=1_000_000)
 
     milvus_uri: str = "http://localhost:19530"
     milvus_token: str = Field(default="", repr=False)

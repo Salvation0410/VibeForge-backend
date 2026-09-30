@@ -28,7 +28,7 @@
 
 ### 客服机器人 RAG 实施进度
 
-- 设计提交 `b61fc07`、实施计划提交 `be6b5db` 已完成。当前 Task 1–7 的源码已实现，其中 Task 7 是 Spring/MySQL 知识文档管理、mutation coordinator 和 ETL worker；Reranker、问答和前端能力仍未完成，且 Task 7 仍有下述真实环境验收门和 REBUILD 跨服务缺口，不能据此推断整套客服机器人可用。
+- 设计提交 `b61fc07`、实施计划提交 `be6b5db` 已完成。当前 Task 1–7 的源码已实现，其中 Task 7 是 Spring/MySQL 知识文档管理、mutation coordinator 和 ETL worker，Python REBUILD 跨服务源码缺口也已关闭；Reranker、问答和前端能力仍未完成，且 Task 7 仍有下述真实环境验收门，不能据此推断整套客服机器人可用。
 - Task 1 的 MySQL 知识文档与 ETL outbox 表、对应 MyBatis-Flex 实体和 Mapper 已在提交 `8e18149` 完成。
 - Task 1 定向 schema 测试 2 项通过，`mvn clean -DskipTests compile` 通过，暂存差异的 `git diff --cached --check` 通过。仓库没有 `mvnw.cmd`，测试和编译使用系统 Maven；测试实际命令为 `mvn test -Dtest=CustomerServiceKnowledgeSchemaTest`。
 - 尚未在真实 MySQL 执行 DDL、CRUD 或并发任务认领验证，这些仍是人工待验收项。
@@ -50,9 +50,9 @@
 - Task 6 提交链为 `172763a`、`4d9e56a`、`34633c9`、`b7e9ce5`、`e3d9bc3`、`70b3f68`。资源上限与配置定向测试分别 6 项、14 项通过；完整 Python 测试 435 项通过、1 项跳过，`compileall`、`uv lock --check` 和 `git diff --check` 均通过。测试使用 MockTransport、Fake CloseAI 和 Fake Milvus；Task 7 现已提供 Spring 内部 lease endpoints 和索引调度端，但真实 Spring/MySQL fencing、OSS、CloseAI、Milvus 和完整 E2E 均待人工验收。
 - Task 7 的 MySQL coordinator 使用 guard 表行锁分配全局单调 fence，并将 lease 审计写入独立表；HMAC proof 不入库。签名 lease 包含 `scope / operationId / operation / fence / expiresAt / proof` 六个字段，Spring 提供 Bearer 认证的内部 `validate` 与只读 `health` 接口，验证字段绑定、过期、撤销和 HMAC，异常时 fail-closed。初始化 SQL 与面向既有 Task 1 数据库的升级 SQL `sql/alter_customer_service_knowledge_task7.sql` 已同步。
 - Task 7 已实现知识文档 Service、outbox、管理员上传/替换/重索引/启停/删除/任务历史接口，以及 worker 的 claim、过期 reclaim、claim refresh、lease 内快照重验和版本 CAS。INDEX 成功与最终失败通过独立 Spring 事务 finalizer 原子更新文档和 outbox；重试基数、指数退避和 MySQL `DATETIME` 上限均有边界。对 Python 的 HTTP 调用使用覆盖响应头与完整响应体的整体超时，流式按字节限制响应并在超限或超时时取消订阅。
-- Task 7 的 REBUILD 继续 fail-closed：默认最多 1000 个文档，序列化后 UTF-8 JSON 最多 4 MiB，查询只读取 `max + 1` 条并在 lease 内重验。由于 Python 仍缺少 `/internal/v1/customer-service/knowledge:rebuild`，Java REBUILD 当前不可用；同时重建只纳入当前 `ACTIVE` 且 `indexedVersion=documentVersion` 的文档，发生替换失败而仅保留旧 `indexedVersion` 的文档会被排除，不能把旧对象误当成可重建来源。
+- Task 7 的 REBUILD 全链路源码已闭合：Java 默认最多 1000 个文档，序列化后 UTF-8 JSON 最多 4 MiB，查询只读取 `max + 1` 条并在 lease 内重验；Python `/internal/v1/customer-service/knowledge:rebuild` 严格匹配 Java 请求/响应，原样验证 collection lease，在 permit 生命周期内逐文档下载、解析、Embedding，再调用 Task 5 staging + alias 发布。Python 默认同样最多 1000 个文档，并限制累计 1,000,000 chunks 和 8,000,000 embedding elements；任一文档、预算或 permit 失败均不切 alias，临时文件逐文档清理。重建只纳入当前 `ACTIVE` 且 `indexedVersion=documentVersion` 的文档，发生替换失败而仅保留旧 `indexedVersion` 的文档会被排除，不能把旧对象误当成可重建来源。
 - Task 7 最终聚焦套件 66 项通过，`mvn clean -DskipTests compile` 和 `git diff --check` 通过。上一轮完整 Maven 测试运行 252 项，仍在既有 `YuAiCodeMotherApplicationTests.contextLoads` 因缺少 `openAiChatModel` bean 报错；本轮未把该环境问题计为 Task 7 通过。`CustomerServiceKnowledgeMySqlIT` 需要 URL 与执行开关双 opt-in，本轮未运行，不能声称真实事务回滚、行锁或迁移已验证。
-- Task 7 的人工验收仍包括：在真实 MySQL 执行初始化/升级迁移，验证 guard 行锁、global fence、事务回滚、过期 reclaim 和多 Spring 实例竞争；验证真实私有 OSS 上传与签名下载；在 Python 路由齐备后执行 Spring/Python lease、INDEX/DELETE/REBUILD 和失败恢复联调。
+- Task 7 的人工验收仍包括：在真实 MySQL 执行初始化/升级迁移，验证 guard 行锁、global fence、事务回滚、过期 reclaim 和多 Spring 实例竞争；验证真实私有 OSS 上传与签名下载；执行 Spring/Python lease、INDEX/DELETE/REBUILD 和失败恢复联调，以及真实 CloseAI/Milvus staging 与 alias 切换。
 
 ### 已关闭的源码阻塞
 
@@ -579,7 +579,7 @@ Vue 多 Agent 已于 2026-09-30 本地快进合并到 `dev`，合并后 HEAD 为
 - `doc/ai-service-langchain-langgraph-refactor-design.md`：重构架构与边界设计。
 - `docs/superpowers/specs/2026-09-29-postgres-checkpoint-design.md`：PostgreSQL checkpoint 迁移、故障语义和长期记忆决策。
 - `docs/superpowers/specs/2026-09-29-vue-multi-agent-quality-review-design.md`：Vue 三角色质量审查、F1 错误语义、repair 和 checkpoint 边界。
-- `docs/superpowers/specs/2026-09-30-customer-service-rag-design.md`：客服机器人、OSS 文档 ETL、CloseAI Embedding、Milvus 和 GPU Reranker 设计；目前 Task 1–7 的源码已实现，Task 7 的真实 MySQL/OSS/多实例与 Spring/Python 联调仍待验收，Python REBUILD 路由及后续 Reranker、问答和前端能力仍未完成。
+- `docs/superpowers/specs/2026-09-30-customer-service-rag-design.md`：客服机器人、OSS 文档 ETL、CloseAI Embedding、Milvus 和 GPU Reranker 设计；目前 Task 1–7 及 Python REBUILD 路由源码已实现，Task 7 的真实 MySQL/OSS/多实例与 Spring/Python 联调仍待验收，后续 Reranker、问答和前端能力仍未完成。
 - `docs/superpowers/specs/2026-09-21-bounded-streaming-simple-prompts-design.md`：有限流式窗口和简短优化提示设计。
 - `docs/superpowers/specs/2026-09-21-circular-preview-spinner-design.md`：预览加载图正圆修复设计。
 

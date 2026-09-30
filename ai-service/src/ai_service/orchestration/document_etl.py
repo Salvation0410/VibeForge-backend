@@ -7,7 +7,7 @@ import unicodedata
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, AsyncIterator, Mapping, Protocol, Sequence
 
 from docx import Document
 from docx.table import Table
@@ -443,6 +443,103 @@ class KnowledgeEtlService:
         await self._store.delete_document(
             document_id, document_version, lease=lease
         )
+
+    async def rebuild(
+        self, *, documents: Sequence[Any], etl_version: str,
+        lease: KnowledgeMutationLease,
+    ):
+        async with self._semaphore:
+            total_chunks = 0
+            total_embedding_elements = 0
+
+            def field(document: Any, name: str) -> Any:
+                if isinstance(document, Mapping):
+                    camel = name.split("_")[0] + "".join(
+                        part.capitalize() for part in name.split("_")[1:]
+                    )
+                    return document[camel]
+                return getattr(document, name)
+
+            async def indexed_documents() -> AsyncIterator[IndexedDocument]:
+                nonlocal total_chunks, total_embedding_elements
+                for item in documents:
+                    document_id = field(item, "document_id")
+                    document_version = field(item, "document_version")
+                    file_name = field(item, "file_name")
+                    file_type = field(item, "file_type")
+                    signed_url = field(item, "signed_url")
+                    sha256 = field(item, "sha256")
+                    downloaded = await self._downloader.download(
+                        signed_url,
+                        expected_sha256=sha256,
+                        max_bytes=self._settings.rag_download_max_bytes,
+                    )
+                    chunks = await parse_and_split_download(
+                        downloaded,
+                        file_type=file_type,
+                        document_id=document_id,
+                        document_version=document_version,
+                        source_name=file_name,
+                        settings=self._settings,
+                    )
+                    total_chunks += len(chunks)
+                    if total_chunks > self._settings.rag_rebuild_max_chunks:
+                        raise DocumentETLError("KNOWLEDGE_REBUILD_TOO_MANY_CHUNKS")
+                    remaining = (
+                        self._settings.rag_max_embedding_elements
+                        - total_embedding_elements
+                    )
+                    if len(chunks) > remaining:
+                        raise EmbeddingOutputError(
+                            "KNOWLEDGE_EMBEDDING_BUDGET_EXCEEDED"
+                        )
+                    vectors = await self._embeddings.embed_documents(
+                        [chunk.content for chunk in chunks],
+                        max_elements=remaining,
+                    )
+                    try:
+                        elements = sum(len(vector) for vector in vectors)
+                    except TypeError:
+                        raise EmbeddingOutputError(
+                            "KNOWLEDGE_EMBEDDING_INVALID_OUTPUT"
+                        ) from None
+                    total_embedding_elements += elements
+                    if total_embedding_elements > self._settings.rag_max_embedding_elements:
+                        raise EmbeddingOutputError(
+                            "KNOWLEDGE_EMBEDDING_BUDGET_EXCEEDED"
+                        )
+                    try:
+                        indexed_chunks = tuple(
+                            IndexedChunk(
+                                chunk_id=chunk.chunk_id,
+                                chunk_index=chunk.chunk_index,
+                                content=chunk.content,
+                                source_locator=chunk.source_locator,
+                                content_hash=hashlib.sha256(
+                                    chunk.content.encode("utf-8")
+                                ).hexdigest(),
+                                embedding=vector,
+                            )
+                            for chunk, vector in zip(chunks, vectors, strict=True)
+                        )
+                    except ValueError:
+                        raise EmbeddingOutputError(
+                            "KNOWLEDGE_EMBEDDING_INVALID_OUTPUT"
+                        ) from None
+                    yield IndexedDocument(
+                        document_id=document_id,
+                        document_version=document_version,
+                        etl_version=etl_version,
+                        embedding_model_version=self._settings.rag_embedding_model,
+                        file_name=file_name,
+                        file_type=file_type.lower(),
+                        content_hash=sha256,
+                        chunks=indexed_chunks,
+                    )
+
+            return await self._store.rebuild_collection(
+                indexed_documents(), lease=lease
+            )
 
     async def ping(self) -> bool:
         return await self._store.ping()
