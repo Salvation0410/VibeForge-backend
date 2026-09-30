@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 import hashlib
 import json
 import logging
@@ -13,6 +14,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from ai_service.api.schemas import CodeGenType, GenerationRequest
 from ai_service.infrastructure.spring_tools import SpringToolGateway
 from ai_service.infrastructure.milvus_knowledge import MilvusKnowledgeError
+from ai_service.orchestration.document_etl import KnowledgeEtlService
 from ai_service.models.base import ModelTurn, ToolCall
 from ai_service.models.quality_review import (
     IssueSeverity,
@@ -293,6 +295,97 @@ def test_customer_service_repeated_index_reports_store_idempotency(
         )
     assert first.json()["idempotent"] is False
     assert second.json()["idempotent"] is True
+
+
+def test_http_etl_preserves_all_lease_fields_through_service_store_and_coordinator(
+    app_factory, auth_headers, settings, tmp_path,
+):
+    settings.customer_service_rag_enabled = True
+    path = tmp_path / "lease.txt"
+    path.write_text("knowledge", encoding="utf-8")
+
+    class Downloaded:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_args):
+            path.unlink(missing_ok=True)
+        @property
+        def path(self):
+            return path
+
+    class Downloader:
+        async def download(self, *_args, **_kwargs):
+            return Downloaded()
+
+    class Embeddings:
+        async def embed_documents(self, texts):
+            assert texts == ["knowledge"]
+            return [[0.1, 0.2]]
+
+    class Permit:
+        fence = 17
+        async def assert_current(self):
+            return None
+
+    class Coordinator(FakeLeaseValidator):
+        @asynccontextmanager
+        async def hold(self, lease, *, scope, operation):
+            self.held = (lease, scope, operation)
+            yield Permit()
+
+    coordinator = Coordinator()
+
+    class Store:
+        async def upsert_document_version(self, document, *, lease):
+            self.lease = lease
+            async with coordinator.hold(
+                lease, scope=f"document:{document.document_id}", operation="upsert"
+            ):
+                pass
+            return type("Result", (), {
+                "document_id": document.document_id,
+                "document_version": document.document_version,
+                "chunk_count": len(document.chunks),
+                "idempotent": False,
+            })()
+        async def ping(self):
+            return True
+
+    store = Store()
+    service = KnowledgeEtlService(
+        settings, Downloader(), Embeddings(), store
+    )
+    expires_at = time.time() + 300
+    payload = knowledge_etl_payload()
+    payload["lease"] = {
+        "scope": "document:doc-1",
+        "operationId": "operation-raw-1",
+        "operation": "INDEX",
+        "fence": 17,
+        "expiresAt": expires_at,
+        "proof": "proof-raw-value",
+    }
+    with TestClient(app_factory(
+        knowledge_etl_service=service, mutation_coordinator=coordinator,
+    )) as client:
+        response = client.post(
+            "/internal/v1/customer-service/knowledge:etl",
+            json=payload, headers=auth_headers,
+        )
+
+    assert response.status_code == 200
+    lease = store.lease
+    assert (
+        lease.scope, lease.operation_id, lease.operation, lease.fence,
+        lease.expires_at, lease.proof,
+    ) == (
+        "document:doc-1", "operation-raw-1", "INDEX", 17,
+        expires_at, "proof-raw-value",
+    )
+    held_lease, held_scope, held_operation = coordinator.held
+    assert held_lease is lease
+    assert held_scope == "document:doc-1"
+    assert held_operation == "upsert"
 
 
 def test_customer_service_errors_are_stable_and_redacted(

@@ -602,6 +602,13 @@ Expected: FAIL because the route is absent.
 
 Add `KnowledgeEtlRequest`, `KnowledgeEtlResponse`, `KnowledgeDeleteRequest`, and stable error models. Limit IDs to 128 characters, file names to 255, URL length, allowed file types, and SHA-256 format. Mutation 请求必须通过认证 schema 携带 Spring 签发的 `scope / operation / fence / expiry / proof`，并原样传给 Milvus store；不得在 Python 内构造替代 lease。
 
+固定 Spring Bearer 验证契约如下：
+
+- `POST /api/internal/customer-service/knowledge-mutation-leases:validate`，请求体只允许 camelCase 六字段 `scope / operationId / operation / fence / expiresAt / proof`；`operation` 为 `INDEX / DELETE / REBUILD`，`expiresAt` 为 Unix epoch seconds。
+- 成功响应是 `{code: 0, data: {verified: true, current: true, scope, operationId, operation, fence, expiresAt}, message: "ok"}`；Python 逐项匹配原请求和当前 store 动作，禁止自行生成或覆盖 operation 等 lease 字段。
+- `GET /api/internal/customer-service/knowledge-mutation-leases/health` 是无请求体、无 mutation 的只读探测，成功响应 `{code: 0, data: {ready: true}, message: "ok"}`。
+- 404、timeout、非 JSON、非零 code、撤销、过期、verified/current 非 true 或任意字段不匹配全部 fail-closed，且不得记录 Bearer、proof、vendor body 或签名 URL。
+
 - [ ] **Step 4: Compose ETL dependencies in `create_app`**
 
 Only instantiate downloader, embedding provider, Milvus store, and ETL service when `customer_service_rag_enabled` is true. Add optional injectable parameters so unit tests use fakes. Close HTTP/Milvus resources in lifespan without changing checkpoint lifecycle. `MilvusClient` 构造是同步操作，必须通过 async factory/offload 初始化，禁止阻塞 FastAPI event loop。
@@ -671,6 +678,8 @@ Follow the JDK `HttpClient` and Bearer pattern from `LangGraphAiGenerationGatewa
 - [ ] **Step 6: Implement service and worker**
 
 Spring/MySQL Outbox 是唯一跨实例 mutation coordinator。Task 7 必须把任务 claim、document/collection 冲突域、lease expiry、proof 验证和 fencing token 放在可审计的 MySQL 状态转换中；Redis 或 Python 本地锁不得成为正确性来源。Worker 只有持有有效 permit 时才能调用 Task 6 接口，并必须把 lease 传到 Python。
+
+Task 7 还必须实现上述两个 Spring Bearer 内部接口：validate POST 从 MySQL coordinator 状态验证六字段并返回逐字段匹配结果；health GET 只读检查 coordinator 是否可验证 lease，不签发或构造虚假 mutation lease。接口缺失或不可用时 Task 6 health 必须保持 degraded/503。
 
 Use conditional updates for claiming:
 

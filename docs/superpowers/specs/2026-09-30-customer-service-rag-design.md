@@ -149,7 +149,15 @@ Spring 必须在同一个 MySQL 事务内更新文档状态并写入 Outbox。�
 - Python store 的 `upsert_document_version`、`delete_document` 和 `rebuild_collection` 缺少、过期、伪造、撤销或 scope/operation/fence 不匹配的 lease 时一律 fail-closed；默认 coordinator 为 `DenyAll`。
 - permit 必须持续到已启动的同步 Milvus mutation RPC 得到确定结果后才能释放，避免取消请求时后台线程仍在写入而下一个持有者已经进入。
 
-Task 5 只实现上述 Python 契约和 fail-closed 边界。Task 6 的认证传递及 Task 7 的 MySQL 签发、验证和冲突仲裁尚未实现，不得描述为已有端到端索引能力。
+Task 6 与 Task 7 之间固定使用现有 Spring gateway Bearer 认证，并约定以下两个接口：
+
+- `POST /api/internal/customer-service/knowledge-mutation-leases:validate`。请求体严格为 camelCase 六字段 `scope`、`operationId`、`operation`、`fence`、`expiresAt`、`proof`；其中 `operation` 只能是 `INDEX / DELETE / REBUILD`，`expiresAt` 是 Unix epoch seconds。成功响应使用 Spring `BaseResponse`：`{code: 0, data: {verified: true, current: true, scope, operationId, operation, fence, expiresAt}, message: "ok"}`。Python 必须逐项与原始 lease 和当前 store 动作匹配，不得生成、覆盖或规范化 lease 字段。
+- `GET /api/internal/customer-service/knowledge-mutation-leases/health`。这是无 mutation、无 lease 请求体的只读探测；可用时返回 `{code: 0, data: {ready: true}, message: "ok"}`。
+- 404、超时、非 JSON、非零 `code`、`verified/current` 非 true、字段缺失或任意字段不匹配，均 fail-closed。错误和日志不得包含 Bearer、proof、响应正文或签名 URL。
+
+Task 7 必须在 Spring 中实现这两个接口，并以 MySQL coordinator 状态作为验证和 health 的事实来源；Python health 不得仅因 coordinator 对象存在就报告可用。
+
+Task 5 只实现上述 Python store 契约和 fail-closed 边界。Task 6 已实现认证传递、远程验证适配器和只读 health 探测；Task 7 的 MySQL 签发、验证、冲突仲裁及两个 Spring 接口尚未实现，不得描述为已有端到端索引能力。
 
 ## 5. 文件上传与 OSS
 

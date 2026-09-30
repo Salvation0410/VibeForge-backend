@@ -11,10 +11,12 @@ from dataclasses import replace
 from contextlib import asynccontextmanager
 
 import pytest
+import httpx
 
 import ai_service.infrastructure.milvus_knowledge as milvus_module
 
 from ai_service.config import Settings
+from ai_service.app import _construct_in_thread
 from ai_service.infrastructure.milvus_knowledge import (
     DenyAllKnowledgeMutationCoordinator,
     IndexedChunk,
@@ -69,9 +71,15 @@ async def test_closeai_embeddings_initialize_once_and_batch_documents(settings):
         [1.0, 0.0], [0.0, 1.0], [0.5, 0.5]
     ]
     assert fake.document_calls == [["a", "b"], ["c"]]
-    assert factory_calls == [("openai:text-embedding-3-large", {
-        "api_key": "closeai-test-secret", "base_url": "https://closeai.test/v1"
-    })]
+    model, kwargs = factory_calls[0]
+    assert model == "openai:text-embedding-3-large"
+    assert kwargs["api_key"] == "closeai-test-secret"
+    assert kwargs["base_url"] == "https://closeai.test/v1"
+    assert isinstance(kwargs["http_client"], httpx.Client)
+    assert isinstance(kwargs["http_async_client"], httpx.AsyncClient)
+    await embeddings.close()
+    assert kwargs["http_client"].is_closed
+    assert kwargs["http_async_client"].is_closed
 
 
 @pytest.mark.asyncio
@@ -80,6 +88,7 @@ async def test_closeai_query_embedding_is_validated(settings):
     embeddings, _ = provider(settings, fake)
     assert await embeddings.embed_query("refund") == [0.25, 0.75]
     assert fake.query_calls == ["refund"]
+    await embeddings.close()
 
 
 @pytest.mark.asyncio
@@ -99,6 +108,7 @@ async def test_closeai_embeddings_reject_invalid_outputs(settings, responses, co
     embeddings, _ = provider(settings, fake)
     with pytest.raises(EmbeddingOutputError, match=f"^{code}$"):
         await embeddings.embed_documents(["a", "b"])
+    await embeddings.close()
 
 
 @pytest.mark.asyncio
@@ -112,27 +122,98 @@ async def test_closeai_errors_are_stable_and_do_not_leak_provider_details(settin
     assert str(caught.value) == "KNOWLEDGE_EMBEDDING_UNAVAILABLE"
     assert secret not in repr(caught.value)
     assert response_body not in repr(caught.value)
+    await embeddings.close()
 
 
 @pytest.mark.asyncio
 async def test_closeai_provider_closes_sync_and_async_http_clients(settings):
-    class AsyncClient:
-        closed = False
-        async def aclose(self):
-            self.closed = True
-
-    class SyncClient:
-        closed = False
-        def close(self):
-            self.closed = True
-
     fake = FakeEmbeddings()
-    fake.async_client = AsyncClient()
-    fake.client = SyncClient()
-    embeddings, _ = provider(settings, fake)
+    embeddings, calls = provider(settings, fake)
+    sync_client = calls[0][1]["http_client"]
+    async_client = calls[0][1]["http_async_client"]
+    assert not sync_client.is_closed
+    assert not async_client.is_closed
     await embeddings.close()
-    assert fake.async_client.closed
-    assert fake.client.closed
+    assert sync_client.is_closed
+    assert async_client.is_closed
+
+
+@pytest.mark.asyncio
+async def test_closeai_real_langchain_shape_owns_and_closes_http_clients(settings):
+    settings.closeai_api_key = "closeai-test-secret"
+    settings.closeai_base_url = "https://closeai.test/v1"
+    embeddings = CloseAIEmbeddingProvider(settings)
+    sync_client = embeddings._http_client
+    async_client = embeddings._http_async_client
+    assert isinstance(sync_client, httpx.Client) and not sync_client.is_closed
+    assert isinstance(async_client, httpx.AsyncClient) and not async_client.is_closed
+    await embeddings.close()
+    assert sync_client.is_closed
+    assert async_client.is_closed
+
+
+def test_closeai_provider_constructor_failure_closes_owned_http_clients(settings):
+    sync_client = httpx.Client()
+    async_client = httpx.AsyncClient()
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("constructor failed")
+
+    with pytest.raises(EmbeddingOutputError, match="KNOWLEDGE_EMBEDDING_UNAVAILABLE"):
+        CloseAIEmbeddingProvider(
+            settings,
+            embedding_factory=fail,
+            http_client_factory=lambda **_kwargs: sync_client,
+            http_async_client_factory=lambda **_kwargs: async_client,
+        )
+    assert sync_client.is_closed
+    assert async_client.is_closed
+
+
+def test_closeai_async_http_client_factory_failure_closes_sync_client(settings):
+    sync_client = httpx.Client()
+
+    def fail(**_kwargs):
+        raise RuntimeError("async client constructor failed")
+
+    with pytest.raises(EmbeddingOutputError, match="KNOWLEDGE_EMBEDDING_UNAVAILABLE"):
+        CloseAIEmbeddingProvider(
+            settings,
+            embedding_factory=lambda *_args, **_kwargs: FakeEmbeddings(),
+            http_client_factory=lambda **_kwargs: sync_client,
+            http_async_client_factory=fail,
+        )
+    assert sync_client.is_closed
+
+
+@pytest.mark.asyncio
+async def test_cancelled_closeai_construction_closes_owned_http_clients(settings):
+    sync_client = httpx.Client()
+    async_client = httpx.AsyncClient()
+    started = threading.Event()
+    release = threading.Event()
+
+    def factory(*_args, **_kwargs):
+        started.set()
+        release.wait(1)
+        return FakeEmbeddings()
+
+    task = asyncio.create_task(_construct_in_thread(
+        CloseAIEmbeddingProvider,
+        settings,
+        embedding_factory=factory,
+        http_client_factory=lambda **_kwargs: sync_client,
+        http_async_client_factory=lambda **_kwargs: async_client,
+    ))
+    assert await asyncio.to_thread(started.wait, 0.3)
+    task.cancel()
+    await asyncio.sleep(0.02)
+    assert not task.done()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert sync_client.is_closed
+    assert async_client.is_closed
 
 
 class FakeMilvusClient:

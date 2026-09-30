@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import math
+import threading
 from collections.abc import Callable, Sequence
 from typing import Any, Protocol
 
 from langchain.embeddings import init_embeddings
+import httpx
 
 from ai_service.config import Settings
 
@@ -28,20 +29,43 @@ class EmbeddingProvider(Protocol):
 class CloseAIEmbeddingProvider:
     """Process-scoped OpenAI-compatible embeddings client for CloseAI."""
 
+    @staticmethod
+    def _close_async_client_sync(client: httpx.AsyncClient) -> None:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(client.aclose())
+            return
+        thread = threading.Thread(target=lambda: asyncio.run(client.aclose()))
+        thread.start()
+        thread.join()
+
     def __init__(
         self,
         settings: Settings,
         *,
         embedding_factory: Callable[..., Any] = init_embeddings,
+        http_client_factory: Callable[..., httpx.Client] = httpx.Client,
+        http_async_client_factory: Callable[..., httpx.AsyncClient] = httpx.AsyncClient,
     ) -> None:
         self._batch_size = settings.rag_embedding_batch_size
+        self._http_client: httpx.Client | None = None
+        self._http_async_client: httpx.AsyncClient | None = None
         try:
+            self._http_client = http_client_factory(trust_env=False)
+            self._http_async_client = http_async_client_factory(trust_env=False)
             self._client = embedding_factory(
                 settings.rag_embedding_model,
                 api_key=settings.closeai_api_key,
                 base_url=settings.closeai_base_url,
+                http_client=self._http_client,
+                http_async_client=self._http_async_client,
             )
         except Exception:
+            if self._http_client is not None:
+                self._http_client.close()
+            if self._http_async_client is not None:
+                self._close_async_client_sync(self._http_async_client)
             raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_UNAVAILABLE") from None
 
     @staticmethod
@@ -105,20 +129,9 @@ class CloseAIEmbeddingProvider:
         return self.validate([raw], expected_count=1)[0]
 
     async def close(self) -> None:
-        """Close OpenAI-compatible sync and async HTTP clients when exposed."""
+        """Close the HTTP clients explicitly owned by this provider."""
 
-        seen: set[int] = set()
-        for name in ("async_client", "client"):
-            resource = getattr(self._client, name, None)
-            if resource is None or id(resource) in seen:
-                continue
-            seen.add(id(resource))
-            close = getattr(resource, "aclose", None) or getattr(resource, "close", None)
-            if close is None:
-                continue
-            if inspect.iscoroutinefunction(close):
-                await close()
-            else:
-                result = await asyncio.to_thread(close)
-                if inspect.isawaitable(result):
-                    await result
+        if self._http_async_client is not None:
+            await self._http_async_client.aclose()
+        if self._http_client is not None:
+            await asyncio.to_thread(self._http_client.close)
