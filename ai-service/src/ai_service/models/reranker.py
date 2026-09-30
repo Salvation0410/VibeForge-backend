@@ -5,10 +5,13 @@ from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import gc
+from importlib.metadata import version
 import inspect
 import logging
 import math
+import multiprocessing
 from typing import Any, Protocol
+import uuid
 
 from ai_service.config import Settings
 from ai_service.infrastructure.milvus_knowledge import RetrievedChunk
@@ -19,6 +22,7 @@ MAX_CHUNKS = 100
 MAX_CHUNK_CHARS = 100_000
 MAX_TOTAL_CONTENT_CHARS = 1_000_000
 SHUTDOWN_DRAIN_TIMEOUT_SECONDS = 30.0
+WORKER_STARTUP_TIMEOUT_SECONDS = 300.0
 
 logger = logging.getLogger(__name__)
 
@@ -176,9 +180,25 @@ def _score_flag_batch(
 
 def _load_flag_reranker(model_name: str, **kwargs: Any) -> Any:
     # Keep importing FlagEmbedding out of disabled startup and module import paths.
+    if version("FlagEmbedding") != "1.4.2":
+        raise RuntimeError("unsupported FlagEmbedding runtime")
     from FlagEmbedding import FlagReranker
+    from FlagEmbedding.utils import tokenizer_compat
 
-    return _SafeFlagRerankerAdapter(FlagReranker(model_name, **kwargs))
+    if not callable(getattr(FlagReranker, "compute_score", None)):
+        raise RuntimeError("unsupported FlagEmbedding reranker surface")
+    for name in ("pad_with_compat", "prepare_for_model_compat"):
+        if not callable(getattr(tokenizer_compat, name, None)):
+            raise RuntimeError("unsupported FlagEmbedding tokenizer surface")
+
+    reranker = FlagReranker(model_name, **kwargs)
+    for name in (
+        "get_detailed_inputs", "batch_size", "tokenizer", "model",
+        "target_devices", "max_length", "query_max_length", "use_fp16",
+    ):
+        if not hasattr(reranker, name):
+            raise RuntimeError("unsupported FlagEmbedding instance surface")
+    return _SafeFlagRerankerAdapter(reranker)
 
 
 def _is_cuda_oom(error: BaseException) -> bool:
@@ -235,6 +255,249 @@ async def _drain_task(task: asyncio.Future[Any] | asyncio.Task[Any]) -> Any:
     return task.result()
 
 
+def _reranker_worker_entry(connection: Any, config: dict[str, Any]) -> None:
+    """Spawn-safe worker entry; model construction and ownership stay in this process."""
+
+    owner: _ModelOwner | None = None
+    try:
+        model = _load_flag_reranker(
+            config["model_name"], use_fp16=True,
+            devices=[config["device"]], normalize=False,
+        )
+        owner = _ModelOwner(model)
+        connection.send({"type": "ready"})
+        while True:
+            message = connection.recv()
+            if not isinstance(message, dict):
+                raise ValueError
+            if message.get("type") == "shutdown":
+                break
+            request_id = message.get("request_id")
+            pairs = message.get("pairs")
+            batch_size = message.get("batch_size")
+            if (
+                message.get("type") != "score"
+                or not isinstance(request_id, str)
+                or not isinstance(pairs, list)
+                or not isinstance(batch_size, int)
+                or not 1 <= batch_size <= 128
+            ):
+                raise ValueError
+            try:
+                scores: list[Any] = []
+                for start in range(0, len(pairs), batch_size):
+                    raw = model.compute_score(pairs[start : start + batch_size])
+                    values = raw.tolist() if hasattr(raw, "tolist") else raw
+                    if isinstance(values, (int, float)):
+                        values = [values]
+                    scores.extend(values)
+                connection.send({
+                    "type": "result", "request_id": request_id, "scores": scores,
+                })
+            except BaseException:
+                connection.send({
+                    "type": "error", "request_id": request_id,
+                    "code": "CUSTOMER_SERVICE_RERANKER_UNAVAILABLE",
+                })
+    except BaseException:
+        try:
+            connection.send({
+                "type": "failed", "code": "CUSTOMER_SERVICE_RERANKER_UNAVAILABLE",
+            })
+        except BaseException:
+            pass
+    finally:
+        if owner is not None:
+            owner.release()
+        try:
+            connection.close()
+        except BaseException:
+            pass
+
+
+class _ProcessReranker:
+    def __init__(
+        self, connection: Any, process: Any, *, batch_size: int,
+        timeout_seconds: float, shutdown_seconds: float = SHUTDOWN_DRAIN_TIMEOUT_SECONDS,
+    ) -> None:
+        self._connection = connection
+        self._process = process
+        self._batch_size = batch_size
+        self._timeout = timeout_seconds
+        self._shutdown_seconds = shutdown_seconds
+        self._lock = asyncio.Lock()
+        self._closed = False
+        self._drains: set[asyncio.Task[None]] = set()
+
+    @classmethod
+    async def start(
+        cls, settings: Settings, *, worker_target: Callable[..., None] = _reranker_worker_entry,
+        context: Any | None = None,
+        shutdown_seconds: float = SHUTDOWN_DRAIN_TIMEOUT_SECONDS,
+    ) -> _ProcessReranker:
+        ctx = context or multiprocessing.get_context("spawn")
+        parent, child = ctx.Pipe(duplex=True)
+        process = ctx.Process(
+            target=worker_target,
+            args=(child, {
+                "model_name": settings.rag_reranker_model,
+                "device": settings.rag_reranker_device,
+            }),
+            name="customer-service-reranker", daemon=True,
+        )
+        started = False
+        try:
+            process.start()
+            started = True
+            child.close()
+            backend = cls(
+                parent, process, batch_size=settings.rag_reranker_batch_size,
+                timeout_seconds=settings.rag_reranker_timeout_seconds,
+                shutdown_seconds=shutdown_seconds,
+            )
+            response = await backend._receive(WORKER_STARTUP_TIMEOUT_SECONDS)
+            if response != {"type": "ready"}:
+                raise RerankerError("CUSTOMER_SERVICE_RERANKER_UNAVAILABLE")
+            return backend
+        except BaseException as error:
+            try:
+                child.close()
+                parent.close()
+            except BaseException:
+                pass
+            if started and process.is_alive():
+                process.terminate()
+                process.join(1)
+                if process.is_alive() and hasattr(process, "kill"):
+                    process.kill()
+                    process.join(1)
+            if isinstance(error, asyncio.CancelledError):
+                raise
+            raise RerankerError("CUSTOMER_SERVICE_RERANKER_UNAVAILABLE") from None
+
+    async def _receive(self, timeout: float | None = None) -> dict[str, Any]:
+        loop = asyncio.get_running_loop()
+        deadline = None if timeout is None else loop.time() + timeout
+        while True:
+            try:
+                if self._connection.poll(0):
+                    value = self._connection.recv()
+                    if not isinstance(value, dict):
+                        raise RerankerError("CUSTOMER_SERVICE_RERANKER_UNAVAILABLE")
+                    return value
+            except (EOFError, OSError):
+                raise RerankerError("CUSTOMER_SERVICE_RERANKER_UNAVAILABLE") from None
+            if not self._process.is_alive():
+                raise RerankerError("CUSTOMER_SERVICE_RERANKER_UNAVAILABLE")
+            if deadline is not None and loop.time() >= deadline:
+                raise TimeoutError
+            await asyncio.sleep(0.005)
+
+    async def _score(self, pairs: list[list[str]]) -> list[float]:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._timeout
+        try:
+            await asyncio.wait_for(self._lock.acquire(), self._timeout)
+        except TimeoutError:
+            raise RerankerError("CUSTOMER_SERVICE_RERANKER_TIMEOUT") from None
+        owns_lock = True
+        request_id = uuid.uuid4().hex
+        try:
+            self._connection.send({
+                "type": "score", "request_id": request_id,
+                "pairs": pairs, "batch_size": self._batch_size,
+            })
+            receive = asyncio.create_task(self._receive())
+            def transfer_to_drain() -> None:
+                nonlocal owns_lock
+
+                async def drain() -> None:
+                    try:
+                        await receive
+                    except BaseException:
+                        pass
+                    finally:
+                        self._lock.release()
+
+                task = asyncio.create_task(drain())
+                self._drains.add(task)
+                task.add_done_callback(self._drains.discard)
+                owns_lock = False
+
+            try:
+                response = await asyncio.wait_for(
+                    asyncio.shield(receive), max(0.0, deadline - loop.time()),
+                )
+            except TimeoutError:
+                transfer_to_drain()
+                raise RerankerError("CUSTOMER_SERVICE_RERANKER_TIMEOUT") from None
+            except asyncio.CancelledError:
+                transfer_to_drain()
+                raise
+            if response.get("request_id") != request_id:
+                raise RerankerError("CUSTOMER_SERVICE_RERANKER_UNAVAILABLE")
+            if response.get("type") != "result":
+                raise RerankerError("CUSTOMER_SERVICE_RERANKER_UNAVAILABLE")
+            return LocalCrossEncoderReranker._normalize_scores(
+                response.get("scores"), expected_count=len(pairs),
+            )
+        except RerankerError:
+            raise
+        except asyncio.CancelledError:
+            raise
+        except BaseException:
+            raise RerankerError("CUSTOMER_SERVICE_RERANKER_UNAVAILABLE") from None
+        finally:
+            if owns_lock:
+                self._lock.release()
+
+    async def rerank(
+        self, question: str, chunks: Sequence[RetrievedChunk], *, top_n: int,
+    ) -> list[RerankedChunk]:
+        validated = _validate_request(question, chunks, top_n)
+        if not validated:
+            return []
+        scores = await self._score([[question, item.content] for item in validated])
+        ranked = [
+            (index, RerankedChunk(chunk=item, score=scores[index]))
+            for index, item in enumerate(validated)
+        ]
+        ranked.sort(key=lambda value: (-value[1].score, value[0]))
+        return [item for _, item in ranked[:top_n]]
+
+    async def _wait_exit(self, timeout: float) -> bool:
+        deadline = asyncio.get_running_loop().time() + timeout
+        while self._process.is_alive() and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.01)
+        self._process.join(0)
+        return not self._process.is_alive()
+
+    async def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            await asyncio.wait_for(self._lock.acquire(), self._shutdown_seconds)
+        except TimeoutError:
+            pass
+        else:
+            try:
+                self._connection.send({"type": "shutdown"})
+            except (EOFError, OSError):
+                pass
+            finally:
+                self._lock.release()
+            if await self._wait_exit(self._shutdown_seconds):
+                self._connection.close()
+                return
+        if self._process.is_alive():
+            self._process.terminate()
+        if not await self._wait_exit(1.0) and hasattr(self._process, "kill"):
+            self._process.kill()
+            await self._wait_exit(1.0)
+        self._connection.close()
+
+
 class LocalCrossEncoderReranker:
     """Process-scoped bounded adapter for blocking local cross-encoder inference."""
 
@@ -276,7 +539,9 @@ class LocalCrossEncoderReranker:
         settings: Settings,
         *,
         model_factory: Callable[..., Any] = _load_flag_reranker,
-    ) -> LocalCrossEncoderReranker:
+    ) -> RerankerProvider:
+        if model_factory is _load_flag_reranker:
+            return await _ProcessReranker.start(settings)
         load_task = asyncio.create_task(asyncio.to_thread(
             model_factory,
             settings.rag_reranker_model,

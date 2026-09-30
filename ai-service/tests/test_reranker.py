@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import multiprocessing
 import threading
 import time
 from typing import Any
@@ -18,6 +19,7 @@ from ai_service.models.reranker import (
     DisabledReranker,
     LocalCrossEncoderReranker,
     RerankerError,
+    _ProcessReranker,
     _SafeFlagRerankerAdapter,
 )
 
@@ -54,6 +56,36 @@ class FakeCrossEncoder:
 
     def close(self) -> None:
         self.closed = True
+
+
+def protocol_test_worker(connection, _config):
+    connection.send({"type": "ready"})
+    try:
+        while True:
+            message = connection.recv()
+            if message.get("type") == "shutdown":
+                return
+            pairs = message["pairs"]
+            if pairs and pairs[0][1] == "block-forever":
+                while True:
+                    time.sleep(1)
+            if pairs and pairs[0][1] == "oom":
+                connection.send({
+                    "type": "error", "request_id": message["request_id"],
+                    "code": "CUSTOMER_SERVICE_RERANKER_UNAVAILABLE",
+                })
+                continue
+            connection.send({
+                "type": "result", "request_id": message["request_id"],
+                "scores": [float(index) for index, _pair in enumerate(pairs)],
+            })
+    finally:
+        connection.close()
+
+
+def startup_block_worker(_connection, _config):
+    while True:
+        time.sleep(1)
 
 
 @pytest.mark.asyncio
@@ -391,6 +423,112 @@ def test_safe_flag_adapter_retries_smaller_batches_and_preserves_count():
     output = adapter.compute_score([["q", "a"], ["q", "b"]])
     assert output == [0.0, 0.0]
     assert attempts == [(2, 2), (1, 1), (1, 1)]
+
+
+def test_locked_flagembedding_runtime_surface_is_compatible():
+    from importlib.metadata import version
+    from FlagEmbedding import FlagReranker
+    from FlagEmbedding.utils import tokenizer_compat
+
+    assert version("FlagEmbedding") == "1.4.2"
+    assert callable(FlagReranker.compute_score)
+    assert callable(tokenizer_compat.pad_with_compat)
+    assert callable(tokenizer_compat.prepare_for_model_compat)
+
+
+@pytest.mark.asyncio
+async def test_default_factory_selects_process_backend(monkeypatch):
+    sentinel = DisabledReranker()
+    calls = []
+
+    async def start(_cls, settings):
+        calls.append(settings.rag_reranker_model)
+        return sentinel
+
+    monkeypatch.setattr(_ProcessReranker, "start", classmethod(start))
+
+    result = await LocalCrossEncoderReranker.create(rag_settings())
+
+    assert result is sentinel
+    assert calls == ["BAAI/bge-reranker-v2-m3"]
+
+
+@pytest.mark.asyncio
+async def test_spawn_worker_normal_result_and_unavailable_protocol():
+    settings = rag_settings(
+        rag_reranker_timeout_seconds=0.5, rag_reranker_batch_size=2,
+    )
+    backend = await _ProcessReranker.start(
+        settings, worker_target=protocol_test_worker, shutdown_seconds=0.1,
+    )
+    try:
+        result = await backend.rerank(
+            "q", [chunk(0), chunk(1)], top_n=2,
+        )
+        assert [item.chunk.chunk_id for item in result] == ["chunk-1", "chunk-0"]
+        with pytest.raises(RerankerError) as captured:
+            await backend.rerank("q", [chunk(0, content="oom")], top_n=1)
+        assert captured.value.code == "CUSTOMER_SERVICE_RERANKER_UNAVAILABLE"
+    finally:
+        await backend.close()
+    assert not backend._process.is_alive()
+
+
+@pytest.mark.asyncio
+async def test_spawn_worker_timeout_shutdown_terminates_permanent_child():
+    settings = rag_settings(rag_reranker_timeout_seconds=0.03)
+    backend = await _ProcessReranker.start(
+        settings, worker_target=protocol_test_worker, shutdown_seconds=0.03,
+    )
+    with pytest.raises(RerankerError) as captured:
+        await backend.rerank(
+            "q", [chunk(0, content="block-forever")], top_n=1,
+        )
+    assert captured.value.code == "CUSTOMER_SERVICE_RERANKER_TIMEOUT"
+
+    await asyncio.wait_for(backend.close(), 0.5)
+
+    assert not backend._process.is_alive()
+
+
+@pytest.mark.asyncio
+async def test_spawn_worker_cancelled_request_keeps_ipc_lock_until_shutdown():
+    settings = rag_settings(rag_reranker_timeout_seconds=1)
+    backend = await _ProcessReranker.start(
+        settings, worker_target=protocol_test_worker, shutdown_seconds=0.03,
+    )
+    request = asyncio.create_task(backend.rerank(
+        "q", [chunk(0, content="block-forever")], top_n=1,
+    ))
+    await asyncio.sleep(0.03)
+    request.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await request
+    assert backend._lock.locked()
+    await backend.close()
+    assert not backend._process.is_alive()
+
+
+@pytest.mark.asyncio
+async def test_spawn_worker_startup_cancellation_terminates_child():
+    before = {child.pid for child in multiprocessing.active_children()}
+    loading = asyncio.create_task(_ProcessReranker.start(
+        rag_settings(), worker_target=startup_block_worker,
+        shutdown_seconds=0.03,
+    ))
+    await asyncio.sleep(0.05)
+    loading.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await loading
+    for _ in range(50):
+        remaining = {
+            child.pid for child in multiprocessing.active_children()
+            if child.pid not in before
+        }
+        if not remaining:
+            break
+        await asyncio.sleep(0.01)
+    assert not remaining
 
 
 @pytest.mark.asyncio
