@@ -929,6 +929,26 @@ def test_store_revalidates_alias_and_derives_legal_bounded_names(settings):
 
 
 @pytest.mark.asyncio
+async def test_max_length_alias_can_rebuild_and_publish_staging(settings):
+    alias = "a" * 255
+    settings.milvus_collection_alias = alias
+    client = FakeMilvusClient()
+    knowledge = MilvusKnowledgeStore(
+        settings, client_factory=lambda **_kwargs: client,
+        mutation_coordinator=client.coordinator,
+    )
+
+    result = await knowledge.rebuild_collection(
+        documents(document()),
+        lease=lease(f"collection:{alias}", 100),
+    )
+
+    assert client.aliases[alias] == result.collection_name
+    assert result.collection_name in client.collections
+    assert len(result.collection_name) <= 255
+
+
+@pytest.mark.asyncio
 async def test_configured_timeout_is_used_for_client_and_rpc(settings):
     settings.milvus_rpc_timeout_seconds = 1.25
     client = FakeMilvusClient()

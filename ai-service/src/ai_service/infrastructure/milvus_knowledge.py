@@ -21,6 +21,10 @@ SCHEMA_VERSION = 1
 _ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,128}")
 _CHUNK_ID_PATTERN = re.compile(r"[A-Za-z0-9_.:-]{1,512}")
 _MILVUS_IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,254}")
+_MAX_MILVUS_IDENTIFIER_LENGTH = 255
+_COLLECTION_BASE_LENGTH = _MAX_MILVUS_IDENTIFIER_LENGTH - len(
+    "_000000000000_staging_000000000000"
+)
 _VERIFY_BATCH_SIZE = 256
 _MAX_DOCUMENT_HISTORY_RECORDS = 10_000
 _OUTPUT_FIELDS = [
@@ -302,7 +306,7 @@ class MilvusKnowledgeStore:
             f"customer-service\0{model}\0{dimension}\0{self._schema_version}".encode()
         ).hexdigest()[:12]
         ending = f"_{fingerprint}{suffix}"
-        name = f"{self._alias[:255 - len(ending)]}{ending}"
+        name = f"{self._alias[:_COLLECTION_BASE_LENGTH]}{ending}"
         if not self._valid_collection_identifier(name):
             raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_ALIAS_INVALID")
         return name
@@ -444,7 +448,7 @@ class MilvusKnowledgeStore:
 
     def _control_collection_name(self) -> str:
         ending = "_mutation_control_v1"
-        name = f"{self._alias[:255 - len(ending)]}{ending}"
+        name = f"{self._alias[:_COLLECTION_BASE_LENGTH]}{ending}"
         if not self._valid_collection_identifier(name):
             raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_ALIAS_INVALID")
         return name
