@@ -21,7 +21,7 @@ from ai_service.infrastructure.milvus_knowledge import (
     KnowledgeMutationLease,
     KnowledgeStore,
 )
-from ai_service.models.embeddings import EmbeddingProvider
+from ai_service.models.embeddings import EmbeddingOutputError, EmbeddingProvider
 
 
 # Limits also apply after decompression and text extraction, where input byte limits alone do not help.
@@ -356,13 +356,34 @@ class KnowledgeEtlService:
         downloader: object,
         embeddings: EmbeddingProvider,
         store: KnowledgeStore,
+        semaphore: asyncio.Semaphore | None = None,
     ) -> None:
         self._settings = settings
         self._downloader = downloader
         self._embeddings = embeddings
         self._store = store
+        self._semaphore = semaphore or asyncio.Semaphore(
+            settings.rag_etl_max_concurrency
+        )
 
     async def index(
+        self, *, document_id: str, document_version: int, file_name: str,
+        file_type: str, signed_url: str, sha256: str, etl_version: str,
+        lease: KnowledgeMutationLease,
+    ):
+        async with self._semaphore:
+            return await self._index(
+                document_id=document_id,
+                document_version=document_version,
+                file_name=file_name,
+                file_type=file_type,
+                signed_url=signed_url,
+                sha256=sha256,
+                etl_version=etl_version,
+                lease=lease,
+            )
+
+    async def _index(
         self, *, document_id: str, document_version: int, file_name: str,
         file_type: str, signed_url: str, sha256: str, etl_version: str,
         lease: KnowledgeMutationLease,
@@ -380,9 +401,18 @@ class KnowledgeEtlService:
             source_name=file_name,
             settings=self._settings,
         )
+        if len(chunks) > self._settings.rag_max_embedding_elements:
+            raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_BUDGET_EXCEEDED")
         vectors = await self._embeddings.embed_documents(
-            [chunk.content for chunk in chunks]
+            [chunk.content for chunk in chunks],
+            max_elements=self._settings.rag_max_embedding_elements,
         )
+        try:
+            total_elements = sum(len(vector) for vector in vectors)
+        except TypeError:
+            raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_INVALID_OUTPUT") from None
+        if total_elements > self._settings.rag_max_embedding_elements:
+            raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_BUDGET_EXCEEDED")
         indexed_chunks = tuple(
             IndexedChunk(
                 chunk_id=chunk.chunk_id,

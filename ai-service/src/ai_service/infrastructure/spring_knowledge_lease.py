@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+import json
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -12,6 +13,27 @@ from ai_service.infrastructure.milvus_knowledge import (
     KnowledgeMutationLease,
     MilvusKnowledgeError,
 )
+
+
+MAX_LEASE_RESPONSE_BYTES = 64 * 1024
+
+
+async def _bounded_json(response: httpx.Response) -> Any:
+    response.raise_for_status()
+    declared = response.headers.get("Content-Length")
+    if declared is not None:
+        try:
+            declared_size = int(declared)
+        except ValueError:
+            raise ValueError from None
+        if declared_size < 0 or declared_size > MAX_LEASE_RESPONSE_BYTES:
+            raise ValueError
+    body = bytearray()
+    async for chunk in response.aiter_bytes():
+        if len(body) + len(chunk) > MAX_LEASE_RESPONSE_BYTES:
+            raise ValueError
+        body.extend(chunk)
+    return json.loads(body)
 
 
 def _validation_url(gateway_base_url: str) -> str:
@@ -82,9 +104,10 @@ class SpringKnowledgeMutationCoordinator:
             "proof": lease.proof,
         }
         try:
-            response = await self._client.post(self._validation_url, json=request)
-            response.raise_for_status()
-            payload = response.json()
+            async with self._client.stream(
+                "POST", self._validation_url, json=request
+            ) as response:
+                payload = await _bounded_json(response)
             data: Any = payload.get("data") if isinstance(payload, dict) else None
             if (
                 not isinstance(payload, dict)
@@ -106,9 +129,8 @@ class SpringKnowledgeMutationCoordinator:
 
     async def ping(self) -> bool:
         try:
-            response = await self._client.get(self._health_url)
-            response.raise_for_status()
-            payload = response.json()
+            async with self._client.stream("GET", self._health_url) as response:
+                payload = await _bounded_json(response)
             return bool(
                 isinstance(payload, dict)
                 and payload.get("code") == 0

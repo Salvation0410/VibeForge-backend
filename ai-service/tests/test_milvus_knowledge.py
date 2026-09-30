@@ -83,6 +83,18 @@ async def test_closeai_embeddings_initialize_once_and_batch_documents(settings):
 
 
 @pytest.mark.asyncio
+async def test_closeai_embedding_budget_stops_before_later_batches(settings):
+    fake = FakeEmbeddings(document_responses=[[[1, 0, 0], [0, 1, 0]]])
+    embeddings, _ = provider(settings, fake)
+    with pytest.raises(
+        EmbeddingOutputError, match="KNOWLEDGE_EMBEDDING_BUDGET_EXCEEDED"
+    ):
+        await embeddings.embed_documents(["a", "b", "c"], max_elements=8)
+    assert fake.document_calls == [["a", "b"]]
+    await embeddings.close()
+
+
+@pytest.mark.asyncio
 async def test_closeai_query_embedding_is_validated(settings):
     fake = FakeEmbeddings(query_response=[0.25, 0.75])
     embeddings, _ = provider(settings, fake)

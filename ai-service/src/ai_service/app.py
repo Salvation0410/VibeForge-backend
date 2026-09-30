@@ -153,7 +153,11 @@ def create_app(
                 )
                 resources.append(store)
                 app.state.knowledge_etl_service = KnowledgeEtlService(
-                    config, downloader, embeddings, store
+                    config,
+                    downloader,
+                    embeddings,
+                    store,
+                    semaphore=asyncio.Semaphore(config.rag_etl_max_concurrency),
                 )
             yield
         finally:

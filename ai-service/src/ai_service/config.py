@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     )
     rag_embedding_model: str = Field(default="openai:text-embedding-3-large", min_length=1)
     rag_embedding_batch_size: int = Field(default=32, ge=1, le=256)
+    rag_max_embedding_elements: int = Field(default=8_000_000, ge=1, le=100_000_000)
+    rag_etl_max_concurrency: int = Field(default=2, ge=1, le=32)
 
     milvus_uri: str = "http://localhost:19530"
     milvus_token: str = Field(default="", repr=False)

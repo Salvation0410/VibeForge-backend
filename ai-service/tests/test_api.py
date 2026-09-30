@@ -318,7 +318,7 @@ def test_http_etl_preserves_all_lease_fields_through_service_store_and_coordinat
             return Downloaded()
 
     class Embeddings:
-        async def embed_documents(self, texts):
+        async def embed_documents(self, texts, **_kwargs):
             assert texts == ["knowledge"]
             return [[0.1, 0.2]]
 

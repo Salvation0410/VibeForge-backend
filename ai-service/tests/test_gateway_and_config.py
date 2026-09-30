@@ -860,6 +860,8 @@ def test_customer_service_rag_prefixed_closeai_dotenv_takes_priority(monkeypatch
         ({"rag_retrieval_top_k": 0}, "rag_retrieval_top_k"),
         ({"rag_final_top_k": 0}, "rag_final_top_k"),
         ({"rag_embedding_batch_size": 0}, "rag_embedding_batch_size"),
+        ({"rag_max_embedding_elements": 0}, "rag_max_embedding_elements"),
+        ({"rag_etl_max_concurrency": 0}, "rag_etl_max_concurrency"),
         ({"rag_reranker_batch_size": 0}, "rag_reranker_batch_size"),
         ({"rag_reranker_timeout_seconds": 0}, "rag_reranker_timeout_seconds"),
         ({"rag_download_max_bytes": 0}, "rag_download_max_bytes"),

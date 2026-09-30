@@ -19,6 +19,7 @@ import ai_service.orchestration.document_etl as document_etl
 
 from ai_service.orchestration.document_etl import (
     DocumentETLError,
+    KnowledgeChunk,
     KnowledgeEtlService,
     ParsedSection,
     parse_document,
@@ -447,7 +448,7 @@ async def test_etl_service_indexes_embedded_document_with_original_lease(setting
             return Downloaded()
 
     class Embeddings:
-        async def embed_documents(self, texts):
+        async def embed_documents(self, texts, **_kwargs):
             assert texts == ["refund policy"]
             return [[0.25, 0.75]]
 
@@ -537,7 +538,7 @@ async def test_etl_service_propagates_download_and_embedding_failures(settings, 
             return Downloaded()
 
     class FailingEmbeddings:
-        async def embed_documents(self, _texts):
+        async def embed_documents(self, _texts, **_kwargs):
             raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_UNAVAILABLE")
 
     service = KnowledgeEtlService(settings, Downloader(), FailingEmbeddings(), object())
@@ -573,7 +574,7 @@ async def test_etl_service_propagates_store_failure(settings, tmp_path):
             return Downloaded()
 
     class Embeddings:
-        async def embed_documents(self, _texts):
+        async def embed_documents(self, _texts, **_kwargs):
             return [[0.1, 0.2]]
 
     class Store:
@@ -592,6 +593,119 @@ async def test_etl_service_propagates_store_failure(settings, tmp_path):
     assert not path.exists()
 
 
+@pytest.mark.asyncio
+async def test_etl_service_budget_exceeded_does_not_call_store(settings, tmp_path):
+    settings.rag_max_embedding_elements = 2
+    path = tmp_path / "budget.txt"
+    path.write_text("content", encoding="utf-8")
+
+    class Downloaded:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_):
+            path.unlink(missing_ok=True)
+        @property
+        def path(self):
+            return path
+
+    class Downloader:
+        async def download(self, *_args, **_kwargs):
+            return Downloaded()
+
+    class Embeddings:
+        calls = 0
+        async def embed_documents(self, _texts, **_kwargs):
+            self.calls += 1
+            return [[0.1, 0.2, 0.3]]
+
+    class Store:
+        called = False
+        async def upsert_document_version(self, *_args, **_kwargs):
+            self.called = True
+
+    embeddings, store = Embeddings(), Store()
+    service = KnowledgeEtlService(settings, Downloader(), embeddings, store)
+    lease = KnowledgeMutationLease(
+        scope="document:doc-1", operation_id="op-1", operation="INDEX",
+        fence=1, expires_at=time.time() + 60, proof="proof",
+    )
+    with pytest.raises(
+        EmbeddingOutputError, match="KNOWLEDGE_EMBEDDING_BUDGET_EXCEEDED"
+    ):
+        await service.index(
+            document_id="doc-1", document_version=1, file_name="budget.txt",
+            file_type="TXT", signed_url="https://oss.test/x", sha256="a" * 64,
+            etl_version="etl-v1", lease=lease,
+        )
+    assert embeddings.calls == 1
+    assert not store.called
+
+
+@pytest.mark.asyncio
+async def test_etl_semaphore_limits_concurrency_and_releases_on_cancel(
+    settings, monkeypatch,
+):
+    entered: list[int] = []
+    first_entered = asyncio.Event()
+    block = asyncio.Event()
+
+    async def parse(*_args, **kwargs):
+        version = kwargs["document_version"]
+        return (KnowledgeChunk(
+            chunk_id=f"doc-1:{version}:0", document_id="doc-1",
+            document_version=version, chunk_index=0, content="content",
+            source_name="x.txt", source_locator="lines 1-1",
+        ),)
+
+    class Downloader:
+        async def download(self, *_args, **_kwargs):
+            return object()
+
+    class Embeddings:
+        async def embed_documents(self, _texts, **_kwargs):
+            entered.append(len(entered) + 1)
+            if len(entered) == 1:
+                first_entered.set()
+                await block.wait()
+            return [[0.1, 0.2]]
+
+    class Store:
+        async def upsert_document_version(self, document, *, lease):
+            return type("Result", (), {
+                "document_id": document.document_id,
+                "document_version": document.document_version,
+                "chunk_count": 1, "idempotent": False,
+            })()
+
+    monkeypatch.setattr(document_etl, "parse_and_split_download", parse)
+    service = KnowledgeEtlService(
+        settings, Downloader(), Embeddings(), Store(),
+        semaphore=asyncio.Semaphore(1),
+    )
+    lease = KnowledgeMutationLease(
+        scope="document:doc-1", operation_id="op-1", operation="INDEX",
+        fence=1, expires_at=time.time() + 60, proof="proof",
+    )
+
+    async def index(version):
+        return await service.index(
+            document_id="doc-1", document_version=version, file_name="x.txt",
+            file_type="TXT", signed_url="https://oss.test/x", sha256="a" * 64,
+            etl_version="etl-v1", lease=lease,
+        )
+
+    first = asyncio.create_task(index(1))
+    await first_entered.wait()
+    second = asyncio.create_task(index(2))
+    await asyncio.sleep(0.02)
+    assert entered == [1]
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    await asyncio.wait_for(second, 0.5)
+    assert entered == [1, 2]
+
+
 def spring_lease_response(lease, **overrides):
     data = {
         "verified": True,
@@ -604,6 +718,15 @@ def spring_lease_response(lease, **overrides):
     }
     data.update(overrides)
     return {"code": 0, "data": data, "message": "ok"}
+
+
+class LeaseResponseStream(httpx.AsyncByteStream):
+    def __init__(self, *parts: bytes):
+        self.parts = parts
+
+    async def __aiter__(self):
+        for part in self.parts:
+            yield part
 
 
 @pytest.mark.asyncio
@@ -796,3 +919,49 @@ async def test_spring_coordinator_timeout_is_fail_closed():
     await coordinator.close()
     assert str(caught.value) == "KNOWLEDGE_MUTATION_LEASE_INVALID"
     assert "vendor body" not in repr(caught.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", ["validate", "health"])
+@pytest.mark.parametrize("framing", ["content_length", "chunked"])
+async def test_spring_coordinator_rejects_oversized_streamed_responses(
+    target, framing,
+):
+    from ai_service.infrastructure.spring_knowledge_lease import (
+        MAX_LEASE_RESPONSE_BYTES,
+    )
+
+    def handler(_request):
+        if framing == "content_length":
+            return httpx.Response(
+                200,
+                headers={"Content-Length": str(MAX_LEASE_RESPONSE_BYTES + 1)},
+                stream=LeaseResponseStream(b"{}"),
+            )
+        return httpx.Response(
+            200,
+            stream=LeaseResponseStream(
+                b"x" * MAX_LEASE_RESPONSE_BYTES, b"x"
+            ),
+        )
+
+    coordinator = SpringKnowledgeMutationCoordinator(
+        gateway_base_url="http://spring.test/api/internal/ai-tools",
+        bearer_token="spring-secret",
+        transport=httpx.MockTransport(handler),
+    )
+    if target == "health":
+        assert not await coordinator.ping()
+    else:
+        lease = KnowledgeMutationLease(
+            scope="document:doc-1", operation_id="op-1", operation="INDEX",
+            fence=7, expires_at=time.time() + 60, proof="proof",
+        )
+        with pytest.raises(
+            MilvusKnowledgeError, match="KNOWLEDGE_MUTATION_LEASE_INVALID"
+        ):
+            async with coordinator.hold(
+                lease, scope="document:doc-1", operation="upsert"
+            ):
+                pass
+    await coordinator.close()

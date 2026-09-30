@@ -21,7 +21,9 @@ class EmbeddingOutputError(RuntimeError):
 
 
 class EmbeddingProvider(Protocol):
-    async def embed_documents(self, texts: list[str]) -> list[list[float]]: ...
+    async def embed_documents(
+        self, texts: list[str], *, max_elements: int | None = None,
+    ) -> list[list[float]]: ...
 
     async def embed_query(self, text: str) -> list[float]: ...
 
@@ -110,13 +112,23 @@ class CloseAIEmbeddingProvider:
             validated.append(normalized)
         return validated
 
-    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
+    async def embed_documents(
+        self, texts: list[str], *, max_elements: int | None = None,
+    ) -> list[list[float]]:
         if not isinstance(texts, list) or any(not isinstance(text, str) for text in texts):
+            raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_INVALID_INPUT")
+        if (
+            max_elements is not None
+            and (not isinstance(max_elements, int) or max_elements < 1)
+        ):
             raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_INVALID_INPUT")
         if not texts:
             return []
+        if max_elements is not None and len(texts) > max_elements:
+            raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_BUDGET_EXCEEDED")
         output: list[list[float]] = []
         dimension: int | None = None
+        total_elements = 0
         for start in range(0, len(texts), self._batch_size):
             batch = texts[start : start + self._batch_size]
             try:
@@ -128,8 +140,18 @@ class CloseAIEmbeddingProvider:
             vectors = self.validate(raw, expected_count=len(batch))
             if dimension is None:
                 dimension = len(vectors[0])
+                if (
+                    max_elements is not None
+                    and len(texts) * dimension > max_elements
+                ):
+                    raise EmbeddingOutputError(
+                        "KNOWLEDGE_EMBEDDING_BUDGET_EXCEEDED"
+                    )
             elif any(len(vector) != dimension for vector in vectors):
                 raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_DIMENSION_MISMATCH")
+            total_elements += sum(len(vector) for vector in vectors)
+            if max_elements is not None and total_elements > max_elements:
+                raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_BUDGET_EXCEEDED")
             output.extend(vectors)
         return output
 
