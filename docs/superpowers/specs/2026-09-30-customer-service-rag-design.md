@@ -235,14 +235,14 @@ AI_SERVICE_CLOSEAI_BASE_URL=
 AI_SERVICE_RAG_EMBEDDING_MODEL=openai:text-embedding-3-large
 AI_SERVICE_RAG_EMBEDDING_BATCH_SIZE=
 AI_SERVICE_RAG_MAX_EMBEDDING_ELEMENTS=8000000
-AI_SERVICE_RAG_ETL_MAX_CONCURRENCY=2
+AI_SERVICE_RAG_ETL_MAX_CONCURRENCY=1
 AI_SERVICE_RAG_CHUNK_SIZE=1000
 AI_SERVICE_RAG_CHUNK_OVERLAP=150
 ```
 
 Embedding 返回后必须校验数量、维度和所有值均为有限数。密钥不得进入日志、异常、测试快照或 Git。
 
-单个 ETL 默认最多生成 8,000,000 个 embedding float 元素（约 32 MiB 原始 float32 数据），覆盖 2,000,000 字符上限按 1000/150 切分并使用 3072 维模型的正常范围，同时拒绝接近 10,000 chunks 的极端峰值。Embedding provider 在首批取得实际维度后计算整份文档预计元素数，超限时不得继续请求后续批次；ETL service 在 load 前再次核对实际总元素。进程内共享 semaphore 默认只允许 2 个 INDEX ETL 并发，等待或执行任务取消时必须自动释放 permit。功能关闭时不得初始化 semaphore 以外的 RAG 外部依赖。
+单个 ETL 默认最多生成 8,000,000 个 embedding float 元素，覆盖 2,000,000 字符上限按 1000/150 切分、使用 3072 维模型时约 7,230,000 个元素的正常范围，同时拒绝接近 10,000 chunks 的极端峰值。8,000,000 个元素若按 Python `list[float]` 的对象与引用开销保守估算约为 256 MiB；这是防 OOM 的近似预算，不是精确 RSS。Embedding provider 在首批取得实际维度后计算整份文档预计元素数，超限时不得继续请求后续批次；ETL service 在 load 前再次核对实际总元素。进程内共享 semaphore 默认只允许 1 个 INDEX ETL 执行，等待或执行任务取消时必须自动释放 permit。只有后续改为流式 staging、避免整份向量同时驻留 Python 堆后，才考虑提高默认并发。功能关闭时不得初始化 semaphore 或任何 RAG 外部依赖。
 
 ### 6.4 Load
 

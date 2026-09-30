@@ -770,6 +770,8 @@ def test_customer_service_rag_defaults_are_disabled_and_bounded(monkeypatch):
     assert settings.rag_chunk_overlap == 150
     assert settings.rag_retrieval_top_k == 8
     assert settings.rag_final_top_k == 3
+    assert settings.rag_max_embedding_elements == 8_000_000
+    assert settings.rag_etl_max_concurrency == 1
     assert settings.rag_min_rerank_score is None
     assert settings.milvus_uri == "http://localhost:19530"
 
