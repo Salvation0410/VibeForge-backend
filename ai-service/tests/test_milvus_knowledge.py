@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import struct
 import threading
 import time
 from collections.abc import AsyncIterator
@@ -13,6 +14,7 @@ import pytest
 
 import ai_service.infrastructure.milvus_knowledge as milvus_module
 
+from ai_service.config import Settings
 from ai_service.infrastructure.milvus_knowledge import (
     DenyAllKnowledgeMutationCoordinator,
     IndexedChunk,
@@ -130,10 +132,12 @@ class FakeMilvusClient:
         self.partial_upsert_count: int | None = None
         self.partial_active_upsert_count: int | None = None
         self.before_old_activation: tuple[threading.Event, threading.Event] | None = None
+        self.block_next_upsert: tuple[threading.Event, threading.Event] | None = None
+        self.block_next_alias_switch: tuple[threading.Event, threading.Event] | None = None
         self.coordinator = FakeMutationCoordinator()
         self.iterator_calls: list[dict] = []
 
-    def has_collection(self, collection_name):
+    def has_collection(self, collection_name, **_kwargs):
         return collection_name in self.collections
 
     def create_collection(self, collection_name, dimension, **kwargs):
@@ -141,17 +145,28 @@ class FakeMilvusClient:
         self.dimensions[collection_name] = dimension
         self.descriptions[collection_name] = kwargs.get("description", "")
 
-    def describe_collection(self, collection_name):
+    def describe_collection(self, collection_name, **_kwargs):
         return {"collection_name": collection_name, "dimension": self.dimensions[collection_name],
                 "description": self.descriptions[collection_name]}
 
-    def drop_collection(self, collection_name):
+    def drop_collection(self, collection_name, **_kwargs):
         self.collections.pop(collection_name, None)
         self.dimensions.pop(collection_name, None)
         self.descriptions.pop(collection_name, None)
 
-    def insert(self, collection_name, data):
+    @staticmethod
+    def _float32(value):
+        return struct.unpack("!f", struct.pack("!f", float(value)))[0]
+
+    @classmethod
+    def _round_trip_vectors(cls, rows):
+        for row in rows:
+            if "embedding" in row:
+                row["embedding"] = [cls._float32(value) for value in row["embedding"]]
+
+    def insert(self, collection_name, data, **_kwargs):
         rows = deepcopy(data)
+        self._round_trip_vectors(rows)
         if self.corrupt_next_insert and rows:
             rows.pop()
             self.corrupt_next_insert = False
@@ -164,8 +179,14 @@ class FakeMilvusClient:
         self.collections[collection_name].extend(rows)
         return {"insert_count": len(rows)}
 
-    def upsert(self, collection_name, data):
+    def upsert(self, collection_name, data, **_kwargs):
         items = deepcopy(data)
+        self._round_trip_vectors(items)
+        if self.block_next_upsert:
+            started, release = self.block_next_upsert
+            self.block_next_upsert = None
+            started.set()
+            assert release.wait(2)
         if self.corrupt_next_insert and items:
             items.pop()
             self.corrupt_next_insert = False
@@ -211,28 +232,33 @@ class FakeMilvusClient:
                                   "output_fields": output_fields, "data": data})
         rows = [row for row in self.collections[self._resolve(collection_name)]
                 if self._matches(row, filter)][:limit]
-        return [[{"id": row["id"], "distance": 0.2, "score": 0.8,
+        return [[{"id": row["id"], "distance": 0.99,
                   "entity": {key: deepcopy(row[key]) for key in output_fields}}
                  for row in rows]]
 
-    def describe_alias(self, alias):
+    def describe_alias(self, alias, **_kwargs):
         if self.fail_alias_lookup:
             raise RuntimeError("milvus unavailable with sensitive response")
         if alias not in self.aliases:
             raise RuntimeError("alias missing")
         return {"alias": alias, "collection_name": self.aliases[alias]}
 
-    def list_aliases(self, collection_name=""):
+    def list_aliases(self, collection_name="", **_kwargs):
         if self.fail_alias_lookup:
             raise RuntimeError("milvus unavailable with sensitive response")
         return {"aliases": list(self.aliases)}
 
-    def create_alias(self, collection_name, alias):
+    def create_alias(self, collection_name, alias, **_kwargs):
         if alias in self.aliases:
             raise RuntimeError("alias already exists")
         self.aliases[alias] = collection_name
 
-    def alter_alias(self, collection_name, alias):
+    def alter_alias(self, collection_name, alias, **_kwargs):
+        if self.block_next_alias_switch:
+            started, release = self.block_next_alias_switch
+            self.block_next_alias_switch = None
+            started.set()
+            assert release.wait(2)
         if self.alias_switch_failures:
             mode = self.alias_switch_failures.pop(0)
             if mode == "before":
@@ -245,7 +271,7 @@ class FakeMilvusClient:
             self.fail_alias_switch = False
             raise RuntimeError("switch failed with sensitive provider response")
 
-    def list_collections(self):
+    def list_collections(self, **_kwargs):
         return list(self.collections)
 
     def close(self):
@@ -457,6 +483,8 @@ async def test_delete_disables_version_and_search_only_returns_active_metadata(s
     assert "embedding" not in client.search_calls[-1]["output_fields"]
     assert all(not hasattr(item, "embedding") and math.isfinite(item.distance)
                for item in results)
+    assert all(item.score == pytest.approx(0.99) for item in results)
+    assert all(item.distance == pytest.approx(0.01) for item in results)
     with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_DOCUMENT_DISABLED$"):
         await index_document(knowledge, document())
 
@@ -530,6 +558,22 @@ async def test_incomplete_document_staging_can_be_retried_idempotently(settings)
     assert replay.idempotent
     assert len([row for row in next(iter(client.collections.values()))
                 if row.get("recordType") == "chunk"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_float_vectors_are_canonicalized_before_write_verification(settings):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    value = document()
+    chunks = tuple(replace(chunk, embedding=(0.1, 0.2)) for chunk in value.chunks)
+
+    await index_document(knowledge, replace(value, chunks=chunks))
+
+    stored = next(row for row in next(iter(client.collections.values()))
+                  if row.get("recordType") == "chunk")
+    assert stored["embedding"] != [0.1, 0.2]
+    assert stored["embedding"] == [FakeMilvusClient._float32(0.1),
+                                    FakeMilvusClient._float32(0.2)]
 
 
 @pytest.mark.asyncio
@@ -646,9 +690,9 @@ async def test_alias_readback_failure_preserves_both_collections(settings):
     client.alias_switch_failures = ["after"]
     original_alter = client.alter_alias
 
-    def switch_then_break_lookup(collection_name, alias):
+    def switch_then_break_lookup(collection_name, alias, **kwargs):
         try:
-            return original_alter(collection_name, alias)
+            return original_alter(collection_name, alias, **kwargs)
         finally:
             client.fail_alias_lookup = True
 
@@ -796,6 +840,118 @@ async def test_fence_is_recorded_in_manifest_and_collection_metadata(settings):
                     if row.get("recordType") == "manifest")
     assert manifest["mutationFence"] == 42
     assert '"mutationFence":42' in client.descriptions[target]
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_upsert_keeps_permit_until_rpc_finishes(settings):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    started, release = threading.Event(), threading.Event()
+    client.block_next_upsert = (started, release)
+
+    task = asyncio.create_task(index_document(knowledge, document()))
+    assert await asyncio.to_thread(started.wait, 1)
+    task.cancel()
+    await asyncio.sleep(0.02)
+
+    assert "document:doc-1" in client.coordinator.active
+    assert not task.done()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert client.coordinator.active == set()
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_alias_switch_preserves_active_staging(settings):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    await index_document(knowledge, document())
+    alias = settings.milvus_collection_alias
+    old = client.aliases[alias]
+    started, release = threading.Event(), threading.Event()
+    client.block_next_alias_switch = (started, release)
+
+    task = asyncio.create_task(rebuild(knowledge, documents(document(version=2))))
+    assert await asyncio.to_thread(started.wait, 1)
+    staging = next(name for name in client.collections if "_staging_" in name)
+    task.cancel()
+    await asyncio.sleep(0.02)
+
+    assert f"collection:{alias}" in client.coordinator.active
+    assert not task.done()
+    assert client.aliases[alias] == old
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert client.coordinator.active == set()
+    assert client.aliases[alias] == staging
+    assert staging in client.collections
+
+
+@pytest.mark.parametrize(
+    "alias",
+    ["1knowledge", "-knowledge", "knowledge-name", "知识库", "a" * 256],
+)
+def test_settings_reject_invalid_milvus_aliases(alias):
+    with pytest.raises(ValueError, match="milvus_collection_alias"):
+        Settings(
+            internal_bearer_token="test-secret",
+            spring_gateway_base_url="http://spring.test/api/internal/ai-tools",
+            spring_gateway_bearer_token="spring-secret",
+            checkpoint_enabled=False,
+            checkpoint_required=False,
+            milvus_collection_alias=alias,
+        )
+
+
+def test_store_revalidates_alias_and_derives_legal_bounded_names(settings):
+    settings.milvus_collection_alias = "a" * 255
+    knowledge = MilvusKnowledgeStore(
+        settings, client_factory=lambda **_kwargs: FakeMilvusClient(),
+        mutation_coordinator=FakeMutationCoordinator(),
+    )
+    names = [
+        knowledge._collection_name("embedding-v1", 1536),
+        knowledge._collection_name(
+            "embedding-v1", 1536, suffix="_staging_" + "f" * 12
+        ),
+        knowledge._control_collection_name(),
+    ]
+    assert all(len(name) <= 255 and name[0].isalpha() for name in names)
+    assert all(all(character.isalnum() or character == "_" for character in name)
+               for name in names)
+
+    settings.milvus_collection_alias = "bad-alias"
+    with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_COLLECTION_ALIAS_INVALID$"):
+        MilvusKnowledgeStore(settings, client_factory=lambda **_kwargs: FakeMilvusClient())
+
+
+@pytest.mark.asyncio
+async def test_configured_timeout_is_used_for_client_and_rpc(settings):
+    settings.milvus_rpc_timeout_seconds = 1.25
+    client = FakeMilvusClient()
+    client_kwargs = {}
+    rpc_kwargs = {}
+
+    def factory(**kwargs):
+        client_kwargs.update(kwargs)
+        return client
+
+    def list_collections(**kwargs):
+        rpc_kwargs.update(kwargs)
+        return []
+
+    client.list_collections = list_collections
+    knowledge = MilvusKnowledgeStore(
+        settings, client_factory=factory,
+        mutation_coordinator=client.coordinator,
+    )
+
+    assert await knowledge.ping()
+    assert client_kwargs["timeout"] == 1.25
+    assert rpc_kwargs == {"timeout": 1.25}
 
 
 @pytest.mark.asyncio

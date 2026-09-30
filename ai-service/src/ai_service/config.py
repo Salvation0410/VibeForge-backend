@@ -58,7 +58,13 @@ class Settings(BaseSettings):
     milvus_uri: str = "http://localhost:19530"
     milvus_token: str = Field(default="", repr=False)
     milvus_database: str = Field(default="default", min_length=1)
-    milvus_collection_alias: str = Field(default="customer_service_knowledge", min_length=1)
+    milvus_collection_alias: str = Field(
+        default="customer_service_knowledge",
+        min_length=1,
+        max_length=255,
+        pattern=r"^[A-Za-z_][A-Za-z0-9_]*$",
+    )
+    milvus_rpc_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
 
     rag_chunk_size: int = Field(default=1000, ge=1, le=100000)
     rag_chunk_overlap: int = Field(default=150, ge=0, le=99999)

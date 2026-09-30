@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import re
+import struct
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -19,6 +20,7 @@ from ai_service.config import Settings
 SCHEMA_VERSION = 1
 _ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,128}")
 _CHUNK_ID_PATTERN = re.compile(r"[A-Za-z0-9_.:-]{1,512}")
+_MILVUS_IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,254}")
 _VERIFY_BATCH_SIZE = 256
 _MAX_DOCUMENT_HISTORY_RECORDS = 10_000
 _OUTPUT_FIELDS = [
@@ -160,11 +162,14 @@ class MilvusKnowledgeStore:
         mutation_coordinator: KnowledgeMutationCoordinator | None = None,
     ) -> None:
         self._alias = settings.milvus_collection_alias
+        if not self._valid_collection_identifier(self._alias):
+            raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_ALIAS_INVALID")
         self._schema_version = schema_version
+        self._rpc_timeout = settings.milvus_rpc_timeout_seconds
         try:
             self._client = client_factory(
                 uri=settings.milvus_uri, token=settings.milvus_token,
-                db_name=settings.milvus_database,
+                db_name=settings.milvus_database, timeout=self._rpc_timeout,
             )
         except Exception:
             raise MilvusKnowledgeError("KNOWLEDGE_VECTOR_STORE_UNAVAILABLE") from None
@@ -209,11 +214,52 @@ class MilvusKnowledgeStore:
             raise MilvusKnowledgeError("KNOWLEDGE_MUTATION_LEASE_INVALID") from None
 
     async def _call(self, method: str, *args: object, **kwargs: object) -> Any:
-        return await asyncio.to_thread(getattr(self._client, method), *args, **kwargs)
+        kwargs.setdefault("timeout", self._rpc_timeout)
+        task = asyncio.create_task(
+            asyncio.to_thread(getattr(self._client, method), *args, **kwargs)
+        )
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError as cancelled:
+            # The thread cannot be stopped. Keep the mutation permit held until the bounded
+            # pymilvus RPC has a definite outcome, then preserve caller cancellation.
+            while not task.done():
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+            if task.done() and not task.cancelled():
+                try:
+                    task.result()
+                except Exception:
+                    pass
+            raise cancelled
 
     @staticmethod
     def _valid_id(value: str) -> bool:
         return isinstance(value, str) and _ID_PATTERN.fullmatch(value) is not None
+
+    @staticmethod
+    def _valid_collection_identifier(value: str) -> bool:
+        return (
+            isinstance(value, str)
+            and _MILVUS_IDENTIFIER_PATTERN.fullmatch(value) is not None
+        )
+
+    @staticmethod
+    def _canonical_vector(values: Sequence[object]) -> list[float]:
+        try:
+            vector = [
+                struct.unpack("!f", struct.pack("!f", float(value)))[0]
+                for value in values
+            ]
+        except (TypeError, ValueError, OverflowError, struct.error):
+            raise MilvusKnowledgeError("KNOWLEDGE_EMBEDDING_INVALID_VECTOR") from None
+        if not vector or not all(math.isfinite(value) for value in vector):
+            raise MilvusKnowledgeError("KNOWLEDGE_EMBEDDING_INVALID_VECTOR")
+        return vector
 
     @classmethod
     def _validate_document(cls, document: IndexedDocument) -> int:
@@ -243,12 +289,7 @@ class MilvusKnowledgeStore:
                 raise MilvusKnowledgeError("KNOWLEDGE_DOCUMENT_INVALID")
             chunk_ids.add(chunk.chunk_id)
             indexes.add(chunk.chunk_index)
-            try:
-                vector = [float(value) for value in chunk.embedding]
-            except (TypeError, ValueError, OverflowError):
-                raise MilvusKnowledgeError("KNOWLEDGE_EMBEDDING_INVALID_VECTOR") from None
-            if not all(math.isfinite(value) for value in vector):
-                raise MilvusKnowledgeError("KNOWLEDGE_EMBEDDING_INVALID_VECTOR")
+            vector = cls._canonical_vector(chunk.embedding)
             if dimension is None:
                 dimension = len(vector)
             elif len(vector) != dimension:
@@ -260,8 +301,11 @@ class MilvusKnowledgeStore:
         fingerprint = hashlib.sha256(
             f"customer-service\0{model}\0{dimension}\0{self._schema_version}".encode()
         ).hexdigest()[:12]
-        prefix = re.sub(r"[^A-Za-z0-9_]", "_", self._alias)[:80].strip("_") or "knowledge"
-        return f"{prefix}_{fingerprint}{suffix}"
+        ending = f"_{fingerprint}{suffix}"
+        name = f"{self._alias[:255 - len(ending)]}{ending}"
+        if not self._valid_collection_identifier(name):
+            raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_ALIAS_INVALID")
+        return name
 
     def _collection_metadata(self, model: str, dimension: int, fence: int) -> str:
         return json.dumps({
@@ -371,7 +415,7 @@ class MilvusKnowledgeStore:
             "contentHash": chunk.content_hash, "documentContentHash": document.content_hash,
             "embeddingDimension": dimension, "schemaVersion": self._schema_version,
             "mutationFence": fence, "isActive": active,
-            "embedding": [float(value) for value in chunk.embedding],
+            "embedding": self._canonical_vector(chunk.embedding),
         } for chunk in document.chunks]
 
     def _manifest_row(
@@ -399,8 +443,11 @@ class MilvusKnowledgeStore:
         return f'documentId == "{document_id}"'
 
     def _control_collection_name(self) -> str:
-        prefix = re.sub(r"[^A-Za-z0-9_]", "_", self._alias)[:100].strip("_") or "knowledge"
-        return f"{prefix}_mutation_control_v1"
+        ending = "_mutation_control_v1"
+        name = f"{self._alias[:255 - len(ending)]}{ending}"
+        if not self._valid_collection_identifier(name):
+            raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_ALIAS_INVALID")
+        return name
 
     @staticmethod
     def _tombstone_id(document_id: str, document_version: int) -> str:
@@ -506,9 +553,12 @@ class MilvusKnowledgeStore:
             left, right = actual.get(field), expected.get(field)
             if field == "embedding":
                 try:
-                    if [float(value) for value in left] != [float(value) for value in right]:
+                    if (
+                        MilvusKnowledgeStore._canonical_vector(left)
+                        != MilvusKnowledgeStore._canonical_vector(right)
+                    ):
                         return False
-                except (TypeError, ValueError):
+                except (TypeError, MilvusKnowledgeError):
                     return False
             elif left != right:
                 return False
@@ -745,8 +795,8 @@ class MilvusKnowledgeStore:
             output: list[RetrievedChunk] = []
             for hit in result[0] if result else []:
                 entity = hit.get("entity", hit)
-                distance = float(hit.get("distance", hit.get("score", 0.0)))
-                score = float(hit.get("score", 1.0 - distance))
+                score = float(hit.get("distance", hit.get("score")))
+                distance = 1.0 - score
                 if not math.isfinite(distance) or not math.isfinite(score):
                     raise ValueError
                 output.append(RetrievedChunk(
@@ -824,7 +874,7 @@ class MilvusKnowledgeStore:
                                            suffix=f"_staging_{uuid.uuid4().hex[:12]}")
         async with self._write_lock:
             old = await self._alias_target()
-            safe_to_drop, switched = True, False
+            switched = False
             try:
                 await self._assert_permit(permit)
                 await self._ensure_collection(
@@ -855,17 +905,18 @@ class MilvusKnowledgeStore:
                     await self._assert_permit(permit)
                     await self._switch_alias(old, collection)
                     switched = True
-                except MilvusKnowledgeError as error:
-                    if error.code == "KNOWLEDGE_ALIAS_SWITCH_UNCERTAIN":
-                        safe_to_drop = False
+                except MilvusKnowledgeError:
                     raise
                 return RebuildResult(collection, len(docs), len(chunks))
             finally:
-                if not switched and safe_to_drop:
+                if not switched:
                     try:
-                        if await self._call("has_collection", collection):
+                        current = await self._alias_target()
+                        if current != collection and await self._call(
+                            "has_collection", collection
+                        ):
                             await self._call("drop_collection", collection)
-                    except Exception:
+                    except (Exception, asyncio.CancelledError):
                         pass
 
     async def ping(self) -> bool:
