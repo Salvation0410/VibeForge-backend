@@ -28,16 +28,19 @@
 
 ### 客服机器人 RAG 实施进度
 
-- 设计提交 `b61fc07`、实施计划提交 `be6b5db` 已完成；计划中的问答、ETL、Embedding、Milvus、Reranker 和前端能力不能据此视为已实现。
+- 设计提交 `b61fc07`、实施计划提交 `be6b5db` 已完成；计划中的问答、Embedding、Milvus、Reranker 和前端能力不能据此视为已实现。
 - Task 1 的 MySQL 知识文档与 ETL outbox 表、对应 MyBatis-Flex 实体和 Mapper 已在提交 `8e18149` 完成。
 - Task 1 定向 schema 测试 2 项通过，`mvn clean -DskipTests compile` 通过，暂存差异的 `git diff --cached --check` 通过。仓库没有 `mvnw.cmd`，测试和编译使用系统 Maven；测试实际命令为 `mvn test -Dtest=CustomerServiceKnowledgeSchemaTest`。
 - 尚未在真实 MySQL 执行 DDL、CRUD 或并发任务认领验证，这些仍是人工待验收项。
 - Task 2 私有 OSS 知识文档能力已在 `89d1487` 实现，并由 `312b9f5`、`a0be99a` 修正 DOCX 宏绕过和 PDF 文本误判。上传策略支持 PDF、DOCX、Markdown、TXT，校验扩展名、MIME、内容和 20 MiB 上限，规范展示名并计算 SHA-256；对象键由随机 ID 生成，上传显式设置 private ACL，只返回对象键和文件元数据。另提供可配置有效期的单对象签名 GET URL 与对象删除。
 - DOCX 校验包含 ZIP 条目数、单条和总展开大小边界，并安全解析 `[Content_Types].xml` 与各 `.rels` 的宏内容类型和关系类型；XML 有大小限制且禁用 DTD、外部实体。Task 2 的 15 项定向测试、`mvn clean -DskipTests compile` 和 `git diff --check` 均通过，使用系统 Maven，未调用真实 OSS。
-- 真实私有 OSS 上传、签名 URL 下载和删除仍待人工验收。完整加密 PDF 识别与拒绝属于尚未实现的 Python `pypdf` ETL Task 4；当前 Spring 对 PDF 只做上传层的扩展名、MIME、大小、空文件和 `%PDF-` 魔数等校验，不识别加密状态。
+- 真实私有 OSS 上传、签名 URL 下载和删除仍待人工验收。Spring 对 PDF 只做上传层的扩展名、MIME、大小、空文件和 `%PDF-` 魔数等校验，不识别加密状态；Python Task 4 的 `pypdf` 解析已识别并拒绝加密 PDF。
 - Task 3 的 Python RAG 依赖与配置在 `dde4bce` 完成，Windows CUDA 运行时在 `8e9663a` 修正。功能开关 `AI_SERVICE_CUSTOMER_SERVICE_RAG_ENABLED` 默认关闭；分块默认 1000 字符、重叠 150 字符，检索 Top 8、最终 Top 3。CloseAI Embedding 独立使用 `AI_SERVICE_CLOSEAI_*`，兼容既有裸键 `CLOSEAI_API_KEY`/`CLOSEAI_BASE_URL`；同一配置来源中前缀键优先，进程环境优先于 `.env`。配置和示例均不含真实密钥。Milvus URI 默认 `http://localhost:19530`，本轮未建立连接。
 - Task 3 锁定 `langchain 0.3.30`、`langchain-core 0.3.86`、`langchain-openai 0.3.35`、`langchain-text-splitters 0.3.11`、`pymilvus 2.6.17`、`FlagEmbedding 1.4.2`、`pypdf 6.19.0` 和 `python-docx 1.2.0`。Windows 从 PyTorch 官方 cu124 索引安装 `torch 2.6.0+cu124`；本机驱动 555.97 下实测 `torch.version.cuda=12.4`、`torch.cuda.is_available()=True`。CUDA wheel 约 2.4 GiB，部署时需预留下载、缓存和磁盘空间。
-- Task 3 的 83 项定向测试、完整 Python 测试 271 项通过且 1 项跳过；`uv sync --frozen --python 3.12`、`compileall`、`uv lock --check` 和 `git diff --check` 均通过。仅验证依赖导入和 CUDA 可用性；没有下载或运行 BGE Reranker 模型，没有调用 CloseAI，也没有连接 Milvus。Task 4 及后续任务尚未实施，客服问答与索引链路不可用。
+- Task 3 的 83 项定向测试、完整 Python 测试 271 项通过且 1 项跳过；`uv sync --frozen --python 3.12`、`compileall`、`uv lock --check` 和 `git diff --check` 均通过。仅验证依赖导入和 CUDA 可用性；没有下载或运行 BGE Reranker 模型，没有调用 CloseAI，也没有连接 Milvus。
+- Task 4 在 `51dac9d` 实现安全下载和文档解析，并由 `4e7d4a6`、`e5e7b8d` 修正标题与表格顺序、下载和取消边界。`KnowledgeDownloader` 仅允许配置白名单内的 HTTPS 主机，逐跳校验全部 DNS 结果为公网地址，并对 DNS、连接和读取分别设置超时；每次重定向独立创建客户端，以当前主机设置 Host 和 TLS SNI，避免同 IP 跨主机复用旧连接。下载按声明和实际字节数限额流式写入临时文件，核对 SHA-256，失败与解析完成后清理临时文件；错误、日志和返回元数据不包含签名 URL。
+- Task 4 支持 PDF、DOCX、Markdown、TXT 解析。PDF 保留页码并拒绝加密或无文本文件；Markdown/DOCX 保留真实标题层级，TXT 保留行范围，DOCX 普通、合并和嵌套表格按文档顺序提取并保留表格/行定位。`RecursiveCharacterTextSplitter` 默认分块 1000 字符、重叠 150 字符，生成稳定的 `documentId:documentVersion:index` chunk ID，按实际产出执行最多 10000 个 chunk 的上限。同步解析与切分在线程中执行，取消时等待工作线程结束再清理临时文件。
+- Task 4 定向测试 55 项通过，完整 Python 测试 326 项通过、1 项跳过；`compileall`、`uv lock --check` 和 `git diff --check` 通过。测试使用本地生成文档和模拟传输；真实 OSS 签名下载、真实 TLS/SNI 与同 IP 跨主机重定向，以及超时、大文件和取消压力仍待人工验证。首期不做 OCR，扫描 PDF 因无可提取文本而失败。Task 5 及后续 Embedding、Milvus、问答和前端链路尚未实现，客服问答与索引链路不可用。
 
 ### 已关闭的源码阻塞
 
@@ -218,6 +221,8 @@ START
 | `ai-service/src/ai_service/infrastructure/postgres_checkpoint.py` | 官方 PostgreSQL saver、脱敏状态摘要和 TTL 清理 |
 | `ai-service/src/ai_service/infrastructure/checkpoint_setup.py` | 独立 schema 初始化命令 |
 | `ai-service/src/ai_service/infrastructure/spring_tools.py` | Spring 工具客户端与脱敏错误处理 |
+| `ai-service/src/ai_service/infrastructure/knowledge_download.py` | 客服知识文档安全下载、逐跳校验、摘要与临时文件生命周期 |
+| `ai-service/src/ai_service/orchestration/document_etl.py` | PDF/DOCX/Markdown/TXT 解析、来源定位与递归切分 |
 
 ### Vue 前端独立仓库
 
@@ -484,6 +489,9 @@ Vue 多 Agent 是 Python LangGraph 内部的功能开关，回滚时保持 LangG
 
 | 提交 | 内容 |
 | --- | --- |
+| `e5e7b8d` | 隔离知识文档重定向连接、保持表格顺序并在线程中执行 ETL |
+| `4e7d4a6` | 修正标题层级、DNS 超时、表格抽取和 chunk 上限 |
+| `51dac9d` | 增加知识文档安全下载、解析与切分 |
 | `a0be99a` | 避免将 PDF 正文中的 `/Encrypt` 误判为加密 |
 | `312b9f5` | 根据 DOCX 内容类型与关系文件拒绝改名宏部件 |
 | `89d1487` | 增加私有 OSS 知识文档操作与文件策略 |
@@ -550,7 +558,7 @@ Vue 多 Agent 已于 2026-09-30 本地快进合并到 `dev`，合并后 HEAD 为
 - `doc/ai-service-langchain-langgraph-refactor-design.md`：重构架构与边界设计。
 - `docs/superpowers/specs/2026-09-29-postgres-checkpoint-design.md`：PostgreSQL checkpoint 迁移、故障语义和长期记忆决策。
 - `docs/superpowers/specs/2026-09-29-vue-multi-agent-quality-review-design.md`：Vue 三角色质量审查、F1 错误语义、repair 和 checkpoint 边界。
-- `docs/superpowers/specs/2026-09-30-customer-service-rag-design.md`：客服机器人、OSS 文档 ETL、CloseAI Embedding、Milvus 和 GPU Reranker 设计；目前 Task 1 数据库 schema、Task 2 私有 OSS 文档操作、Task 3 Python 依赖与配置已实现，Task 4 及后续仍属规划。
+- `docs/superpowers/specs/2026-09-30-customer-service-rag-design.md`：客服机器人、OSS 文档 ETL、CloseAI Embedding、Milvus 和 GPU Reranker 设计；目前 Task 1 数据库 schema、Task 2 私有 OSS 文档操作、Task 3 Python 依赖与配置、Task 4 安全下载与解析切分已实现，Task 5 及后续仍属规划。
 - `docs/superpowers/specs/2026-09-21-bounded-streaming-simple-prompts-design.md`：有限流式窗口和简短优化提示设计。
 - `docs/superpowers/specs/2026-09-21-circular-preview-spinner-design.md`：预览加载图正圆修复设计。
 
