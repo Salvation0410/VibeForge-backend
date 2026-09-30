@@ -5,10 +5,12 @@ import hashlib
 import json
 import math
 import re
+import time
 import uuid
+from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, AsyncContextManager, Protocol
 
 from pymilvus import MilvusClient
 
@@ -18,6 +20,7 @@ SCHEMA_VERSION = 1
 _ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,128}")
 _CHUNK_ID_PATTERN = re.compile(r"[A-Za-z0-9_.:-]{1,512}")
 _VERIFY_BATCH_SIZE = 256
+_MAX_DOCUMENT_HISTORY_RECORDS = 10_000
 _OUTPUT_FIELDS = [
     "chunkId", "documentId", "documentVersion", "chunkIndex", "etlVersion",
     "embeddingModelVersion", "fileName", "fileType", "sourceLocator", "content",
@@ -27,7 +30,7 @@ _VERIFIED_FIELDS = {
     "id", "recordType", "chunkId", "documentId", "documentVersion", "chunkIndex",
     "etlVersion", "embeddingModelVersion", "fileName", "fileType", "sourceLocator",
     "content", "contentHash", "documentContentHash", "embeddingDimension",
-    "schemaVersion", "isActive", "embedding",
+    "schemaVersion", "mutationFence", "isActive", "embedding",
 }
 
 
@@ -35,6 +38,48 @@ class MilvusKnowledgeError(RuntimeError):
     def __init__(self, code: str):
         self.code = code
         super().__init__(code)
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeMutationLease:
+    scope: str
+    operation_id: str
+    fence: int
+    expires_at: float
+    proof: str
+
+
+class MutationPermit(Protocol):
+    """A held, externally fenced mutation permit."""
+
+    fence: int
+
+    async def assert_current(self) -> None: ...
+
+
+class KnowledgeMutationCoordinator(Protocol):
+    """Trusted cross-instance mutation coordinator.
+
+    Implementations must validate the lease proof and fencing token, never overlap permits
+    for the same document, and make a collection scope conflict with every document scope.
+    A permit must remain exclusive until its context exits; `assert_current` fails closed if
+    the upstream lease is revoked. The store intentionally provides no local-lock fallback.
+    """
+
+    def hold(
+        self, lease: KnowledgeMutationLease, *, scope: str, operation: str
+    ) -> AsyncContextManager[MutationPermit]: ...
+
+
+class DenyAllKnowledgeMutationCoordinator:
+    """Default coordinator: mutation is impossible until a trusted coordinator is injected."""
+
+    @asynccontextmanager
+    async def hold(
+        self, lease: KnowledgeMutationLease, *, scope: str, operation: str
+    ) -> AsyncIterator[MutationPermit]:
+        raise MilvusKnowledgeError("KNOWLEDGE_MUTATION_LEASE_REQUIRED")
+        yield  # pragma: no cover
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,10 +136,18 @@ class RebuildResult:
 
 
 class KnowledgeStore(Protocol):
-    async def upsert_document_version(self, document: IndexedDocument) -> IndexResult: ...
-    async def delete_document(self, document_id: str, document_version: int) -> None: ...
+    async def upsert_document_version(
+        self, document: IndexedDocument, *, lease: KnowledgeMutationLease | None = None
+    ) -> IndexResult: ...
+    async def delete_document(
+        self, document_id: str, document_version: int, *,
+        lease: KnowledgeMutationLease | None = None,
+    ) -> None: ...
     async def search(self, vector: list[float], limit: int) -> list[RetrievedChunk]: ...
-    async def rebuild_collection(self, documents: AsyncIterator[IndexedDocument]) -> RebuildResult: ...
+    async def rebuild_collection(
+        self, documents: AsyncIterator[IndexedDocument], *,
+        lease: KnowledgeMutationLease | None = None,
+    ) -> RebuildResult: ...
     async def ping(self) -> bool: ...
 
 
@@ -104,6 +157,7 @@ class MilvusKnowledgeStore:
     def __init__(
         self, settings: Settings, *, client_factory: Callable[..., Any] = MilvusClient,
         schema_version: int = SCHEMA_VERSION,
+        mutation_coordinator: KnowledgeMutationCoordinator | None = None,
     ) -> None:
         self._alias = settings.milvus_collection_alias
         self._schema_version = schema_version
@@ -114,8 +168,45 @@ class MilvusKnowledgeStore:
             )
         except Exception:
             raise MilvusKnowledgeError("KNOWLEDGE_VECTOR_STORE_UNAVAILABLE") from None
+        self._mutation_coordinator = (
+            mutation_coordinator or DenyAllKnowledgeMutationCoordinator()
+        )
         # Local serialization is an optimization; persisted manifests provide cross-worker safety.
         self._write_lock = asyncio.Lock()
+
+    @asynccontextmanager
+    async def _mutation(
+        self, lease: KnowledgeMutationLease | None, *, scope: str, operation: str,
+    ) -> AsyncIterator[MutationPermit]:
+        if lease is None:
+            raise MilvusKnowledgeError("KNOWLEDGE_MUTATION_LEASE_REQUIRED")
+        if (
+            lease.scope != scope or not lease.operation_id
+            or not isinstance(lease.fence, int) or lease.fence < 1
+            or not lease.proof or lease.expires_at <= time.time()
+        ):
+            raise MilvusKnowledgeError("KNOWLEDGE_MUTATION_LEASE_INVALID")
+        try:
+            async with self._mutation_coordinator.hold(
+                lease, scope=scope, operation=operation
+            ) as permit:
+                if permit.fence != lease.fence:
+                    raise MilvusKnowledgeError("KNOWLEDGE_MUTATION_LEASE_INVALID")
+                await self._assert_permit(permit)
+                yield permit
+        except MilvusKnowledgeError:
+            raise
+        except Exception:
+            raise MilvusKnowledgeError("KNOWLEDGE_MUTATION_LEASE_INVALID") from None
+
+    @staticmethod
+    async def _assert_permit(permit: MutationPermit) -> None:
+        try:
+            await permit.assert_current()
+        except MilvusKnowledgeError:
+            raise
+        except Exception:
+            raise MilvusKnowledgeError("KNOWLEDGE_MUTATION_LEASE_INVALID") from None
 
     async def _call(self, method: str, *args: object, **kwargs: object) -> Any:
         return await asyncio.to_thread(getattr(self._client, method), *args, **kwargs)
@@ -172,12 +263,13 @@ class MilvusKnowledgeStore:
         prefix = re.sub(r"[^A-Za-z0-9_]", "_", self._alias)[:80].strip("_") or "knowledge"
         return f"{prefix}_{fingerprint}{suffix}"
 
-    def _collection_metadata(self, model: str, dimension: int) -> str:
+    def _collection_metadata(self, model: str, dimension: int, fence: int) -> str:
         return json.dumps({
             "kind": "customer-service-knowledge",
             "embeddingModelVersion": model,
             "embeddingDimension": dimension,
             "schemaVersion": self._schema_version,
+            "mutationFence": fence,
         }, sort_keys=True, separators=(",", ":"))
 
     async def _alias_target(self) -> str | None:
@@ -223,19 +315,36 @@ class MilvusKnowledgeStore:
             raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_MISMATCH")
         if described_dimension != dimension:
             raise MilvusKnowledgeError("KNOWLEDGE_EMBEDDING_DIMENSION_MISMATCH")
-        if description.get("description") != self._collection_metadata(model, dimension):
+        try:
+            metadata = json.loads(description.get("description", ""))
+        except (TypeError, ValueError):
+            raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_MISMATCH") from None
+        if (
+            metadata.get("kind") != "customer-service-knowledge"
+            or metadata.get("embeddingModelVersion") != model
+            or metadata.get("embeddingDimension") != dimension
+            or metadata.get("schemaVersion") != self._schema_version
+            or not isinstance(metadata.get("mutationFence"), int)
+            or metadata["mutationFence"] < 1
+        ):
             raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_MISMATCH")
 
-    async def _ensure_collection(self, name: str, model: str, dimension: int) -> None:
+    async def _ensure_collection(
+        self, name: str, model: str, dimension: int, fence: int
+    ) -> None:
         try:
             if not await self._call("has_collection", name):
-                await self._call(
-                    "create_collection", name, dimension=dimension, primary_field_name="id",
-                    id_type="string", vector_field_name="embedding", metric_type="COSINE",
-                    auto_id=False, max_length=64, enable_dynamic_field=True,
-                    consistency_level="Strong",
-                    description=self._collection_metadata(model, dimension),
-                )
+                try:
+                    await self._call(
+                        "create_collection", name, dimension=dimension, primary_field_name="id",
+                        id_type="string", vector_field_name="embedding", metric_type="COSINE",
+                        auto_id=False, max_length=64, enable_dynamic_field=True,
+                        consistency_level="Strong",
+                        description=self._collection_metadata(model, dimension, fence),
+                    )
+                except Exception:
+                    if not await self._call("has_collection", name):
+                        raise
         except Exception:
             raise MilvusKnowledgeError("KNOWLEDGE_VECTOR_STORE_UNAVAILABLE") from None
         await self._validate_collection(name, model, dimension)
@@ -247,7 +356,9 @@ class MilvusKnowledgeStore:
             f"\0{document.embedding_model_version}"
         )
 
-    def _chunk_rows(self, document: IndexedDocument, dimension: int, *, active: bool) -> list[dict[str, Any]]:
+    def _chunk_rows(
+        self, document: IndexedDocument, dimension: int, *, active: bool, fence: int
+    ) -> list[dict[str, Any]]:
         identity = self._identity(document)
         return [{
             "id": hashlib.sha256(f"{identity}\0{chunk.chunk_id}".encode()).hexdigest(),
@@ -259,11 +370,13 @@ class MilvusKnowledgeStore:
             "sourceLocator": chunk.source_locator, "content": chunk.content,
             "contentHash": chunk.content_hash, "documentContentHash": document.content_hash,
             "embeddingDimension": dimension, "schemaVersion": self._schema_version,
-            "isActive": active, "embedding": [float(value) for value in chunk.embedding],
+            "mutationFence": fence, "isActive": active,
+            "embedding": [float(value) for value in chunk.embedding],
         } for chunk in document.chunks]
 
     def _manifest_row(
-        self, document: IndexedDocument, dimension: int, chunks: list[dict[str, Any]]
+        self, document: IndexedDocument, dimension: int, chunks: list[dict[str, Any]],
+        *, fence: int,
     ) -> dict[str, Any]:
         chunk_ids = [row["id"] for row in chunks]
         checksum = hashlib.sha256("\0".join(chunk_ids).encode()).hexdigest()
@@ -278,12 +391,92 @@ class MilvusKnowledgeStore:
             "documentContentHash": document.content_hash, "embeddingDimension": dimension,
             "schemaVersion": self._schema_version, "isActive": False,
             "embedding": [0.0] * dimension, "chunkIds": chunk_ids,
-            "expectedChunkCount": len(chunk_ids),
+            "expectedChunkCount": len(chunk_ids), "mutationFence": fence,
         }
 
     @staticmethod
     def _document_filter(document_id: str) -> str:
         return f'documentId == "{document_id}"'
+
+    def _control_collection_name(self) -> str:
+        prefix = re.sub(r"[^A-Za-z0-9_]", "_", self._alias)[:100].strip("_") or "knowledge"
+        return f"{prefix}_mutation_control_v1"
+
+    @staticmethod
+    def _tombstone_id(document_id: str, document_version: int) -> str:
+        return hashlib.sha256(
+            f"knowledge-tombstone\0{document_id}\0{document_version}".encode()
+        ).hexdigest()
+
+    async def _ensure_control_collection(self, fence: int) -> str:
+        name = self._control_collection_name()
+        try:
+            if not await self._call("has_collection", name):
+                description = json.dumps({
+                    "kind": "customer-service-knowledge-mutation-control",
+                    "schemaVersion": self._schema_version,
+                    "mutationFence": fence,
+                }, sort_keys=True, separators=(",", ":"))
+                try:
+                    await self._call(
+                        "create_collection", name, dimension=1, primary_field_name="id",
+                        id_type="string", vector_field_name="embedding", metric_type="COSINE",
+                        auto_id=False, max_length=64, enable_dynamic_field=True,
+                        consistency_level="Strong", description=description,
+                    )
+                except Exception:
+                    if not await self._call("has_collection", name):
+                        raise
+            description = await self._call("describe_collection", name)
+        except Exception:
+            raise MilvusKnowledgeError("KNOWLEDGE_VECTOR_STORE_UNAVAILABLE") from None
+        try:
+            metadata = json.loads(description.get("description", ""))
+        except (TypeError, ValueError):
+            raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_MISMATCH") from None
+        if (
+            self._described_dimension(description) != 1
+            or metadata.get("kind") != "customer-service-knowledge-mutation-control"
+            or metadata.get("schemaVersion") != self._schema_version
+        ):
+            raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_MISMATCH")
+        return name
+
+    async def _tombstoned_versions(
+        self, document_id: str, versions: set[int]
+    ) -> set[int]:
+        if not versions:
+            return set()
+        control = self._control_collection_name()
+        try:
+            if not await self._call("has_collection", control):
+                return set()
+        except Exception:
+            raise MilvusKnowledgeError("KNOWLEDGE_VECTOR_STORE_UNAVAILABLE") from None
+        ids = [self._tombstone_id(document_id, version) for version in sorted(versions)]
+        rows = await self._get_rows(control, ids)
+        return {
+            int(row["documentVersion"])
+            for row in rows
+            if row.get("recordType") == "tombstone"
+            and row.get("documentId") == document_id
+        }
+
+    async def _write_tombstone(
+        self, document_id: str, document_version: int, fence: int
+    ) -> None:
+        collection = await self._ensure_control_collection(fence)
+        row = {
+            "id": self._tombstone_id(document_id, document_version),
+            "recordType": "tombstone", "documentId": document_id,
+            "documentVersion": document_version, "mutationFence": fence,
+            "schemaVersion": self._schema_version, "isActive": False,
+            "embedding": [0.0],
+        }
+        await self._write_exact("upsert", collection, [row])
+        actual = await self._get_rows(collection, [row["id"]])
+        if len(actual) != 1 or any(actual[0].get(key) != value for key, value in row.items()):
+            raise MilvusKnowledgeError("KNOWLEDGE_VECTOR_WRITE_INCOMPLETE")
 
     @staticmethod
     def _write_count(result: object, operation: str) -> int | None:
@@ -302,10 +495,13 @@ class MilvusKnowledgeStore:
 
     @staticmethod
     def _rows_match(
-        actual: dict[str, Any], expected: dict[str, Any], *, ignore_active: bool = False
+        actual: dict[str, Any], expected: dict[str, Any], *, ignore_active: bool = False,
+        ignore_fence: bool = False,
     ) -> bool:
         for field in _VERIFIED_FIELDS:
             if ignore_active and field == "isActive":
+                continue
+            if ignore_fence and field == "mutationFence":
                 continue
             left, right = actual.get(field), expected.get(field)
             if field == "embedding":
@@ -332,29 +528,60 @@ class MilvusKnowledgeStore:
         return result
 
     async def _verify_rows(
-        self, collection: str, expected: list[dict[str, Any]], *, ignore_active: bool = False
+        self, collection: str, expected: list[dict[str, Any]], *, ignore_active: bool = False,
+        ignore_fence: bool = False,
     ) -> bool:
         actual = await self._get_rows(collection, [row["id"] for row in expected])
         by_id = {row.get("id"): row for row in actual}
         return len(by_id) == len(expected) and all(
             row["id"] in by_id
-            and self._rows_match(by_id[row["id"]], row, ignore_active=ignore_active)
+            and self._rows_match(
+                by_id[row["id"]], row, ignore_active=ignore_active,
+                ignore_fence=ignore_fence,
+            )
             for row in expected
         )
 
     async def _document_rows(self, collection: str, document_id: str) -> list[dict[str, Any]]:
+        iterator: Any = None
         try:
-            return await self._call(
-                "query", collection, filter=self._document_filter(document_id),
-                output_fields=["*"], consistency_level="Strong",
+            iterator = await self._call(
+                "query_iterator", collection, batch_size=_VERIFY_BATCH_SIZE,
+                limit=_MAX_DOCUMENT_HISTORY_RECORDS + 1,
+                filter=self._document_filter(document_id), output_fields=["*"],
+                consistency_level="Strong",
             )
+            rows: list[dict[str, Any]] = []
+            while True:
+                batch = await asyncio.to_thread(iterator.next)
+                if not batch:
+                    break
+                rows.extend(batch)
+                if len(rows) > _MAX_DOCUMENT_HISTORY_RECORDS:
+                    raise MilvusKnowledgeError("KNOWLEDGE_DOCUMENT_HISTORY_LIMIT_EXCEEDED")
+            return rows
+        except MilvusKnowledgeError:
+            raise
         except Exception:
             raise MilvusKnowledgeError("KNOWLEDGE_VECTOR_STORE_UNAVAILABLE") from None
+        finally:
+            if iterator is not None:
+                try:
+                    await asyncio.to_thread(iterator.close)
+                except Exception:
+                    pass
 
-    async def _converge_document(self, collection: str, document_id: str) -> int:
+    async def _converge_document(
+        self, collection: str, document_id: str, permit: MutationPermit
+    ) -> int:
         for _ in range(5):
             rows = await self._document_rows(collection, document_id)
             manifests = [row for row in rows if row.get("recordType") == "manifest"]
+            tombstoned = await self._tombstoned_versions(
+                document_id, {int(row["documentVersion"]) for row in manifests}
+            )
+            manifests = [row for row in manifests
+                         if int(row["documentVersion"]) not in tombstoned]
             if not manifests:
                 raise MilvusKnowledgeError("KNOWLEDGE_STAGING_INCOMPLETE")
             highest = max(int(row["documentVersion"]) for row in manifests)
@@ -371,6 +598,7 @@ class MilvusKnowledgeStore:
                 raise MilvusKnowledgeError("KNOWLEDGE_STAGING_INCOMPLETE")
             updates = [{**row, "isActive": row.get("recordType") == "chunk"
                         and row.get("id") in target_ids} for row in rows]
+            await self._assert_permit(permit)
             await self._write_exact("upsert", collection, updates)
             verified = await self._document_rows(collection, document_id)
             latest = max(int(row["documentVersion"]) for row in verified
@@ -396,22 +624,42 @@ class MilvusKnowledgeStore:
         if await self._alias_target() != collection:
             raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_MISMATCH")
 
-    async def upsert_document_version(self, document: IndexedDocument) -> IndexResult:
+    async def upsert_document_version(
+        self, document: IndexedDocument, *, lease: KnowledgeMutationLease | None = None,
+    ) -> IndexResult:
         dimension = self._validate_document(document)
+        scope = f"document:{document.document_id}"
+        async with self._mutation(lease, scope=scope, operation="upsert") as permit:
+            return await self._upsert_document_version(document, dimension, permit)
+
+    async def _upsert_document_version(
+        self, document: IndexedDocument, dimension: int, permit: MutationPermit,
+    ) -> IndexResult:
         canonical = self._collection_name(document.embedding_model_version, dimension)
         async with self._write_lock:
+            if document.document_version in await self._tombstoned_versions(
+                document.document_id, {document.document_version}
+            ):
+                raise MilvusKnowledgeError("KNOWLEDGE_DOCUMENT_DISABLED")
             target = await self._alias_target()
             collection = target or canonical
             if target is None:
-                await self._ensure_collection(collection, document.embedding_model_version, dimension)
+                await self._assert_permit(permit)
+                await self._ensure_collection(
+                    collection, document.embedding_model_version, dimension, permit.fence
+                )
             else:
                 await self._validate_collection(collection, document.embedding_model_version, dimension)
             existing = await self._document_rows(collection, document.document_id)
             manifests = [row for row in existing if row.get("recordType") == "manifest"]
             if manifests and max(int(row["documentVersion"]) for row in manifests) > document.document_version:
                 raise MilvusKnowledgeError("KNOWLEDGE_STALE_VERSION")
-            chunks = self._chunk_rows(document, dimension, active=False)
-            manifest = self._manifest_row(document, dimension, chunks)
+            chunks = self._chunk_rows(
+                document, dimension, active=False, fence=permit.fence
+            )
+            manifest = self._manifest_row(
+                document, dimension, chunks, fence=permit.fence
+            )
             same = [row for row in manifests if int(row["documentVersion"]) == document.document_version]
             idempotent = False
             if same:
@@ -421,29 +669,48 @@ class MilvusKnowledgeStore:
                           "contentHash", "chunkIds", "expectedChunkCount")
                 if len(same) != 1 or any(same[0].get(field) != manifest.get(field) for field in fields):
                     raise MilvusKnowledgeError("KNOWLEDGE_VERSION_CONFLICT")
-                if not await self._verify_rows(collection, chunks, ignore_active=True):
+                if not await self._verify_rows(
+                    collection, chunks, ignore_active=True, ignore_fence=True
+                ):
                     raise MilvusKnowledgeError("KNOWLEDGE_STAGING_INCOMPLETE")
                 active_ids = {row.get("id") for row in existing
                               if row.get("recordType") == "chunk" and row.get("isActive")}
                 idempotent = active_ids == set(manifest["chunkIds"])
             else:
+                await self._assert_permit(permit)
                 await self._write_exact("upsert", collection, chunks)
                 if not await self._verify_rows(collection, chunks):
                     raise MilvusKnowledgeError("KNOWLEDGE_STAGING_INCOMPLETE")
+                await self._assert_permit(permit)
                 await self._write_exact("upsert", collection, [manifest])
                 if not await self._verify_rows(collection, [manifest]):
                     raise MilvusKnowledgeError("KNOWLEDGE_STAGING_INCOMPLETE")
-            active_version = await self._converge_document(collection, document.document_id)
+            active_version = await self._converge_document(
+                collection, document.document_id, permit
+            )
+            await self._assert_permit(permit)
             await self._ensure_alias(collection)
             if active_version > document.document_version:
                 raise MilvusKnowledgeError("KNOWLEDGE_STALE_VERSION")
             return IndexResult(document.document_id, document.document_version,
                                len(document.chunks), collection, idempotent)
 
-    async def delete_document(self, document_id: str, document_version: int) -> None:
+    async def delete_document(
+        self, document_id: str, document_version: int, *,
+        lease: KnowledgeMutationLease | None = None,
+    ) -> None:
         if not self._valid_id(document_id) or not isinstance(document_version, int) or document_version < 1:
             raise MilvusKnowledgeError("KNOWLEDGE_DOCUMENT_INVALID")
+        scope = f"document:{document_id}"
+        async with self._mutation(lease, scope=scope, operation="delete") as permit:
+            await self._delete_document(document_id, document_version, permit)
+
+    async def _delete_document(
+        self, document_id: str, document_version: int, permit: MutationPermit,
+    ) -> None:
         async with self._write_lock:
+            await self._assert_permit(permit)
+            await self._write_tombstone(document_id, document_version, permit.fence)
             target = await self._alias_target()
             if target is None:
                 return
@@ -455,8 +722,8 @@ class MilvusKnowledgeStore:
                      **({"isDeleted": True} if row.get("recordType") == "manifest" else {})}
                     for row in selected
                 ]
-                await self._write_exact("upsert", target,
-                                        updates)
+                await self._assert_permit(permit)
+                await self._write_exact("upsert", target, updates)
                 verified = await self._document_rows(target, document_id)
                 if any(row.get("isActive") and int(row.get("documentVersion", -1)) == document_version
                        for row in verified):
@@ -532,8 +799,18 @@ class MilvusKnowledgeStore:
             raise MilvusKnowledgeError("KNOWLEDGE_ALIAS_SWITCH_UNCERTAIN")
         raise MilvusKnowledgeError("KNOWLEDGE_ALIAS_SWITCH_FAILED")
 
-    async def rebuild_collection(self, documents: AsyncIterator[IndexedDocument]) -> RebuildResult:
-        docs = [document async for document in documents]
+    async def rebuild_collection(
+        self, documents: AsyncIterator[IndexedDocument], *,
+        lease: KnowledgeMutationLease | None = None,
+    ) -> RebuildResult:
+        scope = f"collection:{self._alias}"
+        async with self._mutation(lease, scope=scope, operation="rebuild") as permit:
+            docs = [document async for document in documents]
+            return await self._rebuild_collection(docs, permit)
+
+    async def _rebuild_collection(
+        self, docs: list[IndexedDocument], permit: MutationPermit,
+    ) -> RebuildResult:
         if not docs:
             raise MilvusKnowledgeError("KNOWLEDGE_DOCUMENT_INVALID")
         dimensions = {self._validate_document(document) for document in docs}
@@ -549,20 +826,33 @@ class MilvusKnowledgeStore:
             old = await self._alias_target()
             safe_to_drop, switched = True, False
             try:
-                await self._ensure_collection(collection, model, dimension)
+                await self._assert_permit(permit)
+                await self._ensure_collection(
+                    collection, model, dimension, permit.fence
+                )
                 chunks: list[dict[str, Any]] = []
                 manifests: list[dict[str, Any]] = []
                 for document in docs:
-                    rows = self._chunk_rows(document, dimension, active=True)
+                    if document.document_version in await self._tombstoned_versions(
+                        document.document_id, {document.document_version}
+                    ):
+                        raise MilvusKnowledgeError("KNOWLEDGE_DOCUMENT_DISABLED")
+                    rows = self._chunk_rows(
+                        document, dimension, active=True, fence=permit.fence
+                    )
                     chunks.extend(rows)
-                    manifests.append(self._manifest_row(document, dimension, rows))
+                    manifests.append(self._manifest_row(
+                        document, dimension, rows, fence=permit.fence
+                    ))
                 all_rows = [*chunks, *manifests]
                 for start in range(0, len(all_rows), _VERIFY_BATCH_SIZE):
+                    await self._assert_permit(permit)
                     await self._write_exact("insert", collection,
                                             all_rows[start:start + _VERIFY_BATCH_SIZE])
                 if not await self._verify_rows(collection, all_rows):
                     raise MilvusKnowledgeError("KNOWLEDGE_STAGING_INCOMPLETE")
                 try:
+                    await self._assert_permit(permit)
                     await self._switch_alias(old, collection)
                     switched = True
                 except MilvusKnowledgeError as error:

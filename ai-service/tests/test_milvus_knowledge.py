@@ -3,15 +3,21 @@ from __future__ import annotations
 import asyncio
 import math
 import threading
+import time
 from collections.abc import AsyncIterator
 from copy import deepcopy
 from dataclasses import replace
+from contextlib import asynccontextmanager
 
 import pytest
 
+import ai_service.infrastructure.milvus_knowledge as milvus_module
+
 from ai_service.infrastructure.milvus_knowledge import (
+    DenyAllKnowledgeMutationCoordinator,
     IndexedChunk,
     IndexedDocument,
+    KnowledgeMutationLease,
     MilvusKnowledgeError,
     MilvusKnowledgeStore,
 )
@@ -124,6 +130,8 @@ class FakeMilvusClient:
         self.partial_upsert_count: int | None = None
         self.partial_active_upsert_count: int | None = None
         self.before_old_activation: tuple[threading.Event, threading.Event] | None = None
+        self.coordinator = FakeMutationCoordinator()
+        self.iterator_calls: list[dict] = []
 
     def has_collection(self, collection_name):
         return collection_name in self.collections
@@ -185,6 +193,12 @@ class FakeMilvusClient:
         self.query_calls.append({"collection_name": collection_name, "filter": filter})
         rows = deepcopy(self.collections[self._resolve(collection_name)])
         return [row for row in rows if self._matches(row, filter)]
+
+    def query_iterator(self, collection_name, batch_size, limit, filter="", **_kwargs):
+        self.iterator_calls.append({"batch_size": batch_size, "limit": limit, "filter": filter})
+        rows = [deepcopy(row) for row in self.collections[self._resolve(collection_name)]
+                if self._matches(row, filter)][:limit]
+        return FakeQueryIterator(rows, batch_size)
 
     def get(self, collection_name, ids, output_fields=None, **_kwargs):
         self.get_calls.append(list(ids))
@@ -258,6 +272,77 @@ class FakeMilvusClient:
         return True
 
 
+class FakeQueryIterator:
+    def __init__(self, rows, batch_size):
+        self.rows = rows
+        self.batch_size = batch_size
+        self.offset = 0
+        self.closed = False
+
+    def next(self):
+        batch = self.rows[self.offset:self.offset + self.batch_size]
+        self.offset += len(batch)
+        return batch
+
+    def close(self):
+        self.closed = True
+
+
+class FakeMutationPermit:
+    def __init__(self, coordinator, lease):
+        self.coordinator = coordinator
+        self.fence = lease.fence
+
+    async def assert_current(self):
+        self.coordinator.assertions += 1
+        if self.coordinator.revoked:
+            raise MilvusKnowledgeError("KNOWLEDGE_MUTATION_LEASE_INVALID")
+        if (self.coordinator.revoke_after is not None
+                and self.coordinator.assertions > self.coordinator.revoke_after):
+            self.coordinator.revoked = True
+            raise MilvusKnowledgeError("KNOWLEDGE_MUTATION_LEASE_INVALID")
+
+
+class FakeMutationCoordinator:
+    def __init__(self):
+        self.active: set[str] = set()
+        self.condition = asyncio.Condition()
+        self.max_active = 0
+        self.entries: list[str] = []
+        self.assertions = 0
+        self.revoked = False
+        self.revoke_after: int | None = None
+        self.block_next: tuple[threading.Event, threading.Event] | None = None
+
+    @staticmethod
+    def _conflicts(left, right):
+        return left == right or left.startswith("collection:") or right.startswith("collection:")
+
+    @asynccontextmanager
+    async def hold(self, lease, *, scope, operation):
+        if (lease.scope != scope or lease.proof != "valid-proof"
+                or lease.expires_at <= time.time() or self.revoked):
+            raise MilvusKnowledgeError("KNOWLEDGE_MUTATION_LEASE_INVALID")
+        async with self.condition:
+            await self.condition.wait_for(
+                lambda: not any(self._conflicts(scope, active) for active in self.active)
+            )
+            self.active.add(scope)
+            self.entries.append(f"{operation}:{scope}")
+            self.max_active = max(self.max_active, len(self.active))
+        try:
+            if self.block_next:
+                entered, release = self.block_next
+                self.block_next = None
+                entered.set()
+                await asyncio.to_thread(release.wait, 2)
+            yield FakeMutationPermit(self, lease)
+        finally:
+            async with self.condition:
+                self.active.remove(scope)
+                self.condition.notify_all()
+
+
 def document(version=1, *, etl="etl-v1", model="embedding-v1", dimension=2,
              document_id="doc-1"):
     chunks = tuple(
@@ -278,16 +363,47 @@ def document(version=1, *, etl="etl-v1", model="embedding-v1", dimension=2,
 
 def store(settings, client):
     settings.milvus_collection_alias = "customer_service_knowledge"
-    return MilvusKnowledgeStore(settings, client_factory=lambda **_kwargs: client)
+    return MilvusKnowledgeStore(
+        settings, client_factory=lambda **_kwargs: client,
+        mutation_coordinator=client.coordinator,
+    )
+
+
+def lease(scope, fence=1, *, proof="valid-proof", expires_at=None):
+    return KnowledgeMutationLease(
+        scope=scope, operation_id=f"operation-{fence}", fence=fence,
+        expires_at=expires_at or time.time() + 60, proof=proof,
+    )
+
+
+async def index_document(knowledge, value, *, mutation_lease=None):
+    return await knowledge.upsert_document_version(
+        value,
+        lease=mutation_lease or lease(f"document:{value.document_id}", value.document_version),
+    )
+
+
+async def delete_version(knowledge, document_id, version, *, mutation_lease=None):
+    return await knowledge.delete_document(
+        document_id, version,
+        lease=mutation_lease or lease(f"document:{document_id}", version),
+    )
+
+
+async def rebuild(knowledge, values, *, mutation_lease=None, fence=100):
+    return await knowledge.rebuild_collection(
+        values,
+        lease=mutation_lease or lease("collection:customer_service_knowledge", fence),
+    )
 
 
 @pytest.mark.asyncio
 async def test_version_write_is_complete_idempotent_and_activates_newest(settings):
     client = FakeMilvusClient()
     knowledge = store(settings, client)
-    first = await knowledge.upsert_document_version(document())
-    replay = await knowledge.upsert_document_version(document())
-    second = await knowledge.upsert_document_version(document(version=2))
+    first = await index_document(knowledge, document())
+    replay = await index_document(knowledge, document())
+    second = await index_document(knowledge, document(version=2))
 
     assert first.chunk_count == 2 and not first.idempotent
     assert replay.idempotent
@@ -307,11 +423,11 @@ async def test_version_write_is_complete_idempotent_and_activates_newest(setting
 async def test_stale_or_conflicting_version_cannot_replace_active_version(settings):
     client = FakeMilvusClient()
     knowledge = store(settings, client)
-    await knowledge.upsert_document_version(document(version=2))
+    await index_document(knowledge, document(version=2))
     with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_STALE_VERSION$"):
-        await knowledge.upsert_document_version(document(version=1))
+        await index_document(knowledge, document(version=1))
     with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_VERSION_CONFLICT$"):
-        await knowledge.upsert_document_version(document(version=2, etl="etl-other"))
+        await index_document(knowledge, document(version=2, etl="etl-other"))
     assert all(row["documentVersion"] == 2 and row["isActive"]
                for row in next(iter(client.collections.values()))
                if row.get("recordType") == "chunk")
@@ -321,9 +437,9 @@ async def test_stale_or_conflicting_version_cannot_replace_active_version(settin
 async def test_dimension_mismatch_is_rejected_without_mixing_collection(settings):
     client = FakeMilvusClient()
     knowledge = store(settings, client)
-    await knowledge.upsert_document_version(document())
+    await index_document(knowledge, document())
     with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_EMBEDDING_DIMENSION_MISMATCH$"):
-        await knowledge.upsert_document_version(document(version=2, dimension=3))
+        await index_document(knowledge, document(version=2, dimension=3))
     assert list(client.dimensions.values()) == [2]
 
 
@@ -331,9 +447,9 @@ async def test_dimension_mismatch_is_rejected_without_mixing_collection(settings
 async def test_delete_disables_version_and_search_only_returns_active_metadata(settings):
     client = FakeMilvusClient()
     knowledge = store(settings, client)
-    await knowledge.upsert_document_version(document())
-    await knowledge.upsert_document_version(document(document_id="doc-2"))
-    await knowledge.delete_document("doc-1", 1)
+    await index_document(knowledge, document())
+    await index_document(knowledge, document(document_id="doc-2"))
+    await delete_version(knowledge, "doc-1", 1)
 
     results = await knowledge.search([0.1, 0.2], 8)
     assert results and {item.document_id for item in results} == {"doc-2"}
@@ -342,7 +458,7 @@ async def test_delete_disables_version_and_search_only_returns_active_metadata(s
     assert all(not hasattr(item, "embedding") and math.isfinite(item.distance)
                for item in results)
     with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_DOCUMENT_DISABLED$"):
-        await knowledge.upsert_document_version(document())
+        await index_document(knowledge, document())
 
 
 async def documents(*items: IndexedDocument) -> AsyncIterator[IndexedDocument]:
@@ -354,15 +470,15 @@ async def documents(*items: IndexedDocument) -> AsyncIterator[IndexedDocument]:
 async def test_rebuild_validates_staging_then_atomically_switches_alias(settings):
     client = FakeMilvusClient()
     knowledge = store(settings, client)
-    await knowledge.upsert_document_version(document())
+    await index_document(knowledge, document())
     old_collection = client.aliases[settings.milvus_collection_alias]
 
-    result = await knowledge.rebuild_collection(documents(document(version=2), document(document_id="doc-2")))
+    result = await rebuild(knowledge, documents(document(version=2), document(document_id="doc-2")))
     assert result.chunk_count == 4 and result.document_count == 2
     assert client.aliases[settings.milvus_collection_alias] == result.collection_name
     assert result.collection_name != old_collection
 
-    incremental = await knowledge.upsert_document_version(document(version=3))
+    incremental = await index_document(knowledge, document(version=3))
     assert incremental.collection_name == result.collection_name
     active = [row for row in client.collections[result.collection_name]
               if row.get("recordType") == "chunk" and row["isActive"]]
@@ -373,28 +489,28 @@ async def test_rebuild_validates_staging_then_atomically_switches_alias(settings
 async def test_rebuild_integrity_or_alias_failure_keeps_old_alias(settings):
     client = FakeMilvusClient()
     knowledge = store(settings, client)
-    await knowledge.upsert_document_version(document())
+    await index_document(knowledge, document())
     alias = settings.milvus_collection_alias
     old_collection = client.aliases[alias]
 
     client.corrupt_next_insert = True
     with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_VECTOR_WRITE_INCOMPLETE$"):
-        await knowledge.rebuild_collection(documents(document(version=2)))
+        await rebuild(knowledge, documents(document(version=2)))
     assert client.aliases[alias] == old_collection
 
     client.corrupt_next_content = True
     with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_STAGING_INCOMPLETE$"):
-        await knowledge.rebuild_collection(documents(document(version=2)))
+        await rebuild(knowledge, documents(document(version=2)))
     assert client.aliases[alias] == old_collection
 
     client.corrupt_next_embedding = True
     with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_STAGING_INCOMPLETE$"):
-        await knowledge.rebuild_collection(documents(document(version=2)))
+        await rebuild(knowledge, documents(document(version=2)))
     assert client.aliases[alias] == old_collection
 
     client.fail_alias_switch = True
     with pytest.raises(MilvusKnowledgeError) as caught:
-        await knowledge.rebuild_collection(documents(document(version=2)))
+        await rebuild(knowledge, documents(document(version=2)))
     assert str(caught.value) == "KNOWLEDGE_ALIAS_SWITCH_FAILED"
     assert "provider response" not in repr(caught.value)
     assert client.aliases[alias] == old_collection
@@ -406,49 +522,53 @@ async def test_incomplete_document_staging_can_be_retried_idempotently(settings)
     knowledge = store(settings, client)
     client.corrupt_next_insert = True
     with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_VECTOR_WRITE_INCOMPLETE$"):
-        await knowledge.upsert_document_version(document())
+        await index_document(knowledge, document())
 
-    result = await knowledge.upsert_document_version(document())
+    result = await index_document(knowledge, document())
     assert not result.idempotent
-    replay = await knowledge.upsert_document_version(document())
+    replay = await index_document(knowledge, document())
     assert replay.idempotent
     assert len([row for row in next(iter(client.collections.values()))
                 if row.get("recordType") == "chunk"]) == 2
 
 
 @pytest.mark.asyncio
-async def test_two_store_instances_converge_when_old_version_finishes_last(settings):
+async def test_two_store_instances_are_strictly_serialized_by_shared_coordinator(settings):
     client = FakeMilvusClient()
     old_store = store(settings, client)
     new_store = store(settings, client)
     old_started = threading.Event()
     release_old = threading.Event()
-    client.before_old_activation = (old_started, release_old)
+    client.coordinator.block_next = (old_started, release_old)
 
-    old_task = asyncio.create_task(old_store.upsert_document_version(document(version=1)))
+    old_task = asyncio.create_task(index_document(old_store, document(version=1)))
     assert await asyncio.to_thread(old_started.wait, 1)
-    await new_store.upsert_document_version(document(version=2))
+    new_task = asyncio.create_task(index_document(new_store, document(version=2)))
+    await asyncio.sleep(0.02)
+    assert not new_task.done()
+    assert client.coordinator.max_active == 1
     release_old.set()
-    old_result = (await asyncio.gather(old_task, return_exceptions=True))[0]
+    await asyncio.gather(old_task, new_task)
 
     rows = next(iter(client.collections.values()))
     active = [row for row in rows if row.get("recordType") == "chunk" and row["isActive"]]
     assert {row["documentVersion"] for row in active} == {2}
-    assert isinstance(old_result, MilvusKnowledgeError)
-    assert old_result.code == "KNOWLEDGE_STALE_VERSION"
+    assert client.coordinator.entries[:2] == [
+        "upsert:document:doc-1", "upsert:document:doc-1"
+    ]
 
 
 @pytest.mark.asyncio
 async def test_partial_activation_retry_converges_before_idempotent_success(settings):
     client = FakeMilvusClient()
     knowledge = store(settings, client)
-    await knowledge.upsert_document_version(document(version=1))
+    await index_document(knowledge, document(version=1))
     client.partial_active_upsert_count = 1
     with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_VECTOR_WRITE_INCOMPLETE$"):
-        await knowledge.upsert_document_version(document(version=2))
+        await index_document(knowledge, document(version=2))
 
-    result = await knowledge.upsert_document_version(document(version=2))
-    replay = await knowledge.upsert_document_version(document(version=2))
+    result = await index_document(knowledge, document(version=2))
+    replay = await index_document(knowledge, document(version=2))
     rows = next(iter(client.collections.values()))
     active = [row for row in rows if row.get("recordType") == "chunk" and row["isActive"]]
     assert {row["documentVersion"] for row in active} == {2}
@@ -461,7 +581,7 @@ async def test_alias_lookup_failure_is_not_treated_as_missing_on_delete(settings
     knowledge = store(settings, client)
     client.fail_alias_lookup = True
     with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_VECTOR_STORE_UNAVAILABLE$"):
-        await knowledge.delete_document("doc-1", 1)
+        await delete_version(knowledge, "doc-1", 1)
 
 
 @pytest.mark.asyncio
@@ -470,14 +590,14 @@ async def test_document_and_chunk_ids_reject_filter_metacharacters(settings, inv
     client = FakeMilvusClient()
     knowledge = store(settings, client)
     with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_DOCUMENT_INVALID$"):
-        await knowledge.upsert_document_version(document(document_id=invalid_id))
+        await index_document(knowledge, document(document_id=invalid_id))
     with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_DOCUMENT_INVALID$"):
-        await knowledge.delete_document(invalid_id, 1)
+        await delete_version(knowledge, invalid_id, 1)
     valid = document()
     invalid_chunk = replace(valid.chunks[0], chunk_id=invalid_id)
     with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_DOCUMENT_INVALID$"):
-        await knowledge.upsert_document_version(
-            replace(valid, chunks=(invalid_chunk, *valid.chunks[1:]))
+        await index_document(
+            knowledge, replace(valid, chunks=(invalid_chunk, *valid.chunks[1:]))
         )
 
 
@@ -485,7 +605,7 @@ async def test_document_and_chunk_ids_reject_filter_metacharacters(settings, inv
 async def test_rebuild_verifies_known_primary_keys_without_unbounded_query(settings):
     client = FakeMilvusClient()
     knowledge = store(settings, client)
-    await knowledge.rebuild_collection(documents(document(), document(document_id="doc-2")))
+    await rebuild(knowledge, documents(document(), document(document_id="doc-2")))
     assert len(client.get_calls) >= 1
     assert not any(call["filter"] == "" for call in client.query_calls)
 
@@ -494,12 +614,12 @@ async def test_rebuild_verifies_known_primary_keys_without_unbounded_query(setti
 async def test_alias_switch_response_loss_rolls_back_only_after_readback(settings):
     client = FakeMilvusClient()
     knowledge = store(settings, client)
-    await knowledge.upsert_document_version(document())
+    await index_document(knowledge, document())
     alias = settings.milvus_collection_alias
     old = client.aliases[alias]
     client.alias_switch_failures = ["after"]
     with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_ALIAS_SWITCH_FAILED$"):
-        await knowledge.rebuild_collection(documents(document(version=2)))
+        await rebuild(knowledge, documents(document(version=2)))
     assert client.aliases[alias] == old
     assert all("_staging_" not in name for name in client.collections)
 
@@ -508,12 +628,12 @@ async def test_alias_switch_response_loss_rolls_back_only_after_readback(setting
 async def test_alias_rollback_failure_keeps_possibly_active_staging(settings):
     client = FakeMilvusClient()
     knowledge = store(settings, client)
-    await knowledge.upsert_document_version(document())
+    await index_document(knowledge, document())
     alias = settings.milvus_collection_alias
     old = client.aliases[alias]
     client.alias_switch_failures = ["after", "before"]
     with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_ALIAS_SWITCH_UNCERTAIN$"):
-        await knowledge.rebuild_collection(documents(document(version=2)))
+        await rebuild(knowledge, documents(document(version=2)))
     assert client.aliases[alias] != old
     assert client.aliases[alias] in client.collections
 
@@ -522,7 +642,7 @@ async def test_alias_rollback_failure_keeps_possibly_active_staging(settings):
 async def test_alias_readback_failure_preserves_both_collections(settings):
     client = FakeMilvusClient()
     knowledge = store(settings, client)
-    await knowledge.upsert_document_version(document())
+    await index_document(knowledge, document())
     client.alias_switch_failures = ["after"]
     original_alter = client.alter_alias
 
@@ -534,8 +654,148 @@ async def test_alias_readback_failure_preserves_both_collections(settings):
 
     client.alter_alias = switch_then_break_lookup
     with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_ALIAS_SWITCH_UNCERTAIN$"):
-        await knowledge.rebuild_collection(documents(document(version=2)))
+        await rebuild(knowledge, documents(document(version=2)))
     assert len(client.collections) == 2
+
+
+@pytest.mark.asyncio
+async def test_missing_invalid_expired_and_default_deny_leases_write_nothing(settings):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    value = document()
+    with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_MUTATION_LEASE_REQUIRED$"):
+        await knowledge.upsert_document_version(value)
+    for invalid in (
+        lease("document:wrong", 1),
+        lease("document:doc-1", 1, proof="forged"),
+        lease("document:doc-1", 1, expires_at=time.time() - 1),
+    ):
+        with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_MUTATION_LEASE_INVALID$"):
+            await knowledge.upsert_document_version(value, lease=invalid)
+    denied = MilvusKnowledgeStore(settings, client_factory=lambda **_kwargs: client)
+    with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_MUTATION_LEASE_REQUIRED$"):
+        await denied.upsert_document_version(value, lease=lease("document:doc-1"))
+    assert client.collections == {}
+
+
+@pytest.mark.asyncio
+async def test_revoked_permit_stops_before_manifest_and_alias_publication(settings):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    client.coordinator.revoke_after = 3
+    with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_MUTATION_LEASE_INVALID$"):
+        await index_document(knowledge, document())
+    business_rows = [rows for name, rows in client.collections.items()
+                     if "mutation_control" not in name]
+    assert business_rows
+    assert all(not row["isActive"] for row in business_rows[0])
+    assert not any(row.get("recordType") == "manifest" for row in business_rows[0])
+    assert client.aliases == {}
+
+
+@pytest.mark.asyncio
+async def test_delete_before_manifest_writes_deterministic_tombstone(settings):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    await delete_version(knowledge, "doc-1", 1, mutation_lease=lease("document:doc-1", 7))
+    control = client.collections[knowledge._control_collection_name()]
+    assert len(control) == 1
+    assert control[0]["id"] == knowledge._tombstone_id("doc-1", 1)
+    assert control[0]["mutationFence"] == 7
+    with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_DOCUMENT_DISABLED$"):
+        await index_document(knowledge, document(), mutation_lease=lease("document:doc-1", 8))
+    assert len(client.collections[knowledge._control_collection_name()]) == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_and_converge_are_serialized_and_tombstone_wins(settings):
+    client = FakeMilvusClient()
+    first = store(settings, client)
+    second = store(settings, client)
+    entered, release = threading.Event(), threading.Event()
+    client.coordinator.block_next = (entered, release)
+    index_task = asyncio.create_task(index_document(first, document()))
+    assert await asyncio.to_thread(entered.wait, 1)
+    delete_task = asyncio.create_task(
+        delete_version(second, "doc-1", 1, mutation_lease=lease("document:doc-1", 2))
+    )
+    await asyncio.sleep(0.02)
+    assert not delete_task.done()
+    release.set()
+    await asyncio.gather(index_task, delete_task)
+    target = client.aliases["customer_service_knowledge"]
+    assert not any(row.get("isActive") for row in client.collections[target])
+    assert await first._tombstoned_versions("doc-1", {1}) == {1}
+
+
+@pytest.mark.asyncio
+async def test_rebuild_scope_serializes_incremental_mutation(settings):
+    client = FakeMilvusClient()
+    rebuild_store = store(settings, client)
+    incremental_store = store(settings, client)
+    entered, release = threading.Event(), threading.Event()
+    client.coordinator.block_next = (entered, release)
+    rebuild_task = asyncio.create_task(rebuild(
+        rebuild_store, documents(document()), mutation_lease=lease(
+            "collection:customer_service_knowledge", 10
+        )
+    ))
+    assert await asyncio.to_thread(entered.wait, 1)
+    incremental_task = asyncio.create_task(index_document(
+        incremental_store, document(version=2),
+        mutation_lease=lease("document:doc-1", 11),
+    ))
+    await asyncio.sleep(0.02)
+    assert not incremental_task.done()
+    release.set()
+    await asyncio.gather(rebuild_task, incremental_task)
+    assert client.coordinator.max_active == 1
+    target = client.aliases["customer_service_knowledge"]
+    active = [row for row in client.collections[target]
+              if row.get("recordType") == "chunk" and row.get("isActive")]
+    assert {row["documentVersion"] for row in active} == {2}
+
+
+@pytest.mark.asyncio
+async def test_document_history_uses_iterator_pages(settings, monkeypatch):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    await index_document(knowledge, document())
+    monkeypatch.setattr(milvus_module, "_VERIFY_BATCH_SIZE", 2)
+    await index_document(knowledge, document())
+    assert any(call["batch_size"] == 2 for call in client.iterator_calls)
+    assert not client.query_calls
+
+
+@pytest.mark.asyncio
+async def test_document_history_hard_limit_fails_closed(settings, monkeypatch):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    await index_document(knowledge, document())
+    target = client.aliases["customer_service_knowledge"]
+    extra = deepcopy(client.collections[target][0])
+    extra["id"] = "f" * 64
+    extra["chunkId"] = "doc-1:0:extra"
+    client.collections[target].append(extra)
+    monkeypatch.setattr(milvus_module, "_MAX_DOCUMENT_HISTORY_RECORDS", 3)
+    with pytest.raises(
+        MilvusKnowledgeError, match="^KNOWLEDGE_DOCUMENT_HISTORY_LIMIT_EXCEEDED$"
+    ):
+        await index_document(knowledge, document(version=2))
+
+
+@pytest.mark.asyncio
+async def test_fence_is_recorded_in_manifest_and_collection_metadata(settings):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    await index_document(
+        knowledge, document(), mutation_lease=lease("document:doc-1", 42)
+    )
+    target = client.aliases["customer_service_knowledge"]
+    manifest = next(row for row in client.collections[target]
+                    if row.get("recordType") == "manifest")
+    assert manifest["mutationFence"] == 42
+    assert '"mutationFence":42' in client.descriptions[target]
 
 
 @pytest.mark.asyncio
@@ -545,3 +805,8 @@ async def test_ping_uses_injected_client_and_maps_failures(settings):
     assert await knowledge.ping()
     client.list_collections = lambda: (_ for _ in ()).throw(RuntimeError("offline"))
     assert not await knowledge.ping()
+
+
+def test_default_mutation_coordinator_is_fail_closed_contract():
+    assert DenyAllKnowledgeMutationCoordinator
+    assert KnowledgeMutationLease
