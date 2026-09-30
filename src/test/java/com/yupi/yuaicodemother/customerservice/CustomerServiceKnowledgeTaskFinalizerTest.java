@@ -83,7 +83,7 @@ class CustomerServiceKnowledgeTaskFinalizerTest {
     }
 
     @Test
-    void staleTerminalFailureSkipsInsteadOfFailingOutbox() {
+    void versionAdvanceMakesTerminalFailureSkipInsteadOfFailingOutbox() {
         LocalDateTime failedAt = LocalDateTime.parse("2030-01-01T00:00:00");
         when(documents.failIndex(3, 4, 5, "BAD_FILE")).thenReturn(0);
         when(outbox.finish(1, "owner", "SKIPPED", "KNOWLEDGE_TASK_STALE")).thenReturn(1);

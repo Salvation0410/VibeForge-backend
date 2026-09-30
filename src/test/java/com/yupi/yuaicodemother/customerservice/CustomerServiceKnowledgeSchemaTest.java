@@ -93,6 +93,19 @@ class CustomerServiceKnowledgeSchemaTest {
     }
 
     @Test
+    void terminalIndexFailureCasTargetsOnlyCurrentUnpublishedVersion() throws Exception {
+        Update update = CustomerServiceKnowledgeDocumentMapper.class
+                .getMethod("failIndex", long.class, long.class, long.class, String.class)
+                .getAnnotation(Update.class);
+        String sql = update.value()[0];
+        assertTrue(sql.contains("documentVersion=#{version}"));
+        assertTrue(sql.contains("etlVersion=#{etlVersion}"));
+        assertTrue(sql.contains("isDelete=0"));
+        assertTrue(sql.contains("status IN ('UPLOADED','FAILED','INDEXING')"));
+        assertFalse(sql.contains("'ACTIVE'"));
+    }
+
+    @Test
     void claimRefreshRequiresCurrentProcessingOwner() throws Exception {
         Update update = CustomerServiceKnowledgeEtlOutboxMapper.class
                 .getMethod("refreshClaim", long.class, String.class, java.time.LocalDateTime.class)

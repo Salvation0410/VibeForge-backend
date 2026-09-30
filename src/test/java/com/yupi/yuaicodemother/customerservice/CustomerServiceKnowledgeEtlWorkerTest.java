@@ -38,6 +38,8 @@ class CustomerServiceKnowledgeEtlWorkerTest {
 
     @BeforeEach
     void setUp() {
+        reset(documents, outbox, oss, ai, coordinator, finalizer);
+        props = new CustomerServiceProperties();
         props.setRetryMax(5);
         when(outbox.refreshClaim(anyLong(), anyString(), any())).thenReturn(1);
         worker = new CustomerServiceKnowledgeEtlWorker(documents, outbox, oss, ai, coordinator, finalizer, props,
@@ -157,6 +159,57 @@ class CustomerServiceKnowledgeEtlWorkerTest {
         when(ai.index(any())).thenThrow(new CustomerServiceAiClient.CallException("TEMPORARY", true));
         worker.execute(task);
         verify(finalizer).failIndex(eq(1L), anyString(), eq(1L), eq(1L), eq(1L), eq(5), any(), eq("TEMPORARY"));
+    }
+
+    @Test
+    void repeatedSignedUrlFailuresEventuallyFailCurrentDocumentAndOutbox() {
+        var task = task("INDEX");
+        var uploaded = document();
+        uploaded.setStatus("UPLOADED");
+        worker = workerWithRealFinalizer();
+        when(documents.findIncludingDeleted(1)).thenReturn(uploaded);
+        when(oss.generateKnowledgeDownloadUrl("key"))
+                .thenThrow(new RuntimeException("signed URL unavailable"));
+        when(documents.failIndex(1, 1, 1, "KNOWLEDGE_WORKER_FAILED")).thenReturn(1);
+        when(outbox.retry(anyLong(), anyString(), anyString(), anyInt(), any(), anyString())).thenReturn(1);
+
+        for (int retryCount = 0; retryCount < 5; retryCount++) {
+            task.setRetryCount(retryCount);
+            worker.execute(task);
+        }
+
+        verify(outbox, times(4)).retry(eq(1L), anyString(), eq("PENDING"), anyInt(), any(),
+                eq("KNOWLEDGE_WORKER_FAILED"));
+        verify(documents).failIndex(1, 1, 1, "KNOWLEDGE_WORKER_FAILED");
+        verify(outbox).retry(eq(1L), anyString(), eq("FAILED"), eq(5), any(),
+                eq("KNOWLEDGE_WORKER_FAILED"));
+        verifyNoInteractions(coordinator);
+    }
+
+    @Test
+    void repeatedCoordinatorFailuresEventuallyFailCurrentDocumentAndOutbox() throws Exception {
+        var task = task("INDEX");
+        var uploaded = document();
+        uploaded.setStatus("UPLOADED");
+        worker = workerWithRealFinalizer();
+        when(documents.findIncludingDeleted(1)).thenReturn(uploaded);
+        when(oss.generateKnowledgeDownloadUrl("key")).thenReturn(new URL("https://example.com/short"));
+        when(coordinator.acquire(any(), any(), eq("INDEX"), any()))
+                .thenThrow(new IllegalStateException("KNOWLEDGE_COORDINATOR_UNAVAILABLE"));
+        when(documents.failIndex(1, 1, 1, "KNOWLEDGE_COORDINATOR_UNAVAILABLE")).thenReturn(1);
+        when(outbox.retry(anyLong(), anyString(), anyString(), anyInt(), any(), anyString())).thenReturn(1);
+
+        for (int retryCount = 0; retryCount < 5; retryCount++) {
+            task.setRetryCount(retryCount);
+            worker.execute(task);
+        }
+
+        verify(outbox, times(4)).retry(eq(1L), anyString(), eq("PENDING"), anyInt(), any(),
+                eq("KNOWLEDGE_COORDINATOR_UNAVAILABLE"));
+        verify(documents).failIndex(1, 1, 1, "KNOWLEDGE_COORDINATOR_UNAVAILABLE");
+        verify(outbox).retry(eq(1L), anyString(), eq("FAILED"), eq(5), any(),
+                eq("KNOWLEDGE_COORDINATOR_UNAVAILABLE"));
+        verify(coordinator, times(5)).acquire(any(), any(), eq("INDEX"), any());
     }
 
     @Test
@@ -410,6 +463,12 @@ class CustomerServiceKnowledgeEtlWorkerTest {
     }
     private static KnowledgeMutationCoordinator.Lease lease(String operation) {
         return new KnowledgeMutationCoordinator.Lease("document:1", "op_1", operation, 1, 2000000000, "proof");
+    }
+
+    private CustomerServiceKnowledgeEtlWorker workerWithRealFinalizer() {
+        return new CustomerServiceKnowledgeEtlWorker(documents, outbox, oss, ai, coordinator,
+                new CustomerServiceKnowledgeTaskFinalizer(documents, outbox), props,
+                Clock.fixed(Instant.parse("2030-01-01T00:00:00Z"), ZoneOffset.UTC));
     }
 
     private static final class MutableClock extends Clock {

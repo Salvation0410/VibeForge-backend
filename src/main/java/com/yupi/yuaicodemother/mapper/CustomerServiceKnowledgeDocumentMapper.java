@@ -36,7 +36,7 @@ public interface CustomerServiceKnowledgeDocumentMapper extends BaseMapper<Custo
     int completeIndex(@Param("id") long id, @Param("version") long version,
                       @Param("etlVersion") long etlVersion, @Param("chunkCount") int chunkCount);
 
-    @Update("UPDATE customer_service_knowledge_document SET status='FAILED',lastErrorCode=#{code} WHERE id=#{id} AND documentVersion=#{version} AND etlVersion=#{etlVersion} AND status='INDEXING'")
+    @Update("UPDATE customer_service_knowledge_document SET status='FAILED',lastErrorCode=#{code} WHERE id=#{id} AND documentVersion=#{version} AND etlVersion=#{etlVersion} AND isDelete=0 AND status IN ('UPLOADED','FAILED','INDEXING')")
     int failIndex(@Param("id") long id, @Param("version") long version,
                   @Param("etlVersion") long etlVersion, @Param("code") String code);
 }
