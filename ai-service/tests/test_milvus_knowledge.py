@@ -431,7 +431,12 @@ class FakeMilvusClient:
         return [row for row in rows if self._matches(row, filter)]
 
     def query_iterator(self, collection_name, batch_size, limit, filter="", **_kwargs):
-        self.iterator_calls.append({"batch_size": batch_size, "limit": limit, "filter": filter})
+        self.iterator_calls.append({
+            "collection_name": collection_name,
+            "batch_size": batch_size,
+            "limit": limit,
+            "filter": filter,
+        })
         rows = [deepcopy(row) for row in self.collections[self._resolve(collection_name)]
                 if self._matches(row, filter)][:limit]
         return FakeQueryIterator(rows, batch_size)
@@ -778,6 +783,70 @@ async def test_search_returns_current_version_for_rebuild_manifest(settings):
 
     assert results
     assert {item.current_document_version for item in results} == {3}
+
+
+@pytest.mark.asyncio
+async def test_search_filters_same_version_orphan_active_row_by_manifest_pk(settings):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    await index_document(knowledge, document())
+    collection = client.aliases[settings.milvus_collection_alias]
+    original = next(
+        row for row in client.collections[collection]
+        if row.get("recordType") == "chunk"
+    )
+    orphan = deepcopy(original)
+    orphan.update({"id": "f" * 64, "chunkId": "orphan-business-chunk"})
+    client.collections[collection].append(orphan)
+
+    results = await knowledge.search([0.1, 0.2], 8)
+
+    assert results
+    assert "orphan-business-chunk" not in {item.chunk_id for item in results}
+
+
+@pytest.mark.asyncio
+async def test_search_pins_physical_collection_across_alias_switch(settings):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    await index_document(knowledge, document(version=1))
+    alias = settings.milvus_collection_alias
+    old = client.aliases[alias]
+    rebuilt = await rebuild(
+        knowledge, documents(document(version=2)), document_count=1,
+    )
+    client.aliases[alias] = old
+    original_search = client.search
+
+    def switch_after_vector_search(*args, **kwargs):
+        result = original_search(*args, **kwargs)
+        client.aliases[alias] = rebuilt.collection_name
+        return result
+
+    client.search = switch_after_vector_search
+
+    results = await knowledge.search([0.1, 0.2], 8)
+
+    assert results
+    assert {item.document_version for item in results} == {1}
+    assert client.search_calls[-1]["collection_name"] == old
+    assert all(
+        call["collection_name"] == old
+        for call in client.iterator_calls
+        if call["filter"] == 'documentId == "doc-1"'
+    )
+
+
+@pytest.mark.asyncio
+async def test_search_without_alias_fails_stably_before_vector_query(settings):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+
+    with pytest.raises(
+        MilvusKnowledgeError, match="^CUSTOMER_SERVICE_VECTOR_STORE_UNAVAILABLE$"
+    ):
+        await knowledge.search([0.1, 0.2], 8)
+    assert client.search_calls == []
 
 
 class Documents:

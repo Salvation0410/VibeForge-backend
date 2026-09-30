@@ -988,10 +988,10 @@ class MilvusKnowledgeStore:
                        for row in verified):
                     raise MilvusKnowledgeError("KNOWLEDGE_VECTOR_WRITE_INCOMPLETE")
 
-    async def _current_document_version(
+    async def _current_document_state(
         self, collection: str, document_id: str,
-    ) -> int | None:
-        """Prove the current readable version from persisted manifest state."""
+    ) -> tuple[int, frozenset[str]] | None:
+        """Prove the current version and its allowed physical row IDs."""
 
         rows = await self._document_rows(collection, document_id)
         manifests: list[dict[str, Any]] = []
@@ -1042,7 +1042,7 @@ class MilvusKnowledgeStore:
             for row in by_id.values()
         ):
             return None
-        return highest
+        return highest, frozenset(chunk_ids)
 
     async def search(self, vector: list[float], limit: int) -> list[RetrievedChunk]:
         if (not isinstance(vector, list) or not vector or not isinstance(limit, int)
@@ -1050,37 +1050,51 @@ class MilvusKnowledgeStore:
                 or not all(isinstance(v, (int, float)) and math.isfinite(float(v)) for v in vector)):
             raise MilvusKnowledgeError("KNOWLEDGE_SEARCH_INVALID")
         try:
+            collection = await self._alias_target()
+        except MilvusKnowledgeError:
+            raise MilvusKnowledgeError(
+                "CUSTOMER_SERVICE_VECTOR_STORE_UNAVAILABLE"
+            ) from None
+        if collection is None:
+            raise MilvusKnowledgeError("CUSTOMER_SERVICE_VECTOR_STORE_UNAVAILABLE")
+        try:
             result = await self._call(
-                "search", self._alias, data=[[float(v) for v in vector]],
+                "search", collection, data=[[float(v) for v in vector]],
                 filter='recordType == "chunk" and isActive == true', limit=limit,
                 output_fields=_OUTPUT_FIELDS,
                 search_params={"metric_type": "COSINE", "params": {}},
                 consistency_level="Strong",
             )
-            hits: list[RetrievedChunk] = []
+            hits: list[tuple[str, RetrievedChunk]] = []
             for hit in result[0] if result else []:
                 entity = hit.get("entity", hit)
+                record_id = hit.get("id", entity.get("id"))
+                if not isinstance(record_id, str) or not record_id:
+                    raise ValueError
                 score = float(hit.get("distance", hit.get("score")))
                 distance = 1.0 - score
                 if not math.isfinite(distance) or not math.isfinite(score):
                     raise ValueError
-                hits.append(RetrievedChunk(
+                hits.append((record_id, RetrievedChunk(
                     str(entity["chunkId"]), str(entity["documentId"]),
                     int(entity["documentVersion"]), int(entity["chunkIndex"]),
                     str(entity["content"]), str(entity["fileName"]), str(entity["fileType"]),
                     str(entity["sourceLocator"]), str(entity["contentHash"]), distance, score,
                     bool(entity.get("isActive", True)),
                     None,
-                ))
-            current_versions = {
-                document_id: await self._current_document_version(self._alias, document_id)
-                for document_id in dict.fromkeys(item.document_id for item in hits)
+                )))
+            current_states = {
+                document_id: await self._current_document_state(
+                    collection, document_id
+                )
+                for document_id in dict.fromkeys(item.document_id for _, item in hits)
             }
             return [
-                replace(item, current_document_version=current_versions[item.document_id])
-                for item in hits
-                if current_versions[item.document_id] is not None
-                and item.document_version == current_versions[item.document_id]
+                replace(item, current_document_version=state[0])
+                for record_id, item in hits
+                if (state := current_states[item.document_id]) is not None
+                and item.document_version == state[0]
+                and record_id in state[1]
             ]
         except MilvusKnowledgeError:
             raise
