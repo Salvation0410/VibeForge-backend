@@ -4,7 +4,9 @@ import asyncio
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+import gc
 import inspect
+import logging
 import math
 from typing import Any, Protocol
 
@@ -16,6 +18,9 @@ MAX_QUESTION_CHARS = 4_000
 MAX_CHUNKS = 100
 MAX_CHUNK_CHARS = 100_000
 MAX_TOTAL_CONTENT_CHARS = 1_000_000
+SHUTDOWN_DRAIN_TIMEOUT_SECONDS = 30.0
+
+logger = logging.getLogger(__name__)
 
 
 class RerankerError(RuntimeError):
@@ -84,11 +89,96 @@ class DisabledReranker:
         return None
 
 
+class _SafeFlagRerankerAdapter:
+    """Avoid FlagEmbedding 1.4.2's zero-batch infinite OOM retry loop."""
+
+    def __init__(self, reranker: Any, *, score_batch: Callable[..., Any] | None = None):
+        self._reranker = reranker
+        self._score_batch = score_batch or _score_flag_batch
+
+    def compute_score(self, sentence_pairs: list[list[str]]) -> list[float]:
+        detailed = self._reranker.get_detailed_inputs(sentence_pairs)
+        batch_size = min(max(1, int(self._reranker.batch_size)), len(detailed))
+        output: list[float] = []
+        offset = 0
+        while offset < len(detailed):
+            current = detailed[offset : offset + batch_size]
+            try:
+                raw = self._score_batch(
+                    self._reranker, current, batch_size, normalize=False,
+                )
+            except BaseException as error:
+                if not _is_cuda_oom(error) or batch_size == 1:
+                    raise
+                _empty_cuda_cache()
+                batch_size = max(1, batch_size * 3 // 4)
+                continue
+            values = raw.tolist() if hasattr(raw, "tolist") else raw
+            if isinstance(values, (int, float)):
+                values = [values]
+            output.extend(values)
+            offset += len(current)
+        return output
+
+    def close(self) -> None:
+        close = getattr(self._reranker, "close", None)
+        if callable(close):
+            close()
+        else:
+            stop = getattr(self._reranker, "stop_self_pool", None)
+            if callable(stop):
+                stop()
+
+
+def _score_flag_batch(
+    reranker: Any, sentence_pairs: list[list[str]], batch_size: int, **_: Any,
+) -> list[float]:
+    """Run one fixed batch using FlagReranker's supported tokenizer/model surface."""
+
+    import torch
+    from FlagEmbedding.utils.tokenizer_compat import (
+        pad_with_compat,
+        prepare_for_model_compat,
+    )
+
+    query_max_length = reranker.query_max_length or reranker.max_length * 3 // 4
+    queries = [pair[0] for pair in sentence_pairs]
+    passages = [pair[1] for pair in sentence_pairs]
+    query_inputs = reranker.tokenizer(
+        queries, return_tensors=None, add_special_tokens=False,
+        max_length=query_max_length, truncation=True,
+    )["input_ids"]
+    passage_inputs = reranker.tokenizer(
+        passages, return_tensors=None, add_special_tokens=False,
+        max_length=reranker.max_length, truncation=True,
+    )["input_ids"]
+    prepared = [
+        prepare_for_model_compat(
+            reranker.tokenizer, query, passage, truncation="only_second",
+            max_length=reranker.max_length, padding=False,
+        )
+        for query, passage in zip(query_inputs, passage_inputs, strict=True)
+    ]
+    device = reranker.target_devices[0]
+    if reranker.use_fp16:
+        reranker.model.half()
+    reranker.model.to(device)
+    reranker.model.eval()
+    with torch.no_grad():
+        inputs = pad_with_compat(
+            reranker.tokenizer, prepared, padding=True, return_tensors="pt",
+        ).to(device)
+        scores = reranker.model(
+            **inputs, return_dict=True,
+        ).logits.view(-1).float().cpu().numpy().tolist()
+    return scores
+
+
 def _load_flag_reranker(model_name: str, **kwargs: Any) -> Any:
     # Keep importing FlagEmbedding out of disabled startup and module import paths.
     from FlagEmbedding import FlagReranker
 
-    return FlagReranker(model_name, **kwargs)
+    return _SafeFlagRerankerAdapter(FlagReranker(model_name, **kwargs))
 
 
 def _is_cuda_oom(error: BaseException) -> bool:
@@ -110,17 +200,28 @@ def _empty_cuda_cache() -> None:
         pass
 
 
-def _release_model(model: Any) -> None:
-    try:
-        close = getattr(model, "close", None)
-        if callable(close):
-            result = close()
-            if inspect.isawaitable(result):
-                asyncio.run(result)
-    except BaseException:
-        pass
-    finally:
-        _empty_cuda_cache()
+class _ModelOwner:
+    def __init__(self, model: Any):
+        self.model: Any | None = model
+
+    def get(self) -> Any | None:
+        return self.model
+
+    def release(self) -> None:
+        model = self.model
+        self.model = None
+        try:
+            close = getattr(model, "close", None)
+            if callable(close):
+                result = close()
+                if inspect.isawaitable(result):
+                    asyncio.run(result)
+        except BaseException:
+            pass
+        finally:
+            del model
+            gc.collect()
+            _empty_cuda_cache()
 
 
 async def _drain_task(task: asyncio.Future[Any] | asyncio.Task[Any]) -> Any:
@@ -155,7 +256,7 @@ class LocalCrossEncoderReranker:
             or timeout_seconds <= 0
         ):
             raise RerankerError("CUSTOMER_SERVICE_RERANKER_INVALID_CONFIG")
-        self._model: Any | None = model
+        self._owner = _ModelOwner(model)
         self._batch_size = batch_size
         self._timeout_seconds = float(timeout_seconds)
         self._max_concurrency = max_concurrency
@@ -165,6 +266,8 @@ class LocalCrossEncoderReranker:
         )
         self._closed = False
         self._close_lock = asyncio.Lock()
+        self._inference_drains: set[asyncio.Task[None]] = set()
+        self._late_cleanup: asyncio.Task[None] | None = None
 
     @classmethod
     async def create(
@@ -178,6 +281,7 @@ class LocalCrossEncoderReranker:
             settings.rag_reranker_model,
             use_fp16=True,
             devices=[settings.rag_reranker_device],
+            normalize=False,
         ))
         try:
             model = await asyncio.shield(load_task)
@@ -187,7 +291,9 @@ class LocalCrossEncoderReranker:
             except BaseException:
                 pass
             else:
-                cleanup = asyncio.create_task(asyncio.to_thread(_release_model, model))
+                owner = _ModelOwner(model)
+                del model
+                cleanup = asyncio.create_task(asyncio.to_thread(owner.release))
                 try:
                     await _drain_task(cleanup)
                 except BaseException:
@@ -204,7 +310,9 @@ class LocalCrossEncoderReranker:
                 max_concurrency=settings.rag_reranker_max_concurrency,
             )
         except BaseException:
-            await asyncio.to_thread(_release_model, model)
+            owner = _ModelOwner(model)
+            del model
+            await asyncio.to_thread(owner.release)
             raise
 
     @staticmethod
@@ -236,7 +344,7 @@ class LocalCrossEncoderReranker:
         return normalized
 
     def _score_batches(self, question: str, chunks: list[RetrievedChunk]) -> list[float]:
-        model = self._model
+        model = self._owner.get()
         if model is None:
             raise RerankerError("CUSTOMER_SERVICE_RERANKER_UNAVAILABLE")
         scores: list[float] = []
@@ -260,6 +368,19 @@ class LocalCrossEncoderReranker:
             return error
         return RerankerError("CUSTOMER_SERVICE_RERANKER_UNAVAILABLE")
 
+    def _track_drain(self, future: asyncio.Future[Any]) -> None:
+        async def drain() -> None:
+            try:
+                await _drain_task(future)
+            except BaseException:
+                pass
+            finally:
+                self._semaphore.release()
+
+        task = asyncio.create_task(drain())
+        self._inference_drains.add(task)
+        task.add_done_callback(self._inference_drains.discard)
+
     async def rerank(
         self, question: str, chunks: Sequence[RetrievedChunk], *, top_n: int,
     ) -> list[RerankedChunk]:
@@ -268,6 +389,7 @@ class LocalCrossEncoderReranker:
             return []
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._timeout_seconds
+        owns_permit = True
         try:
             await asyncio.wait_for(
                 self._semaphore.acquire(), timeout=max(0.0, deadline - loop.time()),
@@ -285,21 +407,18 @@ class LocalCrossEncoderReranker:
                     asyncio.shield(future), timeout=max(0.0, deadline - loop.time()),
                 )
             except TimeoutError:
-                try:
-                    await _drain_task(future)
-                except BaseException:
-                    pass
+                self._track_drain(future)
+                owns_permit = False
                 raise RerankerError("CUSTOMER_SERVICE_RERANKER_TIMEOUT") from None
             except asyncio.CancelledError:
-                try:
-                    await _drain_task(future)
-                except BaseException:
-                    pass
+                self._track_drain(future)
+                owns_permit = False
                 raise
             except BaseException as error:
                 raise self._provider_error(error) from None
         finally:
-            self._semaphore.release()
+            if owns_permit:
+                self._semaphore.release()
         ranked = [
             (index, RerankedChunk(chunk=item, score=scores[index]))
             for index, item in enumerate(validated)
@@ -314,17 +433,30 @@ class LocalCrossEncoderReranker:
             self._closed = True
             acquired = 0
             try:
-                for _ in range(self._max_concurrency):
-                    await self._semaphore.acquire()
-                    acquired += 1
-                model = self._model
-                self._model = None
-                if model is not None:
+                async with asyncio.timeout(SHUTDOWN_DRAIN_TIMEOUT_SECONDS):
+                    for _ in range(self._max_concurrency):
+                        await self._semaphore.acquire()
+                        acquired += 1
                     await asyncio.get_running_loop().run_in_executor(
-                        self._executor, _release_model, model,
+                        self._executor, self._owner.release,
                     )
-                await asyncio.to_thread(
-                    self._executor.shutdown, wait=True, cancel_futures=False,
+                    await asyncio.to_thread(
+                        self._executor.shutdown, wait=True, cancel_futures=False,
+                    )
+            except TimeoutError:
+                logger.error(
+                    "Reranker shutdown timed out while inference remained blocked"
+                )
+                self._executor.shutdown(wait=False, cancel_futures=True)
+                async def cleanup_when_inference_finishes() -> None:
+                    if self._inference_drains:
+                        await asyncio.gather(
+                            *tuple(self._inference_drains), return_exceptions=True,
+                        )
+                    await asyncio.to_thread(self._owner.release)
+
+                self._late_cleanup = asyncio.create_task(
+                    cleanup_when_inference_finishes()
                 )
             finally:
                 for _ in range(acquired):

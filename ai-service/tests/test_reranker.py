@@ -5,7 +5,9 @@ import math
 import threading
 import time
 from typing import Any
+import weakref
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
@@ -16,6 +18,7 @@ from ai_service.models.reranker import (
     DisabledReranker,
     LocalCrossEncoderReranker,
     RerankerError,
+    _SafeFlagRerankerAdapter,
 )
 
 
@@ -99,6 +102,27 @@ async def test_reranker_keeps_original_order_for_equal_scores_and_scalar_batch()
     await reranker.close()
 
 
+@pytest.mark.asyncio
+async def test_reranker_accepts_numpy_scalar_and_one_dimensional_array():
+    class NumpyModel:
+        calls = 0
+
+        def compute_score(self, _pairs):
+            self.calls += 1
+            return np.float32(0.0) if self.calls == 1 else np.array([1.0, -1.0])
+
+    reranker = LocalCrossEncoderReranker(
+        model=NumpyModel(), batch_size=1, timeout_seconds=1,
+    )
+    first = await reranker.rerank("question", [chunk(0)], top_n=1)
+    reranker._batch_size = 2
+    second = await reranker.rerank("question", [chunk(0), chunk(1)], top_n=2)
+
+    assert first[0].score == pytest.approx(0.5)
+    assert [item.chunk.chunk_id for item in second] == ["chunk-0", "chunk-1"]
+    await reranker.close()
+
+
 @pytest.mark.parametrize(
     ("scores", "code"),
     [
@@ -121,7 +145,7 @@ async def test_reranker_rejects_invalid_provider_output(scores, code):
 
 
 @pytest.mark.asyncio
-async def test_timeout_drains_gpu_work_before_allowing_another_inference():
+async def test_timeout_returns_promptly_but_holds_permit_until_gpu_work_finishes():
     first_started = threading.Event()
     release_first = threading.Event()
     active = 0
@@ -146,27 +170,157 @@ async def test_timeout_drains_gpu_work_before_allowing_another_inference():
                 with lock:
                     active -= 1
 
+    model = BlockingModel()
     reranker = LocalCrossEncoderReranker(
-        model=BlockingModel(), batch_size=2, timeout_seconds=0.03,
+        model=model, batch_size=2, timeout_seconds=0.03,
         max_concurrency=1, workers=1,
     )
     first = asyncio.create_task(reranker.rerank("q", [chunk(0)], top_n=1))
     assert await asyncio.to_thread(first_started.wait, 0.3)
-    await asyncio.sleep(0.05)
-    assert not first.done()
-    second = asyncio.create_task(reranker.rerank("q", [chunk(1)], top_n=1))
-    await asyncio.sleep(0.03)
-    assert not second.done()
-    release_first.set()
-
     with pytest.raises(RerankerError) as first_error:
-        await first
-    with pytest.raises(RerankerError) as second_error:
-        await second
+        await asyncio.wait_for(first, 0.15)
     assert first_error.value.code == "CUSTOMER_SERVICE_RERANKER_TIMEOUT"
+    second = asyncio.create_task(reranker.rerank("q", [chunk(1)], top_n=1))
+    with pytest.raises(RerankerError) as second_error:
+        await asyncio.wait_for(second, 0.15)
     assert second_error.value.code == "CUSTOMER_SERVICE_RERANKER_TIMEOUT"
+    assert active == 1
     assert max_active == 1
+    assert model.calls == 1
+    release_first.set()
+    for _ in range(50):
+        if reranker._semaphore._value == 1:
+            break
+        await asyncio.sleep(0.01)
+    recovered = await reranker.rerank("q", [chunk(2)], top_n=1)
+    assert recovered[0].chunk.chunk_id == "chunk-2"
+    assert model.calls == 2
     await reranker.close()
+
+
+@pytest.mark.asyncio
+async def test_close_waits_for_tracked_inference_drain():
+    started = threading.Event()
+    release = threading.Event()
+
+    class BlockingModel:
+        closed = False
+
+        def compute_score(self, pairs):
+            started.set()
+            release.wait(1)
+            return [0.0] * len(pairs)
+
+        def close(self):
+            self.closed = True
+
+    model = BlockingModel()
+    reranker = LocalCrossEncoderReranker(
+        model=model, timeout_seconds=0.02, max_concurrency=1, workers=1,
+    )
+    with pytest.raises(RerankerError, match="CUSTOMER_SERVICE_RERANKER_TIMEOUT"):
+        await reranker.rerank("q", [chunk(0)], top_n=1)
+    closing = asyncio.create_task(reranker.close())
+    await asyncio.sleep(0.02)
+    assert not closing.done()
+    assert not model.closed
+    release.set()
+    await asyncio.wait_for(closing, 0.5)
+    assert model.closed
+
+
+@pytest.mark.asyncio
+async def test_close_timeout_is_bounded_and_later_releases_model(
+    monkeypatch, caplog,
+):
+    started = threading.Event()
+    release = threading.Event()
+
+    class BlockingModel:
+        closed = False
+
+        def compute_score(self, pairs):
+            started.set()
+            release.wait(1)
+            return [0.0] * len(pairs)
+
+        def close(self):
+            self.closed = True
+
+    model = BlockingModel()
+    reranker = LocalCrossEncoderReranker(model=model, timeout_seconds=0.01)
+    monkeypatch.setattr(
+        "ai_service.models.reranker.SHUTDOWN_DRAIN_TIMEOUT_SECONDS", 0.02,
+    )
+    with pytest.raises(RerankerError, match="CUSTOMER_SERVICE_RERANKER_TIMEOUT"):
+        await reranker.rerank("q", [chunk(0)], top_n=1)
+
+    await asyncio.wait_for(reranker.close(), 0.2)
+
+    assert "shutdown timed out" in caplog.text
+    assert not model.closed
+    release.set()
+    assert reranker._late_cleanup is not None
+    await asyncio.wait_for(reranker._late_cleanup, 0.5)
+    assert model.closed
+
+
+def test_safe_flag_adapter_stops_at_batch_one_oom_without_looping():
+    class Model:
+        def to(self, _device):
+            return self
+
+        def eval(self):
+            return None
+
+        def __call__(self, **_kwargs):
+            raise RuntimeError("CUDA out of memory")
+
+    class FlagShape:
+        batch_size = 4
+        query_max_length = None
+        max_length = 512
+        normalize = False
+        use_fp16 = False
+        target_devices = ["cuda"]
+        model = Model()
+        tokenizer = object()
+
+        def get_detailed_inputs(self, pairs):
+            return pairs
+
+    attempts = []
+
+    def score_batch(_flag, pairs, batch_size, **_kwargs):
+        attempts.append((len(pairs), batch_size))
+        raise RuntimeError("CUDA out of memory")
+
+    adapter = _SafeFlagRerankerAdapter(FlagShape(), score_batch=score_batch)
+    with pytest.raises(RuntimeError, match="out of memory"):
+        adapter.compute_score([["q", "a"], ["q", "b"]])
+    assert attempts == [(2, 2), (1, 1)]
+
+
+def test_safe_flag_adapter_retries_smaller_batches_and_preserves_count():
+    class FlagShape:
+        batch_size = 4
+        normalize = False
+
+        def get_detailed_inputs(self, pairs):
+            return pairs
+
+    attempts = []
+
+    def score_batch(_flag, pairs, batch_size, **_kwargs):
+        attempts.append((len(pairs), batch_size))
+        if batch_size > 1:
+            raise RuntimeError("CUDA out of memory")
+        return [float(index) for index, _ in enumerate(pairs)]
+
+    adapter = _SafeFlagRerankerAdapter(FlagShape(), score_batch=score_batch)
+    output = adapter.compute_score([["q", "a"], ["q", "b"]])
+    assert output == [0.0, 0.0]
+    assert attempts == [(2, 2), (1, 1), (1, 1)]
 
 
 @pytest.mark.asyncio
@@ -211,7 +365,7 @@ async def test_async_factory_loads_once_with_cuda_and_closes_model():
 
     assert calls == [(
         "BAAI/bge-reranker-v2-m3",
-        {"use_fp16": True, "devices": ["cuda"]},
+        {"use_fp16": True, "devices": ["cuda"], "normalize": False},
     )]
     await reranker.close()
     assert model.closed
@@ -239,6 +393,27 @@ async def test_factory_cancellation_drains_load_and_releases_model():
     with pytest.raises(asyncio.CancelledError):
         await loading
     assert model.closed
+
+
+@pytest.mark.asyncio
+async def test_close_drops_last_model_reference_before_emptying_cuda_cache(monkeypatch):
+    events = []
+
+    class Model:
+        pass
+
+    model = Model()
+    reference = weakref.ref(model, lambda _ref: events.append("finalized"))
+    reranker = LocalCrossEncoderReranker(model=model, timeout_seconds=1)
+    del model
+    monkeypatch.setattr(
+        "ai_service.models.reranker._empty_cuda_cache",
+        lambda: events.append(("cache", reference() is None)),
+    )
+
+    await reranker.close()
+
+    assert events == ["finalized", ("cache", True)]
 
 
 def rag_settings(**overrides) -> Settings:
