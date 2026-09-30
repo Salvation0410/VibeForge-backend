@@ -28,7 +28,7 @@
 
 ### 客服机器人 RAG 实施进度
 
-- 设计提交 `b61fc07`、实施计划提交 `be6b5db` 已完成。当前仅 Task 1–5 已实现；Task 6 的认证 ETL API 与 lease 传递、Task 7 的 Spring/MySQL coordinator、Reranker、问答和前端能力仍未完成，不能从设计或计划文档推断为可用。
+- 设计提交 `b61fc07`、实施计划提交 `be6b5db` 已完成。当前 Task 1–6 已实现；Task 7 的 Spring/MySQL coordinator、Reranker、问答和前端能力仍未完成，不能从设计或计划文档推断为可用。
 - Task 1 的 MySQL 知识文档与 ETL outbox 表、对应 MyBatis-Flex 实体和 Mapper 已在提交 `8e18149` 完成。
 - Task 1 定向 schema 测试 2 项通过，`mvn clean -DskipTests compile` 通过，暂存差异的 `git diff --cached --check` 通过。仓库没有 `mvnw.cmd`，测试和编译使用系统 Maven；测试实际命令为 `mvn test -Dtest=CustomerServiceKnowledgeSchemaTest`。
 - 尚未在真实 MySQL 执行 DDL、CRUD 或并发任务认领验证，这些仍是人工待验收项。
@@ -42,8 +42,12 @@
 - Task 4 支持 PDF、DOCX、Markdown、TXT 解析。PDF 保留页码并拒绝加密或无文本文件；Markdown/DOCX 保留真实标题层级，TXT 保留行范围，DOCX 普通、合并和嵌套表格按文档顺序提取并保留表格/行定位。`RecursiveCharacterTextSplitter` 默认分块 1000 字符、重叠 150 字符，生成稳定的 `documentId:documentVersion:index` chunk ID，按实际产出执行最多 10000 个 chunk 的上限。同步解析与切分在线程中执行，取消时等待工作线程结束再清理临时文件。
 - Task 4 定向测试 55 项通过，完整 Python 测试 326 项通过、1 项跳过；`compileall`、`uv lock --check` 和 `git diff --check` 通过。测试使用本地生成文档和模拟传输；真实 OSS 签名下载、真实 TLS/SNI 与同 IP 跨主机重定向，以及超时、大文件和取消压力仍待人工验证。首期不做 OCR，扫描 PDF 因无可提取文本而失败。
 - Task 5 已完成 CloseAI Embedding Provider 和 Milvus versioned store。Provider 单例复用底层客户端，确定性批处理 document embedding，分别支持 document/query，严格校验数量、维度和有限数，并把供应商异常映射为不含密钥或响应正文的稳定错误。Milvus store 支持版本化 chunk/manifest、完整写后校验、旧版本保护、增量激活、全量 staging + alias 切换、确定性 tombstone、COSINE 分数语义、float32 canonicalization、分页读取和单文档 10000 条硬上限；同步 RPC 使用可配置 timeout，取消时 drain 已启动 RPC 后才释放 permit/本地锁，alias 状态不确定时保留 staging。完整 alias 参与业务集合 fingerprint，control collection 也包含完整 alias hash，长 alias 之间保持隔离。
-- Task 5 采用显式 fail-closed mutation lease。Spring/MySQL Outbox 是唯一允许承担跨实例 mutation coordinator 的组件；Python store 的 `upsert/delete/rebuild` 都要求不可伪造的 `scope / operation / fence / expiry / proof`，默认 coordinator 为 `DenyAll`。同一 document scope 串行，collection rebuild scope 与全部 document scope 互斥。Task 6 必须通过认证内部接口传递 lease，并将同步 `MilvusClient` 构造放入 async factory/offload；Task 7 必须负责 MySQL 签发、验证、fencing 和冲突域。Task 6/7 尚未实现，因此索引入口当前按设计 fail-closed，不可对外使用。
-- Task 5 提交链可概括为 `e052d20`、`6a6771f`、`6970873`、`2a865b6`、`a5841dd`、`a6ee768`。最终定向测试 49 项通过，完整 Python 测试 375 项通过、1 项跳过；`compileall`、`uv lock --check` 和 `git diff --check` 通过。测试使用 Fake CloseAI/Fake Milvus；真实 CloseAI 尚未调用，真实 Docker Milvus 的 schema、dynamic fields、Strong consistency、分页、批量写入、alias 切换和重启恢复仍待人工验证，Spring lease 集成也待 Task 6/7 完成后验收。
+- Task 5 采用显式 fail-closed mutation lease。Spring/MySQL Outbox 是唯一允许承担跨实例 mutation coordinator 的组件；Python store 的 `upsert/delete/rebuild` 都要求不可伪造的 `scope / operation / fence / expiry / proof`，默认 coordinator 为 `DenyAll`。同一 document scope 串行，collection rebuild scope 与全部 document scope 互斥。Task 6 已通过认证内部接口原样传递 lease，并将同步 `MilvusClient` 构造移入线程 offload；Task 7 仍必须负责 MySQL 签发、验证、fencing 和冲突域。
+- Task 5 提交链可概括为 `e052d20`、`6a6771f`、`6970873`、`2a865b6`、`a5841dd`、`a6ee768`。最终定向测试 49 项通过，完整 Python 测试 375 项通过、1 项跳过；`compileall`、`uv lock --check` 和 `git diff --check` 通过。测试使用 Fake CloseAI/Fake Milvus；真实 CloseAI 尚未调用，真实 Docker Milvus 的 schema、dynamic fields、Strong consistency、分页、批量写入、alias 切换和重启恢复仍待人工验证，真实 Spring lease 集成待 Task 7 完成后验收。
+- Task 6 已提供 Bearer 认证的 `POST /internal/v1/customer-service/knowledge:etl`、`POST /internal/v1/customer-service/knowledge:delete` 和只读 `GET /internal/v1/customer-service/health`。INDEX 完整串联安全下载、解析切分、Embedding、Milvus 版本写入和稳定响应，DELETE 调用同一 store 边界；请求中的 `scope / operationId / operation / fence / expiresAt / proof` 六个 lease 字段原样绑定到存储操作，不由 Python 补造或改写。
+- Spring lease adapter 对每次 mutation 使用 `POST /api/internal/customer-service/knowledge-mutation-leases:validate`，健康检查使用只读 `GET /api/internal/customer-service/knowledge-mutation-leases/health`；网络错误、非 2xx、超时、非法 JSON、字段不匹配和超过 64 KiB 的声明或流式响应均 fail-closed，且不记录响应正文。功能只在 `AI_SERVICE_CUSTOMER_SERVICE_RAG_ENABLED=true` 时装配外部 RAG 依赖；同步 Milvus 构造在线程中执行，取消时等待构造结束并关闭已创建资源。
+- CloseAI Embedding 使用自有同步和异步 HTTP clients，并在 provider 关闭时独立释放。单次 ETL 的默认 embedding 预算为 8,000,000 个元素，provider 在首批推断维度后、请求后续批次前执行投影检查，service 在写入前复核实际总量；进程内 INDEX 默认并发为 1，等待或执行任务取消会释放 semaphore permit。
+- Task 6 提交链为 `172763a`、`4d9e56a`、`34633c9`、`b7e9ce5`、`e3d9bc3`、`70b3f68`。资源上限与配置定向测试分别 6 项、14 项通过；完整 Python 测试 435 项通过、1 项跳过，`compileall`、`uv lock --check` 和 `git diff --check` 均通过。测试使用 MockTransport、Fake CloseAI 和 Fake Milvus；Task 7 的真实 Spring endpoints 尚未实现，因此真实索引入口仍不可用。真实 Spring/MySQL fencing、OSS、CloseAI、Milvus 和完整 E2E 均待人工验收。
 
 ### 已关闭的源码阻塞
 
@@ -211,7 +215,7 @@ START
 | 仓库相对路径 | 作用 |
 | --- | --- |
 | `ai-service/src/ai_service/app.py` | FastAPI 应用工厂和依赖组装 |
-| `ai-service/src/ai_service/api/routes.py` | 健康、流式生成和取消接口 |
+| `ai-service/src/ai_service/api/routes.py` | 健康、流式生成、取消及认证客服知识 INDEX/DELETE/health 接口 |
 | `ai-service/src/ai_service/api/schemas.py` | 内部请求、响应和事件模型 |
 | `ai-service/src/ai_service/orchestration/workflow.py` | LangGraph 工作流、修复、构建和终态 |
 | `ai-service/src/ai_service/orchestration/cancellation.py` | 单进程协作式取消 |
@@ -225,7 +229,10 @@ START
 | `ai-service/src/ai_service/infrastructure/checkpoint_setup.py` | 独立 schema 初始化命令 |
 | `ai-service/src/ai_service/infrastructure/spring_tools.py` | Spring 工具客户端与脱敏错误处理 |
 | `ai-service/src/ai_service/infrastructure/knowledge_download.py` | 客服知识文档安全下载、逐跳校验、摘要与临时文件生命周期 |
-| `ai-service/src/ai_service/orchestration/document_etl.py` | PDF/DOCX/Markdown/TXT 解析、来源定位与递归切分 |
+| `ai-service/src/ai_service/infrastructure/spring_knowledge_lease.py` | Spring mutation lease 验证与只读健康检查的 fail-closed adapter |
+| `ai-service/src/ai_service/infrastructure/milvus_knowledge.py` | versioned Milvus store、lease fencing 边界与取消清理 |
+| `ai-service/src/ai_service/models/embeddings.py` | CloseAI Embedding provider、独立 HTTP clients 与元素预算 |
+| `ai-service/src/ai_service/orchestration/document_etl.py` | 文档解析切分及 download/embed/store 完整 ETL 编排 |
 
 ### Vue 前端独立仓库
 
@@ -327,10 +334,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 | Redis opt-in 集成 | `powershell -NoProfile -File scripts/verify-langgraph-real-gate.ps1 -Execute -IncludeRedis` | 最近真实环境 6 项通过 | 跨客户端回放、唯一执行、冲突与不确定态 |
 | PowerShell 脚本 | `powershell -NoProfile -File scripts/ai-validation-scripts.tests.ps1` | Windows PowerShell 5.1 与 PowerShell 7 检查通过 | 验收脚本参数、认证和脱敏约束 |
 | 统一非外部数据库门禁 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1 -Execute` | 本轮未重新执行；此前历史基线为 6 个步骤通过 | 不能作为本轮新增多 Agent 测试数量的 fresh 证据 |
-| Python 编译 | `uv run python -m compileall -q src` | 2026-09-29 最终实现 fresh：退出码 0，无输出 | 当前 Python 源码可完成字节码编译 |
-| Python 全量 | `uv run pytest` | 2026-09-29 最终实现 fresh：246 项通过、1 项跳过、2 个依赖弃用警告 | Fake Model、三类工作流、多 Agent 输入白名单/fatal/反馈规范化/取消/checkpoint、降级、清理与 API 契约 |
-| Python 锁文件 | `uv lock --check` | 2026-09-29 最终实现 fresh：退出码 0，解析 71 个包 | `uv.lock` 与项目依赖声明一致 |
-| 文档空白检查 | `git diff --check` | 2026-09-29 最终同步 fresh：退出码 0，无空白错误；仅有 Git 的 LF/CRLF 工作树提示 | 本轮文档差异没有尾随空格等补丁错误 |
+| Python 编译 | `uv run python -m compileall -q src` | 2026-09-30 Task 6 最终 fresh：退出码 0，无输出 | 当前 Python 源码可完成字节码编译 |
+| Python 全量 | `uv run pytest` | 2026-09-30 Task 6 最终 fresh：435 项通过、1 项跳过、2 个依赖弃用警告 | 既有生成与质量阶段，以及客服知识 ETL、lease、资源生命周期、预算和 API 契约 |
+| Python 锁文件 | `uv lock --check` | 2026-09-30 Task 6 最终 fresh：退出码 0，解析 150 个包 | `uv.lock` 与项目依赖声明一致 |
+| 文档空白检查 | `git diff --check` | 2026-09-30 Task 6 交接同步 fresh：退出码 0，无空白错误；仅有 Git 的 LF/CRLF 工作树提示 | 本轮文档差异没有尾随空格等补丁错误 |
 | 当前工作树 | `git status --short` | 当前隔离分支工作树干净，最终提交后命令无输出 | 不把其他工作树或前端仓库状态混入本分支结论 |
 | 实现差异范围 | `git diff --stat b5c665d..HEAD` | 20 个文件，2510 行新增、57 行删除，覆盖 Python 生产代码、测试、配置和文档 | Vue 多 Agent 实施并非仅文档修改；范围以设计基线至当前 HEAD 的真实 Git 差异为准 |
 | PostgreSQL 默认门 | `uv run pytest tests/test_postgres_checkpoint_integration.py` | 默认 1 项跳过，不连接数据库 | opt-in 门禁不会误连本机数据库 |
@@ -492,6 +499,12 @@ Vue 多 Agent 是 Python LangGraph 内部的功能开关，回滚时保持 LangG
 
 | 提交 | 内容 |
 | --- | --- |
+| `70b3f68` | 将 INDEX ETL 默认并发收敛为 1 并记录 Python 内存预算 |
+| `e3d9bc3` | 限制 Spring 响应与 embedding 元素峰值 |
+| `b7e9ce5` | 完成 Embedding HTTP clients 独立清理 |
+| `34633c9` | 补齐 Embedding client 生命周期和设计约束 |
+| `4d9e56a` | 加固客服 ETL lease、健康检查和装配生命周期 |
+| `172763a` | 提供认证客服知识 ETL API |
 | `e5e7b8d` | 隔离知识文档重定向连接、保持表格顺序并在线程中执行 ETL |
 | `4e7d4a6` | 修正标题层级、DNS 超时、表格抽取和 chunk 上限 |
 | `51dac9d` | 增加知识文档安全下载、解析与切分 |
@@ -561,7 +574,7 @@ Vue 多 Agent 已于 2026-09-30 本地快进合并到 `dev`，合并后 HEAD 为
 - `doc/ai-service-langchain-langgraph-refactor-design.md`：重构架构与边界设计。
 - `docs/superpowers/specs/2026-09-29-postgres-checkpoint-design.md`：PostgreSQL checkpoint 迁移、故障语义和长期记忆决策。
 - `docs/superpowers/specs/2026-09-29-vue-multi-agent-quality-review-design.md`：Vue 三角色质量审查、F1 错误语义、repair 和 checkpoint 边界。
-- `docs/superpowers/specs/2026-09-30-customer-service-rag-design.md`：客服机器人、OSS 文档 ETL、CloseAI Embedding、Milvus 和 GPU Reranker 设计；目前 Task 1–5 已实现，Task 6 的认证 ETL/lease 接线和 Task 7 的 Spring/MySQL coordinator 及后续能力仍属规划。
+- `docs/superpowers/specs/2026-09-30-customer-service-rag-design.md`：客服机器人、OSS 文档 ETL、CloseAI Embedding、Milvus 和 GPU Reranker 设计；目前 Task 1–6 已实现，Task 7 的 Spring/MySQL coordinator 及后续能力仍属规划。Task 7 完成前真实索引入口不可用。
 - `docs/superpowers/specs/2026-09-21-bounded-streaming-simple-prompts-design.md`：有限流式窗口和简短优化提示设计。
 - `docs/superpowers/specs/2026-09-21-circular-preview-spinner-design.md`：预览加载图正圆修复设计。
 
