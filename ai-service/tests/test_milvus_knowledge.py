@@ -216,6 +216,82 @@ async def test_cancelled_closeai_construction_closes_owned_http_clients(settings
     assert async_client.is_closed
 
 
+@pytest.mark.asyncio
+async def test_closeai_sync_close_failure_still_closes_async_client(settings):
+    class FailingSyncClient:
+        attempted = False
+        def close(self):
+            self.attempted = True
+            raise RuntimeError("sync close failed")
+
+    async_client = httpx.AsyncClient()
+    sync_client = FailingSyncClient()
+    embeddings = CloseAIEmbeddingProvider(
+        settings,
+        embedding_factory=lambda *_args, **_kwargs: FakeEmbeddings(),
+        http_client_factory=lambda **_kwargs: sync_client,
+        http_async_client_factory=lambda **_kwargs: async_client,
+    )
+    with pytest.raises(RuntimeError, match="sync close failed"):
+        await embeddings.close()
+    assert sync_client.attempted
+    assert async_client.is_closed
+
+
+@pytest.mark.asyncio
+async def test_closeai_async_close_failure_still_closes_sync_client(settings):
+    class FailingAsyncClient:
+        attempted = False
+        async def aclose(self):
+            self.attempted = True
+            raise RuntimeError("async close failed")
+
+    sync_client = httpx.Client()
+    async_client = FailingAsyncClient()
+    embeddings = CloseAIEmbeddingProvider(
+        settings,
+        embedding_factory=lambda *_args, **_kwargs: FakeEmbeddings(),
+        http_client_factory=lambda **_kwargs: sync_client,
+        http_async_client_factory=lambda **_kwargs: async_client,
+    )
+    with pytest.raises(RuntimeError, match="async close failed"):
+        await embeddings.close()
+    assert async_client.attempted
+    assert sync_client.is_closed
+
+
+def test_closeai_constructor_and_cleanup_failures_keep_stable_error(settings):
+    class FailingSyncClient:
+        attempted = False
+        def close(self):
+            self.attempted = True
+            raise RuntimeError("sync cleanup vendor body")
+
+    class FailingAsyncClient:
+        attempted = False
+        async def aclose(self):
+            self.attempted = True
+            raise RuntimeError("async cleanup vendor body")
+
+    sync_client = FailingSyncClient()
+    async_client = FailingAsyncClient()
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("constructor vendor body")
+
+    with pytest.raises(EmbeddingOutputError) as caught:
+        CloseAIEmbeddingProvider(
+            settings,
+            embedding_factory=fail,
+            http_client_factory=lambda **_kwargs: sync_client,
+            http_async_client_factory=lambda **_kwargs: async_client,
+        )
+    assert str(caught.value) == "KNOWLEDGE_EMBEDDING_UNAVAILABLE"
+    assert "vendor body" not in repr(caught.value)
+    assert sync_client.attempted
+    assert async_client.attempted
+
+
 class FakeMilvusClient:
     def __init__(self):
         self.collections: dict[str, list[dict]] = {}

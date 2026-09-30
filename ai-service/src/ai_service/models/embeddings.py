@@ -36,9 +36,19 @@ class CloseAIEmbeddingProvider:
         except RuntimeError:
             asyncio.run(client.aclose())
             return
-        thread = threading.Thread(target=lambda: asyncio.run(client.aclose()))
+        errors: list[BaseException] = []
+
+        def close() -> None:
+            try:
+                asyncio.run(client.aclose())
+            except BaseException as error:
+                errors.append(error)
+
+        thread = threading.Thread(target=close)
         thread.start()
         thread.join()
+        if errors:
+            raise errors[0]
 
     def __init__(
         self,
@@ -63,9 +73,15 @@ class CloseAIEmbeddingProvider:
             )
         except Exception:
             if self._http_client is not None:
-                self._http_client.close()
+                try:
+                    self._http_client.close()
+                except BaseException:
+                    pass
             if self._http_async_client is not None:
-                self._close_async_client_sync(self._http_async_client)
+                try:
+                    self._close_async_client_sync(self._http_async_client)
+                except BaseException:
+                    pass
             raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_UNAVAILABLE") from None
 
     @staticmethod
@@ -131,7 +147,17 @@ class CloseAIEmbeddingProvider:
     async def close(self) -> None:
         """Close the HTTP clients explicitly owned by this provider."""
 
+        first_error: BaseException | None = None
         if self._http_async_client is not None:
-            await self._http_async_client.aclose()
+            try:
+                await self._http_async_client.aclose()
+            except BaseException as error:
+                first_error = error
         if self._http_client is not None:
-            await asyncio.to_thread(self._http_client.close)
+            try:
+                await asyncio.to_thread(self._http_client.close)
+            except BaseException as error:
+                if first_error is None:
+                    first_error = error
+        if first_error is not None:
+            raise first_error
