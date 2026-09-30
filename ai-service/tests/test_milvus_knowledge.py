@@ -454,7 +454,10 @@ class FakeMilvusClient:
             "output_fields": list(output_fields or []),
         })
         rows = [deepcopy(row) for row in self.collections[self._resolve(collection_name)]
-                if self._matches(row, filter)][:limit]
+                if self._matches(row, filter)]
+        if 'recordType == "collection_retirement"' in filter:
+            rows.sort(key=lambda row: str(row.get("id", "")))
+        rows = rows[:limit]
         return FakeQueryIterator(rows, batch_size)
 
     def get(self, collection_name, ids, output_fields=None, **_kwargs):
@@ -530,6 +533,11 @@ class FakeMilvusClient:
             return True
         clauses = [clause.strip() for clause in expression.split(" and ")]
         for clause in clauses:
+            if " > " in clause:
+                field, _, raw = clause.partition(" > ")
+                if str(row.get(field, "")) <= raw.strip().strip('"'):
+                    return False
+                continue
             field, _, raw = clause.partition(" == ")
             expected = raw.strip().strip('"')
             actual = row.get(field)
@@ -998,6 +1006,75 @@ async def test_rebuild_retains_configured_generations_after_grace(
 
 
 @pytest.mark.asyncio
+async def test_retention_state_rebinds_when_generation_config_changes(
+    settings, monkeypatch,
+):
+    clock = [1_000.0]
+    monkeypatch.setattr(milvus_module.time, "time", lambda: clock[0])
+    settings.rag_collection_retention_generations = 2
+    settings.rag_collection_cleanup_grace_seconds = 1
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+
+    for version in range(1, 3):
+        value = document(version=version)
+        await rebuild(knowledge, documents(value), document_count=1,
+                      expected_documents=(value,))
+        clock[0] += 2
+
+    settings.rag_collection_retention_generations = 4
+    knowledge = store(settings, client)
+    for version in range(3, 5):
+        value = document(version=version)
+        await rebuild(knowledge, documents(value), document_count=1,
+                      expected_documents=(value,))
+        clock[0] += 2
+        assert len([
+            name for name in client.collections
+            if name != knowledge._control_collection_name()
+        ]) == version
+
+    fifth = document(version=5)
+    await rebuild(knowledge, documents(fifth), document_count=1,
+                  expected_documents=(fifth,))
+    clock[0] += 2
+    business = [
+        name for name in client.collections
+        if name != knowledge._control_collection_name()
+    ]
+    assert len(business) == 4
+    state = next(
+        row for row in client.collections[knowledge._control_collection_name()]
+        if row.get("recordType") == "collection_retention_state"
+    )
+    assert state["retentionGenerations"] == 4
+    assert state["retentionComplete"] is True
+    assert len(state["protectedCollections"]) == 3
+
+    settings.rag_collection_retention_generations = 2
+    knowledge = store(settings, client)
+    sixth = document(version=6)
+    await rebuild(knowledge, documents(sixth), document_count=1,
+                  expected_documents=(sixth,))
+    clock[0] += 2
+    seventh = document(version=7)
+    await rebuild(knowledge, documents(seventh), document_count=1,
+                  expected_documents=(seventh,))
+    business = [
+        name for name in client.collections
+        if name != knowledge._control_collection_name()
+    ]
+    assert len(business) == 2
+    state = next(
+        row for row in client.collections[knowledge._control_collection_name()]
+        if row.get("recordType") == "collection_retention_state"
+    )
+    assert state["retentionGenerations"] == 2
+    assert state["retentionComplete"] is True
+    assert len(state["protectedCollections"]) == 1
+
+
+@pytest.mark.asyncio
 async def test_rebuild_cleanup_preserves_generations_inside_grace(settings, monkeypatch):
     clock = [2_000.0]
     monkeypatch.setattr(milvus_module.time, "time", lambda: clock[0])
@@ -1099,6 +1176,83 @@ async def test_legacy_collection_is_marked_then_deleted_only_after_grace(
         )),
     )
     assert names[0] not in client.collections
+
+
+@pytest.mark.asyncio
+async def test_model_dimension_migration_deletes_retired_old_namespace(
+    settings, monkeypatch,
+):
+    clock = [7_000.0]
+    monkeypatch.setattr(milvus_module.time, "time", lambda: clock[0])
+    settings.rag_collection_retention_generations = 2
+    settings.rag_collection_cleanup_grace_seconds = 1
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+
+    async def rebuild_variant(version, model, dimension, fence):
+        value = document(version=version, model=model, dimension=dimension)
+        return await knowledge.rebuild_collection(
+            documents(value),
+            lease=lease(
+                f"collection:{settings.milvus_collection_alias}", fence,
+                operation="REBUILD",
+            ),
+            plan=RebuildPlan(
+                embedding_model_version=model, embedding_dimension=dimension,
+                etl_version="etl-v1", document_count=1,
+                document_fingerprint=rebuild_fingerprint((value,)),
+            ),
+        )
+
+    old = await rebuild_variant(1, "embedding-v1", 2, 701)
+    clock[0] += 2
+    await rebuild_variant(2, "embedding-v2", 3, 702)
+    clock[0] += 2
+    await rebuild_variant(3, "embedding-v2", 3, 703)
+
+    assert old.collection_name not in client.collections
+    control = client.collections[knowledge._control_collection_name()]
+    assert not any(
+        row.get("collectionName") == old.collection_name for row in control
+    )
+
+
+@pytest.mark.asyncio
+async def test_legacy_collection_without_alias_hash_is_preserved(
+    settings, monkeypatch,
+):
+    clock = [9_000.0]
+    monkeypatch.setattr(milvus_module.time, "time", lambda: clock[0])
+    settings.rag_collection_cleanup_grace_seconds = 1
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    current = knowledge._collection_name("embedding-v1", 2)
+    legacy = f"{current}_staging_legacy_without_alias_hash"
+    for name in (current, legacy):
+        client.collections[name] = []
+        client.dimensions[name] = 2
+        metadata = json.loads(knowledge._collection_metadata("embedding-v1", 2, 1))
+        if name == legacy:
+            metadata.pop("aliasHash", None)
+        client.descriptions[name] = json.dumps(metadata)
+    client.aliases[settings.milvus_collection_alias] = current
+
+    for fence in range(801, 804):
+        await knowledge._cleanup_retired_collections(
+            current=current, just_replaced=None,
+            model="embedding-v1", dimension=2,
+            permit=FakeMutationPermit(client.coordinator, lease(
+                f"collection:{settings.milvus_collection_alias}", fence,
+                operation="REBUILD",
+            )),
+        )
+        clock[0] += 2
+
+    assert legacy in client.collections
+    assert not any(
+        row.get("collectionName") == legacy
+        for row in client.collections[knowledge._control_collection_name()]
+    )
 
 
 @pytest.mark.asyncio
@@ -1254,12 +1408,28 @@ async def test_rebuild_cleanup_scan_limit_advances_markers_and_deletes_in_batche
             "embedding-v1", 2, index + 1,
         )
     client.aliases[settings.milvus_collection_alias] = names[-1]
+    control = await knowledge._ensure_control_collection(99)
+    client.collections[control].append({
+        "id": knowledge._retention_state_id(),
+        "recordType": "collection_retention_state",
+        "protectedCollections": [names[-2]], "retentionComplete": True,
+        "retentionGenerations": 2, "aliasHash": knowledge._alias_hash(),
+        "mutationFence": 99, "schemaVersion": 1,
+        "isActive": False, "embedding": [0.0],
+    })
+    client.collections[control].extend({
+        "id": knowledge._retirement_id(name),
+        "recordType": "collection_retirement", "collectionName": name,
+        "retiredAt": clock[0] - 62, "aliasHash": knowledge._alias_hash(),
+        "mutationFence": 99, "schemaVersion": 1,
+        "isActive": False, "embedding": [0.0],
+    } for name in names[:-2])
 
-    marker_counts = []
+    remaining_counts = []
     for fence in range(100, 110):
         before = len(client.describe_calls)
         await knowledge._cleanup_retired_collections(
-            current=names[-1], just_replaced=names[-2],
+            current=names[-1], just_replaced=None,
             model="embedding-v1", dimension=2,
             permit=FakeMutationPermit(client.coordinator, lease(
                 f"collection:{settings.milvus_collection_alias}", fence,
@@ -1270,24 +1440,12 @@ async def test_rebuild_cleanup_scan_limit_advances_markers_and_deletes_in_batche
             name for name in client.describe_calls[before:] if name in names
         ]
         assert len(described_business) <= 10
-        marker_counts.append(sum(
+        remaining_counts.append(sum(
             row.get("recordType") == "collection_retirement"
             for row in client.collections[knowledge._control_collection_name()]
         ))
-    assert marker_counts[1] > marker_counts[0]
-    assert marker_counts[-1] == 100
-    assert set(names).issubset(client.collections)
-
-    clock[0] += 62
-    for fence in range(200, 212):
-        await knowledge._cleanup_retired_collections(
-            current=names[-1], just_replaced=names[-2],
-            model="embedding-v1", dimension=2,
-            permit=FakeMutationPermit(client.coordinator, lease(
-                f"collection:{settings.milvus_collection_alias}", fence,
-                operation="REBUILD",
-            )),
-        )
+    assert remaining_counts == sorted(remaining_counts, reverse=True)
+    assert remaining_counts[-1] == 0
     assert set(client.collections).intersection(names) == {names[-2], names[-1]}
 
 
@@ -1299,6 +1457,7 @@ async def test_cleanup_large_namespace_reads_only_one_marker_batch_per_round(
     monkeypatch.setattr(milvus_module.time, "time", lambda: clock[0])
     settings.rag_collection_cleanup_scan_limit = 100
     settings.rag_collection_cleanup_timeout_seconds = 60
+    settings.rag_collection_cleanup_grace_seconds = 61
     client = FakeMilvusClient()
     knowledge = store(settings, client)
     canonical = knowledge._collection_name("embedding-v1", 2)
@@ -1310,10 +1469,28 @@ async def test_cleanup_large_namespace_reads_only_one_marker_batch_per_round(
             "embedding-v1", 2, index + 1,
         )
     client.aliases[settings.milvus_collection_alias] = names[-1]
+    control = await knowledge._ensure_control_collection(299)
+    client.collections[control].append({
+        "id": knowledge._retention_state_id(),
+        "recordType": "collection_retention_state",
+        "protectedCollections": [names[-2]], "retentionComplete": True,
+        "retentionGenerations": 2, "aliasHash": knowledge._alias_hash(),
+        "mutationFence": 299, "schemaVersion": 1,
+        "isActive": False, "embedding": [0.0],
+    })
+    client.collections[control].extend({
+        "id": knowledge._retirement_id(name),
+        "recordType": "collection_retirement", "collectionName": name,
+        "retiredAt": clock[0] - 120, "aliasHash": knowledge._alias_hash(),
+        "mutationFence": 299, "schemaVersion": 1,
+        "isActive": False, "embedding": [0.0],
+    } for name in names[:-2])
 
-    marker_counts = []
+    remaining_counts = []
     for fence in range(300, 303):
-        before = len(client.get_call_details)
+        before_iterators = len(client.iterator_calls)
+        before_describes = len(client.describe_calls)
+        before_count = len(client.collections)
         permit = FakeMutationPermit(client.coordinator, lease(
             f"collection:{settings.milvus_collection_alias}", fence,
             operation="REBUILD",
@@ -1322,20 +1499,21 @@ async def test_cleanup_large_namespace_reads_only_one_marker_batch_per_round(
             current=names[-1], just_replaced=None,
             model="embedding-v1", dimension=2, permit=permit,
         )
-        marker_lookups = [
-            call for call in client.get_call_details[before:]
-            if "retiredAt" in call["output_fields"]
+        marker_queries = [
+            call for call in client.iterator_calls[before_iterators:]
+            if 'recordType == "collection_retirement"' in call["filter"]
         ]
-        assert sum(len(call["ids"]) for call in marker_lookups) <= 100
+        assert marker_queries
+        assert all(call["limit"] <= 100 for call in marker_queries)
         assert len([
-            name for name in client.describe_calls if name in names
-        ]) <= 100 * (fence - 299)
-        marker_counts.append(sum(
+            name for name in client.describe_calls[before_describes:] if name in names
+        ]) <= 100
+        assert before_count - len(client.collections) <= 100
+        remaining_counts.append(sum(
             row.get("recordType") == "collection_retirement"
             for row in client.collections[knowledge._control_collection_name()]
         ))
-    assert marker_counts == sorted(marker_counts)
-    assert len(set(marker_counts)) == 3
+    assert remaining_counts == [9_898, 9_798, 9_698]
 
 
 @pytest.mark.asyncio
@@ -2241,8 +2419,14 @@ async def test_long_alias_fingerprints_keep_business_and_control_data_isolated(s
     first_control, second_control = (
         derived_names[0][2], derived_names[1][2]
     )
-    assert {row["documentId"] for row in client.collections[first_control]} == {"doc-1"}
-    assert {row["documentId"] for row in client.collections[second_control]} == {"doc-2"}
+    assert {
+        row["documentId"] for row in client.collections[first_control]
+        if row.get("recordType") == "tombstone"
+    } == {"doc-1"}
+    assert {
+        row["documentId"] for row in client.collections[second_control]
+        if row.get("recordType") == "tombstone"
+    } == {"doc-2"}
 
 
 @pytest.mark.asyncio

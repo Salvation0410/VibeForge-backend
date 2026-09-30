@@ -382,6 +382,7 @@ class MilvusKnowledgeStore:
     ) -> str:
         metadata = {
             "kind": "customer-service-knowledge",
+            "aliasHash": self._alias_hash(),
             "embeddingModelVersion": model,
             "embeddingDimension": dimension,
             "schemaVersion": self._schema_version,
@@ -541,6 +542,7 @@ class MilvusKnowledgeStore:
                     return
                 expected = {
                     "kind": "customer-service-knowledge",
+                    "aliasHash": self._alias_hash(),
                     "embeddingModelVersion": model,
                     "embeddingDimension": dimension,
                     "schemaVersion": self._schema_version,
@@ -597,6 +599,7 @@ class MilvusKnowledgeStore:
             if not await call("has_collection", name):
                 description = json.dumps({
                     "kind": "customer-service-knowledge-mutation-control",
+                    "aliasHash": self._alias_hash(),
                     "schemaVersion": self._schema_version,
                     "mutationFence": fence,
                 }, sort_keys=True, separators=(",", ":"))
@@ -658,6 +661,7 @@ class MilvusKnowledgeStore:
                 "recordType": "collection_retirement",
                 "collectionName": collection,
                 "retiredAt": retired_at,
+                "aliasHash": self._alias_hash(),
                 "mutationFence": fence,
                 "schemaVersion": self._schema_version,
                 "isActive": False,
@@ -679,6 +683,7 @@ class MilvusKnowledgeStore:
                 "recordType": "collection_retirement",
                 "collectionName": collection,
                 "retiredAt": retired_at,
+                "aliasHash": self._alias_hash(),
                 "mutationFence": fence,
                 "schemaVersion": self._schema_version,
                 "isActive": False,
@@ -689,9 +694,66 @@ class MilvusKnowledgeStore:
             if self._write_count(result, "upsert") != len(rows):
                 raise TypeError
 
+        async def query_control_rows(
+            control: str, expression: str, limit: int,
+            output_fields: list[str],
+        ) -> list[dict[str, Any]]:
+            if limit <= 0:
+                return []
+            iterator: Any = None
+            try:
+                iterator = await call(
+                    "query_iterator", control,
+                    batch_size=min(_VERIFY_BATCH_SIZE, limit), limit=limit,
+                    filter=expression, output_fields=output_fields,
+                    consistency_level="Strong",
+                )
+                rows: list[dict[str, Any]] = []
+                while len(rows) < limit:
+                    batch = await self._thread_call(iterator.next)
+                    if not batch:
+                        break
+                    rows.extend(batch[:limit - len(rows)])
+                return rows
+            finally:
+                if iterator is not None:
+                    try:
+                        await self._thread_call(iterator.close)
+                    except Exception:
+                        pass
+
+        async def marker_batch(
+            control: str, cursor: str,
+        ) -> list[dict[str, Any]]:
+            base_filter = (
+                'recordType == "collection_retirement" and '
+                f'aliasHash == "{self._alias_hash()}"'
+            )
+            fields = [
+                "id", "recordType", "collectionName", "retiredAt",
+                "aliasHash", "schemaVersion",
+            ]
+            after_filter = base_filter
+            if cursor:
+                after_filter += f' and id > "{cursor}"'
+            rows = await query_control_rows(
+                control, after_filter, self._cleanup_scan_limit, fields,
+            )
+            if cursor and len(rows) < self._cleanup_scan_limit:
+                wrapped = await query_control_rows(
+                    control, base_filter,
+                    self._cleanup_scan_limit - len(rows), fields,
+                )
+                seen = {str(row.get("id")) for row in rows}
+                rows.extend(
+                    row for row in wrapped
+                    if str(row.get("id")) not in seen
+                    and str(row.get("id", "")) <= cursor
+                )
+            return rows[:self._cleanup_scan_limit]
+
         try:
             async with asyncio.timeout(self._cleanup_timeout_seconds):
-                canonical = self._collection_name(model, dimension)
                 control = await ensure_control_collection()
                 if just_replaced is not None:
                     await retirement_marker(
@@ -701,11 +763,11 @@ class MilvusKnowledgeStore:
                     control, [self._retention_state_id()],
                     [
                         "id", "recordType", "protectedCollections",
-                        "retentionComplete",
+                        "retentionComplete", "retentionGenerations",
                     ],
                 )
                 protected: list[str] = []
-                retention_complete = self._retention_generations == 2
+                stored_generations: int | None = None
                 if (
                     len(retention_rows) == 1
                     and retention_rows[0].get("recordType")
@@ -718,23 +780,31 @@ class MilvusKnowledgeStore:
                         name for name in retention_rows[0]["protectedCollections"]
                         if isinstance(name, str)
                     ][:self._retention_generations - 1]
-                    retention_complete = bool(
-                        retention_rows[0].get("retentionComplete")
-                    )
+                    if isinstance(
+                        retention_rows[0].get("retentionGenerations"), int
+                    ):
+                        stored_generations = int(
+                            retention_rows[0]["retentionGenerations"]
+                        )
                 if just_replaced is not None:
                     protected = [
                         just_replaced,
                         *(name for name in protected if name != just_replaced),
                     ][:self._retention_generations - 1]
-                    retention_complete = (
-                        retention_complete
-                        or len(protected) >= self._retention_generations - 1
-                    )
+                retention_complete = (
+                    len(protected) >= self._retention_generations - 1
+                )
+                if (
+                    just_replaced is not None
+                    or stored_generations != self._retention_generations
+                ):
                     retention_row = {
                         "id": self._retention_state_id(),
                         "recordType": "collection_retention_state",
                         "protectedCollections": protected,
                         "retentionComplete": retention_complete,
+                        "retentionGenerations": self._retention_generations,
+                        "aliasHash": self._alias_hash(),
                         "mutationFence": fence,
                         "schemaVersion": self._schema_version,
                         "isActive": False,
@@ -744,75 +814,50 @@ class MilvusKnowledgeStore:
                         control, retention_row,
                         (
                             "recordType", "protectedCollections",
-                            "retentionComplete", "schemaVersion",
+                            "retentionComplete", "retentionGenerations",
+                            "aliasHash", "schemaVersion",
                         ),
                     )
-                names = await call("list_collections")
-                if not isinstance(names, list):
-                    raise TypeError
-                candidates = [
-                    name for name in names
-                    if isinstance(name, str) and (
-                        name == canonical or name.startswith(f"{canonical}_staging_")
-                    )
-                ]
-                candidates.sort()
                 keep = {current, *protected}
                 if just_replaced is not None:
                     keep.add(just_replaced)
-                processable = [name for name in candidates if name not in keep]
-                if not processable:
-                    return
                 cursor_rows = await control_rows(
                     control, [self._cleanup_cursor_id()],
-                    ["id", "recordType", "cursorCollectionName"],
+                    ["id", "recordType", "cursorMarkerId"],
                 )
-                cursor = None
+                cursor = ""
                 if (
                     len(cursor_rows) == 1
                     and cursor_rows[0].get("recordType") == "collection_cleanup_cursor"
-                    and isinstance(cursor_rows[0].get("cursorCollectionName"), str)
+                    and isinstance(cursor_rows[0].get("cursorMarkerId"), str)
                 ):
-                    cursor = str(cursor_rows[0]["cursorCollectionName"])
-                start = 0
-                if cursor is not None:
-                    start = next(
-                        (index for index, name in enumerate(processable) if name > cursor),
-                        0,
-                    )
-                ordered = processable[start:] + processable[:start]
-                batch = ordered[:self._cleanup_scan_limit]
-                marker_rows = await control_rows(
-                    control, [self._retirement_id(name) for name in batch],
-                    ["id", "recordType", "collectionName", "retiredAt"],
-                )
-                markers = {
-                    str(row.get("collectionName")): row
-                    for row in marker_rows
-                    if row.get("recordType") == "collection_retirement"
-                    and isinstance(row.get("collectionName"), str)
-                    and isinstance(row.get("retiredAt"), (int, float))
-                    and math.isfinite(float(row["retiredAt"]))
-                }
+                    cursor = str(cursor_rows[0]["cursorMarkerId"])
+                marker_rows = await marker_batch(control, cursor)
                 cutoff = time.time() - self._cleanup_grace_seconds
-                legacy: list[str] = []
-                for name in batch:
-                    description = await call("describe_collection", name)
-                    metadata = self._metadata(description)
+                for marker in marker_rows:
+                    name = marker.get("collectionName")
                     if (
-                        metadata.get("kind") != "customer-service-knowledge"
-                        or metadata.get("embeddingModelVersion") != model
-                        or metadata.get("embeddingDimension") != dimension
-                        or metadata.get("schemaVersion") != self._schema_version
+                        not isinstance(name, str) or name in keep
+                        or not isinstance(marker.get("retiredAt"), (int, float))
+                        or not math.isfinite(float(marker["retiredAt"]))
+                        or marker.get("schemaVersion") != self._schema_version
                     ):
-                        continue
-                    marker = markers.get(name)
-                    if marker is None:
-                        legacy.append(name)
                         continue
                     if not retention_complete:
                         continue
                     if float(marker["retiredAt"]) >= cutoff:
+                        continue
+                    if not await call("has_collection", name):
+                        await self._assert_permit(permit)
+                        await call("delete", control, ids=[str(marker["id"])])
+                        continue
+                    description = await call("describe_collection", name)
+                    metadata = self._metadata(description)
+                    if (
+                        metadata.get("kind") != "customer-service-knowledge"
+                        or metadata.get("aliasHash") != self._alias_hash()
+                        or metadata.get("schemaVersion") != self._schema_version
+                    ):
                         continue
                     if await alias_target() != current:
                         return
@@ -820,22 +865,104 @@ class MilvusKnowledgeStore:
                     await call("drop_collection", name)
                     await self._assert_permit(permit)
                     await call(
-                        "delete", control, ids=[self._retirement_id(name)],
+                        "delete", control, ids=[str(marker["id"])],
                     )
-                await write_legacy_markers(control, legacy, time.time())
-                cursor_row = {
-                    "id": self._cleanup_cursor_id(),
-                    "recordType": "collection_cleanup_cursor",
-                    "cursorCollectionName": batch[-1],
-                    "mutationFence": fence,
-                    "schemaVersion": self._schema_version,
-                    "isActive": False,
-                    "embedding": [0.0],
-                }
-                await upsert_control_row(
-                    control, cursor_row,
-                    ("recordType", "cursorCollectionName", "schemaVersion"),
+                if marker_rows:
+                    cursor_row = {
+                        "id": self._cleanup_cursor_id(),
+                        "recordType": "collection_cleanup_cursor",
+                        "cursorMarkerId": str(marker_rows[-1]["id"]),
+                        "aliasHash": self._alias_hash(),
+                        "mutationFence": fence,
+                        "schemaVersion": self._schema_version,
+                        "isActive": False,
+                        "embedding": [0.0],
+                    }
+                    await upsert_control_row(
+                        control, cursor_row,
+                        ("recordType", "cursorMarkerId", "aliasHash", "schemaVersion"),
+                    )
+
+                discovery_budget = self._cleanup_scan_limit - len(marker_rows)
+                if discovery_budget <= 0:
+                    return
+                names = await call("list_collections")
+                if not isinstance(names, list):
+                    raise TypeError
+                candidates = sorted(
+                    name for name in names
+                    if isinstance(name, str)
+                    and name not in keep and name != control
                 )
+                discovery_rows = await control_rows(
+                    control, [self._discovery_cursor_id()],
+                    ["id", "recordType", "cursorCollectionName"],
+                )
+                discovery_cursor = ""
+                if (
+                    len(discovery_rows) == 1
+                    and discovery_rows[0].get("recordType")
+                    == "collection_discovery_cursor"
+                    and isinstance(
+                        discovery_rows[0].get("cursorCollectionName"), str
+                    )
+                ):
+                    discovery_cursor = str(
+                        discovery_rows[0]["cursorCollectionName"]
+                    )
+                start = next(
+                    (
+                        index for index, name in enumerate(candidates)
+                        if name > discovery_cursor
+                    ),
+                    0,
+                )
+                discovery_batch = (
+                    candidates[start:] + candidates[:start]
+                )[:discovery_budget]
+                existing_markers = await control_rows(
+                    control,
+                    [self._retirement_id(name) for name in discovery_batch],
+                    ["id", "recordType"],
+                )
+                existing_ids = {
+                    str(row.get("id")) for row in existing_markers
+                    if row.get("recordType") == "collection_retirement"
+                }
+                legacy: list[str] = []
+                for name in discovery_batch:
+                    if self._retirement_id(name) in existing_ids:
+                        continue
+                    description = await call("describe_collection", name)
+                    try:
+                        metadata = self._metadata(description)
+                    except MilvusKnowledgeError:
+                        continue
+                    if (
+                        metadata.get("kind") == "customer-service-knowledge"
+                        and metadata.get("aliasHash") == self._alias_hash()
+                        and metadata.get("schemaVersion") == self._schema_version
+                    ):
+                        legacy.append(name)
+                await write_legacy_markers(control, legacy, time.time())
+                if discovery_batch:
+                    discovery_row = {
+                        "id": self._discovery_cursor_id(),
+                        "recordType": "collection_discovery_cursor",
+                        "cursorCollectionName": discovery_batch[-1],
+                        "aliasHash": self._alias_hash(),
+                        "mutationFence": fence,
+                        "schemaVersion": self._schema_version,
+                        "isActive": False,
+                        "embedding": [0.0],
+                    }
+                    await upsert_control_row(
+                        control, discovery_row,
+                        (
+                            "recordType", "cursorCollectionName",
+                            "aliasHash", "schemaVersion",
+                        ),
+                    )
         except TimeoutError:
             logger.warning("customer-service collection cleanup timed out")
         except Exception:
@@ -951,12 +1078,14 @@ class MilvusKnowledgeStore:
         return f'documentId == "{document_id}"'
 
     def _control_collection_name(self) -> str:
-        alias_fingerprint = hashlib.sha256(self._alias.encode()).hexdigest()[:12]
-        ending = f"_mutation_control_v1_{alias_fingerprint}"
+        ending = f"_mutation_control_v1_{self._alias_hash()}"
         name = f"{self._alias[:_COLLECTION_BASE_LENGTH]}{ending}"
         if not self._valid_collection_identifier(name):
             raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_ALIAS_INVALID")
         return name
+
+    def _alias_hash(self) -> str:
+        return hashlib.sha256(self._alias.encode()).hexdigest()[:12]
 
     @staticmethod
     def _tombstone_id(document_id: str, document_version: int) -> str:
@@ -975,6 +1104,11 @@ class MilvusKnowledgeStore:
             f"knowledge-collection-cleanup-cursor\0{self._alias}".encode()
         ).hexdigest()
 
+    def _discovery_cursor_id(self) -> str:
+        return hashlib.sha256(
+            f"knowledge-collection-discovery-cursor\0{self._alias}".encode()
+        ).hexdigest()
+
     def _retention_state_id(self) -> str:
         return hashlib.sha256(
             f"knowledge-collection-retention-state\0{self._alias}".encode()
@@ -986,6 +1120,7 @@ class MilvusKnowledgeStore:
             if not await self._call("has_collection", name):
                 description = json.dumps({
                     "kind": "customer-service-knowledge-mutation-control",
+                    "aliasHash": self._alias_hash(),
                     "schemaVersion": self._schema_version,
                     "mutationFence": fence,
                 }, sort_keys=True, separators=(",", ":"))
