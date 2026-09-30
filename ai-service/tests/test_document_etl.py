@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+import threading
 import zipfile
 
 import pytest
@@ -135,9 +137,44 @@ def test_docx_nested_table_text_appears_once(tmp_path):
     table.cell(0, 1).text = "Peer"
     doc.save(path)
     sections = parse_document(path, "docx")
-    assert [section.content for section in sections] == ["Outer | Peer", "Nested"]
+    assert [section.content for section in sections] == ["Outer", "Nested", "Peer"]
     assert sections[0].source_locator == "表格 1 / 行 1"
     assert sections[1].source_locator == "表格 1 / 行 1 / 列 1 / 嵌套表格 1 / 行 1"
+    assert sections[2].source_locator == "表格 1 / 行 1"
+
+
+def test_docx_nested_table_preserves_surrounding_paragraph_order(tmp_path):
+    path = tmp_path / "ordered-nested.docx"
+    doc = Document()
+    cell = doc.add_table(rows=1, cols=1).cell(0, 0)
+    cell.text = "before"
+    cell.add_table(rows=1, cols=1).cell(0, 0).text = "nested"
+    cell.add_paragraph("after")
+    doc.save(path)
+    sections = parse_document(path, "docx")
+    assert [section.content for section in sections] == ["before", "nested", "after"]
+    assert [section.source_locator for section in sections] == [
+        "表格 1 / 行 1",
+        "表格 1 / 行 1 / 列 1 / 嵌套表格 1 / 行 1",
+        "表格 1 / 行 1",
+    ]
+
+
+def test_docx_nested_table_keeps_cross_column_order(tmp_path):
+    path = tmp_path / "cross-column.docx"
+    doc = Document()
+    table = doc.add_table(rows=1, cols=3)
+    table.cell(0, 0).text = "left"
+    middle = table.cell(0, 1)
+    middle.text = "before"
+    middle.add_table(rows=1, cols=1).cell(0, 0).text = "nested"
+    middle.add_paragraph("after")
+    table.cell(0, 2).text = "right"
+    doc.save(path)
+    sections = parse_document(path, "docx")
+    assert [section.content for section in sections] == [
+        "left | before", "nested", "after | right",
+    ]
 
 
 def test_pdf_page_locator_and_encryption(tmp_path):
@@ -293,3 +330,85 @@ async def test_pipeline_cleans_download_on_success_and_parse_failure(settings, t
             document_version=1, source_name="help.pdf", settings=settings,
         )
     assert not bad.exists()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_parse_does_not_block_event_loop(settings, tmp_path, monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+    timer = threading.Timer(0.5, release.set)
+    timer.start()
+
+    def blocking_parse(path, file_type):
+        started.set()
+        release.wait()
+        return (ParsedSection("content", "document"),)
+
+    class Downloaded:
+        def __init__(self, path):
+            self.path = path
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_):
+            self.path.unlink(missing_ok=True)
+
+    monkeypatch.setattr(document_etl, "parse_document", blocking_parse)
+    path = tmp_path / "document.txt"
+    path.write_text("content", encoding="utf-8")
+    task = asyncio.create_task(parse_and_split_download(
+        Downloaded(path), file_type="txt", document_id="42",
+        document_version=1, source_name="document.txt", settings=settings,
+    ))
+    try:
+        assert await asyncio.to_thread(started.wait, 0.4)
+        assert not release.is_set()
+    finally:
+        release.set()
+        timer.cancel()
+        await task
+    assert not path.exists()
+
+
+@pytest.mark.asyncio
+async def test_cancel_waits_for_parser_before_temp_cleanup(settings, tmp_path, monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+    timer = threading.Timer(0.5, release.set)
+    timer.start()
+    cleaned = False
+
+    def blocking_parse(path, file_type):
+        started.set()
+        release.wait()
+        assert path.exists()
+        return (ParsedSection("content", "document"),)
+
+    class Downloaded:
+        def __init__(self, path):
+            self.path = path
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_):
+            nonlocal cleaned
+            cleaned = True
+            self.path.unlink(missing_ok=True)
+
+    monkeypatch.setattr(document_etl, "parse_document", blocking_parse)
+    path = tmp_path / "document.txt"
+    path.write_text("content", encoding="utf-8")
+    task = asyncio.create_task(parse_and_split_download(
+        Downloaded(path), file_type="txt", document_id="42",
+        document_version=1, source_name="document.txt", settings=settings,
+    ))
+    try:
+        assert await asyncio.to_thread(started.wait, 0.4)
+        task.cancel()
+        await asyncio.sleep(0.02)
+        assert path.exists()
+        assert not cleaned
+    finally:
+        release.set()
+        timer.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert cleaned and not path.exists()

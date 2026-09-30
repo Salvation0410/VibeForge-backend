@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 import unicodedata
 import zipfile
@@ -167,7 +168,12 @@ def _parse_docx(path: Path) -> list[ParsedSection]:
                 raise DocumentETLError("KNOWLEDGE_DOCUMENT_TOO_LARGE")
             row_locator = f"{locator} / 行 {row_index}"
             texts: list[str] = []
-            nested_tables: list[tuple[Table, str]] = []
+
+            def flush_texts() -> None:
+                if texts:
+                    _append(sections, " | ".join(texts), row_locator, count)
+                    texts.clear()
+
             for column_index, cell in enumerate(row.cells, 1):
                 if cell._tc in seen_cells:
                     continue
@@ -175,16 +181,16 @@ def _parse_docx(path: Path) -> list[ParsedSection]:
                 nested_index = 0
                 for item in cell.iter_inner_content():
                     if isinstance(item, Table):
+                        flush_texts()
                         nested_index += 1
-                        nested_tables.append((
+                        read_table(
                             item,
                             f"{row_locator} / 列 {column_index} / 嵌套表格 {nested_index}",
-                        ))
+                            depth + 1,
+                        )
                     elif item.text.strip():
                         texts.append(item.text)
-            _append(sections, " | ".join(texts), row_locator, count)
-            for nested, nested_locator in nested_tables:
-                read_table(nested, nested_locator, depth + 1)
+            flush_texts()
 
     try:
         doc = Document(path)
@@ -307,8 +313,27 @@ async def parse_and_split_download(
     downloaded: _DownloadedFile, *, file_type: str, document_id: str,
     document_version: int, source_name: str, settings: Settings,
 ) -> tuple[KnowledgeChunk, ...]:
-    async with downloaded:
+    def parse_and_split() -> tuple[KnowledgeChunk, ...]:
         return split_sections(
             parse_document(downloaded.path, file_type), document_id=document_id,
             document_version=document_version, source_name=source_name, settings=settings,
         )
+
+    async with downloaded:
+        worker = asyncio.create_task(asyncio.to_thread(parse_and_split))
+        try:
+            return await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            # The temp file belongs to the worker until parsing and splitting both finish.
+            while not worker.done():
+                try:
+                    await asyncio.shield(worker)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+            try:
+                worker.result()
+            except Exception:
+                pass
+            raise

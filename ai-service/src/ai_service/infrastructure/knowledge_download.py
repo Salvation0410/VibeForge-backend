@@ -146,11 +146,12 @@ class KnowledgeDownloader:
             pool=self._settings.rag_download_connect_timeout_seconds,
         )
         try:
-            async with httpx.AsyncClient(
-                transport=self._transport, timeout=timeout, follow_redirects=False, trust_env=False
-            ) as client:
-                for redirects in range(self.MAX_REDIRECTS + 1):
-                    host, target = await self._validated_target(url)
+            for redirects in range(self.MAX_REDIRECTS + 1):
+                host, target = await self._validated_target(url)
+                async with httpx.AsyncClient(
+                    transport=self._transport, timeout=timeout,
+                    follow_redirects=False, trust_env=False,
+                ) as client:
                     request = client.build_request(
                         "GET", target, headers={"Host": host, "Accept-Encoding": "identity"},
                         extensions={"sni_hostname": host},

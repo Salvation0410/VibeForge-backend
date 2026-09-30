@@ -172,6 +172,49 @@ async def test_public_redirect_revalidates_and_succeeds(settings):
 
 
 @pytest.mark.asyncio
+async def test_cross_host_redirect_uses_separate_client_for_same_ip(settings, monkeypatch):
+    settings.rag_oss_allowed_hosts = "oss.example.test,mirror.example.test"
+    real_client = httpx.AsyncClient
+    lifecycle = []
+    requests = []
+
+    class TrackedClient(real_client):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            lifecycle.append(("created", self))
+
+        async def __aexit__(self, *args):
+            lifecycle.append(("closed", self))
+            return await super().__aexit__(*args)
+
+    def handler(request):
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(
+                302, headers={"Location": "https://mirror.example.test/next?Signature=second-secret"}
+            )
+        return httpx.Response(200, content=BODY)
+
+    monkeypatch.setattr(httpx, "AsyncClient", TrackedClient)
+    dl = KnowledgeDownloader(
+        settings, transport=httpx.MockTransport(handler), resolver=public_resolver
+    )
+    result = await dl.download(URL, expected_sha256=HASH, max_bytes=100)
+    result.cleanup()
+    assert [request.url.host for request in requests] == ["93.184.215.14"] * 2
+    assert [request.headers["Host"] for request in requests] == [
+        "oss.example.test", "mirror.example.test",
+    ]
+    assert [request.extensions["sni_hostname"] for request in requests] == [
+        "oss.example.test", "mirror.example.test",
+    ]
+    assert [event for event, _ in lifecycle] == [
+        "created", "closed", "created", "closed",
+    ]
+    assert lifecycle[0][1] is not lifecycle[2][1]
+
+
+@pytest.mark.asyncio
 async def test_mixed_public_private_dns_answer_rejected(settings):
     async def resolver(_):
         return ["93.184.215.14", "10.0.0.1"]
