@@ -235,12 +235,16 @@ def test_customer_service_answer_response_is_bounded_and_has_no_raw_fields(
     assert "reasoning" not in response.text.lower()
 
 
+@pytest.mark.parametrize("code", [
+    "CUSTOMER_SERVICE_EMBEDDING_UNAVAILABLE",
+    "CUSTOMER_SERVICE_VECTOR_STORE_UNAVAILABLE",
+])
 def test_customer_service_answer_unavailable_is_stable_and_redacted(
-    app_factory, auth_headers, settings,
+    app_factory, auth_headers, settings, code,
 ):
     settings.customer_service_rag_enabled = True
     service = FakeCustomerServiceRag(
-        error=CustomerServiceRagError("CUSTOMER_SERVICE_UNAVAILABLE")
+        error=CustomerServiceRagError(code)
     )
     with TestClient(app_factory(
         customer_service_rag_service=service,
@@ -251,7 +255,7 @@ def test_customer_service_answer_unavailable_is_stable_and_redacted(
             json={"question": "secret query"}, headers=auth_headers,
         )
     assert response.status_code == 503
-    assert response.json()["error"]["code"] == "CUSTOMER_SERVICE_UNAVAILABLE"
+    assert response.json()["error"]["code"] == code
     assert "secret query" not in response.text
 
 

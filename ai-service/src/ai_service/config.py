@@ -114,6 +114,13 @@ class Settings(BaseSettings):
             and self.rag_reranker_device != "cuda"
         ):
             raise ValueError("rag_reranker_device must be cuda for local_cross_encoder")
+        if (
+            self.rag_reranker_provider == "disabled"
+            and self.rag_min_rerank_score is not None
+        ):
+            raise ValueError(
+                "rag_min_rerank_score requires an enabled reranker provider"
+            )
         if self.customer_service_rag_enabled:
             for name in ("milvus_uri", "closeai_api_key", "closeai_base_url"):
                 if not getattr(self, name).strip():

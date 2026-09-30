@@ -736,6 +736,50 @@ async def test_delete_disables_version_and_search_only_returns_active_metadata(s
         await index_document(knowledge, document())
 
 
+@pytest.mark.asyncio
+async def test_search_proves_current_version_from_manifest_and_filters_old_active_hit(settings):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    await index_document(knowledge, document(version=1))
+    await index_document(knowledge, document(version=2))
+    collection = client.aliases[settings.milvus_collection_alias]
+    for row in client.collections[collection]:
+        if row.get("recordType") == "chunk" and row.get("documentVersion") == 1:
+            row["isActive"] = True
+
+    results = await knowledge.search([0.1, 0.2], 8)
+
+    assert results
+    assert {item.document_version for item in results} == {2}
+    assert {item.current_document_version for item in results} == {2}
+
+
+@pytest.mark.asyncio
+async def test_search_fails_closed_when_active_hit_has_no_manifest(settings):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    await index_document(knowledge, document())
+    collection = client.aliases[settings.milvus_collection_alias]
+    client.collections[collection] = [
+        row for row in client.collections[collection]
+        if row.get("recordType") != "manifest"
+    ]
+
+    assert await knowledge.search([0.1, 0.2], 8) == []
+
+
+@pytest.mark.asyncio
+async def test_search_returns_current_version_for_rebuild_manifest(settings):
+    client = FakeMilvusClient()
+    knowledge = store(settings, client)
+    await rebuild(knowledge, documents(document(version=3)), document_count=1)
+
+    results = await knowledge.search([0.1, 0.2], 8)
+
+    assert results
+    assert {item.current_document_version for item in results} == {3}
+
+
 class Documents:
     def __init__(self, items):
         self.items = items

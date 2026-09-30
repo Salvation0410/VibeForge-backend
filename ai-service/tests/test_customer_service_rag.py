@@ -131,17 +131,13 @@ async def test_retrieves_top_eight_filters_stale_inactive_and_deduplicates_docum
         chunk("c4", "doc-4", score=0.95),
     ]
     store = FakeStore(hits)
-    reranker = FakeReranker({
-        "current-without-marker": 0.1, "c1": 0.2, "c3": 0.9, "c4": 0.8,
-    })
+    reranker = FakeReranker({"c1": 0.2, "c3": 0.9, "c4": 0.8})
     model = FakeAnswerModel(CustomerServiceModelAnswer(True, "Grounded", ("c3", "c4", "c1")))
 
     result = await service(store=store, reranker=reranker, model=model).answer("How to deploy?")
 
     assert store.calls == [([0.1, 0.2], 8)]
-    assert [item.chunk_id for item in reranker.calls[0][1]] == [
-        "current-without-marker", "c1", "c3", "c4",
-    ]
+    assert [item.chunk_id for item in reranker.calls[0][1]] == ["c1", "c3", "c4"]
     assert reranker.calls[0][2] == 3
     assert [source.chunk_id for source in result.sources] == ["c3", "c4", "c1"]
 
@@ -163,7 +159,10 @@ async def test_rerank_ties_preserve_retrieval_order_and_sources_follow_citations
 async def test_embedding_dimension_mismatch_is_stable_and_skips_retrieval(vector):
     store = FakeStore([chunk("c1", "d1")])
     model = FakeAnswerModel()
-    with pytest.raises(CustomerServiceRagError, match="CUSTOMER_SERVICE_UNAVAILABLE"):
+    with pytest.raises(
+        CustomerServiceRagError,
+        match="^CUSTOMER_SERVICE_EMBEDDING_UNAVAILABLE$",
+    ):
         await service(embeddings=FakeEmbeddings(vector), store=store, model=model).answer("question")
     assert store.calls == []
     assert model.calls == []
@@ -171,15 +170,23 @@ async def test_embedding_dimension_mismatch_is_stable_and_skips_retrieval(vector
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "dependency",
+    ("dependency", "code"),
     [
-        (FakeEmbeddings(error=EmbeddingOutputError("KNOWLEDGE_EMBEDDING_UNAVAILABLE")), FakeStore()),
-        (FakeEmbeddings(), FakeStore(error=RuntimeError("milvus secret"))),
+        (
+            (FakeEmbeddings(error=EmbeddingOutputError("KNOWLEDGE_EMBEDDING_UNAVAILABLE")), FakeStore()),
+            "CUSTOMER_SERVICE_EMBEDDING_UNAVAILABLE",
+        ),
+        (
+            (FakeEmbeddings(), FakeStore(error=RuntimeError("milvus secret"))),
+            "CUSTOMER_SERVICE_VECTOR_STORE_UNAVAILABLE",
+        ),
     ],
 )
-async def test_embedding_or_store_failure_is_unavailable_and_never_calls_model(dependency):
+async def test_embedding_or_store_failure_is_unavailable_and_never_calls_model(
+    dependency, code,
+):
     model = FakeAnswerModel()
-    with pytest.raises(CustomerServiceRagError, match="CUSTOMER_SERVICE_UNAVAILABLE"):
+    with pytest.raises(CustomerServiceRagError, match=f"^{code}$"):
         await service(embeddings=dependency[0], store=dependency[1], model=model).answer("question")
     assert model.calls == []
 
@@ -209,6 +216,23 @@ async def test_reranker_unavailable_degrades_to_raw_top_three():
     ).answer("question")
     assert result.degraded is True
     assert [context.chunk_id for context in model.calls[0][1]] == ["c1", "c2", "c3"]
+
+
+@pytest.mark.asyncio
+async def test_reranker_failure_with_threshold_conservatively_skips_answer_model():
+    model = FakeAnswerModel()
+    result = await service(
+        chunks=[chunk("c1", "d1")],
+        reranker=FakeReranker(
+            error=RerankerError("CUSTOMER_SERVICE_RERANKER_UNAVAILABLE")
+        ),
+        model=model,
+        rag_min_rerank_score=0.5,
+    ).answer("question")
+
+    assert result.answered is False
+    assert result.degraded is True
+    assert model.calls == []
 
 
 @pytest.mark.asyncio

@@ -86,11 +86,18 @@ class CustomerServiceRagService:
                 )
             ):
                 raise ValueError
+        except Exception:
+            raise CustomerServiceRagError(
+                "CUSTOMER_SERVICE_EMBEDDING_UNAVAILABLE"
+            ) from None
+        try:
             retrieved = await self._store.search(
                 [float(value) for value in vector], self._retrieval_top_k,
             )
         except Exception:
-            raise CustomerServiceRagError("CUSTOMER_SERVICE_UNAVAILABLE") from None
+            raise CustomerServiceRagError(
+                "CUSTOMER_SERVICE_VECTOR_STORE_UNAVAILABLE"
+            ) from None
 
         candidates = _filter_and_dedupe(retrieved)
         if not candidates:
@@ -155,7 +162,6 @@ def _filter_and_dedupe(chunks: object) -> list[RetrievedChunk]:
     if not isinstance(chunks, Sequence) or isinstance(chunks, (str, bytes)):
         return []
     valid: list[RetrievedChunk] = []
-    observed_versions: dict[str, int] = {}
     for item in chunks:
         try:
             score_is_finite = math.isfinite(float(item.score))
@@ -165,10 +171,7 @@ def _filter_and_dedupe(chunks: object) -> list[RetrievedChunk]:
             not isinstance(item, RetrievedChunk)
             or not item.is_active
             or item.document_version < 1
-            or (
-                item.current_document_version is not None
-                and item.current_document_version != item.document_version
-            )
+            or item.current_document_version != item.document_version
             or not item.chunk_id
             or not item.document_id
             or not item.content
@@ -177,17 +180,13 @@ def _filter_and_dedupe(chunks: object) -> list[RetrievedChunk]:
         ):
             continue
         valid.append(item)
-        observed_versions[item.document_id] = max(
-            observed_versions.get(item.document_id, 0), item.document_version,
-        )
 
     result: list[RetrievedChunk] = []
     chunk_ids: set[str] = set()
     document_ids: set[str] = set()
     for item in valid:
         if (
-            item.document_version != observed_versions[item.document_id]
-            or item.chunk_id in chunk_ids
+            item.chunk_id in chunk_ids
             or item.document_id in document_ids
         ):
             continue

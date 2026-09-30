@@ -9,7 +9,7 @@ import struct
 import time
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, AsyncContextManager, Literal, Protocol
 
 from pymilvus import MilvusClient
@@ -988,6 +988,62 @@ class MilvusKnowledgeStore:
                        for row in verified):
                     raise MilvusKnowledgeError("KNOWLEDGE_VECTOR_WRITE_INCOMPLETE")
 
+    async def _current_document_version(
+        self, collection: str, document_id: str,
+    ) -> int | None:
+        """Prove the current readable version from persisted manifest state."""
+
+        rows = await self._document_rows(collection, document_id)
+        manifests: list[dict[str, Any]] = []
+        versions: set[int] = set()
+        for row in rows:
+            if row.get("recordType") != "manifest" or row.get("isDeleted") is True:
+                continue
+            version = row.get("documentVersion")
+            if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+                continue
+            manifests.append(row)
+            versions.add(version)
+        tombstoned = await self._tombstoned_versions(document_id, versions)
+        manifests = [
+            row for row in manifests
+            if int(row["documentVersion"]) not in tombstoned
+        ]
+        if not manifests:
+            return None
+        highest = max(int(row["documentVersion"]) for row in manifests)
+        current = [
+            row for row in manifests if int(row["documentVersion"]) == highest
+        ]
+        if len(current) != 1:
+            return None
+        manifest = current[0]
+        chunk_ids = manifest.get("chunkIds")
+        expected = manifest.get("expectedChunkCount")
+        if (
+            not isinstance(chunk_ids, list)
+            or any(not isinstance(value, str) or not value for value in chunk_ids)
+            or len(chunk_ids) != len(set(chunk_ids))
+            or not isinstance(expected, int)
+            or isinstance(expected, bool)
+            or expected != len(chunk_ids)
+        ):
+            return None
+        by_id = {
+            row.get("id"): row for row in rows
+            if row.get("recordType") == "chunk" and row.get("id") in chunk_ids
+        }
+        if set(by_id) != set(chunk_ids):
+            return None
+        if any(
+            row.get("documentId") != document_id
+            or row.get("documentVersion") != highest
+            or row.get("isActive") is not True
+            for row in by_id.values()
+        ):
+            return None
+        return highest
+
     async def search(self, vector: list[float], limit: int) -> list[RetrievedChunk]:
         if (not isinstance(vector, list) or not vector or not isinstance(limit, int)
                 or not 1 <= limit <= 100
@@ -1001,22 +1057,31 @@ class MilvusKnowledgeStore:
                 search_params={"metric_type": "COSINE", "params": {}},
                 consistency_level="Strong",
             )
-            output: list[RetrievedChunk] = []
+            hits: list[RetrievedChunk] = []
             for hit in result[0] if result else []:
                 entity = hit.get("entity", hit)
                 score = float(hit.get("distance", hit.get("score")))
                 distance = 1.0 - score
                 if not math.isfinite(distance) or not math.isfinite(score):
                     raise ValueError
-                output.append(RetrievedChunk(
+                hits.append(RetrievedChunk(
                     str(entity["chunkId"]), str(entity["documentId"]),
                     int(entity["documentVersion"]), int(entity["chunkIndex"]),
                     str(entity["content"]), str(entity["fileName"]), str(entity["fileType"]),
                     str(entity["sourceLocator"]), str(entity["contentHash"]), distance, score,
                     bool(entity.get("isActive", True)),
-                    int(entity.get("currentDocumentVersion", entity["documentVersion"])),
+                    None,
                 ))
-            return output
+            current_versions = {
+                document_id: await self._current_document_version(self._alias, document_id)
+                for document_id in dict.fromkeys(item.document_id for item in hits)
+            }
+            return [
+                replace(item, current_document_version=current_versions[item.document_id])
+                for item in hits
+                if current_versions[item.document_id] is not None
+                and item.document_version == current_versions[item.document_id]
+            ]
         except MilvusKnowledgeError:
             raise
         except Exception:

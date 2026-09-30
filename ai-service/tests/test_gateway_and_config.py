@@ -881,3 +881,12 @@ def test_customer_service_rag_nonlocal_reranker_can_use_cpu():
     settings = _rag_settings(rag_reranker_provider="disabled", rag_reranker_device="cpu")
 
     assert settings.rag_reranker_device == "cpu"
+
+
+def test_disabled_reranker_rejects_rerank_score_threshold():
+    with pytest.raises(ValidationError, match="rag_min_rerank_score"):
+        _rag_settings(
+            rag_reranker_provider="disabled",
+            rag_reranker_device="cpu",
+            rag_min_rerank_score=0.5,
+        )
