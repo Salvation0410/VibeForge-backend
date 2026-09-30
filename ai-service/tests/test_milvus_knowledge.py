@@ -1075,7 +1075,8 @@ async def test_retention_state_rebinds_when_generation_config_changes(
 
 
 async def run_retention_state_validation_case(
-    settings, protected, *, mismatched=(), describe_failure=(), fence=900,
+    settings, protected, *, mismatched=(), describe_failure=(),
+    include_current=False, fence=900,
 ):
     settings.rag_collection_retention_generations = 4
     settings.rag_collection_cleanup_grace_seconds = 1
@@ -1085,6 +1086,7 @@ async def run_retention_state_validation_case(
     candidate = knowledge._collection_name(
         "embedding-v1", 2, suffix="_staging_candidate"
     )
+    protected = [current, *protected] if include_current else list(protected)
     for index, name in enumerate({current, candidate, *protected} - {"missing"}):
         client.collections[name] = []
         client.dimensions[name] = 2
@@ -1198,6 +1200,24 @@ async def test_retention_state_rpc_uncertainty_blocks_all_deletion(
     assert candidate in client.collections
     assert "protected collection validation is uncertain" in caplog.text
     assert "protected description unavailable" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_retention_state_current_collection_does_not_count_as_rollback(
+    settings, monkeypatch,
+):
+    monkeypatch.setattr(milvus_module.time, "time", lambda: 10_000.0)
+    protected = [
+        "customer_service_knowledge_old_1",
+        "customer_service_knowledge_old_2",
+    ]
+    client, _, state, candidate = await run_retention_state_validation_case(
+        settings, protected, include_current=True, fence=940,
+    )
+
+    assert state["protectedCollections"] == protected
+    assert state["retentionComplete"] is False
+    assert candidate in client.collections
 
 
 @pytest.mark.asyncio

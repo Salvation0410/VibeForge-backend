@@ -804,7 +804,7 @@ class MilvusKnowledgeStore:
                 distinct_claims: list[str] = []
                 seen_claims: set[str] = set()
                 for name in claimed_protected:
-                    if name not in seen_claims:
+                    if name != current and name not in seen_claims:
                         seen_claims.add(name)
                         distinct_claims.append(name)
 
