@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
-from pydantic import Field, HttpUrl, model_validator
+from pydantic import AliasChoices, Field, HttpUrl, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,6 +14,8 @@ class Settings(BaseSettings):
         env_file=".env",
         extra="ignore",
         case_sensitive=False,
+        populate_by_name=True,
+        hide_input_in_errors=True,
     )
 
     internal_bearer_token: str = Field(min_length=1)
@@ -39,6 +42,41 @@ class Settings(BaseSettings):
     multi_agent_review_enabled: bool = False
     multi_agent_review_timeout_seconds: float = Field(default=60.0, gt=0, le=300)
 
+    customer_service_rag_enabled: bool = False
+    closeai_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("AI_SERVICE_CLOSEAI_API_KEY", "CLOSEAI_API_KEY"),
+        repr=False,
+    )
+    closeai_base_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("AI_SERVICE_CLOSEAI_BASE_URL", "CLOSEAI_BASE_URL"),
+    )
+    rag_embedding_model: str = Field(default="openai:text-embedding-3-large", min_length=1)
+    rag_embedding_batch_size: int = Field(default=32, ge=1, le=256)
+
+    milvus_uri: str = "http://localhost:19530"
+    milvus_token: str = Field(default="", repr=False)
+    milvus_database: str = Field(default="default", min_length=1)
+    milvus_collection_alias: str = Field(default="customer_service_knowledge", min_length=1)
+
+    rag_chunk_size: int = Field(default=1000, ge=1, le=100000)
+    rag_chunk_overlap: int = Field(default=150, ge=0, le=99999)
+    rag_retrieval_top_k: int = Field(default=8, ge=1, le=100)
+    rag_final_top_k: int = Field(default=3, ge=1, le=100)
+    rag_min_rerank_score: float | None = Field(default=None, allow_inf_nan=False)
+
+    rag_reranker_provider: Literal["local_cross_encoder", "remote_api", "disabled"] = "local_cross_encoder"
+    rag_reranker_model: str = Field(default="BAAI/bge-reranker-v2-m3", min_length=1)
+    rag_reranker_device: str = "cuda"
+    rag_reranker_timeout_seconds: float = Field(default=5.0, gt=0, le=300)
+    rag_reranker_batch_size: int = Field(default=4, ge=1, le=128)
+
+    rag_oss_allowed_hosts: str = ""
+    rag_download_max_bytes: int = Field(default=20971520, ge=1, le=104857600)
+    rag_download_connect_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
+    rag_download_read_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+
     @model_validator(mode="after")
     def validate_checkpoint_pool(self) -> "Settings":
         """拒绝无法创建的 PostgreSQL 连接池边界。"""
@@ -47,6 +85,23 @@ class Settings(BaseSettings):
                 "checkpoint_pool_max_size must be greater than or equal to "
                 "checkpoint_pool_min_size"
             )
+        return self
+
+    @model_validator(mode="after")
+    def validate_customer_service_rag(self) -> "Settings":
+        if self.rag_chunk_overlap >= self.rag_chunk_size:
+            raise ValueError("rag_chunk_overlap must be smaller than rag_chunk_size")
+        if self.rag_final_top_k > self.rag_retrieval_top_k:
+            raise ValueError("rag_final_top_k must not exceed rag_retrieval_top_k")
+        if (
+            self.rag_reranker_provider == "local_cross_encoder"
+            and self.rag_reranker_device != "cuda"
+        ):
+            raise ValueError("rag_reranker_device must be cuda for local_cross_encoder")
+        if self.customer_service_rag_enabled:
+            for name in ("milvus_uri", "closeai_api_key", "closeai_base_url"):
+                if not getattr(self, name).strip():
+                    raise ValueError(f"{name} is required when customer_service_rag_enabled")
         return self
 
 

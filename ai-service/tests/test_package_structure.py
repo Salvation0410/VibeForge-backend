@@ -30,3 +30,19 @@ def test_public_modules_can_be_imported_from_new_packages():
     assert events.EventEmitter
     assert multi_agent_review.run_multi_agent_review
     assert workflow.GenerationWorkflow
+
+
+def test_customer_service_rag_dependencies_can_be_imported():
+    from docx import Document
+    from FlagEmbedding import FlagReranker
+    from langchain.embeddings import init_embeddings
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+    from pymilvus import MilvusClient
+    from pypdf import PdfReader
+
+    assert callable(init_embeddings)
+    assert RecursiveCharacterTextSplitter
+    assert MilvusClient
+    assert FlagReranker
+    assert PdfReader
+    assert Document
