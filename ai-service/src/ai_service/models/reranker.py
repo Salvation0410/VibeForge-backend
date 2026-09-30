@@ -5,11 +5,15 @@ from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import gc
+import hashlib
 from importlib.metadata import version
 import inspect
 import logging
 import math
 import multiprocessing
+import os
+from pathlib import Path
+import tempfile
 from typing import Any, Protocol
 import uuid
 
@@ -25,6 +29,48 @@ SHUTDOWN_DRAIN_TIMEOUT_SECONDS = 30.0
 WORKER_STARTUP_TIMEOUT_SECONDS = 300.0
 
 logger = logging.getLogger(__name__)
+
+
+class _GpuOwnerLock:
+    def __init__(self, handle: Any):
+        self._handle = handle
+
+    @classmethod
+    def acquire(cls, model: str, device: str) -> _GpuOwnerLock:
+        identity = hashlib.sha256(f"{model}\0{device}".encode()).hexdigest()
+        path = Path(tempfile.gettempdir()) / f"yu-ai-reranker-{identity}.lock"
+        handle = path.open("a+b")
+        try:
+            handle.seek(0)
+            if handle.read(1) == b"":
+                handle.write(b"0")
+                handle.flush()
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return cls(handle)
+        except BaseException:
+            handle.close()
+            raise RerankerError("CUSTOMER_SERVICE_RERANKER_UNAVAILABLE") from None
+
+    def release(self) -> None:
+        handle, self._handle = self._handle, None
+        if handle is None:
+            return
+        try:
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
 
 
 class RerankerError(RuntimeError):
@@ -319,15 +365,21 @@ class _ProcessReranker:
     def __init__(
         self, connection: Any, process: Any, *, batch_size: int,
         timeout_seconds: float, shutdown_seconds: float = SHUTDOWN_DRAIN_TIMEOUT_SECONDS,
+        owner_lock: _GpuOwnerLock,
     ) -> None:
         self._connection = connection
         self._process = process
         self._batch_size = batch_size
         self._timeout = timeout_seconds
         self._shutdown_seconds = shutdown_seconds
+        self._owner_lock = owner_lock
         self._lock = asyncio.Lock()
-        self._closed = False
+        self._state = "open"
         self._drains: set[asyncio.Task[None]] = set()
+        self._sends: set[asyncio.Task[None]] = set()
+        self._close_task: asyncio.Task[None] | None = None
+        self._connection_closed = False
+        self._process_closed = False
 
     @classmethod
     async def start(
@@ -336,17 +388,21 @@ class _ProcessReranker:
         shutdown_seconds: float = SHUTDOWN_DRAIN_TIMEOUT_SECONDS,
     ) -> _ProcessReranker:
         ctx = context or multiprocessing.get_context("spawn")
-        parent, child = ctx.Pipe(duplex=True)
-        process = ctx.Process(
-            target=worker_target,
-            args=(child, {
-                "model_name": settings.rag_reranker_model,
-                "device": settings.rag_reranker_device,
-            }),
-            name="customer-service-reranker", daemon=True,
+        owner_lock = _GpuOwnerLock.acquire(
+            settings.rag_reranker_model, settings.rag_reranker_device,
         )
+        parent = child = process = None
         started = False
         try:
+            parent, child = ctx.Pipe(duplex=True)
+            process = ctx.Process(
+                target=worker_target,
+                args=(child, {
+                    "model_name": settings.rag_reranker_model,
+                    "device": settings.rag_reranker_device,
+                }),
+                name="customer-service-reranker", daemon=True,
+            )
             process.start()
             started = True
             child.close()
@@ -354,23 +410,31 @@ class _ProcessReranker:
                 parent, process, batch_size=settings.rag_reranker_batch_size,
                 timeout_seconds=settings.rag_reranker_timeout_seconds,
                 shutdown_seconds=shutdown_seconds,
+                owner_lock=owner_lock,
             )
             response = await backend._receive(WORKER_STARTUP_TIMEOUT_SECONDS)
             if response != {"type": "ready"}:
                 raise RerankerError("CUSTOMER_SERVICE_RERANKER_UNAVAILABLE")
             return backend
         except BaseException as error:
-            try:
-                child.close()
-                parent.close()
-            except BaseException:
-                pass
-            if started and process.is_alive():
+            for connection in (child, parent):
+                try:
+                    if connection is not None:
+                        connection.close()
+                except BaseException:
+                    pass
+            if started and process is not None and process.is_alive():
                 process.terminate()
                 process.join(1)
                 if process.is_alive() and hasattr(process, "kill"):
                     process.kill()
                     process.join(1)
+            try:
+                if started and process is not None:
+                    process.close()
+            except BaseException:
+                pass
+            owner_lock.release()
             if isinstance(error, asyncio.CancelledError):
                 raise
             raise RerankerError("CUSTOMER_SERVICE_RERANKER_UNAVAILABLE") from None
@@ -387,26 +451,84 @@ class _ProcessReranker:
                     return value
             except (EOFError, OSError):
                 raise RerankerError("CUSTOMER_SERVICE_RERANKER_UNAVAILABLE") from None
-            if not self._process.is_alive():
+            if not self._is_alive():
                 raise RerankerError("CUSTOMER_SERVICE_RERANKER_UNAVAILABLE")
             if deadline is not None and loop.time() >= deadline:
                 raise TimeoutError
             await asyncio.sleep(0.005)
 
+    def _close_connection(self) -> None:
+        if self._connection_closed:
+            return
+        self._connection_closed = True
+        try:
+            self._connection.close()
+        except BaseException:
+            pass
+
+    def _is_alive(self) -> bool:
+        if self._process_closed:
+            return False
+        try:
+            return self._process.is_alive()
+        except (ValueError, AssertionError):
+            return False
+
+    def _finalize_process_handle(self) -> None:
+        if self._process_closed or self._is_alive():
+            return
+        try:
+            self._process.join(0)
+            self._process.close()
+        finally:
+            self._process_closed = True
+
+    async def _abort_process(self) -> None:
+        if self._is_alive():
+            self._process.terminate()
+        self._close_connection()
+        if not await self._wait_exit(1.0) and hasattr(self._process, "kill"):
+            self._process.kill()
+            await self._wait_exit(1.0)
+        self._finalize_process_handle()
+
+    async def _send(self, message: dict[str, Any], deadline: float) -> None:
+        send = asyncio.create_task(asyncio.to_thread(self._connection.send, message))
+        self._sends.add(send)
+        send.add_done_callback(self._sends.discard)
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(send), max(0.0, deadline - asyncio.get_running_loop().time()),
+            )
+        except (TimeoutError, asyncio.CancelledError) as error:
+            cleanup = asyncio.create_task(self._abort_process())
+            try:
+                await _drain_task(cleanup)
+                await _drain_task(send)
+            except BaseException:
+                pass
+            if isinstance(error, asyncio.CancelledError):
+                raise
+            raise RerankerError("CUSTOMER_SERVICE_RERANKER_TIMEOUT") from None
+        except BaseException:
+            raise RerankerError("CUSTOMER_SERVICE_RERANKER_UNAVAILABLE") from None
+
     async def _score(self, pairs: list[list[str]]) -> list[float]:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._timeout
         try:
-            await asyncio.wait_for(self._lock.acquire(), self._timeout)
+            await asyncio.wait_for(
+                self._lock.acquire(), max(0.0, deadline - loop.time()),
+            )
         except TimeoutError:
             raise RerankerError("CUSTOMER_SERVICE_RERANKER_TIMEOUT") from None
         owns_lock = True
         request_id = uuid.uuid4().hex
         try:
-            self._connection.send({
+            await self._send({
                 "type": "score", "request_id": request_id,
                 "pairs": pairs, "batch_size": self._batch_size,
-            })
+            }, deadline)
             receive = asyncio.create_task(self._receive())
             def transfer_to_drain() -> None:
                 nonlocal owns_lock
@@ -467,35 +589,46 @@ class _ProcessReranker:
 
     async def _wait_exit(self, timeout: float) -> bool:
         deadline = asyncio.get_running_loop().time() + timeout
-        while self._process.is_alive() and asyncio.get_running_loop().time() < deadline:
+        while self._is_alive() and asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(0.01)
-        self._process.join(0)
-        return not self._process.is_alive()
+        if not self._is_alive():
+            self._finalize_process_handle()
+            return True
+        return False
+
+    async def _close_once(self) -> None:
+        self._state = "closing"
+        try:
+            try:
+                await asyncio.wait_for(self._lock.acquire(), self._shutdown_seconds)
+            except TimeoutError:
+                await self._abort_process()
+            else:
+                try:
+                    deadline = asyncio.get_running_loop().time() + self._shutdown_seconds
+                    try:
+                        await self._send({"type": "shutdown"}, deadline)
+                    except RerankerError:
+                        pass
+                finally:
+                    self._lock.release()
+                if not await self._wait_exit(self._shutdown_seconds):
+                    await self._abort_process()
+        finally:
+            if self._is_alive():
+                await self._abort_process()
+            self._close_connection()
+            self._finalize_process_handle()
+            self._owner_lock.release()
+            self._state = "closed"
 
     async def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
+        if self._close_task is None:
+            self._close_task = asyncio.create_task(self._close_once())
         try:
-            await asyncio.wait_for(self._lock.acquire(), self._shutdown_seconds)
-        except TimeoutError:
-            pass
-        else:
-            try:
-                self._connection.send({"type": "shutdown"})
-            except (EOFError, OSError):
-                pass
-            finally:
-                self._lock.release()
-            if await self._wait_exit(self._shutdown_seconds):
-                self._connection.close()
-                return
-        if self._process.is_alive():
-            self._process.terminate()
-        if not await self._wait_exit(1.0) and hasattr(self._process, "kill"):
-            self._process.kill()
-            await self._wait_exit(1.0)
-        self._connection.close()
+            await asyncio.shield(self._close_task)
+        except asyncio.CancelledError:
+            raise
 
 
 class LocalCrossEncoderReranker:

@@ -88,6 +88,12 @@ def startup_block_worker(_connection, _config):
         time.sleep(1)
 
 
+def nonreading_worker(connection, _config):
+    connection.send({"type": "ready"})
+    while True:
+        time.sleep(1)
+
+
 @pytest.mark.asyncio
 async def test_disabled_reranker_preserves_order_and_source_scores():
     chunks = [chunk(0, score=0.8), chunk(1, score=0.4)]
@@ -471,7 +477,7 @@ async def test_spawn_worker_normal_result_and_unavailable_protocol():
         assert captured.value.code == "CUSTOMER_SERVICE_RERANKER_UNAVAILABLE"
     finally:
         await backend.close()
-    assert not backend._process.is_alive()
+    assert backend._process_closed
 
 
 @pytest.mark.asyncio
@@ -488,7 +494,8 @@ async def test_spawn_worker_timeout_shutdown_terminates_permanent_child():
 
     await asyncio.wait_for(backend.close(), 0.5)
 
-    assert not backend._process.is_alive()
+    assert backend._process_closed
+    assert backend._process_closed
 
 
 @pytest.mark.asyncio
@@ -506,7 +513,7 @@ async def test_spawn_worker_cancelled_request_keeps_ipc_lock_until_shutdown():
         await request
     assert backend._lock.locked()
     await backend.close()
-    assert not backend._process.is_alive()
+    assert backend._process_closed
 
 
 @pytest.mark.asyncio
@@ -529,6 +536,87 @@ async def test_spawn_worker_startup_cancellation_terminates_child():
             break
         await asyncio.sleep(0.01)
     assert not remaining
+
+
+@pytest.mark.asyncio
+async def test_large_blocked_ipc_send_does_not_block_loop_and_aborts_child():
+    settings = rag_settings(rag_reranker_timeout_seconds=0.03)
+    backend = await _ProcessReranker.start(
+        settings, worker_target=nonreading_worker, shutdown_seconds=0.03,
+    )
+    ticked = asyncio.Event()
+
+    async def ticker():
+        await asyncio.sleep(0.01)
+        ticked.set()
+
+    ticker_task = asyncio.create_task(ticker())
+    chunks = [chunk(index, content="x" * 90_000) for index in range(10)]
+    with pytest.raises(RerankerError) as captured:
+        await backend.rerank("q", chunks, top_n=1)
+    await ticker_task
+
+    assert ticked.is_set()
+    assert captured.value.code == "CUSTOMER_SERVICE_RERANKER_TIMEOUT"
+    assert backend._process_closed
+    assert not backend._sends
+    await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_close_cancellation_keeps_single_cleanup_task_running():
+    settings = rag_settings(rag_reranker_timeout_seconds=1)
+    backend = await _ProcessReranker.start(
+        settings, worker_target=protocol_test_worker, shutdown_seconds=0.05,
+    )
+    request = asyncio.create_task(backend.rerank(
+        "q", [chunk(0, content="block-forever")], top_n=1,
+    ))
+    await asyncio.sleep(0.02)
+    first_close = asyncio.create_task(backend.close())
+    await asyncio.sleep(0.01)
+    first_close.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first_close
+    cleanup = backend._close_task
+    assert cleanup is not None
+    await asyncio.wait_for(backend.close(), 0.5)
+    assert backend._close_task is cleanup
+    assert backend._state == "closed"
+    assert backend._process_closed
+    with pytest.raises((RerankerError, asyncio.CancelledError)):
+        await request
+
+
+@pytest.mark.asyncio
+async def test_gpu_owner_lock_rejects_same_key_then_releases():
+    settings = rag_settings()
+    first = await _ProcessReranker.start(
+        settings, worker_target=protocol_test_worker, shutdown_seconds=0.1,
+    )
+    with pytest.raises(RerankerError, match="CUSTOMER_SERVICE_RERANKER_UNAVAILABLE"):
+        await _ProcessReranker.start(
+            settings, worker_target=protocol_test_worker, shutdown_seconds=0.1,
+        )
+    await first.close()
+    second = await _ProcessReranker.start(
+        settings, worker_target=protocol_test_worker, shutdown_seconds=0.1,
+    )
+    await second.close()
+
+
+@pytest.mark.asyncio
+async def test_gpu_owner_lock_allows_different_model_keys():
+    first = await _ProcessReranker.start(
+        rag_settings(rag_reranker_model="model-a"),
+        worker_target=protocol_test_worker, shutdown_seconds=0.1,
+    )
+    second = await _ProcessReranker.start(
+        rag_settings(rag_reranker_model="model-b"),
+        worker_target=protocol_test_worker, shutdown_seconds=0.1,
+    )
+    await first.close()
+    await second.close()
 
 
 @pytest.mark.asyncio
