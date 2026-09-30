@@ -29,9 +29,12 @@
 ### 客服机器人 RAG 实施进度
 
 - 设计提交 `b61fc07`、实施计划提交 `be6b5db` 已完成；计划中的问答、ETL、Embedding、Milvus、Reranker 和前端能力不能据此视为已实现。
-- Task 1 的 MySQL 知识文档与 ETL outbox 表、对应 MyBatis-Flex 实体和 Mapper 已在提交 `8e18149` 完成。Task 2 及后续任务均未实施。
+- Task 1 的 MySQL 知识文档与 ETL outbox 表、对应 MyBatis-Flex 实体和 Mapper 已在提交 `8e18149` 完成。
 - Task 1 定向 schema 测试 2 项通过，`mvn clean -DskipTests compile` 通过，暂存差异的 `git diff --cached --check` 通过。仓库没有 `mvnw.cmd`，测试和编译使用系统 Maven；测试实际命令为 `mvn test -Dtest=CustomerServiceKnowledgeSchemaTest`。
 - 尚未在真实 MySQL 执行 DDL、CRUD 或并发任务认领验证，这些仍是人工待验收项。
+- Task 2 私有 OSS 知识文档能力已在 `89d1487` 实现，并由 `312b9f5`、`a0be99a` 修正 DOCX 宏绕过和 PDF 文本误判。上传策略支持 PDF、DOCX、Markdown、TXT，校验扩展名、MIME、内容和 20 MiB 上限，规范展示名并计算 SHA-256；对象键由随机 ID 生成，上传显式设置 private ACL，只返回对象键和文件元数据。另提供可配置有效期的单对象签名 GET URL 与对象删除。
+- DOCX 校验包含 ZIP 条目数、单条和总展开大小边界，并安全解析 `[Content_Types].xml` 与各 `.rels` 的宏内容类型和关系类型；XML 有大小限制且禁用 DTD、外部实体。Task 2 的 15 项定向测试、`mvn clean -DskipTests compile` 和 `git diff --check` 均通过，使用系统 Maven，未调用真实 OSS。
+- 真实私有 OSS 上传、签名 URL 下载和删除仍待人工验收。完整加密 PDF 识别与拒绝属于尚未实现的 Python `pypdf` ETL Task 4；当前 Spring 对 PDF 只做上传层的扩展名、MIME、大小、空文件和 `%PDF-` 魔数等校验，不识别加密状态。Task 3 及后续任务尚未实施，客服问答与索引链路不可用。
 
 ### 已关闭的源码阻塞
 
@@ -478,6 +481,9 @@ Vue 多 Agent 是 Python LangGraph 内部的功能开关，回滚时保持 LangG
 
 | 提交 | 内容 |
 | --- | --- |
+| `a0be99a` | 避免将 PDF 正文中的 `/Encrypt` 误判为加密 |
+| `312b9f5` | 根据 DOCX 内容类型与关系文件拒绝改名宏部件 |
+| `89d1487` | 增加私有 OSS 知识文档操作与文件策略 |
 | `e1abf75` | 限制多 Agent Reviewer 输入上下文 |
 | `47662be` | 加固审查上下文、反馈格式与致命异常处理 |
 | `928a973` | 覆盖多 Agent 审查取消与导入 |
@@ -541,7 +547,7 @@ Vue 多 Agent 已于 2026-09-30 本地快进合并到 `dev`，合并后 HEAD 为
 - `doc/ai-service-langchain-langgraph-refactor-design.md`：重构架构与边界设计。
 - `docs/superpowers/specs/2026-09-29-postgres-checkpoint-design.md`：PostgreSQL checkpoint 迁移、故障语义和长期记忆决策。
 - `docs/superpowers/specs/2026-09-29-vue-multi-agent-quality-review-design.md`：Vue 三角色质量审查、F1 错误语义、repair 和 checkpoint 边界。
-- `docs/superpowers/specs/2026-09-30-customer-service-rag-design.md`：客服机器人、OSS 文档 ETL、CloseAI Embedding、Milvus 和 GPU Reranker 设计；目前仅 Task 1 数据库 schema 已实现，其余仍属规划。
+- `docs/superpowers/specs/2026-09-30-customer-service-rag-design.md`：客服机器人、OSS 文档 ETL、CloseAI Embedding、Milvus 和 GPU Reranker 设计；目前仅 Task 1 数据库 schema 与 Task 2 私有 OSS 文档操作已实现，Task 3 及后续仍属规划。
 - `docs/superpowers/specs/2026-09-21-bounded-streaming-simple-prompts-design.md`：有限流式窗口和简短优化提示设计。
 - `docs/superpowers/specs/2026-09-21-circular-preview-spinner-design.md`：预览加载图正圆修复设计。
 
