@@ -264,6 +264,7 @@ class CustomerServiceHealthResponse(ApiModel):
 class CustomerServiceAnswerRequest(ApiModel):
     model_config = ConfigDict(extra="forbid")
 
+    request_id: str = Field(min_length=1, max_length=128)
     question: str = Field(min_length=1, max_length=4_000)
 
     @field_validator("question")
@@ -279,11 +280,12 @@ class CustomerServiceSourceResponse(ApiModel):
     document_name: str = Field(min_length=1, max_length=255)
     document_version: int = Field(ge=1)
     chunk_id: str = Field(min_length=1, max_length=512)
-    locator: str = Field(max_length=500)
+    locator: str = Field(min_length=1, max_length=500)
     excerpt: str = Field(max_length=400)
 
 
 class CustomerServiceAnswerResponse(ApiModel):
+    request_id: str = Field(min_length=1, max_length=128)
     answered: bool
     answer: str = Field(max_length=4_000)
     sources: list[CustomerServiceSourceResponse] = Field(max_length=3)

@@ -330,6 +330,7 @@ def register_routes(
                 timeout_seconds=request.app.state.settings.rag_answer_timeout_seconds,
             )
             return CustomerServiceAnswerResponse(
+                request_id=body.request_id,
                 answered=result.answered,
                 answer=result.answer,
                 sources=[CustomerServiceSourceResponse(

@@ -53,11 +53,13 @@ public class CustomerServiceAnswerServiceImpl implements CustomerServiceAnswerSe
             CustomerServiceKnowledgeDocument document = findReady(source.documentId());
             if (document == null || document.getDocumentVersion() == null
                     || document.getDocumentVersion() != source.documentVersion()
+                    || document.getIndexedVersion() == null || document.getIndexedVersion() != source.documentVersion()
                     || document.getName() == null || !document.getName().equals(source.documentName())
                     || !validChunk(source, document)) reject(requestId);
             if (source.excerpt() == null || source.excerpt().length() > 400
                     || source.documentName().length() > 255 || source.locator().length() > 500) reject(requestId);
-            if (sources.size() == 3 || !seen.add(source.chunkId())) continue;
+            if (!seen.add(source.chunkId())) reject(requestId);
+            if (sources.size() == 3) continue;
             sources.add(new CustomerServiceAnswerVO.Source(source.documentId(), source.documentName(),
                     source.documentVersion(), source.chunkId(), source.locator(), source.excerpt()));
         }

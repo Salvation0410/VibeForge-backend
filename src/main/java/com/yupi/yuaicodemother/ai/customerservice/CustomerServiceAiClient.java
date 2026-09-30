@@ -17,6 +17,7 @@ import java.net.http.HttpResponse;
 import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Flow;
@@ -85,7 +86,12 @@ public class CustomerServiceAiClient {
 
     public AnswerResponse answer(AnswerRequest request) {
         JsonNode payload = call("/internal/v1/customer-service/answers", request);
-        String responseRequestId = optionalText(payload, "requestId", 128);
+        requireFields(payload, Set.of("requestId", "answered", "answer", "sources", "degraded"));
+        String responseRequestId = requiredText(payload, "requestId", 128);
+        if (!responseRequestId.equals(request.requestId())) invalidResponse();
+        JsonNode degraded = payload.get("degraded");
+        if (degraded == null || !degraded.isBoolean() || degraded.booleanValue())
+            throw new CallException("CUSTOMER_SERVICE_DEGRADED", false);
         JsonNode answered = payload.get("answered");
         JsonNode answer = payload.get("answer");
         if (answered == null || !answered.isBoolean() || answer == null || !answer.isTextual()
@@ -95,17 +101,17 @@ public class CustomerServiceAiClient {
         List<AnswerSource> parsed = new java.util.ArrayList<>();
         for (JsonNode source : sources) {
             if (!source.isObject()) invalidResponse();
+            requireFields(source, Set.of("documentId", "documentName", "documentVersion", "chunkId", "locator", "excerpt"));
             String documentId = requiredText(source, "documentId", 128);
             String documentName = requiredText(source, "documentName", 255);
             JsonNode version = source.get("documentVersion");
             if (version == null || !version.isIntegralNumber() || !version.canConvertToLong() || version.longValue() < 1) invalidResponse();
             String chunkId = requiredText(source, "chunkId", 512);
-            String locator = optionalText(source, "locator", 500);
+            String locator = requiredText(source, "locator", 500);
             String excerpt = requiredText(source, "excerpt", 400);
             parsed.add(new AnswerSource(documentId, documentName, version.longValue(), chunkId, locator, excerpt));
         }
-        return new AnswerResponse(responseRequestId.isBlank() ? request.requestId() : responseRequestId,
-                answered.booleanValue(), answer.textValue(), List.copyOf(parsed));
+        return new AnswerResponse(responseRequestId, answered.booleanValue(), answer.textValue(), List.copyOf(parsed));
     }
 
     private JsonNode call(String path, Object body) {
@@ -221,6 +227,12 @@ public class CustomerServiceAiClient {
         if (value == null || value.isNull()) return "";
         if (!value.isTextual() || value.textValue().length() > maxLength) invalidResponse();
         return value.textValue();
+    }
+
+    private static void requireFields(JsonNode payload, Set<String> expected) {
+        java.util.Iterator<String> fields = payload.fieldNames();
+        while (fields.hasNext()) if (!expected.contains(fields.next())) invalidResponse();
+        for (String field : expected) if (!payload.has(field)) invalidResponse();
     }
 
     private static int requiredInt(JsonNode payload, String field, int minimum, int maximum) {
@@ -366,7 +378,7 @@ public class CustomerServiceAiClient {
     }
     public record Result(int chunkCount, boolean idempotent) { }
     public record RebuildResult(int documentCount, boolean idempotent) { }
-    public record AnswerRequest(@JsonProperty(access = JsonProperty.Access.WRITE_ONLY) String requestId, String question) { }
+    public record AnswerRequest(String requestId, String question) { }
     public record AnswerSource(String documentId, String documentName, long documentVersion,
                                String chunkId, String locator, String excerpt) { }
     public record AnswerResponse(String requestId, boolean answered, String answer,

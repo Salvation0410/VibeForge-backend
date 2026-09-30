@@ -188,7 +188,7 @@ def test_customer_service_answer_auth_disabled_and_question_bounds(
     path = "/internal/v1/customer-service/answers"
     with TestClient(app_factory(customer_service_rag_service=FakeCustomerServiceRag())) as client:
         assert client.post(path, json={"question": "hello"}).status_code == 401
-        disabled = client.post(path, json={"question": "hello"}, headers=auth_headers)
+        disabled = client.post(path, json={"requestId": "req-disabled", "question": "hello"}, headers=auth_headers)
         assert disabled.status_code == 503
         assert disabled.json()["error"]["code"] == "CUSTOMER_SERVICE_RAG_DISABLED"
 
@@ -199,7 +199,7 @@ def test_customer_service_answer_auth_disabled_and_question_bounds(
         knowledge_etl_service=FakeKnowledgeEtlService(),
     )) as client:
         for question in ("   ", "x" * 4001):
-            response = client.post(path, json={"question": question}, headers=auth_headers)
+            response = client.post(path, json={"requestId": "req-bounds", "question": question}, headers=auth_headers)
             assert response.status_code == 422
             assert response.json()["error"]["code"] == "INVALID_REQUEST"
     assert service.questions == []
@@ -217,11 +217,12 @@ def test_customer_service_answer_response_is_bounded_and_has_no_raw_fields(
     )) as client:
         response = client.post(
             "/internal/v1/customer-service/answers",
-            json={"question": "How do I deploy?"}, headers=auth_headers,
+            json={"requestId": "req-answer-1", "question": "How do I deploy?"}, headers=auth_headers,
         )
 
     assert response.status_code == 200
     assert response.json() == {
+        "requestId": "req-answer-1",
         "answered": True,
         "answer": "Click Deploy.",
         "sources": [{
@@ -253,7 +254,7 @@ def test_customer_service_answer_unavailable_is_stable_and_redacted(
     )) as client:
         response = client.post(
             "/internal/v1/customer-service/answers",
-            json={"question": "secret query"}, headers=auth_headers,
+            json={"requestId": "req-error", "question": "secret query"}, headers=auth_headers,
         )
     assert response.status_code == 503
     assert response.json()["error"]["code"] == code
@@ -273,9 +274,10 @@ def test_customer_service_no_answer_has_no_sources(
     )) as client:
         response = client.post(
             "/internal/v1/customer-service/answers",
-            json={"question": "unknown"}, headers=auth_headers,
+            json={"requestId": "req-no-answer", "question": "unknown"}, headers=auth_headers,
         )
     assert response.json() == {
+        "requestId": "req-no-answer",
         "answered": False,
         "answer": "暂未找到足够依据回答该问题。",
         "sources": [],
