@@ -34,6 +34,23 @@ class CustomerServicePropertiesTest {
         assertThrows(IllegalStateException.class, properties::validate);
     }
 
+    @Test
+    void rejectsUnboundedRetryBaseDelay() {
+        var properties = enabled();
+        properties.setRetryBaseDelaySeconds(Long.MAX_VALUE);
+        assertThrows(IllegalStateException.class, properties::validate);
+    }
+
+    @Test
+    void rejectsUnboundedRebuildBudgets() {
+        var properties = enabled();
+        properties.setRebuildMaxDocuments(10_001);
+        assertThrows(IllegalStateException.class, properties::validate);
+        properties = enabled();
+        properties.setRebuildMaxRequestBytes(16_777_217);
+        assertThrows(IllegalStateException.class, properties::validate);
+    }
+
     private static CustomerServiceProperties enabled() {
         var properties = new CustomerServiceProperties();
         properties.setEnabled(true);

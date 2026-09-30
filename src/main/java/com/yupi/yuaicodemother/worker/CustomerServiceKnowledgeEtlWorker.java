@@ -13,6 +13,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.Clock;
+import java.time.DateTimeException;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -22,6 +23,8 @@ import java.util.UUID;
 @Component
 @ConditionalOnProperty(prefix = "ai.customer-service", name = "enabled", havingValue = "true")
 public class CustomerServiceKnowledgeEtlWorker {
+    private static final long MAX_RETRY_DELAY_SECONDS = 3600;
+    private static final LocalDateTime MAX_DATABASE_TIME = LocalDateTime.of(9999, 12, 31, 23, 59, 59);
     private final CustomerServiceKnowledgeDocumentMapper documentMapper;
     private final CustomerServiceKnowledgeEtlOutboxMapper outboxMapper;
     private final OssManager ossManager;
@@ -82,7 +85,7 @@ public class CustomerServiceKnowledgeEtlWorker {
         } catch (LostClaimException ignored) {
             // Another worker reclaimed the task while this worker was preparing the request.
         } catch (StaleTaskException error) {
-            outboxMapper.finish(task.getId(), owner, "SKIPPED", "KNOWLEDGE_TASK_STALE");
+            finishSafely(task, "SKIPPED", "KNOWLEDGE_TASK_STALE");
         } catch (RebuildSnapshotChangedException error) {
             fail(task, "KNOWLEDGE_REBUILD_SNAPSHOT_CHANGED", true);
         } catch (CustomerServiceAiClient.CallException error) {
@@ -92,7 +95,13 @@ public class CustomerServiceKnowledgeEtlWorker {
         } catch (RuntimeException error) {
             fail(task, "KNOWLEDGE_WORKER_FAILED", true);
         } finally {
-            if (lease != null) coordinator.revoke(lease);
+            if (lease != null) {
+                try {
+                    coordinator.revoke(lease);
+                } catch (RuntimeException ignored) {
+                    // The lease has a bounded expiry; revoke failure must not stop the worker loop.
+                }
+            }
         }
     }
 
@@ -185,20 +194,54 @@ public class CustomerServiceKnowledgeEtlWorker {
     }
 
     private List<RebuildDocumentSnapshot> rebuildSnapshot() {
-        return documentMapper.listAllRebuildable().stream().map(document ->
+        List<CustomerServiceKnowledgeDocument> documents = documentMapper.listAllRebuildable();
+        if (documents.size() > properties.getRebuildMaxDocuments())
+            throw new CustomerServiceAiClient.CallException("KNOWLEDGE_REBUILD_TOO_MANY_DOCUMENTS", false);
+        return documents.stream().map(document ->
                 new RebuildDocumentSnapshot(document.getId(), document.getDocumentVersion(), document.getEtlVersion(),
                         document.getIndexedVersion(), document.getName(), document.getFileType(), document.getObjectKey(),
                         document.getContentHash(), document.getStatus(), document.getIsDelete())).toList();
     }
 
     private void fail(CustomerServiceKnowledgeEtlOutbox task, String code, boolean transientFailure) {
-        int attempts = (task.getRetryCount() == null ? 0 : task.getRetryCount()) + 1;
-        boolean retry = transientFailure && attempts < Math.max(1, properties.getRetryMax());
-        long delay = Math.multiplyExact(Math.max(1, properties.getRetryBaseDelaySeconds()), 1L << Math.min(20, attempts - 1));
-        outboxMapper.retry(task.getId(), owner, retry ? "PENDING" : "FAILED", attempts,
-                now().plusSeconds(retry ? delay : 0), code);
-        if (!retry && "INDEX".equals(task.getOperation()))
-            documentMapper.failIndex(task.getDocumentId(), task.getDocumentVersion(), task.getEtlVersion(), code);
+        try {
+            int previousAttempts = task.getRetryCount() == null ? 0 : task.getRetryCount();
+            int attempts = previousAttempts == Integer.MAX_VALUE ? Integer.MAX_VALUE : previousAttempts + 1;
+            boolean retry = transientFailure && attempts < Math.max(1, properties.getRetryMax());
+            outboxMapper.retry(task.getId(), owner, retry ? "PENDING" : "FAILED", attempts,
+                    computeRetryAt(attempts, retry), code);
+            if (!retry && "INDEX".equals(task.getOperation()))
+                documentMapper.failIndex(task.getDocumentId(), task.getDocumentVersion(), task.getEtlVersion(), code);
+        } catch (RuntimeException ignored) {
+            finishSafely(task, "FAILED", "KNOWLEDGE_WORKER_FAILURE_HANDLER_FAILED");
+        }
+    }
+
+    private LocalDateTime computeRetryAt(int attempts, boolean retry) {
+        LocalDateTime current = now();
+        if (!retry) return current;
+        long multiplier = 1L << Math.min(62, Math.max(0, attempts - 1));
+        long delay;
+        try {
+            delay = Math.multiplyExact(Math.max(1, properties.getRetryBaseDelaySeconds()), multiplier);
+        } catch (ArithmeticException error) {
+            delay = MAX_RETRY_DELAY_SECONDS;
+        }
+        delay = Math.min(delay, MAX_RETRY_DELAY_SECONDS);
+        try {
+            LocalDateTime retryAt = current.plusSeconds(delay);
+            return retryAt.isAfter(MAX_DATABASE_TIME) ? MAX_DATABASE_TIME : retryAt;
+        } catch (DateTimeException error) {
+            return MAX_DATABASE_TIME;
+        }
+    }
+
+    private void finishSafely(CustomerServiceKnowledgeEtlOutbox task, String status, String code) {
+        try {
+            outboxMapper.finish(task.getId(), owner, status, code);
+        } catch (RuntimeException ignored) {
+            // A later expired-claim reclaim remains possible; never terminate the poll loop here.
+        }
     }
 
     private LocalDateTime now() { return LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC); }

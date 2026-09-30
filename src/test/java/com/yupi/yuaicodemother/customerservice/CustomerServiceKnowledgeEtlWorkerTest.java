@@ -158,6 +158,44 @@ class CustomerServiceKnowledgeEtlWorkerTest {
     }
 
     @Test
+    void maximumRetryDelaySaturatesAtDatabaseSafeTime() throws Exception {
+        var task = task("INDEX");
+        task.setRetryCount(18);
+        props.setRetryMax(20);
+        props.setRetryBaseDelaySeconds(3600);
+        worker = new CustomerServiceKnowledgeEtlWorker(documents, outbox, oss, ai, coordinator, props,
+                Clock.fixed(Instant.parse("9999-12-31T23:58:00Z"), ZoneOffset.UTC));
+        when(outbox.refreshClaim(anyLong(), anyString(), any())).thenReturn(1);
+        when(coordinator.acquire(any(), any(), any(), any())).thenReturn(lease("INDEX"));
+        when(documents.findIncludingDeleted(1)).thenReturn(document());
+        when(documents.markIndexing(1, 1, 1)).thenReturn(1);
+        when(oss.generateKnowledgeDownloadUrl(any())).thenReturn(new URL("https://example.com/short"));
+        when(ai.index(any())).thenThrow(new CustomerServiceAiClient.CallException("TEMPORARY", true));
+
+        worker.execute(task);
+
+        verify(outbox).retry(eq(1L), anyString(), eq("PENDING"), eq(19),
+                eq(LocalDateTime.of(9999, 12, 31, 23, 59, 59)), eq("TEMPORARY"));
+    }
+
+    @Test
+    void retryHandlerFailureFallsBackWithoutEscapingWorker() throws Exception {
+        var task = task("INDEX");
+        when(coordinator.acquire(any(), any(), any(), any())).thenReturn(lease("INDEX"));
+        when(documents.findIncludingDeleted(1)).thenReturn(document());
+        when(documents.markIndexing(1, 1, 1)).thenReturn(1);
+        when(oss.generateKnowledgeDownloadUrl(any())).thenReturn(new URL("https://example.com/short"));
+        when(ai.index(any())).thenThrow(new CustomerServiceAiClient.CallException("TEMPORARY", true));
+        when(outbox.retry(anyLong(), anyString(), anyString(), anyInt(), any(), anyString()))
+                .thenThrow(new IllegalStateException("database write failed"));
+
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> worker.execute(task));
+
+        verify(outbox).finish(eq(1L), anyString(), eq("FAILED"),
+                eq("KNOWLEDGE_WORKER_FAILURE_HANDLER_FAILED"));
+    }
+
+    @Test
     void transientIndexFailureCanReenterIndexingAndThenSucceed() throws Exception {
         var task = task("INDEX");
         var lease = lease("INDEX");
@@ -294,6 +332,20 @@ class CustomerServiceKnowledgeEtlWorkerTest {
         verify(outbox).retry(eq(1L), anyString(), eq("PENDING"), eq(1), any(),
                 eq("KNOWLEDGE_REBUILD_SNAPSHOT_CHANGED"));
         verify(coordinator).revoke(any());
+    }
+
+    @Test
+    void rebuildDocumentCountLimitFailsBeforeLeaseOrUrlGeneration() {
+        props.setRebuildMaxDocuments(1);
+        var first = document(); first.setStatus("ACTIVE");
+        var second = document(); second.setId(2L); second.setStatus("ACTIVE");
+        when(documents.listAllRebuildable()).thenReturn(List.of(first, second));
+
+        worker.execute(task("REBUILD"));
+
+        verifyNoInteractions(coordinator, ai, oss);
+        verify(outbox).retry(eq(1L), anyString(), eq("FAILED"), eq(1), any(),
+                eq("KNOWLEDGE_REBUILD_TOO_MANY_DOCUMENTS"));
     }
 
     private static CustomerServiceKnowledgeEtlOutbox task(String operation) {

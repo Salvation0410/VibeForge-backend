@@ -9,6 +9,9 @@ import org.junit.jupiter.api.Test;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.List;
 
@@ -64,6 +67,124 @@ class CustomerServiceAiClientTest {
                     () -> new CustomerServiceAiClient(props, ai).delete(new CustomerServiceAiClient.DeleteRequest("1", 1, lease)));
             assertEquals("KNOWLEDGE_AI_RESPONSE_TOO_LARGE", error.code());
             assertFalse(error.getMessage().contains("xxxx"));
+        } finally { server.stop(0); }
+    }
+
+    @Test
+    void timesOutWhenHeadersAreFastButBodyIsSlow() throws Exception {
+        var server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.setExecutor(command -> Thread.startVirtualThread(command));
+        server.createContext("/internal/v1/customer-service/knowledge:delete", exchange -> {
+            try {
+                exchange.getRequestBody().readAllBytes();
+                exchange.sendResponseHeaders(200, 0);
+                exchange.getResponseBody().write('{');
+                exchange.getResponseBody().flush();
+                Thread.sleep(5000);
+                exchange.getResponseBody().write('}');
+            } catch (Exception ignored) {
+            } finally {
+                exchange.close();
+            }
+        });
+        server.start();
+        try {
+            var error = assertTimeoutPreemptively(Duration.ofSeconds(3),
+                    () -> assertThrows(CustomerServiceAiClient.CallException.class,
+                            () -> timeoutClient(server).delete(deleteRequest())));
+            assertEquals("KNOWLEDGE_AI_TIMEOUT", error.code());
+        } finally { server.stop(0); }
+    }
+
+    @Test
+    void timesOutAndCancelsBodyThatNeverCompletes() throws Exception {
+        var release = new CountDownLatch(1);
+        var server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.setExecutor(command -> Thread.startVirtualThread(command));
+        server.createContext("/internal/v1/customer-service/knowledge:delete", exchange -> {
+            try {
+                exchange.getRequestBody().readAllBytes();
+                exchange.sendResponseHeaders(200, 0);
+                exchange.getResponseBody().write("{\"secret\":".getBytes(StandardCharsets.UTF_8));
+                exchange.getResponseBody().flush();
+                release.await();
+            } catch (Exception ignored) {
+            } finally {
+                exchange.close();
+            }
+        });
+        server.start();
+        try {
+            var error = assertTimeoutPreemptively(Duration.ofSeconds(3),
+                    () -> assertThrows(CustomerServiceAiClient.CallException.class,
+                            () -> timeoutClient(server).delete(deleteRequest())));
+            assertEquals("KNOWLEDGE_AI_TIMEOUT", error.code());
+            assertFalse(error.getMessage().contains("secret"));
+        } finally {
+            release.countDown();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void cancelsOversizedChunkedResponseDuringStreaming() throws Exception {
+        var server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.setExecutor(command -> Thread.startVirtualThread(command));
+        server.createContext("/internal/v1/customer-service/knowledge:delete", exchange -> {
+            try {
+                exchange.getRequestBody().readAllBytes();
+                exchange.sendResponseHeaders(500, 0);
+                for (int i = 0; i < 100; i++) {
+                    exchange.getResponseBody().write("secret!!".getBytes(StandardCharsets.UTF_8));
+                    exchange.getResponseBody().flush();
+                }
+            } catch (Exception ignored) {
+            } finally {
+                exchange.close();
+            }
+        });
+        server.start();
+        try {
+            var props = new CustomerServiceProperties();
+            props.setServiceUrl("http://localhost:" + server.getAddress().getPort());
+            props.setTimeoutSeconds(2);
+            props.setMaxResponseBytes(32);
+            var ai = new AiEngineProperties(); ai.setToken("token");
+            var error = assertTimeoutPreemptively(Duration.ofSeconds(2),
+                    () -> assertThrows(CustomerServiceAiClient.CallException.class,
+                            () -> new CustomerServiceAiClient(props, ai).delete(deleteRequest())));
+            assertEquals("KNOWLEDGE_AI_RESPONSE_TOO_LARGE", error.code());
+            assertFalse(error.getMessage().contains("secret"));
+        } finally { server.stop(0); }
+    }
+
+    @Test
+    void rebuildRequestLimitUsesUtf8BytesBeforeNetworkSend() throws Exception {
+        var requests = new AtomicInteger();
+        var server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/internal/v1/customer-service/knowledge:rebuild", exchange -> {
+            requests.incrementAndGet();
+            writeJson(exchange, "{}");
+        });
+        server.start();
+        try {
+            var props = new CustomerServiceProperties();
+            props.setServiceUrl("http://localhost:" + server.getAddress().getPort());
+            var ai = new AiEngineProperties(); ai.setToken("token");
+            var lease = new KnowledgeMutationCoordinator.Lease(
+                    "collection:customer_service_knowledge", "op_2", "REBUILD", 4, 2000000000L, "proof");
+            var request = new CustomerServiceAiClient.RebuildRequest("customer_service_knowledge", List.of(
+                    new CustomerServiceAiClient.RebuildDocument("1", 1, "中文文件名".repeat(20), "TXT",
+                            "https://example.com/a", "a".repeat(64))), "9", lease);
+            byte[] utf8 = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(request);
+            String json = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(request);
+            assertTrue(utf8.length > json.length());
+            props.setRebuildMaxRequestBytes(json.length());
+
+            var error = assertThrows(CustomerServiceAiClient.CallException.class,
+                    () -> new CustomerServiceAiClient(props, ai).rebuild(request));
+            assertEquals("KNOWLEDGE_REBUILD_REQUEST_TOO_LARGE", error.code());
+            assertEquals(0, requests.get());
         } finally { server.stop(0); }
     }
 
@@ -139,5 +260,18 @@ class CustomerServiceAiClientTest {
         props.setServiceUrl("http://localhost:" + server.getAddress().getPort());
         var ai = new AiEngineProperties(); ai.setToken("token");
         return new CustomerServiceAiClient(props, ai);
+    }
+
+    private static CustomerServiceAiClient timeoutClient(HttpServer server) {
+        var props = new CustomerServiceProperties();
+        props.setServiceUrl("http://localhost:" + server.getAddress().getPort());
+        props.setTimeoutSeconds(1);
+        var ai = new AiEngineProperties(); ai.setToken("token");
+        return new CustomerServiceAiClient(props, ai);
+    }
+
+    private static CustomerServiceAiClient.DeleteRequest deleteRequest() {
+        return new CustomerServiceAiClient.DeleteRequest("1", 1,
+                new KnowledgeMutationCoordinator.Lease("document:1", "op_1", "DELETE", 3, 2000000000L, "proof"));
     }
 }

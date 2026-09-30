@@ -63,6 +63,8 @@ ai:
     retry-max: ${AI_CUSTOMER_SERVICE_RETRY_MAX:5}
     retry-base-delay-seconds: ${AI_CUSTOMER_SERVICE_RETRY_BASE_DELAY_SECONDS:5}
     max-response-bytes: ${AI_CUSTOMER_SERVICE_MAX_RESPONSE_BYTES:65536}
+    rebuild-max-documents: ${AI_CUSTOMER_SERVICE_REBUILD_MAX_DOCUMENTS:1000}
+    rebuild-max-request-bytes: ${AI_CUSTOMER_SERVICE_REBUILD_MAX_REQUEST_BYTES:4194304}
   html-artifact:
     enabled: ${AI_HTML_SMOKE_TEST_ENABLED:true}
     required: ${AI_HTML_SMOKE_TEST_REQUIRED:true}

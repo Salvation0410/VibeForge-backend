@@ -48,6 +48,7 @@
 - Spring lease adapter 对每次 mutation 使用 `POST /api/internal/customer-service/knowledge-mutation-leases:validate`，健康检查使用只读 `GET /api/internal/customer-service/knowledge-mutation-leases/health`；网络错误、非 2xx、超时、非法 JSON、字段不匹配和超过 64 KiB 的声明或流式响应均 fail-closed，且不记录响应正文。功能只在 `AI_SERVICE_CUSTOMER_SERVICE_RAG_ENABLED=true` 时装配外部 RAG 依赖；同步 Milvus 构造在线程中执行，取消时等待构造结束并关闭已创建资源。
 - CloseAI Embedding 使用自有同步和异步 HTTP clients，并在 provider 关闭时独立释放。单次 ETL 的默认 embedding 预算为 8,000,000 个元素，provider 在首批推断维度后、请求后续批次前执行投影检查，service 在写入前复核实际总量；进程内 INDEX 默认并发为 1，等待或执行任务取消会释放 semaphore permit。
 - Task 6 提交链为 `172763a`、`4d9e56a`、`34633c9`、`b7e9ce5`、`e3d9bc3`、`70b3f68`。资源上限与配置定向测试分别 6 项、14 项通过；完整 Python 测试 435 项通过、1 项跳过，`compileall`、`uv lock --check` 和 `git diff --check` 均通过。测试使用 MockTransport、Fake CloseAI 和 Fake Milvus；Task 7 的真实 Spring endpoints 尚未实现，因此真实索引入口仍不可用。真实 Spring/MySQL fencing、OSS、CloseAI、Milvus 和完整 E2E 均待人工验收。
+- Task 7 的 Spring ETL worker 对 REBUILD fail-closed：`AI_CUSTOMER_SERVICE_REBUILD_MAX_DOCUMENTS` 默认限制 1000 个文档，`AI_CUSTOMER_SERVICE_REBUILD_MAX_REQUEST_BYTES` 默认限制序列化后的 4 MiB UTF-8 JSON；超过任一预算都不会发起 Python 请求。对 Python 的 HTTP 调用使用覆盖响应头和完整响应体的整体超时，并在读取期间按字节限制响应、超限或超时时取消订阅；默认最大响应为 64 KiB。`AI_CUSTOMER_SERVICE_RETRY_BASE_DELAY_SECONDS` 只接受 1–3600 秒，指数退避最终限制为 3600 秒，重试时间不会超过 MySQL `DATETIME` 上限。Python Task 6 尚未提供 `/internal/v1/customer-service/knowledge:rebuild`，因此真实 REBUILD 仍不可用。
 
 ### 已关闭的源码阻塞
 

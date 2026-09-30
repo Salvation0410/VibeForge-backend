@@ -19,6 +19,8 @@ public class CustomerServiceProperties {
     private int retryMax = 5;
     private long retryBaseDelaySeconds = 5;
     private int maxResponseBytes = 65536;
+    private int rebuildMaxDocuments = 1000;
+    private int rebuildMaxRequestBytes = 4_194_304;
 
     @PostConstruct
     public void validate() {
@@ -35,7 +37,10 @@ public class CustomerServiceProperties {
                 || leaseTimeoutSeconds <= timeoutSeconds + requestPreparationMarginSeconds)
             throw new IllegalStateException("Customer-service claim and lease timeouts must cover preparation plus Python timeout");
         if (pollIntervalMillis < 1 || batchSize < 1 || batchSize > 100 || retryMax < 1 || retryMax > 20
-                || retryBaseDelaySeconds < 1 || maxResponseBytes < 1024 || maxResponseBytes > 1_048_576)
+                || retryBaseDelaySeconds < 1 || retryBaseDelaySeconds > 3600
+                || maxResponseBytes < 1024 || maxResponseBytes > 1_048_576
+                || rebuildMaxDocuments < 1 || rebuildMaxDocuments > 10_000
+                || rebuildMaxRequestBytes < 1024 || rebuildMaxRequestBytes > 16_777_216)
             throw new IllegalStateException("Customer-service worker configuration is invalid");
     }
 }
