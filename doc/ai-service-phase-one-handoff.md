@@ -1,6 +1,6 @@
 # AI 服务 LangGraph 交接说明
 
-> 更新日期：2026-09-30
+> 更新日期：2026-10-01
 > 当前分支：`codex/customer-service-rag`
 > 文档目标：让后续开发者用最短时间确认当前事实、验证证据、人工验收门和下一步优先级。
 
@@ -28,7 +28,9 @@
 
 ### 客服机器人 RAG 实施进度
 
-- 设计提交 `b61fc07`、实施计划提交 `be6b5db` 已完成。当前 Task 1–13 已实现：Task 13 增加关闭态延迟导入、独立客服健康摘要、版本化 synthetic 评估集、离线指标 helper 和运维/回滚文档；下述真实环境验收仍未声称完成。
+- Task 14 新增 `scripts/verify-customer-service-rag.ps1` 安全验收门和 `scripts/customer-service-rag-validation.tests.ps1` 静态契约测试。验收门默认只打印完整计划；`-Execute` 仅探测 Python live/ready、Spring/Frontend HTTP 状态和可选的认证客服 health。Milvus、CloseAI、GPU、OSS、完整 E2E 分别要求显式开关，当前因没有成熟的安全自动化入口而只记录 `blocked`/`not-run` 和稳定错误码，不复制生产协议、不自动执行重启、诱发 OOM、依赖故障或对象删除。
+- Task 14 本轮实际只运行了默认 dry-run、无外部开关的 `-Execute` 和脚本自身静态测试。2026-10-01 非秘密探测中 Python、Spring、Frontend 均未启动，四项探测为 `SERVICE_UNREACHABLE`；当前进程未提供内部令牌，认证客服 health 为 `VALIDATION_SECRET_MISSING`；Milvus、CloseAI、GPU、OSS、E2E 全部为 `OPT_IN_REQUIRED`，没有连接或产生外部副作用。脱敏报告只写入被忽略的 `target/ai-validation`，不纳入提交。
+- 设计提交 `b61fc07`、实施计划提交 `be6b5db` 已完成。当前 Task 1–14 已实现：Task 13 增加关闭态延迟导入、独立客服健康摘要、版本化 synthetic 评估集、离线指标 helper 和运维/回滚文档，Task 14 增加安全验收门；下述真实环境验收仍未声称完成。
 - Task 1 的 MySQL 知识文档与 ETL outbox 表、对应 MyBatis-Flex 实体和 Mapper 已在提交 `8e18149` 完成。
 - Task 1 定向 schema 测试 2 项通过，`mvn clean -DskipTests compile` 通过，暂存差异的 `git diff --cached --check` 通过。仓库没有 `mvnw.cmd`，测试和编译使用系统 Maven；测试实际命令为 `mvn test -Dtest=CustomerServiceKnowledgeSchemaTest`。
 - 尚未在真实 MySQL 执行 DDL、CRUD 或并发任务认领验证，这些仍是人工待验收项。
@@ -220,6 +222,7 @@ START
 - 统一入口只向 `target/ai-validation/langgraph-real-gate.json` 写入步骤名、命令标签、状态、退出码、耗时和人工待验收项，不收集 Maven 原始日志、源码、令牌、Cookie 或响应正文。
 - `scripts/new-ai-validation-record.ps1` 可离线创建版本化人工验收记录，固定覆盖三类型首次生成/二次修改、停止、断线、模型超时、工具失败、长构建、双 Spring 竞争和 Legacy 回滚 13 个 P0 场景。
 - 人工记录为 requestId、终态、稳定错误码、旧预览、刷新次数、历史回源和证据引用提供统一字段，初始状态全部为 `pending`，不保存凭据、源码、工具参数或响应正文。
+- `scripts/verify-customer-service-rag.ps1` 为客服 RAG 提供独立的安全验收门。报告顶层只包含 schema、生成时间、脱敏版本和步骤数组；步骤只包含名称、四态状态、退出码、耗时、稳定错误码、文档 ID/版本/chunk 数和逻辑证据引用。它不接受明文 token/key 参数，不读取 `.env`，不保存 URL、响应正文、签名地址、凭据或主机/GPU 标识。
 
 ## 4. 关键文件
 
@@ -241,6 +244,8 @@ START
 | `scripts/verify-langgraph-real-gate.ps1` | 统一执行自动化验收门并输出脱敏 JSON 摘要 |
 | `scripts/new-ai-validation-record.ps1` | 创建包含 13 个 P0 场景的脱敏人工验收记录 |
 | `scripts/ai-validation-scripts.tests.ps1` | 验收脚本的静态安全与参数契约检查 |
+| `scripts/verify-customer-service-rag.ps1` | 客服 RAG 默认 dry-run、非秘密健康探测和显式外部能力验收计划 |
+| `scripts/customer-service-rag-validation.tests.ps1` | 客服验收门的 PowerShell 5.1/7 静态、安全和脱敏报告契约测试 |
 
 ### Python AI 服务
 
@@ -358,6 +363,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 
 人工执行每个场景后只更新对应记录的 `status`、`requestId`、`terminalStatus`、`errorCode`、`durationMs`、`oldPreviewPreserved`、`previewRefreshCount`、`historyReloaded`、`evidenceRefs` 和简短脱敏备注。不要把日志正文、源码、提示词或认证信息复制进记录。
 
+客服 RAG 安全验收门：
+
+```powershell
+# 默认只打印非秘密探测与全部人工/外部验收计划
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-customer-service-rag.ps1
+
+# 只执行 Python、Spring、Frontend 非秘密探测；内部令牌仅从进程环境读取
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-customer-service-rag.ps1 -Execute
+
+# 真实依赖必须逐类显式 opt-in；没有成熟安全入口时仍会 blocked，不会草率调用生产协议
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-customer-service-rag.ps1 -Execute -IncludeMilvus
+```
+
+`-IncludeCloseAi`、`-IncludeGpu`、`-IncludeOss`、`-IncludeEndToEnd` 与 `-IncludeMilvus` 相互独立，不会互相隐式开启。Docker 重启、诱发 OOM、依赖 outage 和对象删除始终保持 `manual-required`。证据目录、JSON 文件名、三个 base URL 和超时可参数化；报告不保存这些 URL，也不保存原始响应。
+
 ## 6. 当前自动化验证证据
 
 下表优先记录当前分支的最新 fresh 结果；未在本轮重新执行的历史门禁显式标明，不能替代真实外部依赖验收。
@@ -372,6 +392,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 | Java 客服登录 API 定向门禁 | `mvn "-Dtest=CustomerServiceAnswerServiceTest,CustomerServiceControllerTest,CustomerServiceAiClientTest" test` | 2026-10-01 Task 13 fresh：20 项通过 | 登录路由、请求边界、requestId 关联、degraded/unknown fields/source 严格校验、公开 VO 脱敏与 HTTP 客户端边界 |
 | Redis opt-in 集成 | `powershell -NoProfile -File scripts/verify-langgraph-real-gate.ps1 -Execute -IncludeRedis` | 最近真实环境 6 项通过 | 跨客户端回放、唯一执行、冲突与不确定态 |
 | PowerShell 脚本 | `powershell -NoProfile -File scripts/ai-validation-scripts.tests.ps1` | Windows PowerShell 5.1 与 PowerShell 7 检查通过 | 验收脚本参数、认证和脱敏约束 |
+| 客服 RAG 验收门静态测试 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/customer-service-rag-validation.tests.ps1`；`pwsh -NoProfile -File scripts/customer-service-rag-validation.tests.ps1` | 2026-10-01 fresh：Windows PowerShell 5.1.26100.4652 与 PowerShell 7.6.5 均退出码 0 | 默认 dry-run 零网络/uv/docker、opt-in 组合约束、报告字段白名单、secret redaction、缺失 token blocked 和稳定异常映射 |
+| 客服 RAG 验收门 dry-run | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-customer-service-rag.ps1` | 2026-10-01 fresh：退出码 0，仅打印计划 | 覆盖 health、Milvus、CloseAI、GPU、OSS 和 Spring/Python/Vue E2E 计划，不访问服务或创建报告 |
+| 客服 RAG 非秘密探测 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-customer-service-rag.ps1 -Execute` | 2026-10-01 fresh：退出码 2；Python live/ready、Spring、Frontend 均 `SERVICE_UNREACHABLE`，认证客服 health 为 `VALIDATION_SECRET_MISSING` | 安全门诚实记录未启动服务和缺失进程令牌；不能证明任何真实外部能力通过 |
 | 统一非外部数据库门禁 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1 -Execute` | 本轮未重新执行；此前历史基线为 6 个步骤通过 | 不能作为本轮新增多 Agent 测试数量的 fresh 证据 |
 | Python 编译 | `uv run python -m compileall -q src` | 2026-10-01 Task 13 fresh：退出码 0，无输出 | 当前 Python 源码可完成字节码编译 |
 | Python 全量 | `uv run pytest` | 2026-10-01 Task 13 规格修复 fresh：605 项通过、1 项跳过、2 个依赖弃用警告 | 既有生成链路与客服 ETL/RAG，加上完整 lifespan 关闭态隔离、同步/异步 single-flight 健康探针、Milvus 专用同步探针与硬超时、跨 loop 恢复、固定七键摘要、版本化评估集和严格 latency 契约 |
@@ -397,6 +420,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 - pytest 的 2 个 warning 分别来自 Starlette `anyio.abc.BlockingPortal` 别名弃用和 LangGraph `allowed_objects` 默认值将变更；本轮没有把依赖 warning 写成测试失败，也没有扩大范围修改依赖。
 - 受控本地 HTTP/进程测试不能证明真实 Uvicorn、代理、供应商限流、网络背压或 npm 包装层在所有平台上的行为。
 - 未实际运行的 Docker、真实模型、浏览器端到端和生产灰度，必须明确标记为未验证。
+- Task 14 没有自行启动 Spring、Python、前端或 Docker，也没有执行任何真实 Milvus、CloseAI、GPU、OSS、登录会话或 E2E 开关；这些步骤需要用户先提供隔离环境、进程内密钥和经审查的安全 helper/人工证据入口。
 
 ## 7. 当前人工与真实环境验收门
 
@@ -589,6 +613,7 @@ Vue 多 Agent 是 Python LangGraph 内部的功能开关，回滚时保持 LangG
 
 | 提交 | 内容 |
 | --- | --- |
+| 本提交（`test: add customer service RAG validation gate`） | 增加客服 RAG 默认 dry-run 安全验收门、双 PowerShell 静态测试和本轮 blocked/not-run 交接证据 |
 | `0d38ac7` | 使用 Milvus 专用同步 daemon 健康探针，隔离默认 executor 并收紧 lifespan 退出边界 |
 | `763240d` | 为一般 async provider/dependency 增加 single-flight 共享健康 Task 与有界 lifespan 清理 |
 | `e36c106` | 有界化同步健康探针、固定七项公开字段并严格校验 evaluator latency |
