@@ -444,7 +444,8 @@ def test_customer_service_index_delete_and_health(app_factory, auth_headers, set
     assert service.delete_calls[0]["lease"].operation_id == "op-2"
     assert service.delete_calls[0]["lease"].operation == "DELETE"
     assert health.json() == {
-        "enabled": True, "ready": True,
+        "enabled": True, "status": "healthy", "ready": True,
+        "degraded": False,
         "dependencies": {"etl": True, "milvus": True, "leaseValidator": True},
     }
     assert validator.pings == 1
@@ -464,7 +465,8 @@ def test_customer_service_health_degrades_when_lease_validator_is_unavailable(
         )
     assert response.status_code == 503
     assert response.json() == {
-        "enabled": True, "ready": False,
+        "enabled": True, "status": "degraded", "ready": False,
+        "degraded": True,
         "dependencies": {"etl": True, "milvus": True, "leaseValidator": False},
     }
     assert validator.pings == 1
@@ -826,8 +828,8 @@ async def test_startup_cancellation_drains_constructor_and_closes_created_client
 
 
 @pytest.mark.asyncio
-async def test_partial_startup_failure_closes_initialized_dependencies(
-    app_factory, settings,
+async def test_partial_customer_service_startup_failure_is_isolated_and_closes_resources(
+    app_factory, auth_headers, settings,
 ):
     settings.customer_service_rag_enabled = True
 
@@ -847,9 +849,19 @@ async def test_partial_startup_failure_closes_initialized_dependencies(
         knowledge_downloader=downloader, embedding_provider=embeddings,
         mutation_coordinator=coordinator, milvus_client_factory=failing_factory,
     )
-    context = app.router.lifespan_context(app)
-    with pytest.raises(MilvusKnowledgeError, match="KNOWLEDGE_VECTOR_STORE_UNAVAILABLE"):
-        await context.__aenter__()
+    with TestClient(app) as client:
+        ready = client.get("/health/ready")
+        health = client.get(
+            "/internal/v1/customer-service/health", headers=auth_headers,
+        )
+
+    assert ready.status_code == 200
+    assert health.status_code == 503
+    assert health.json()["status"] == "degraded"
+    assert health.json()["dependencies"] == {
+        "etl": False, "leaseValidator": False, "milvus": False,
+    }
+    assert "vendor body" not in health.text
     assert coordinator.closed
     assert embeddings.closed
     assert downloader.closed

@@ -882,10 +882,11 @@ async def test_partial_startup_failure_closes_loaded_reranker(app_factory, setti
         reranker=None, reranker_model_factory=lambda *_args, **_kwargs: model,
     )
     context = app.router.lifespan_context(app)
-    with pytest.raises(MilvusKnowledgeError) as captured:
-        await context.__aenter__()
-    assert str(captured.value) == "KNOWLEDGE_VECTOR_STORE_UNAVAILABLE"
+    await context.__aenter__()
+    assert app.state.customer_service_rag_service is None
+    assert app.state.customer_service_health_provider is not None
     assert model.closed
+    await context.__aexit__(None, None, None)
 
 
 def test_disabled_app_does_not_load_reranker(app_factory, settings):

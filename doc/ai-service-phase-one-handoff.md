@@ -28,7 +28,7 @@
 
 ### 客服机器人 RAG 实施进度
 
-- 设计提交 `b61fc07`、实施计划提交 `be6b5db` 已完成。当前 Task 1–12 已实现：Task 7 是 Spring/MySQL 知识文档管理、mutation coordinator 和 ETL worker，Task 8 已实现本地 GPU Reranker，Task 9 已实现带来源约束的 Grounded RAG 客服问答内部 API，Task 10 已实现 Spring 登录用户客服入口，Task 11 已在独立 Vue 前端仓库实现登录客服问答页面，Task 12 已实现 Vue 知识库管理页面；下述真实环境验收仍未声称完成。下一步按计划执行 Task 13：健康隔离、评估集和运行文档。
+- 设计提交 `b61fc07`、实施计划提交 `be6b5db` 已完成。当前 Task 1–13 已实现：Task 13 增加关闭态延迟导入、独立客服健康摘要、版本化 synthetic 评估集、离线指标 helper 和运维/回滚文档；下述真实环境验收仍未声称完成。
 - Task 1 的 MySQL 知识文档与 ETL outbox 表、对应 MyBatis-Flex 实体和 Mapper 已在提交 `8e18149` 完成。
 - Task 1 定向 schema 测试 2 项通过，`mvn clean -DskipTests compile` 通过，暂存差异的 `git diff --cached --check` 通过。仓库没有 `mvnw.cmd`，测试和编译使用系统 Maven；测试实际命令为 `mvn test -Dtest=CustomerServiceKnowledgeSchemaTest`。
 - 尚未在真实 MySQL 执行 DDL、CRUD 或并发任务认领验证，这些仍是人工待验收项。
@@ -76,6 +76,9 @@
 - 管理页支持分页文档列表、上传/替换、ETL 任务历史、重试索引、启用、停用、删除、全量 rebuild 和健康状态。上传和任务历史请求可取消；删除、替换、rebuild 等危险操作使用确认与操作 guard，分页删除最后一条后回退到有效末页，组件卸载时取消请求、销毁确认框并清理操作状态。
 - 页面只展示管理所需公开字段和脱敏错误码，不展示 OSS object key、签名 URL、lease proof、模型 prompt/reasoning、向量或 rerank 分数、供应商响应正文等敏感内部字段。
 - 2026-10-01 当前主 Agent fresh 执行 `node --test --experimental-strip-types tests/optimizePrompt.test.ts tests/generationStreamProgress.test.ts tests/previewRefreshCoordinator.test.ts tests/customerService.test.ts`，44/44 项通过；`npm run type-check`、`npm run build-only` 和 `git diff --check` 均通过。构建仅报告既有 dynamic-import/chunk warning，没有新增构建错误。该验证未启动真实浏览器、管理员会话、真实文件上传、OSS、MySQL、Python、CloseAI、Milvus 或 GPU。
+- Task 13 使客服 RAG 的可选依赖只在功能开关开启后的 lifespan 中导入和装配；关闭态不加载 Milvus、CloseAI Embedding、文档 ETL、Grounded RAG 或本地 Reranker。`/health/ready` 继续只反映 checkpoint/代码生成 readiness，认证的 `/internal/v1/customer-service/health` 独立返回 `disabled/healthy/degraded`、ready/degraded 布尔值和脱敏依赖摘要；同步探针在线程中执行并受总超时约束，未知异常 fail-safe。
+- Task 13 新增 `customer-service-rag-eval/v1` synthetic fixture 与注入 runner 的离线 evaluator。指标包括 Recall@8、MRR@3、NDCG@3、no-answer accuracy、citation validity 和延迟摘要；重复检索 ID 去重，重复/未知 citation 计为无效，空集不除零。fixture 包含中文同义改写、错别字、稳定错误码、无答案和“忽略规则/泄露系统提示”攻击样例，不含真实业务内容或秘密。
+- Task 13 自动化验证只使用 fake/injected provider；真实 OSS、CloseAI、Docker Milvus、GPU Reranker、浏览器和完整 E2E 截至 2026-10-01 均未执行，继续保持 pending。客服仍不使用 checkpoint，长期记忆和 `PostgresStore` 仍关闭。
 
 ### 已关闭的源码阻塞
 
@@ -363,20 +366,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 | Java 定向门禁 | `mvn "-Dtest=LangGraphAiGenerationGatewayTest,DelegatingAiGenerationGatewayTest,AppServiceGenerationCancellationTest,VueProjectBuilderTest" test` | 35 项通过 | HTTP 生命周期、灰度、取消、长构建治理 |
 | Java 网关 | `mvn "-Dtest=LangGraphAiGenerationGatewayTest" test` | 10 项通过 | HTTP/1.1、连接复用、大流隔离、空闲超时与恢复 |
 | Vue 构建器 | `mvn "-Dtest=VueProjectBuilderTest" test` | 16 项通过 | 构建错误边界、输出限制、父子进程回收 |
-| Java 生产编译 | `mvn clean -DskipTests compile` | 239 个生产源文件编译成功 | 当前生产源码可干净编译 |
-| Java 客服登录 API 定向门禁 | `mvn -q "-Dtest=CustomerServiceAnswerServiceTest,CustomerServiceControllerTest,CustomerServiceAiClientTest" test` | 2026-10-01 Task 10 fresh：20 项通过 | 登录路由、USER 限流声明、请求边界、requestId 关联、degraded/unknown fields/source 严格校验、公开 VO 脱敏与 HTTP 客户端边界 |
+| Java 生产编译 | `mvn clean -DskipTests compile` | 2026-10-01 Task 13 fresh：263 个生产源文件编译成功 | 当前生产源码可干净编译 |
+| Java 客服登录 API 定向门禁 | `mvn "-Dtest=CustomerServiceAnswerServiceTest,CustomerServiceControllerTest,CustomerServiceAiClientTest" test` | 2026-10-01 Task 13 fresh：20 项通过 | 登录路由、请求边界、requestId 关联、degraded/unknown fields/source 严格校验、公开 VO 脱敏与 HTTP 客户端边界 |
 | Redis opt-in 集成 | `powershell -NoProfile -File scripts/verify-langgraph-real-gate.ps1 -Execute -IncludeRedis` | 最近真实环境 6 项通过 | 跨客户端回放、唯一执行、冲突与不确定态 |
 | PowerShell 脚本 | `powershell -NoProfile -File scripts/ai-validation-scripts.tests.ps1` | Windows PowerShell 5.1 与 PowerShell 7 检查通过 | 验收脚本参数、认证和脱敏约束 |
 | 统一非外部数据库门禁 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1 -Execute` | 本轮未重新执行；此前历史基线为 6 个步骤通过 | 不能作为本轮新增多 Agent 测试数量的 fresh 证据 |
-| Python 编译 | `uv run python -m compileall -q src` | 2026-10-01 REBUILD 收尾 fresh：退出码 0，无输出 | 当前 Python 源码可完成字节码编译 |
-| Python 全量 | `uv run pytest -q` | 2026-10-01 Task 9 fresh：576 项通过、1 项跳过、2 个依赖弃用警告 | 既有生成与质量阶段，以及客服知识 ETL、Grounded RAG、REBUILD、lease、流式 staging、预算、回答 deadline 和取消清理契约 |
+| Python 编译 | `uv run python -m compileall -q src` | 2026-10-01 Task 13 fresh：退出码 0，无输出 | 当前 Python 源码可完成字节码编译 |
+| Python 全量 | `uv run pytest` | 2026-10-01 Task 13 最终 fresh：585 项通过、1 项跳过、2 个依赖弃用警告 | 既有生成链路与客服 ETL/RAG，加上健康隔离、版本化评估集和 evaluator 契约 |
+| Python Task 13 focused | `uv run pytest tests/test_customer_service_health.py tests/test_api.py -q` | 2026-10-01 fresh：102 项通过；另加 partial-reranker cleanup 定向后共 103 项通过 | 关闭态零 RAG 导入、启用态依赖失败隔离、鉴权/超时/脱敏摘要、离线指标和资源清理 |
 | Python 客服回答契约 | `uv run pytest -q tests/test_api.py -k customer_service_answer` | 2026-10-01 Task 10 fresh：5 项通过 | Python 内部问答请求、requestId 回传、字段边界、脱敏错误和 disabled/degraded 契约 |
 | Vue 客服、知识管理与既有纯函数测试 | `node --test --experimental-strip-types tests/optimizePrompt.test.ts tests/generationStreamProgress.test.ts tests/previewRefreshCoordinator.test.ts tests/customerService.test.ts` | 2026-10-01 Task 12 fresh：44/44 项通过 | 单轮问答，以及知识文件边界、LongValue、latest-wins、分页回退、请求取消、危险操作和卸载清理契约 |
 | Vue 类型检查 | `npm run type-check` | 2026-10-01 Task 12 fresh：退出码 0 | 客服页面、知识管理路由、API 与工具类型一致 |
 | Vue 生产构建 | `npm run build-only` | 2026-10-01 Task 12 fresh：退出码 0；仅有既有 dynamic-import/chunk warning | 前端生产 bundle 可构建，不代表真实浏览器或后端联调通过 |
 | Vue 差异检查 | `git diff --check` | 2026-10-01 Task 12 fresh：退出码 0 | 前端分支差异没有尾随空格等补丁错误 |
-| Python 锁文件 | `uv lock --check` | 2026-10-01 REBUILD 收尾 fresh：退出码 0，解析 150 个包 | `uv.lock` 与项目依赖声明一致 |
-| 文档空白检查 | `git diff --check` | 2026-10-01 REBUILD 收尾 fresh：退出码 0，仅有 Git 的 LF/CRLF 工作树提示 | 本轮文档差异没有尾随空格等补丁错误 |
+| Python 锁文件 | `uv lock --check` | 2026-10-01 Task 13 fresh：退出码 0，解析 150 个包 | `uv.lock` 与项目依赖声明一致 |
+| 文档空白检查 | `git diff --check` | 2026-10-01 Task 13 fresh：退出码 0，仅有 Git 的 LF/CRLF 工作树提示 | 本轮差异没有尾随空格等补丁错误 |
 | 当前工作树 | `git status --short` | 当前隔离分支工作树干净，最终提交后命令无输出 | 不把其他工作树或前端仓库状态混入本分支结论 |
 | 实现差异范围 | `git diff --stat b5c665d..HEAD` | 20 个文件，2510 行新增、57 行删除，覆盖 Python 生产代码、测试、配置和文档 | Vue 多 Agent 实施并非仅文档修改；范围以设计基线至当前 HEAD 的真实 Git 差异为准 |
 | PostgreSQL 默认门 | `uv run pytest tests/test_postgres_checkpoint_integration.py` | 默认 1 项跳过，不连接数据库 | opt-in 门禁不会误连本机数据库 |
@@ -384,6 +388,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 重要限制：
 
 - 全量 `mvn test` 存在历史实验代码和外部依赖相关失败，当前不能声明全量 Java 测试通过。
+- Task 13 全量 Python 的一次中间运行在 Windows spawn 压力下触发既有 reranker 固定 `sleep(0.03)` 时序断言；该单测独立复跑通过，随后最终完整 `uv run pytest` 585 项通过、1 项跳过。未为掩盖抖动修改业务实现或该测试同步策略。
 - 本轮统一入口未使用 `-IncludeRedis`；表中的真实 Redis 6 项来自最近一次独立真实环境验证，不冒充本轮 fresh 结果。
 - 本机 PostgreSQL Docker 容器存在，但独立数据库 `yu_ai_checkpoint` 尚未创建；本轮没有运行 `-IncludePostgres`，不得声称真实 PostgreSQL 集成通过。
 - Python 大部分测试使用 Fake Model、内存网关或 MockTransport，不能替代真实模型、真实 Spring 和完整前端验收。
@@ -582,6 +587,7 @@ Vue 多 Agent 是 Python LangGraph 内部的功能开关，回滚时保持 LangG
 
 | 提交 | 内容 |
 | --- | --- |
+| 本轮 Task 13 提交 | 增加客服健康隔离、版本化离线评估集和运行文档 |
 | `73885b8` | 拒绝客服回答中的失效来源和超限 chunk ID，补齐 Task 10 严格来源契约 |
 | `e61e5a8` | 加强客服登录 API 的 requestId、重复来源与匿名响应契约测试 |
 | `fa42253` | 覆盖客服登录 HTTP 路由 |
@@ -669,7 +675,7 @@ Vue 多 Agent 已于 2026-09-30 本地快进合并到 `dev`，合并后 HEAD 为
 - `doc/ai-service-langchain-langgraph-refactor-design.md`：重构架构与边界设计。
 - `docs/superpowers/specs/2026-09-29-postgres-checkpoint-design.md`：PostgreSQL checkpoint 迁移、故障语义和长期记忆决策。
 - `docs/superpowers/specs/2026-09-29-vue-multi-agent-quality-review-design.md`：Vue 三角色质量审查、F1 错误语义、repair 和 checkpoint 边界。
-- `docs/superpowers/specs/2026-09-30-customer-service-rag-design.md`：客服机器人、OSS 文档 ETL、CloseAI Embedding、Milvus、GPU Reranker、Task 9 Grounded RAG、Task 10 Spring 登录客服 API、Task 11 Vue 客服问答页面和 Task 12 Vue 知识库管理页面设计；Task 1–12 已实现，Task 7 的真实 MySQL/OSS/多实例、Task 8 的真实 GPU/POSIX/部署验收，以及 Task 9–12 的真实评估集/模型/Milvus/断连/浏览器/E2E 验收仍待完成。下一步为 Task 13 健康隔离、评估集和运行文档。
+- `docs/superpowers/specs/2026-09-30-customer-service-rag-design.md`：客服机器人、OSS 文档 ETL、CloseAI Embedding、Milvus、GPU Reranker 与 Task 1–13 设计；Task 1–13 已实现，真实 MySQL/OSS/CloseAI/Milvus/GPU/POSIX/多实例/断连/浏览器/E2E 和生产阈值验收仍待完成。
 - `docs/superpowers/specs/2026-09-21-bounded-streaming-simple-prompts-design.md`：有限流式窗口和简短优化提示设计。
 - `docs/superpowers/specs/2026-09-21-circular-preview-spinner-design.md`：预览加载图正圆修复设计。
 

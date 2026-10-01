@@ -117,6 +117,32 @@ Invoke-RestMethod http://localhost:8000/health/ready
 
 也兼容 `/internal/v1/health/live` 和 `/internal/v1/health/ready`。ready 检查会反映 PostgreSQL checkpoint 状态；数据库不可用时返回 503，`AI_SERVICE_CHECKPOINT_REQUIRED=true` 时启动探测或运行期写入失败会显式失败。
 
+客服 RAG 使用独立且需要 Bearer 鉴权的健康端点，不参与代码生成 readiness：
+
+```powershell
+$headers = @{ Authorization = "Bearer $env:AI_SERVICE_INTERNAL_BEARER_TOKEN" }
+Invoke-RestMethod http://localhost:8000/internal/v1/customer-service/health -Headers $headers
+```
+
+关闭 `AI_SERVICE_CUSTOMER_SERVICE_RAG_ENABLED` 时响应为 `disabled`，且不会导入、初始化或连接 Milvus、CloseAI、文档 ETL 与 GPU Reranker。开启后，任何依赖未知异常、超时或 false 状态都 fail-safe 为 `degraded` 和 HTTP 503；摘要只有稳定状态与布尔值，不包含连接 URI、密钥或异常正文。即使客服 degraded，`/health/ready` 仍只由 checkpoint 决定。
+
+### 4.1 客服 RAG 启动顺序
+
+1. 启动 MySQL、Redis 和私有 OSS，并完成 Spring 知识表迁移；真实凭据只放在部署环境。
+2. 启动 Spring，确认内部 lease health、管理员知识接口和 outbox worker 可用。Python 与 Spring 两个方向当前使用部署约定的共享 token，但示例和文档不得写真实值。
+3. 启动 Docker Milvus，确认数据库和 `AI_SERVICE_MILVUS_COLLECTION_ALIAS`。alias 是稳定读入口，物理 collection 是不可变版本；默认 retention 为 2 代。
+4. 配置 CloseAI Base URL/API Key、OSS HTTPS 白名单，以及 GPU Reranker model/device。`local_cross_encoder` 对同一 model+device 只允许一个 owner；多 Uvicorn worker 不能共享同一卡上的本地模型。
+5. 先保持客服开关关闭启动 Python，检查 `/health/ready`；再开启开关并滚动重启，检查认证客服 health。
+6. 使用管理员页面 `/admin/customer-service/knowledge` 上传 PDF/DOCX/MD/TXT。文件经 Spring 私有 OSS 和 outbox 进入 ETL；任务按 `PENDING -> RUNNING -> SUCCEEDED` 推进，可重试失败回到 `PENDING`，耗尽重试进入 `FAILED`。观察 `documentId/documentVersion/etlVersion/status/errorCode`，不要记录签名 URL 或 lease proof。
+7. ETL 成功后执行 synthetic smoke、no-answer、prompt-injection 与引用核对；真实环境结果需单独保存脱敏证据。
+
+### 4.2 错误、版本与回滚
+
+- ETL/DELETE/REBUILD 只按稳定 `error.code` 处理；常见类别为 `KNOWLEDGE_DOWNLOAD_*`、`KNOWLEDGE_DOCUMENT_*`、`KNOWLEDGE_EMBEDDING_*`、`KNOWLEDGE_MUTATION_LEASE_*`、`KNOWLEDGE_VECTOR_*` 和 `KNOWLEDGE_REBUILD_*`。HTTP 503/未知异常不能用供应商正文替代错误码。失败、超时或状态不确定时保留上一活动 alias。
+- rebuild 在 staging collection 完整写入和校验后才切 alias。默认保留当前和一个回滚版本；清理需要 retirement marker、alias ownership、grace window 和 scan budget 同时满足。禁止手工删除 current、protected 或 ownership 不明的 collection。
+- 客服故障优先设置 `AI_SERVICE_CUSTOMER_SERVICE_RAG_ENABLED=false` 并滚动重启 Python；确认代码生成 ready 正常。需要数据回滚时，仅将 alias 指向已经人工核验、模型和维度兼容的上一物理版本。
+- 长期记忆/`PostgresStore` 仍关闭；客服不使用 LangGraph checkpoint，不需要为了客服回滚修改或清理 checkpoint 表。
+
 ## 5. Docker 启动
 
 确保 Docker daemon 已启动，在 `ai-service` 目录执行：
@@ -162,6 +188,14 @@ Spring 工具幂等状态和成功结果保存在现有 Spring Redis 配置中�
 工具调用 Redis 幂等和 `VersionedArtifactStore` 的不可变版本发布幂等彼此独立。前者控制 Spring 工具调用的去重与冲突，后者控制产物 release、墓碑和活动指针。本轮没有运行真实 Redis 多 Spring 实例集成验证，上线前仍需覆盖该场景。
 
 ## 7. 测试与排查
+
+### 客服离线评估
+
+版本化 fixture 位于 `ai-service/tests/fixtures/customer_service_eval.json`，schema 为 `customer-service-rag-eval/v1`。它只包含 synthetic/non-sensitive 问题，并显式标出 expected document IDs 与 `expectedAnswerable`。评估 helper 位于 `ai_service.orchestration.customer_service_evaluation`，必须注入 fake/recorded runner；默认测试不连接 OSS、CloseAI、Milvus 或 GPU。
+
+指标为 Recall@8、MRR@3、NDCG@3、no-answer accuracy、citation validity，以及 count/min/p50/p95/max/mean latency。检索 ID 先按首次出现去重；重复或未知 citation 计为无效；0 样本返回 0。真实阈值只能在经审批的业务评估集和真实依赖环境中确定，synthetic fixture 不能用于设定生产 `RAG_MIN_RERANK_SCORE`。
+
+截至 2026-10-01，真实 OSS、CloseAI、Docker Milvus、GPU 模型加载/显存/吞吐、浏览器与 Spring-Python E2E 均未在本轮执行，状态保持 pending。
 
 ### 稳定灰度与第二阶段验收
 

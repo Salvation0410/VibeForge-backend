@@ -27,18 +27,13 @@ from ai_service.api.schemas import (
     RouteResponse,
 )
 from ai_service.infrastructure.checkpoint import CheckpointStore
-from ai_service.infrastructure.knowledge_download import KnowledgeDownloadError
-from ai_service.infrastructure.milvus_knowledge import (
-    KnowledgeMutationLease,
-    MilvusKnowledgeError,
-)
 from ai_service.models.base import GenerationModel
-from ai_service.models.embeddings import EmbeddingOutputError
 from ai_service.orchestration.cancellation import CancellationRegistry
 from ai_service.orchestration.active_generations import ActiveGenerationRegistry
 from ai_service.orchestration.workflow import GenerationWorkflow
-from ai_service.orchestration.document_etl import DocumentETLError
-from ai_service.orchestration.customer_service_rag import CustomerServiceRagError
+from ai_service.orchestration.customer_service_health import (
+    probe_customer_service_health,
+)
 
 
 _CUSTOMER_SERVICE_ERROR_STATUS = {
@@ -79,7 +74,21 @@ def _stable_error(code: str, *, status_code: int | None = None) -> JSONResponse:
     )
 
 
-def _lease(value) -> KnowledgeMutationLease:
+def _exception_code(error: Exception, fallback: str) -> str:
+    code = getattr(error, "code", None)
+    return code if isinstance(code, str) else fallback
+
+
+def _stable_exception(error: Exception, fallback: str) -> JSONResponse:
+    code = getattr(error, "code", None)
+    if isinstance(code, str):
+        return _stable_error(code)
+    return _stable_error(fallback, status_code=500)
+
+
+def _lease(value) -> Any:
+    from ai_service.infrastructure.milvus_knowledge import KnowledgeMutationLease
+
     return KnowledgeMutationLease(
         scope=value.scope,
         operation_id=value.operation_id,
@@ -133,6 +142,8 @@ async def _run_customer_service_answer(
                 raise asyncio.CancelledError
             return await answer_task
     except TimeoutError:
+        from ai_service.orchestration.customer_service_rag import CustomerServiceRagError
+
         raise CustomerServiceRagError("CUSTOMER_SERVICE_TIMEOUT") from None
     finally:
         await cancel_and_drain()
@@ -205,13 +216,8 @@ def register_routes(
                 chunk_count=result.chunk_count,
                 idempotent=result.idempotent,
             )
-        except (
-            KnowledgeDownloadError, DocumentETLError,
-            EmbeddingOutputError, MilvusKnowledgeError,
-        ) as error:
-            return _stable_error(error.code)
-        except Exception:
-            return _stable_error("KNOWLEDGE_ETL_FAILED", status_code=500)
+        except Exception as error:
+            return _stable_exception(error, "KNOWLEDGE_ETL_FAILED")
 
     @app.post(
         "/internal/v1/customer-service/knowledge:delete",
@@ -235,10 +241,8 @@ def register_routes(
                 document_version=body.document_version,
                 chunk_count=0,
             )
-        except MilvusKnowledgeError as error:
-            return _stable_error(error.code)
-        except Exception:
-            return _stable_error("KNOWLEDGE_ETL_FAILED", status_code=500)
+        except Exception as error:
+            return _stable_exception(error, "KNOWLEDGE_ETL_FAILED")
 
     @app.post(
         "/internal/v1/customer-service/knowledge:rebuild",
@@ -268,49 +272,25 @@ def register_routes(
                 document_count=result.document_count,
                 idempotent=result.idempotent,
             )
-        except (
-            KnowledgeDownloadError, DocumentETLError,
-            EmbeddingOutputError, MilvusKnowledgeError,
-        ) as error:
-            return _stable_error(error.code)
-        except Exception:
-            return _stable_error("KNOWLEDGE_REBUILD_FAILED", status_code=500)
+        except Exception as error:
+            return _stable_exception(error, "KNOWLEDGE_REBUILD_FAILED")
 
     @app.get(
         "/internal/v1/customer-service/health",
         dependencies=[Depends(require_internal_auth)],
     )
     async def customer_service_health(request: Request) -> JSONResponse:
-        service = getattr(request.app.state, "knowledge_etl_service", None)
-        coordinator = getattr(
-            request.app.state, "knowledge_mutation_coordinator", None
+        summary = await probe_customer_service_health(
+            getattr(request.app.state, "customer_service_health_provider", None),
+            enabled=customer_service_rag_enabled,
         )
-        milvus_ready = False
-        validator_ready = False
-        if customer_service_rag_enabled and service is not None:
-            ping = getattr(service, "ping", None)
-            try:
-                milvus_ready = True if ping is None else bool(await ping())
-            except Exception:
-                milvus_ready = False
-        if customer_service_rag_enabled and coordinator is not None:
-            ping = getattr(coordinator, "ping", None)
-            if ping is not None:
-                try:
-                    validator_ready = bool(await ping())
-                except Exception:
-                    validator_ready = False
-        ready_state = bool(service is not None and milvus_ready and validator_ready)
-        dependencies = {
-            "etl": service is not None,
-            "milvus": milvus_ready,
-            "leaseValidator": validator_ready,
-        }
         return JSONResponse({
-            "enabled": customer_service_rag_enabled,
-            "ready": ready_state,
-            "dependencies": dependencies,
-        }, status_code=200 if ready_state or not customer_service_rag_enabled else 503)
+            "enabled": summary.enabled,
+            "status": summary.status,
+            "ready": summary.ready,
+            "degraded": summary.degraded,
+            "dependencies": summary.dependencies,
+        }, status_code=200 if summary.ready or not summary.enabled else 503)
 
     @app.post(
         "/internal/v1/customer-service/answers",
@@ -343,10 +323,8 @@ def register_routes(
                 ) for item in result.sources[:3]],
                 degraded=result.degraded,
             )
-        except CustomerServiceRagError as error:
-            return _stable_error(error.code)
-        except Exception:
-            return _stable_error("CUSTOMER_SERVICE_UNAVAILABLE")
+        except Exception as error:
+            return _stable_error(_exception_code(error, "CUSTOMER_SERVICE_UNAVAILABLE"))
 
     @app.post(
         "/internal/v1/route",

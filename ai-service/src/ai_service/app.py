@@ -16,22 +16,14 @@ from ai_service.infrastructure.checkpoint import (
 )
 from ai_service.infrastructure.postgres_checkpoint import PostgresCheckpoint
 from ai_service.infrastructure.spring_tools import SpringToolGateway
-from ai_service.infrastructure.knowledge_download import KnowledgeDownloader
-from ai_service.infrastructure.milvus_knowledge import MilvusKnowledgeStore
-from ai_service.infrastructure.spring_knowledge_lease import SpringKnowledgeMutationCoordinator
 from ai_service.models.base import GenerationModel
-from ai_service.models.embeddings import CloseAIEmbeddingProvider
 from ai_service.models.openai_compatible import OpenAICompatibleModel
-from ai_service.models.reranker import (
-    DisabledReranker,
-    LocalCrossEncoderReranker,
-    RerankerProvider,
-)
 from ai_service.orchestration.cancellation import CancellationRegistry
 from ai_service.orchestration.active_generations import ActiveGenerationRegistry
 from ai_service.orchestration.workflow import GenerationWorkflow
-from ai_service.orchestration.document_etl import KnowledgeEtlService
-from ai_service.orchestration.customer_service_rag import CustomerServiceRagService
+from ai_service.orchestration.customer_service_health import (
+    CustomerServiceDependencyHealth,
+)
 
 
 async def _close_resource(resource: Any) -> None:
@@ -86,9 +78,10 @@ def create_app(
     mutation_coordinator: Any | None = None,
     milvus_client_factory: Any | None = None,
     lease_validation_transport: Any | None = None,
-    reranker: RerankerProvider | None = None,
+    reranker: Any | None = None,
     reranker_model_factory: Any | None = None,
     customer_service_rag_service: Any | None = None,
+    customer_service_health_provider: Any | None = None,
 ) -> FastAPI:
     """创建并组装 AI 服务。
 
@@ -135,67 +128,125 @@ def create_app(
 
         await checkpoint_store.start()
         resources: list[Any] = []
-        if config.customer_service_rag_enabled:
-            resources.extend(
-                resource for resource in (
-                    initial_etl_service, initial_mutation_coordinator, initial_reranker,
-                ) if resource is not None
-            )
         try:
-            if (
-                config.customer_service_rag_enabled
-                and config.rag_reranker_provider == "local_cross_encoder"
-                and initial_reranker is None
-            ):
-                factory_kwargs = {}
-                if reranker_model_factory is not None:
-                    factory_kwargs["model_factory"] = reranker_model_factory
-                local_reranker = await LocalCrossEncoderReranker.create(
-                    config, **factory_kwargs,
-                )
-                resources.append(local_reranker)
-                app.state.reranker = local_reranker
-            if config.customer_service_rag_enabled and app.state.knowledge_etl_service is None:
-                coordinator = mutation_coordinator or SpringKnowledgeMutationCoordinator(
-                    gateway_base_url=str(config.spring_gateway_base_url),
-                    bearer_token=config.spring_gateway_bearer_token,
-                    transport=lease_validation_transport,
-                )
-                resources.append(coordinator)
-                app.state.knowledge_mutation_coordinator = coordinator
-                downloader = knowledge_downloader or KnowledgeDownloader(config)
-                resources.append(downloader)
-                embeddings = embedding_provider or await _construct_in_thread(
-                    CloseAIEmbeddingProvider, config
-                )
-                resources.append(embeddings)
-                store_kwargs = {"mutation_coordinator": coordinator}
-                if milvus_client_factory is not None:
-                    store_kwargs["client_factory"] = milvus_client_factory
-                store = knowledge_store or await _construct_in_thread(
-                    MilvusKnowledgeStore, config, **store_kwargs
-                )
-                resources.append(store)
-                app.state.knowledge_etl_service = KnowledgeEtlService(
-                    config,
-                    downloader,
-                    embeddings,
-                    store,
-                    semaphore=asyncio.Semaphore(config.rag_etl_max_concurrency),
-                )
-                if app.state.customer_service_rag_service is None:
-                    app.state.customer_service_rag_service = CustomerServiceRagService(
-                        config, embeddings, store, app.state.reranker, generation_model,
+            try:
+                if config.customer_service_rag_enabled:
+                    # Import and initialize the optional stack behind the feature gate.
+                    from ai_service.infrastructure.knowledge_download import KnowledgeDownloader
+                    from ai_service.infrastructure.milvus_knowledge import MilvusKnowledgeStore
+                    from ai_service.infrastructure.spring_knowledge_lease import (
+                        SpringKnowledgeMutationCoordinator,
                     )
-            elif (
-                config.customer_service_rag_enabled
-                and app.state.customer_service_rag_service is None
-                and embedding_provider is not None
-                and knowledge_store is not None
-            ):
-                app.state.customer_service_rag_service = CustomerServiceRagService(
-                    config, embedding_provider, knowledge_store,
-                    app.state.reranker, generation_model,
+                    from ai_service.models.embeddings import CloseAIEmbeddingProvider
+                    from ai_service.models.reranker import (
+                        DisabledReranker,
+                        LocalCrossEncoderReranker,
+                    )
+                    from ai_service.orchestration.customer_service_rag import (
+                        CustomerServiceRagService,
+                    )
+                    from ai_service.orchestration.document_etl import KnowledgeEtlService
+
+                    if app.state.reranker is None:
+                        app.state.reranker = DisabledReranker()
+                    resources.extend(
+                        resource for resource in (
+                            initial_etl_service,
+                            initial_mutation_coordinator,
+                            initial_reranker,
+                        ) if resource is not None
+                    )
+                if (
+                    config.customer_service_rag_enabled
+                    and config.rag_reranker_provider == "local_cross_encoder"
+                    and initial_reranker is None
+                ):
+                    factory_kwargs = {}
+                    if reranker_model_factory is not None:
+                        factory_kwargs["model_factory"] = reranker_model_factory
+                    local_reranker = await LocalCrossEncoderReranker.create(
+                        config, **factory_kwargs,
+                    )
+                    resources.append(local_reranker)
+                    app.state.reranker = local_reranker
+                if (
+                    config.customer_service_rag_enabled
+                    and app.state.knowledge_etl_service is None
+                ):
+                    coordinator = mutation_coordinator or SpringKnowledgeMutationCoordinator(
+                        gateway_base_url=str(config.spring_gateway_base_url),
+                        bearer_token=config.spring_gateway_bearer_token,
+                        transport=lease_validation_transport,
+                    )
+                    resources.append(coordinator)
+                    app.state.knowledge_mutation_coordinator = coordinator
+                    downloader = knowledge_downloader or KnowledgeDownloader(config)
+                    resources.append(downloader)
+                    embeddings = embedding_provider or await _construct_in_thread(
+                        CloseAIEmbeddingProvider, config
+                    )
+                    resources.append(embeddings)
+                    store_kwargs = {"mutation_coordinator": coordinator}
+                    if milvus_client_factory is not None:
+                        store_kwargs["client_factory"] = milvus_client_factory
+                    store = knowledge_store or await _construct_in_thread(
+                        MilvusKnowledgeStore, config, **store_kwargs
+                    )
+                    resources.append(store)
+                    app.state.knowledge_etl_service = KnowledgeEtlService(
+                        config,
+                        downloader,
+                        embeddings,
+                        store,
+                        semaphore=asyncio.Semaphore(config.rag_etl_max_concurrency),
+                    )
+                    if app.state.customer_service_rag_service is None:
+                        app.state.customer_service_rag_service = CustomerServiceRagService(
+                            config, embeddings, store, app.state.reranker, generation_model,
+                        )
+                elif (
+                    config.customer_service_rag_enabled
+                    and app.state.customer_service_rag_service is None
+                    and embedding_provider is not None
+                    and knowledge_store is not None
+                ):
+                    app.state.customer_service_rag_service = CustomerServiceRagService(
+                        config, embedding_provider, knowledge_store,
+                        app.state.reranker, generation_model,
+                    )
+                if (
+                    config.customer_service_rag_enabled
+                    and app.state.customer_service_health_provider is None
+                ):
+                    app.state.customer_service_health_provider = (
+                        CustomerServiceDependencyHealth({
+                            "etl": lambda: app.state.knowledge_etl_service is not None,
+                            "milvus": app.state.knowledge_etl_service,
+                            "leaseValidator": app.state.knowledge_mutation_coordinator,
+                        })
+                    )
+            except Exception:
+                # Optional customer-service dependencies never take code generation down.
+                seen: set[int] = set()
+                for resource in reversed(resources):
+                    if id(resource) in seen:
+                        continue
+                    seen.add(id(resource))
+                    try:
+                        await _close_resource(resource)
+                    except Exception:
+                        pass
+                resources.clear()
+                app.state.knowledge_etl_service = None
+                app.state.knowledge_mutation_coordinator = None
+                app.state.reranker = None
+                app.state.customer_service_rag_service = None
+                app.state.customer_service_health_provider = (
+                    CustomerServiceDependencyHealth({
+                        "etl": lambda: False,
+                        "milvus": lambda: False,
+                        "leaseValidator": lambda: False,
+                    })
                 )
             yield
         finally:
@@ -233,8 +284,9 @@ def create_app(
     app.state.workflow = workflow
     app.state.knowledge_etl_service = initial_etl_service
     app.state.knowledge_mutation_coordinator = initial_mutation_coordinator
-    app.state.reranker = initial_reranker or DisabledReranker()
+    app.state.reranker = initial_reranker
     app.state.customer_service_rag_service = initial_rag_service
+    app.state.customer_service_health_provider = customer_service_health_provider
 
     register_routes(
         app,
