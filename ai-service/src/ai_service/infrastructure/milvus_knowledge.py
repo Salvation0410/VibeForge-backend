@@ -1934,6 +1934,15 @@ class MilvusKnowledgeStore:
         except Exception:
             return False
 
+    def health_ready_sync(self) -> bool:
+        """Probe the sync client directly for bounded daemon health checks."""
+
+        try:
+            self._client.list_collections(timeout=self._rpc_timeout)
+            return True
+        except Exception:
+            return False
+
     async def close(self) -> None:
         close = getattr(self._client, "close", None)
         if close is not None:

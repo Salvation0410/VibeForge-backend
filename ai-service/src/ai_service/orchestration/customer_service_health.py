@@ -21,6 +21,7 @@ REQUIRED_CUSTOMER_SERVICE_DEPENDENCIES = (
 
 _UNSET = object()
 _SYNC_PROBE_POLL_SECONDS = 0.005
+_SYNC_PROBE_COMPLETED_CACHE_LIMIT = len(REQUIRED_CUSTOMER_SERVICE_DEPENDENCIES)
 
 
 class CustomerServiceHealthProvider(Protocol):
@@ -141,7 +142,8 @@ class _AsyncSingleFlightProbe:
             current = self._run
             if current is not None:
                 if current.key != key or current.task.get_loop() is not loop:
-                    if current.task.done():
+                    previous_loop = current.task.get_loop()
+                    if current.task.done() or not previous_loop.is_running():
                         _consume_async_task(current.task)
                         self._run = None
                         current = None
@@ -187,13 +189,11 @@ class _AsyncSingleFlightProbe:
             current = self._run
             if current is None or (key is not _UNSET and current.key != key):
                 return
+            self._run = None
         task = current.task
         loop = task.get_loop()
         if task.done():
             _consume_async_task(task)
-            with self._lock:
-                if self._run is current:
-                    self._run = None
             return
         running_loop = asyncio.get_running_loop()
         if loop is running_loop:
@@ -201,12 +201,13 @@ class _AsyncSingleFlightProbe:
             done, _ = await asyncio.wait({task}, timeout=0.1)
             for completed in done:
                 _consume_async_task(completed)
-            if task.done():
-                with self._lock:
-                    if self._run is current:
-                        self._run = None
         elif loop.is_running():
             loop.call_soon_threadsafe(task.cancel)
+        else:
+            try:
+                task.cancel()
+            except RuntimeError:
+                pass
 
 
 @dataclass(slots=True)
@@ -227,12 +228,18 @@ class _DaemonSingleFlightProbe:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._run: _SyncProbeRun | None = None
+        self._completed: dict[object, _SyncProbeRun] = {}
 
     async def invoke(self, probe: Callable[[], Any], *, key: object = None) -> Any:
         with self._lock:
-            current = self._run
+            current = self._completed.pop(key, None)
+            if current is None:
+                current = self._run
             if current is not None and current.key != key:
                 if current.done.is_set():
+                    if len(self._completed) >= _SYNC_PROBE_COMPLETED_CACHE_LIMIT:
+                        self._completed.pop(next(iter(self._completed)))
+                    self._completed[current.key] = current
                     self._run = None
                     current = None
                 else:
@@ -361,6 +368,8 @@ async def _invoke_provider(provider: Any) -> Any:
     if not callable(probe):
         raise TypeError("customer service health provider requires probe")
     if inspect.iscoroutinefunction(probe):
+        if isinstance(provider, CustomerServiceDependencyHealth):
+            return await probe()
         runner, key = _provider_async_runner_for(provider)
         return await runner.invoke(probe, key=key)
     runner, key = _provider_sync_runner(provider)
@@ -385,7 +394,9 @@ async def _probe_dependency(
     key: object,
 ) -> bool:
     try:
-        probe = getattr(dependency, "health_ready", None)
+        probe = getattr(dependency, "health_ready_sync", None)
+        if probe is None:
+            probe = getattr(dependency, "health_ready", None)
         if probe is None:
             probe = getattr(dependency, "ping", None)
         if probe is None:

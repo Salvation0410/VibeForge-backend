@@ -76,7 +76,7 @@
 - 管理页支持分页文档列表、上传/替换、ETL 任务历史、重试索引、启用、停用、删除、全量 rebuild 和健康状态。上传和任务历史请求可取消；删除、替换、rebuild 等危险操作使用确认与操作 guard，分页删除最后一条后回退到有效末页，组件卸载时取消请求、销毁确认框并清理操作状态。
 - 页面只展示管理所需公开字段和脱敏错误码，不展示 OSS object key、签名 URL、lease proof、模型 prompt/reasoning、向量或 rerank 分数、供应商响应正文等敏感内部字段。
 - 2026-10-01 当前主 Agent fresh 执行 `node --test --experimental-strip-types tests/optimizePrompt.test.ts tests/generationStreamProgress.test.ts tests/previewRefreshCoordinator.test.ts tests/customerService.test.ts`，44/44 项通过；`npm run type-check`、`npm run build-only` 和 `git diff --check` 均通过。构建仅报告既有 dynamic-import/chunk warning，没有新增构建错误。该验证未启动真实浏览器、管理员会话、真实文件上传、OSS、MySQL、Python、CloseAI、Milvus 或 GPU。
-- Task 13 使客服 RAG 的可选依赖只在功能开关开启后的 lifespan 中导入和装配；关闭态完整 lifespan 不加载 Milvus、CloseAI Embedding、文档 ETL、Grounded RAG 或本地 Reranker。`/health/ready` 继续只反映 checkpoint/代码生成 readiness。认证客服 health 只输出 `answerService/answerModel/embedding/etl/leaseValidator/milvus/reranker` 固定七键，缺键或非严格布尔 true 按 false，额外键忽略；只有七项全部可用时 healthy。同步自定义探针使用单个 daemon single-flight worker；async provider/dependency 按实例与 dependency key 共享后台 Task，请求超时不会取消 cancellation-draining Milvus ping 或重复启动线程，完成结果可由下一轮消费。lifespan 关闭对后台 Task 做有界 cancel/drain；模型、Embedding 和 Reranker 只做无供应商调用的本地生命周期检查，异常/缺失 answer service 同样 fail-safe degraded。
+- Task 13 使客服 RAG 的可选依赖只在功能开关开启后的 lifespan 中导入和装配；关闭态完整 lifespan 不加载 Milvus、CloseAI Embedding、文档 ETL、Grounded RAG 或本地 Reranker。`/health/ready` 继续只反映 checkpoint/代码生成 readiness。认证客服 health 只输出 `answerService/answerModel/embedding/etl/leaseValidator/milvus/reranker` 固定七键，缺键或非严格布尔 true 按 false，额外键忽略；只有七项全部可用时 healthy。同步探针使用 daemon single-flight；Milvus 专用 `health_ready_sync()` 直接调用同步 client，不复用业务 `ping()` 的 cancellation-draining `_thread_call`，超时和 lifespan 退出都不等待 RPC、不占默认 executor、不留 ASGI pending Task。其他 async provider/dependency 按实例与 dependency key 共享 Task，dispose 先分离缓存再有界 cancel/drain，旧 loop 后的新 loop 可恢复；模型、Embedding 和 Reranker 只做无供应商调用的本地生命周期检查，异常/缺失 answer service 同样 fail-safe degraded。
 - Task 13 新增 `customer-service-rag-eval/v1` synthetic fixture 与注入 runner 的离线 evaluator。指标包括 Recall@8、MRR@3、NDCG@3、no-answer accuracy、citation validity 和延迟摘要；重复检索 ID 去重，重复/未知 citation 计为无效，空集不除零。latency 的不可转换值、字符串、bool、NaN、Inf 或负数会 fail-closed 抛出只含 entry id 的稳定 `ValueError`，不按 0 计入。fixture 包含中文同义改写、错别字、稳定错误码、无答案和“忽略规则/泄露系统提示”攻击样例，不含真实业务内容或秘密。
 - Task 13 自动化验证只使用 fake/injected provider；真实 OSS、CloseAI、Docker Milvus、GPU Reranker、浏览器和完整 E2E 截至 2026-10-01 均未执行，继续保持 pending。客服仍不使用 checkpoint，长期记忆和 `PostgresStore` 仍关闭。
 - Task 13 规格复审补强了 answer readiness：回答模型复用 `AI_SERVICE_MODEL_*` 配置的 `OpenAICompatibleModel`，CloseAI 仅用于 Embedding。生产模型、Embedding、Reranker 使用不发外部请求的本地生命周期检查；disabled 测试已在隔离子进程完整进入和退出 lifespan，并注入 fake model/gateway/checkpoint 验证代码生成 ready 不受影响。
@@ -373,8 +373,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 | PowerShell 脚本 | `powershell -NoProfile -File scripts/ai-validation-scripts.tests.ps1` | Windows PowerShell 5.1 与 PowerShell 7 检查通过 | 验收脚本参数、认证和脱敏约束 |
 | 统一非外部数据库门禁 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1 -Execute` | 本轮未重新执行；此前历史基线为 6 个步骤通过 | 不能作为本轮新增多 Agent 测试数量的 fresh 证据 |
 | Python 编译 | `uv run python -m compileall -q src` | 2026-10-01 Task 13 fresh：退出码 0，无输出 | 当前 Python 源码可完成字节码编译 |
-| Python 全量 | `uv run pytest` | 2026-10-01 Task 13 规格修复 fresh：604 项通过、1 项跳过、2 个依赖弃用警告 | 既有生成链路与客服 ETL/RAG，加上完整 lifespan 关闭态隔离、同步/异步 single-flight 健康探针、Milvus 硬超时与共享 Task、固定七键摘要、版本化评估集和严格 latency 契约 |
-| Python Task 13 focused | `uv run pytest tests/test_customer_service_health.py tests/test_api.py -q` | 2026-10-01 规格修复 fresh：121 项通过、2 个依赖弃用警告 | 关闭态完整 lifespan 零 RAG 导入、同步/异步 timeout/busy/recovery、真实 Milvus store 阻塞 fake client、默认 executor 隔离、固定七项依赖、严格 latency、鉴权和有界关闭清理 |
+| Python 全量 | `uv run pytest` | 2026-10-01 Task 13 规格修复 fresh：605 项通过、1 项跳过、2 个依赖弃用警告 | 既有生成链路与客服 ETL/RAG，加上完整 lifespan 关闭态隔离、同步/异步 single-flight 健康探针、Milvus 专用同步探针与硬超时、跨 loop 恢复、固定七键摘要、版本化评估集和严格 latency 契约 |
+| Python Task 13 focused | `uv run pytest tests/test_customer_service_health.py tests/test_api.py tests/test_milvus_knowledge.py -q` | 2026-10-01 规格修复 fresh：221 项通过、2 个依赖弃用警告 | 关闭态完整 lifespan 零 RAG 导入、2 秒阻塞 Milvus fake client、退出时限、同步/异步 timeout/busy/recovery、默认 executor 隔离、跨 loop dispose、固定七项依赖、严格 latency 和鉴权 |
 | Python 客服回答契约 | `uv run pytest -q tests/test_api.py -k customer_service_answer` | 2026-10-01 Task 10 fresh：5 项通过 | Python 内部问答请求、requestId 回传、字段边界、脱敏错误和 disabled/degraded 契约 |
 | Vue 客服、知识管理与既有纯函数测试 | `node --test --experimental-strip-types tests/optimizePrompt.test.ts tests/generationStreamProgress.test.ts tests/previewRefreshCoordinator.test.ts tests/customerService.test.ts` | 2026-10-01 Task 12 fresh：44/44 项通过 | 单轮问答，以及知识文件边界、LongValue、latest-wins、分页回退、请求取消、危险操作和卸载清理契约 |
 | Vue 类型检查 | `npm run type-check` | 2026-10-01 Task 12 fresh：退出码 0 | 客服页面、知识管理路由、API 与工具类型一致 |
@@ -389,7 +389,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 重要限制：
 
 - 全量 `mvn test` 存在历史实验代码和外部依赖相关失败，当前不能声明全量 Java 测试通过。
-- Task 13 初始实现的一次中间运行在 Windows spawn 压力下触发既有 reranker 固定 `sleep(0.03)` 时序断言；该单测独立复跑通过，异步健康 single-flight 复审修复后的最终完整 `uv run pytest` 604 项通过、1 项跳过。未为掩盖抖动修改业务实现或该测试同步策略。
+- Task 13 初始实现的一次中间运行在 Windows spawn 压力下触发既有 reranker 固定 `sleep(0.03)` 时序断言；该单测独立复跑通过，Milvus 专用同步健康探针复审修复后的最终完整 `uv run pytest` 605 项通过、1 项跳过。未为掩盖抖动修改业务实现或该测试同步策略。
 - 本轮统一入口未使用 `-IncludeRedis`；表中的真实 Redis 6 项来自最近一次独立真实环境验证，不冒充本轮 fresh 结果。
 - 本机 PostgreSQL Docker 容器存在，但独立数据库 `yu_ai_checkpoint` 尚未创建；本轮没有运行 `-IncludePostgres`，不得声称真实 PostgreSQL 集成通过。
 - Python 大部分测试使用 Fake Model、内存网关或 MockTransport，不能替代真实模型、真实 Spring 和完整前端验收。
@@ -588,6 +588,7 @@ Vue 多 Agent 是 Python LangGraph 内部的功能开关，回滚时保持 LangG
 
 | 提交 | 内容 |
 | --- | --- |
+| `763240d` | 为一般 async provider/dependency 增加共享健康 Task 与有界 lifespan 清理 |
 | `e36c106` | 限制同步健康探针 single-flight、固定七键摘要并严格校验 evaluator latency |
 | `912346f` | 补齐 answer readiness、七项必需依赖、稳定 reason 和完整 lifespan disabled 验证 |
 | `4291790` | 增加客服健康隔离、版本化离线评估集和运行文档 |

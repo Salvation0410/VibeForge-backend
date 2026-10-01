@@ -363,7 +363,7 @@ async def test_async_health_provider_dispose_cancels_background_probe_boundedly(
 
 @pytest.mark.asyncio
 async def test_milvus_health_timeout_is_hard_and_shared_across_concurrent_requests(
-    settings,
+    settings, app_factory,
 ):
     started = threading.Event()
     finished = threading.Event()
@@ -375,42 +375,50 @@ async def test_milvus_health_timeout_is_hard_and_shared_across_concurrent_reques
             self.active = 0
             self.max_active = 0
             self.lock = threading.Lock()
+            self.thread_names = []
+            self.thread_daemons = []
 
         def list_collections(self, **_kwargs):
             with self.lock:
                 self.calls += 1
                 self.active += 1
                 self.max_active = max(self.max_active, self.active)
+                self.thread_names.append(threading.current_thread().name)
+                self.thread_daemons.append(threading.current_thread().daemon)
             started.set()
             try:
-                release.wait()
+                release.wait(2)
                 return []
             finally:
                 with self.lock:
                     self.active -= 1
                 finished.set()
 
-    class AsyncHealthy:
-        async def health_ready(self):
-            return True
-
+    settings.customer_service_rag_enabled = True
     client = BlockingMilvusClient()
     store = MilvusKnowledgeStore(
         settings, client_factory=lambda **_kwargs: client,
     )
-    provider = CustomerServiceDependencyHealth({
-        "answerModel": AsyncHealthy(),
-        "answerService": AsyncHealthy(),
-        "embedding": AsyncHealthy(),
-        "etl": AsyncHealthy(),
-        "leaseValidator": AsyncHealthy(),
-        "milvus": store,
-        "reranker": AsyncHealthy(),
-    })
-    timer = threading.Timer(0.3, release.set)
-    timer.daemon = True
-    timer.start()
+    ping_calls = 0
+
+    async def forbidden_async_ping():
+        nonlocal ping_calls
+        ping_calls += 1
+        raise AssertionError("health must use health_ready_sync, not async ping")
+
+    store.ping = forbidden_async_ping
+    app = app_factory(
+        knowledge_etl_service=object(),
+        embedding_provider=object(),
+        knowledge_store=store,
+        mutation_coordinator=object(),
+        customer_service_rag_service=object(),
+    )
+    context = app.router.lifespan_context(app)
+    await context.__aenter__()
+    exited = False
     try:
+        provider = app.state.customer_service_health_provider
         started_at = time.perf_counter()
         summaries = await asyncio.gather(*(
             probe_customer_service_health(
@@ -421,12 +429,23 @@ async def test_milvus_health_timeout_is_hard_and_shared_across_concurrent_reques
         elapsed = time.perf_counter() - started_at
 
         assert elapsed < 0.2
-        assert {summary.reason for summary in summaries} == {
-            "CUSTOMER_SERVICE_HEALTH_PROBE_TIMEOUT"
-        }
+        reasons = {summary.reason for summary in summaries}
+        assert reasons.issubset({
+            "CUSTOMER_SERVICE_HEALTH_PROBE_TIMEOUT",
+            "CUSTOMER_SERVICE_HEALTH_PROBE_BUSY",
+        })
+        assert "CUSTOMER_SERVICE_HEALTH_PROBE_TIMEOUT" in reasons
         assert started.wait(0.1)
         assert client.calls == 1
         assert client.max_active == 1
+        assert ping_calls == 0
+        assert client.thread_daemons == [True]
+        assert all(not name.startswith("asyncio") for name in client.thread_names)
+
+        exit_started_at = time.perf_counter()
+        await context.__aexit__(None, None, None)
+        exited = True
+        assert time.perf_counter() - exit_started_at < 0.3
         assert await asyncio.wait_for(
             asyncio.to_thread(lambda: "default-executor-available"), timeout=0.1,
         ) == "default-executor-available"
@@ -447,7 +466,75 @@ async def test_milvus_health_timeout_is_hard_and_shared_across_concurrent_reques
         assert client.max_active == 1
     finally:
         release.set()
-        timer.cancel()
+        if not exited:
+            await context.__aexit__(None, None, None)
+
+
+def test_async_probe_runner_recovers_on_new_loop_after_incomplete_dispose():
+    release = None
+    stopped = None
+    calls = 0
+    loop_errors = []
+
+    class Provider:
+        async def probe(self):
+            nonlocal calls, release, stopped
+            calls += 1
+            if calls > 1:
+                return {
+                    name: True for name in (
+                        "answerModel", "answerService", "embedding", "etl",
+                        "leaseValidator", "milvus", "reranker",
+                    )
+                }
+            release = asyncio.Event()
+            stopped = asyncio.Event()
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                await release.wait()
+            finally:
+                stopped.set()
+
+    provider = Provider()
+    old_loop = asyncio.new_event_loop()
+    old_loop.set_exception_handler(
+        lambda _loop, context: loop_errors.append(context)
+    )
+
+    async def leave_incomplete_probe():
+        summary = await probe_customer_service_health(
+            provider, enabled=True, timeout_seconds=0.01,
+        )
+        assert summary.reason == "CUSTOMER_SERVICE_HEALTH_PROBE_TIMEOUT"
+        await dispose_customer_service_health_provider(provider)
+
+    try:
+        old_loop.run_until_complete(leave_incomplete_probe())
+
+        new_loop = asyncio.new_event_loop()
+        try:
+            recovered = new_loop.run_until_complete(
+                probe_customer_service_health(
+                    provider, enabled=True, timeout_seconds=0.2,
+                )
+            )
+        finally:
+            new_loop.close()
+
+        assert recovered.ready is True
+        assert calls == 2
+
+        release.set()
+        old_loop.run_until_complete(asyncio.wait_for(stopped.wait(), timeout=0.2))
+        old_loop.run_until_complete(asyncio.sleep(0))
+    finally:
+        old_loop.close()
+
+    assert not any(
+        "Task was destroyed" in str(context.get("message", ""))
+        for context in loop_errors
+    )
 
 
 @pytest.mark.asyncio
