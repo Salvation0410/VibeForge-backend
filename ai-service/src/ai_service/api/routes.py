@@ -287,6 +287,7 @@ def register_routes(
         return JSONResponse({
             "enabled": summary.enabled,
             "status": summary.status,
+            "reason": summary.reason,
             "ready": summary.ready,
             "degraded": summary.degraded,
             "dependencies": summary.dependencies,

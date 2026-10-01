@@ -60,6 +60,11 @@ class OpenAICompatibleModel:
             max_tokens=settings.model_max_tokens,
         )
 
+    def health_ready(self) -> bool:
+        """Report local adapter availability without sending a model request."""
+
+        return getattr(self, "_client", None) is not None
+
     async def route(self, prompt: str) -> str:
         """要求模型返回唯一的生成类型标识。"""
         response = await self._client.ainvoke(

@@ -72,6 +72,16 @@ class CustomerServiceRagService:
         self._reranker = reranker
         self._model = model
 
+    def health_ready(self) -> bool:
+        """Validate the local answer pipeline shape without provider calls."""
+
+        return all((
+            callable(getattr(self._embeddings, "embed_query", None)),
+            callable(getattr(self._store, "search", None)),
+            callable(getattr(self._reranker, "rerank", None)),
+            callable(getattr(self._model, "answer_customer_service", None)),
+        ))
+
     async def answer(self, question: str) -> CustomerServiceAnswer:
         normalized_question = question.strip() if isinstance(question, str) else ""
         if not normalized_question or len(normalized_question) > MAX_QUESTION_CHARS:

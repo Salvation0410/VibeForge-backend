@@ -23,6 +23,7 @@ from ai_service.orchestration.active_generations import ActiveGenerationRegistry
 from ai_service.orchestration.workflow import GenerationWorkflow
 from ai_service.orchestration.customer_service_health import (
     CustomerServiceDependencyHealth,
+    CustomerServiceDependencyReference,
 )
 
 
@@ -186,6 +187,7 @@ def create_app(
                         CloseAIEmbeddingProvider, config
                     )
                     resources.append(embeddings)
+                    app.state.customer_service_embedding_provider = embeddings
                     store_kwargs = {"mutation_coordinator": coordinator}
                     if milvus_client_factory is not None:
                         store_kwargs["client_factory"] = milvus_client_factory
@@ -193,6 +195,7 @@ def create_app(
                         MilvusKnowledgeStore, config, **store_kwargs
                     )
                     resources.append(store)
+                    app.state.customer_service_knowledge_store = store
                     app.state.knowledge_etl_service = KnowledgeEtlService(
                         config,
                         downloader,
@@ -220,9 +223,26 @@ def create_app(
                 ):
                     app.state.customer_service_health_provider = (
                         CustomerServiceDependencyHealth({
+                            "answerModel": CustomerServiceDependencyReference(
+                                lambda: app.state.model
+                            ),
+                            "answerService": CustomerServiceDependencyReference(
+                                lambda: app.state.customer_service_rag_service
+                            ),
+                            "embedding": CustomerServiceDependencyReference(
+                                lambda: app.state.customer_service_embedding_provider
+                            ),
                             "etl": lambda: app.state.knowledge_etl_service is not None,
-                            "milvus": app.state.knowledge_etl_service,
-                            "leaseValidator": app.state.knowledge_mutation_coordinator,
+                            "leaseValidator": CustomerServiceDependencyReference(
+                                lambda: app.state.knowledge_mutation_coordinator
+                            ),
+                            "milvus": CustomerServiceDependencyReference(
+                                lambda: app.state.customer_service_knowledge_store
+                                or app.state.knowledge_etl_service
+                            ),
+                            "reranker": CustomerServiceDependencyReference(
+                                lambda: app.state.reranker
+                            ),
                         })
                     )
             except Exception:
@@ -239,13 +259,19 @@ def create_app(
                 resources.clear()
                 app.state.knowledge_etl_service = None
                 app.state.knowledge_mutation_coordinator = None
+                app.state.customer_service_embedding_provider = None
+                app.state.customer_service_knowledge_store = None
                 app.state.reranker = None
                 app.state.customer_service_rag_service = None
                 app.state.customer_service_health_provider = (
                     CustomerServiceDependencyHealth({
+                        "answerModel": lambda: False,
+                        "answerService": lambda: False,
+                        "embedding": lambda: False,
                         "etl": lambda: False,
-                        "milvus": lambda: False,
                         "leaseValidator": lambda: False,
+                        "milvus": lambda: False,
+                        "reranker": lambda: False,
                     })
                 )
             yield
@@ -284,6 +310,8 @@ def create_app(
     app.state.workflow = workflow
     app.state.knowledge_etl_service = initial_etl_service
     app.state.knowledge_mutation_coordinator = initial_mutation_coordinator
+    app.state.customer_service_embedding_provider = embedding_provider
+    app.state.customer_service_knowledge_store = knowledge_store
     app.state.reranker = initial_reranker
     app.state.customer_service_rag_service = initial_rag_service
     app.state.customer_service_health_provider = customer_service_health_provider

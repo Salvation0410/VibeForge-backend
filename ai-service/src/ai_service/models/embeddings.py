@@ -161,6 +161,17 @@ class CloseAIEmbeddingProvider:
             output.extend(vectors)
         return output
 
+    def health_ready(self) -> bool:
+        """Check owned client lifecycle without calling the embedding provider."""
+
+        return bool(
+            self._http_client is not None
+            and self._http_async_client is not None
+            and not self._http_client.is_closed
+            and not self._http_async_client.is_closed
+            and getattr(self, "_client", None) is not None
+        )
+
     async def embed_query(self, text: str) -> list[float]:
         if not isinstance(text, str) or not text:
             raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_INVALID_INPUT")

@@ -328,9 +328,10 @@ $headers = @{ Authorization = "Bearer $env:AI_SERVICE_INTERNAL_BEARER_TOKEN" }
 Invoke-RestMethod http://localhost:8000/internal/v1/customer-service/health -Headers $headers
 ```
 
-- 开关关闭时返回 HTTP 200、`status=disabled`、`ready=false`，且不探测外部依赖。
-- 开关开启且依赖正常时返回 `status=healthy`；未知异常、超时、非法探针结果或任一依赖失败均 fail-safe 为 HTTP 503、`status=degraded`。
-- 响应只包含 `enabled/status/ready/degraded` 和依赖布尔值，不包含 URI、令牌、异常正文或供应商响应。
+- 开关关闭时返回 HTTP 200、`status=disabled`、`reason=CUSTOMER_SERVICE_RAG_DISABLED`、`ready=false`，且不探测外部依赖。
+- 只有 `answerService/answerModel/embedding/etl/leaseValidator/milvus/reranker` 七项全部为 true 才返回 `status=healthy`、`reason=CUSTOMER_SERVICE_READY`。answer service 缺失、模型适配器/Embedding/Reranker 本地生命周期不可用、Milvus/lease 探测失败都会返回 HTTP 503、`status=degraded`。
+- degraded 使用稳定脱敏 reason：依赖失败为 `CUSTOMER_SERVICE_DEPENDENCY_UNAVAILABLE`，整体探针超时或异常分别为 `CUSTOMER_SERVICE_HEALTH_PROBE_TIMEOUT`、`CUSTOMER_SERVICE_HEALTH_PROBE_FAILED`。模型、Embedding 和 Reranker 只检查本地对象/进程生命周期，不发送真实供应商请求；Milvus 与 lease validator 沿用现有轻量健康调用。
+- 响应只包含 `enabled/status/reason/ready/degraded` 和依赖布尔值，不包含 URI、令牌、异常正文或供应商响应。
 - 客服降级不会把 `/health/ready` 变为 503；该端点仍只反映 checkpoint/代码生成 readiness。
 
 ## 内部接口

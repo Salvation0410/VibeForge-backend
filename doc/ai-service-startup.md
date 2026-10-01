@@ -124,7 +124,7 @@ $headers = @{ Authorization = "Bearer $env:AI_SERVICE_INTERNAL_BEARER_TOKEN" }
 Invoke-RestMethod http://localhost:8000/internal/v1/customer-service/health -Headers $headers
 ```
 
-关闭 `AI_SERVICE_CUSTOMER_SERVICE_RAG_ENABLED` 时响应为 `disabled`，且不会导入、初始化或连接 Milvus、CloseAI、文档 ETL 与 GPU Reranker。开启后，任何依赖未知异常、超时或 false 状态都 fail-safe 为 `degraded` 和 HTTP 503；摘要只有稳定状态与布尔值，不包含连接 URI、密钥或异常正文。即使客服 degraded，`/health/ready` 仍只由 checkpoint 决定。
+关闭 `AI_SERVICE_CUSTOMER_SERVICE_RAG_ENABLED` 时响应为 `disabled`、`reason=CUSTOMER_SERVICE_RAG_DISABLED`，且不会导入、初始化或连接 Milvus、CloseAI、文档 ETL 与 GPU Reranker。开启后仅当 `answerService/answerModel/embedding/etl/leaseValidator/milvus/reranker` 全部为 true 才为 healthy；answer service 缺失或任一依赖 false 都以 `CUSTOMER_SERVICE_DEPENDENCY_UNAVAILABLE` 降级，探针超时/异常使用 `CUSTOMER_SERVICE_HEALTH_PROBE_TIMEOUT` / `CUSTOMER_SERVICE_HEALTH_PROBE_FAILED`。模型、Embedding 和 Reranker 只做本地生命周期检查，不发送真实模型请求；摘要不包含连接 URI、密钥或异常正文。即使客服 degraded，`/health/ready` 仍只由 checkpoint 决定。
 
 ### 4.1 客服 RAG 启动顺序
 

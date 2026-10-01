@@ -80,7 +80,9 @@ async def test_closeai_embeddings_initialize_once_and_batch_documents(settings):
     assert kwargs["base_url"] == "https://closeai.test/v1"
     assert isinstance(kwargs["http_client"], httpx.Client)
     assert isinstance(kwargs["http_async_client"], httpx.AsyncClient)
+    assert embeddings.health_ready()
     await embeddings.close()
+    assert not embeddings.health_ready()
     assert kwargs["http_client"].is_closed
     assert kwargs["http_async_client"].is_closed
 

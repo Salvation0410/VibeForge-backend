@@ -124,9 +124,11 @@ def detached_owner_worker(connection, config):
 @pytest.mark.asyncio
 async def test_disabled_reranker_preserves_order_and_source_scores():
     chunks = [chunk(0, score=0.8), chunk(1, score=0.4)]
+    reranker = DisabledReranker()
 
-    result = await DisabledReranker().rerank("deploy app", chunks, top_n=1)
+    result = await reranker.rerank("deploy app", chunks, top_n=1)
 
+    assert reranker.health_ready()
     assert result[0].chunk is chunks[0]
     assert result[0].score == 0.8
 
@@ -138,6 +140,7 @@ async def test_reranker_batches_pairs_normalizes_scores_and_returns_top_n():
     reranker = LocalCrossEncoderReranker(
         model=model, batch_size=2, timeout_seconds=1,
     )
+    assert reranker.health_ready()
 
     result = await reranker.rerank("deploy app", chunks, top_n=2)
 
@@ -150,6 +153,7 @@ async def test_reranker_batches_pairs_normalizes_scores_and_returns_top_n():
     assert result[1].score == pytest.approx(0.5)
     assert chunks[1].score == 0.5
     await reranker.close()
+    assert not reranker.health_ready()
 
 
 @pytest.mark.asyncio
@@ -494,6 +498,7 @@ async def test_spawn_worker_normal_result_and_unavailable_protocol():
     backend = await _ProcessReranker.start(
         settings, worker_target=protocol_test_worker, shutdown_seconds=0.1,
     )
+    assert backend.health_ready()
     try:
         result = await backend.rerank(
             "q", [chunk(0), chunk(1)], top_n=2,
@@ -504,6 +509,7 @@ async def test_spawn_worker_normal_result_and_unavailable_protocol():
         assert captured.value.code == "CUSTOMER_SERVICE_RERANKER_UNAVAILABLE"
     finally:
         await backend.close()
+    assert not backend.health_ready()
     assert backend._process_closed
 
 

@@ -3,7 +3,19 @@ from __future__ import annotations
 import asyncio
 import inspect
 from dataclasses import dataclass
+from collections.abc import Callable
 from typing import Any, Mapping, Protocol
+
+
+REQUIRED_CUSTOMER_SERVICE_DEPENDENCIES = frozenset({
+    "answerModel",
+    "answerService",
+    "embedding",
+    "etl",
+    "leaseValidator",
+    "milvus",
+    "reranker",
+})
 
 
 class CustomerServiceHealthProvider(Protocol):
@@ -14,6 +26,7 @@ class CustomerServiceHealthProvider(Protocol):
 class CustomerServiceHealthSummary:
     enabled: bool
     status: str
+    reason: str
     ready: bool
     degraded: bool
     dependencies: dict[str, bool]
@@ -36,9 +49,30 @@ class CustomerServiceDependencyHealth:
         return dict(zip(names, results, strict=True))
 
 
+class CustomerServiceDependencyReference:
+    """Resolve mutable application state at probe time."""
+
+    def __init__(self, getter: Callable[[], Any]) -> None:
+        self._getter = getter
+
+    async def health_ready(self) -> bool:
+        return await _probe_dependency(self._getter())
+
+
+def _failure_summary(provider: Any) -> Mapping[str, bool]:
+    try:
+        fallback = getattr(provider, "failure_summary", None)
+        raw = fallback() if callable(fallback) else {}
+    except Exception:
+        return {}
+    return raw if isinstance(raw, Mapping) else {}
+
+
 async def _probe_dependency(dependency: Any) -> bool:
     try:
-        probe = getattr(dependency, "ping", None)
+        probe = getattr(dependency, "health_ready", None)
+        if probe is None:
+            probe = getattr(dependency, "ping", None)
         if probe is None:
             probe = dependency if callable(dependency) else None
         if probe is None:
@@ -65,31 +99,51 @@ async def probe_customer_service_health(
     """Return a bounded, fail-safe summary containing only stable booleans."""
 
     if not enabled:
-        return CustomerServiceHealthSummary(False, "disabled", False, False, {})
+        return CustomerServiceHealthSummary(
+            False, "disabled", "CUSTOMER_SERVICE_RAG_DISABLED", False, False, {},
+        )
     if provider is None:
-        return CustomerServiceHealthSummary(True, "degraded", False, True, {})
+        return CustomerServiceHealthSummary(
+            True, "degraded", "CUSTOMER_SERVICE_HEALTH_NOT_CONFIGURED",
+            False, True, {},
+        )
+    reason: str | None = None
     try:
         async with asyncio.timeout(timeout_seconds):
             raw = await provider.probe()
     except asyncio.CancelledError:
         raise
+    except TimeoutError:
+        reason = "CUSTOMER_SERVICE_HEALTH_PROBE_TIMEOUT"
+        raw = _failure_summary(provider)
     except Exception:
-        fallback = getattr(provider, "failure_summary", None)
-        raw = fallback() if callable(fallback) else {}
+        reason = "CUSTOMER_SERVICE_HEALTH_PROBE_FAILED"
+        raw = _failure_summary(provider)
     if not isinstance(raw, Mapping):
-        fallback = getattr(provider, "failure_summary", None)
-        raw = fallback() if callable(fallback) else {}
-    if not isinstance(raw, Mapping):
-        raw = {}
-    dependencies = {
-        str(name): value is True
-        for name, value in sorted(raw.items())
+        reason = "CUSTOMER_SERVICE_HEALTH_PROBE_FAILED"
+        raw = _failure_summary(provider)
+    valid_items = [
+        (name, value)
+        for name, value in raw.items()
         if isinstance(name, str) and 0 < len(name) <= 64
+    ]
+    dependencies = {
+        name: value is True
+        for name, value in sorted(valid_items, key=lambda item: item[0])
     }
+    for name in REQUIRED_CUSTOMER_SERVICE_DEPENDENCIES:
+        dependencies.setdefault(name, False)
+    dependencies = dict(sorted(dependencies.items()))
     ready = bool(dependencies) and all(dependencies.values())
+    if reason is None:
+        reason = (
+            "CUSTOMER_SERVICE_READY"
+            if ready else "CUSTOMER_SERVICE_DEPENDENCY_UNAVAILABLE"
+        )
     return CustomerServiceHealthSummary(
         True,
         "healthy" if ready else "degraded",
+        reason,
         ready,
         not ready,
         dependencies,

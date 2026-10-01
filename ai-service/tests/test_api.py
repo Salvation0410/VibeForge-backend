@@ -414,6 +414,8 @@ def test_customer_service_index_delete_and_health(app_factory, auth_headers, set
     validator = FakeLeaseValidator()
     with TestClient(app_factory(
         knowledge_etl_service=service, mutation_coordinator=validator,
+        embedding_provider=object(),
+        customer_service_rag_service=FakeCustomerServiceRag(),
     )) as client:
         response = client.post(
             "/internal/v1/customer-service/knowledge:etl",
@@ -445,8 +447,12 @@ def test_customer_service_index_delete_and_health(app_factory, auth_headers, set
     assert service.delete_calls[0]["lease"].operation == "DELETE"
     assert health.json() == {
         "enabled": True, "status": "healthy", "ready": True,
-        "degraded": False,
-        "dependencies": {"etl": True, "milvus": True, "leaseValidator": True},
+        "reason": "CUSTOMER_SERVICE_READY", "degraded": False,
+        "dependencies": {
+            "answerModel": True, "answerService": True,
+            "embedding": True, "etl": True, "leaseValidator": True,
+            "milvus": True, "reranker": True,
+        },
     }
     assert validator.pings == 1
 
@@ -459,6 +465,8 @@ def test_customer_service_health_degrades_when_lease_validator_is_unavailable(
     with TestClient(app_factory(
         knowledge_etl_service=FakeKnowledgeEtlService(),
         mutation_coordinator=validator,
+        embedding_provider=object(),
+        customer_service_rag_service=FakeCustomerServiceRag(),
     )) as client:
         response = client.get(
             "/internal/v1/customer-service/health", headers=auth_headers,
@@ -466,8 +474,12 @@ def test_customer_service_health_degrades_when_lease_validator_is_unavailable(
     assert response.status_code == 503
     assert response.json() == {
         "enabled": True, "status": "degraded", "ready": False,
-        "degraded": True,
-        "dependencies": {"etl": True, "milvus": True, "leaseValidator": False},
+        "reason": "CUSTOMER_SERVICE_DEPENDENCY_UNAVAILABLE", "degraded": True,
+        "dependencies": {
+            "answerModel": True, "answerService": True,
+            "embedding": True, "etl": True, "leaseValidator": False,
+            "milvus": True, "reranker": True,
+        },
     }
     assert validator.pings == 1
 
@@ -494,13 +506,17 @@ def test_customer_service_health_degrades_on_spring_validator_failure(
     with TestClient(app_factory(
         knowledge_etl_service=FakeKnowledgeEtlService(),
         mutation_coordinator=coordinator,
+        embedding_provider=object(),
+        customer_service_rag_service=FakeCustomerServiceRag(),
     )) as client:
         response = client.get(
             "/internal/v1/customer-service/health", headers=auth_headers,
         )
     assert response.status_code == 503
     assert response.json()["dependencies"] == {
-        "etl": True, "milvus": True, "leaseValidator": False,
+        "answerModel": True, "answerService": True,
+        "embedding": True, "etl": True, "leaseValidator": False,
+        "milvus": True, "reranker": True,
     }
 
 
@@ -858,8 +874,11 @@ async def test_partial_customer_service_startup_failure_is_isolated_and_closes_r
     assert ready.status_code == 200
     assert health.status_code == 503
     assert health.json()["status"] == "degraded"
+    assert health.json()["reason"] == "CUSTOMER_SERVICE_DEPENDENCY_UNAVAILABLE"
     assert health.json()["dependencies"] == {
-        "etl": False, "leaseValidator": False, "milvus": False,
+        "answerModel": False, "answerService": False,
+        "embedding": False, "etl": False, "leaseValidator": False,
+        "milvus": False, "reranker": False,
     }
     assert "vendor body" not in health.text
     assert coordinator.closed

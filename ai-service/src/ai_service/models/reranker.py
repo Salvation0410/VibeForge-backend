@@ -176,6 +176,9 @@ class DisabledReranker:
     async def close(self) -> None:
         return None
 
+    def health_ready(self) -> bool:
+        return True
+
 
 class _SafeFlagRerankerAdapter:
     """Avoid FlagEmbedding 1.4.2's zero-batch infinite OOM retry loop."""
@@ -508,6 +511,13 @@ class _ProcessReranker:
             return self._process.is_alive()
         except (ValueError, AssertionError):
             return False
+
+    def health_ready(self) -> bool:
+        return (
+            self._state == "open"
+            and not self._connection_closed
+            and self._is_alive()
+        )
 
     def _finalize_process_handle(self) -> None:
         if self._process_closed or self._is_alive():
@@ -896,6 +906,9 @@ class LocalCrossEncoderReranker:
         ]
         ranked.sort(key=lambda value: (-value[1].score, value[0]))
         return [item for _, item in ranked[:top_n]]
+
+    def health_ready(self) -> bool:
+        return not self._closed and self._owner.get() is not None
 
     async def _close_once(self) -> None:
         async with self._close_lock:

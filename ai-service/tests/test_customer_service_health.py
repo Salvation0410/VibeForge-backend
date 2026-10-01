@@ -27,6 +27,7 @@ def test_disabled_app_does_not_import_customer_service_runtime_modules():
     script = r'''
 import importlib.abc
 import sys
+from fastapi.testclient import TestClient
 
 blocked = {
     "ai_service.infrastructure.knowledge_download",
@@ -48,6 +49,23 @@ sys.meta_path.insert(0, Blocker())
 from ai_service.app import create_app
 from ai_service.config import Settings
 
+calls = []
+
+class FakeModel:
+    pass
+
+class FakeGateway:
+    async def close(self):
+        calls.append("gateway-close")
+
+class FakeCheckpoint:
+    async def start(self):
+        calls.append("checkpoint-start")
+    async def close(self):
+        calls.append("checkpoint-close")
+    async def ping(self):
+        return True
+
 settings = Settings(
     internal_bearer_token="test-secret",
     spring_gateway_base_url="http://spring.test/api/internal/ai-tools",
@@ -55,9 +73,21 @@ settings = Settings(
     checkpoint_enabled=False,
     customer_service_rag_enabled=False,
 )
-app = create_app(settings=settings)
-assert app.state.customer_service_rag_service is None
+app = create_app(
+    settings=settings,
+    model=FakeModel(),
+    tool_gateway=FakeGateway(),
+    checkpoint=FakeCheckpoint(),
+    milvus_client_factory=lambda **_kwargs: calls.append("milvus"),
+    reranker_model_factory=lambda *_args, **_kwargs: calls.append("reranker"),
+)
+with TestClient(app) as client:
+    response = client.get("/health/ready")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready", "checkpoint": True}
+    assert app.state.customer_service_rag_service is None
 assert not any(name in sys.modules for name in blocked)
+assert calls == ["checkpoint-start", "checkpoint-close", "gateway-close"]
 '''
     completed = subprocess.run(
         [sys.executable, "-c", script],
@@ -87,6 +117,7 @@ def test_customer_service_health_is_disabled_and_does_not_affect_ready(
     assert response.json() == {
         "enabled": False,
         "status": "disabled",
+        "reason": "CUSTOMER_SERVICE_RAG_DISABLED",
         "ready": False,
         "degraded": False,
         "dependencies": {},
@@ -120,10 +151,15 @@ def test_customer_service_degradation_is_isolated_from_generation_readiness(
     assert response.json() == {
         "enabled": True,
         "status": "degraded",
+        "reason": "CUSTOMER_SERVICE_DEPENDENCY_UNAVAILABLE",
         "ready": False,
         "degraded": True,
         "dependencies": {
+            "answerModel": False,
+            "answerService": False,
             "embedding": False,
+            "etl": False,
+            "leaseValidator": False,
             "milvus": False,
             "reranker": True,
         },
@@ -163,7 +199,77 @@ async def test_health_probe_times_out_fail_safe_without_blocking_event_loop():
 
     assert heartbeat.is_set()
     assert summary.status == "degraded"
-    assert summary.dependencies == {"milvus": False}
+    assert summary.reason == "CUSTOMER_SERVICE_HEALTH_PROBE_TIMEOUT"
+    assert summary.dependencies == {
+        "answerModel": False, "answerService": False,
+        "embedding": False, "etl": False, "leaseValidator": False,
+        "milvus": False, "reranker": False,
+    }
+
+
+def test_customer_service_health_degrades_when_answer_service_is_missing(
+    app_factory, auth_headers, settings,
+):
+    settings.customer_service_rag_enabled = True
+
+    class Healthy:
+        def health_ready(self):
+            return True
+
+    class HealthyStore:
+        async def ping(self):
+            return True
+
+    app = app_factory(
+        knowledge_etl_service=HealthyStore(),
+        embedding_provider=Healthy(),
+        knowledge_store=HealthyStore(),
+        mutation_coordinator=Healthy(),
+        customer_service_rag_service=None,
+    )
+    with TestClient(app) as client:
+        app.state.customer_service_rag_service = None
+        response = client.get(
+            "/internal/v1/customer-service/health", headers=auth_headers,
+        )
+
+    assert response.status_code == 503
+    assert response.json()["reason"] == "CUSTOMER_SERVICE_DEPENDENCY_UNAVAILABLE"
+    assert response.json()["dependencies"]["answerService"] is False
+
+
+def test_customer_service_health_degrades_when_answer_dependency_is_unhealthy(
+    app_factory, auth_headers, settings,
+):
+    settings.customer_service_rag_enabled = True
+
+    class Dependency:
+        def __init__(self, ready=True):
+            self.ready = ready
+
+        def health_ready(self):
+            return self.ready
+
+    class Store(Dependency):
+        async def ping(self):
+            return self.ready
+
+    with TestClient(app_factory(
+        knowledge_etl_service=Store(),
+        embedding_provider=Dependency(),
+        knowledge_store=Store(),
+        mutation_coordinator=Dependency(),
+        customer_service_rag_service=Dependency(),
+        model=Dependency(ready=False),
+    )) as client:
+        response = client.get(
+            "/internal/v1/customer-service/health", headers=auth_headers,
+        )
+
+    assert response.status_code == 503
+    assert response.json()["reason"] == "CUSTOMER_SERVICE_DEPENDENCY_UNAVAILABLE"
+    assert response.json()["dependencies"]["answerService"] is True
+    assert response.json()["dependencies"]["answerModel"] is False
 
 
 def test_versioned_evaluation_fixture_is_synthetic_and_explicit():

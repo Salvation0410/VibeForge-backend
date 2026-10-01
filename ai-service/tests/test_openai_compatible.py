@@ -64,8 +64,9 @@ def test_model_client_receives_configured_max_tokens(monkeypatch):
         rag_answer_timeout_seconds=17,
     )
 
-    OpenAICompatibleModel(settings)
+    model = OpenAICompatibleModel(settings)
 
+    assert model.health_ready()
     assert captured["max_tokens"] == 4096
     assert "timeout" not in captured
     assert "request_timeout" not in captured
