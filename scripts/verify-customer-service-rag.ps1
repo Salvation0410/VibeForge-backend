@@ -122,7 +122,7 @@ function Test-ExactJsonObject {
     if ($null -eq $Value -or $Value.GetType().FullName -ne 'System.Management.Automation.PSCustomObject') {
         return $false
     }
-    $actual = @($Value.PSObject.Properties.Name | Sort-Object)
+    $actual = @($Value.PSObject.Properties | ForEach-Object { $_.Name } | Sort-Object)
     $required = @($RequiredFields | Sort-Object)
     return @(Compare-Object $required $actual).Count -eq 0
 }
@@ -189,6 +189,7 @@ function Invoke-HttpValidationStep {
         [string]$EvidenceReference,
         [hashtable]$Headers = @{},
         [scriptblock]$ValidateBody,
+        [int[]]$ExpectedStatusCodes = @(200),
         [switch]$StatusOnly
     )
 
@@ -226,7 +227,7 @@ function Invoke-HttpValidationStep {
                 -DurationMs $stopwatch.ElapsedMilliseconds `
                 -StableErrorCode 'HTTP_STATUS_UNEXPECTED' -EvidenceReference $EvidenceReference
         }
-        if ($statusCode -ne 200) {
+        if ($ExpectedStatusCodes -notcontains $statusCode) {
             return New-StepResult -Name $Name -Status 'failed' -ExitCode 1 `
                 -DurationMs $stopwatch.ElapsedMilliseconds `
                 -StableErrorCode 'HTTP_STATUS_UNEXPECTED' -EvidenceReference $EvidenceReference
@@ -238,7 +239,12 @@ function Invoke-HttpValidationStep {
                 -DurationMs $stopwatch.ElapsedMilliseconds `
                 -StableErrorCode $readResult.error -EvidenceReference $EvidenceReference
         }
-        $validation = & $ValidateBody $readResult.body
+        try { $validation = & $ValidateBody $readResult.body $statusCode }
+        catch {
+            return New-StepResult -Name $Name -Status 'failed' -ExitCode 1 `
+                -DurationMs $stopwatch.ElapsedMilliseconds `
+                -StableErrorCode 'HEALTH_RESPONSE_INVALID' -EvidenceReference $EvidenceReference
+        }
         if ($validation.status -ne 'passed') {
             return New-StepResult -Name $Name -Status $validation.status -ExitCode $validation.exitCode `
                 -DurationMs $stopwatch.ElapsedMilliseconds `
@@ -267,29 +273,33 @@ function Invoke-HttpValidationStep {
 }
 
 function Test-LiveBody {
-    param($Body)
+    param($Body, [int]$HttpStatus)
     if ((Test-ExactJsonObject -Value $Body -RequiredFields @('status')) -and
-        (Test-ExactType -Value $Body.status -ExpectedType ([string])) -and $Body.status -eq 'live') {
+        (Test-ExactType -Value $Body.status -ExpectedType ([string])) -and
+        $HttpStatus -eq 200 -and $Body.status -eq 'live') {
         return @{ status = 'passed'; exitCode = 0; stableErrorCode = $null }
     }
     return @{ status = 'failed'; exitCode = 1; stableErrorCode = 'HEALTH_RESPONSE_INVALID' }
 }
 
 function Test-ReadyBody {
-    param($Body)
+    param($Body, [int]$HttpStatus)
     if (-not (Test-ExactJsonObject -Value $Body -RequiredFields @('status', 'checkpoint')) -or
         -not (Test-ExactType -Value $Body.status -ExpectedType ([string])) -or
         -not (Test-ExactType -Value $Body.checkpoint -ExpectedType ([bool]))) {
         return @{ status = 'failed'; exitCode = 1; stableErrorCode = 'HEALTH_RESPONSE_INVALID' }
     }
-    if ($Body.status -eq 'ready' -and $Body.checkpoint -eq $true) {
+    if ($HttpStatus -eq 200 -and $Body.status -eq 'ready' -and $Body.checkpoint -eq $true) {
         return @{ status = 'passed'; exitCode = 0; stableErrorCode = $null }
     }
-    return @{ status = 'blocked'; exitCode = 2; stableErrorCode = 'SERVICE_NOT_READY' }
+    if ($HttpStatus -eq 503 -and $Body.status -eq 'not_ready' -and $Body.checkpoint -eq $false) {
+        return @{ status = 'blocked'; exitCode = 2; stableErrorCode = 'SERVICE_NOT_READY' }
+    }
+    return @{ status = 'failed'; exitCode = 1; stableErrorCode = 'HEALTH_RESPONSE_INVALID' }
 }
 
 function Test-CustomerHealthBody {
-    param($Body)
+    param($Body, [int]$HttpStatus)
     $topFields = @('enabled', 'status', 'reason', 'ready', 'degraded', 'dependencies')
     $dependencyFields = @(
         'answerService', 'answerModel', 'embedding', 'etl',
@@ -300,24 +310,41 @@ function Test-CustomerHealthBody {
         -not (Test-ExactType -Value $Body.reason -ExpectedType ([string])) -or
         -not (Test-ExactType -Value $Body.ready -ExpectedType ([bool])) -or
         -not (Test-ExactType -Value $Body.degraded -ExpectedType ([bool])) -or
-        -not (Test-ExactJsonObject -Value $Body.dependencies -RequiredFields $dependencyFields) -or
-        @($dependencyFields | Where-Object {
-            -not (Test-ExactType -Value $Body.dependencies.$_ -ExpectedType ([bool]))
-        }).Count -gt 0 -or $Body.reason -notmatch '^[A-Z][A-Z0-9_]{0,127}$') {
+        $null -eq $Body.dependencies -or
+        $Body.dependencies.GetType().FullName -ne 'System.Management.Automation.PSCustomObject' -or
+        $Body.reason -notmatch '^CUSTOMER_SERVICE_[A-Z0-9_]{1,100}$') {
         return @{ status = 'failed'; exitCode = 1; stableErrorCode = 'HEALTH_RESPONSE_INVALID' }
     }
     $reason = $Body.reason
-    if ($Body.enabled -eq $false) {
+    if ($HttpStatus -eq 200 -and $Body.enabled -eq $false -and
+        $Body.status -eq 'disabled' -and $Body.ready -eq $false -and
+        $Body.degraded -eq $false -and $reason -eq 'CUSTOMER_SERVICE_RAG_DISABLED' -and
+        (Test-ExactJsonObject -Value $Body.dependencies -RequiredFields @())) {
         return @{ status = 'blocked'; exitCode = 2; stableErrorCode = $reason }
+    }
+    $dependenciesValid = (Test-ExactJsonObject -Value $Body.dependencies `
+        -RequiredFields $dependencyFields) -and @($dependencyFields | Where-Object {
+            -not (Test-ExactType -Value $Body.dependencies.$_ -ExpectedType ([bool]))
+        }).Count -eq 0
+    if (-not $dependenciesValid) {
+        return @{ status = 'failed'; exitCode = 1; stableErrorCode = 'HEALTH_RESPONSE_INVALID' }
     }
     $allDependenciesReady = @($dependencyFields | Where-Object {
         $Body.dependencies.$_ -ne $true
     }).Count -eq 0
-    if ($Body.ready -eq $true -and $Body.degraded -eq $false -and
-        $Body.status -eq 'healthy' -and $allDependenciesReady) {
+    if ($HttpStatus -eq 200 -and $Body.enabled -eq $true -and
+        $Body.ready -eq $true -and $Body.degraded -eq $false -and
+        $Body.status -eq 'healthy' -and $reason -eq 'CUSTOMER_SERVICE_READY' -and
+        $allDependenciesReady) {
         return @{ status = 'passed'; exitCode = 0; stableErrorCode = $null }
     }
-    return @{ status = 'failed'; exitCode = 1; stableErrorCode = $reason }
+    if ($HttpStatus -eq 503 -and $Body.enabled -eq $true -and
+        $Body.ready -eq $false -and $Body.degraded -eq $true -and
+        $Body.status -eq 'degraded' -and -not $allDependenciesReady -and
+        $reason -notin @('CUSTOMER_SERVICE_READY', 'CUSTOMER_SERVICE_RAG_DISABLED')) {
+        return @{ status = 'blocked'; exitCode = 2; stableErrorCode = $reason }
+    }
+    return @{ status = 'failed'; exitCode = 1; stableErrorCode = 'HEALTH_RESPONSE_INVALID' }
 }
 
 function Resolve-ReportOutputPath {
@@ -503,6 +530,7 @@ $steps.Add((Invoke-HttpValidationStep -Name 'python-health-live' `
     -EvidenceReference 'runtime/python-health-live'))
 $steps.Add((Invoke-HttpValidationStep -Name 'python-health-ready' `
     -Uri "$PythonBaseUrl/health/ready" -ValidateBody ${function:Test-ReadyBody} `
+    -ExpectedStatusCodes @(200, 503) `
     -EvidenceReference 'runtime/python-health-ready'))
 $steps.Add((Invoke-HttpValidationStep -Name 'spring-http-prerequisite' `
     -Uri $SpringBaseUrl -StatusOnly -EvidenceReference 'runtime/spring-http-status'))
@@ -528,6 +556,7 @@ if ([string]::IsNullOrWhiteSpace($internalToken)) {
     $steps.Add((Invoke-HttpValidationStep -Name 'authenticated-customer-service-health' `
         -Uri $customerHealthUri -Headers $headers `
         -ValidateBody ${function:Test-CustomerHealthBody} `
+        -ExpectedStatusCodes @(200, 503) `
         -EvidenceReference 'runtime/customer-service-health'))
     $headers.Clear()
     $internalToken = $null

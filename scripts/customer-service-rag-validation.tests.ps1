@@ -133,13 +133,19 @@ public sealed class CustomerRagGateTestServer : IDisposable {
                 finally { try { context.Response.Close(); } catch { } }
                 return;
             }
+            int readyStatus = 200;
             string ready = "{\"status\":\"ready\",\"checkpoint\":true}";
+            if (scenario == "ready-not-ready") {
+                readyStatus = 503;
+                ready = "{\"status\":\"not_ready\",\"checkpoint\":false}";
+            }
+            else if (scenario == "ready-empty") ready = "{}";
             if (scenario == "ready-string-true") ready = "{\"status\":\"ready\",\"checkpoint\":\"true\"}";
             else if (scenario == "ready-number") ready = "{\"status\":\"ready\",\"checkpoint\":1}";
             else if (scenario == "ready-string-false") ready = "{\"status\":\"ready\",\"checkpoint\":\"false\"}";
             else if (scenario == "ready-array") ready = "[]";
             else if (scenario == "ready-extra") ready = "{\"status\":\"ready\",\"checkpoint\":true,\"extra\":1}";
-            Write(context, 200, ready, false);
+            Write(context, readyStatus, ready, false);
             return;
         }
         if (path.EndsWith("/internal/v1/customer-service/health")) {
@@ -151,16 +157,28 @@ public sealed class CustomerRagGateTestServer : IDisposable {
             }
             string dependencies = "{\"answerService\":true,\"answerModel\":true,\"embedding\":true," +
                 "\"etl\":true,\"leaseValidator\":true,\"milvus\":true,\"reranker\":true}";
+            int healthStatus = 200;
             string health = "{\"enabled\":true,\"status\":\"healthy\",\"reason\":\"CUSTOMER_SERVICE_READY\"," +
                 "\"ready\":true,\"degraded\":false,\"dependencies\":" + dependencies + "}";
-            if (scenario == "customer-string-true") health = health.Replace("\"enabled\":true", "\"enabled\":\"true\"");
+            if (scenario == "customer-disabled") {
+                health = "{\"enabled\":false,\"status\":\"disabled\",\"reason\":\"CUSTOMER_SERVICE_RAG_DISABLED\"," +
+                    "\"ready\":false,\"degraded\":false,\"dependencies\":{}}";
+            }
+            else if (scenario == "customer-degraded") {
+                healthStatus = 503;
+                health = "{\"enabled\":true,\"status\":\"degraded\",\"reason\":\"CUSTOMER_SERVICE_DEPENDENCY_UNAVAILABLE\"," +
+                    "\"ready\":false,\"degraded\":true,\"dependencies\":" +
+                    dependencies.Replace("\"milvus\":true", "\"milvus\":false") + "}";
+            }
+            else if (scenario == "customer-empty") health = "{}";
+            else if (scenario == "customer-string-true") health = health.Replace("\"enabled\":true", "\"enabled\":\"true\"");
             else if (scenario == "customer-number") health = health.Replace("\"ready\":true", "\"ready\":1");
             else if (scenario == "customer-string-false") health = health.Replace("\"degraded\":false", "\"degraded\":\"false\"");
             else if (scenario == "customer-array") health = "[]";
             else if (scenario == "customer-extra") health = health.Substring(0, health.Length - 1) + ",\"extra\":1}";
             else if (scenario == "customer-dependency-string") health = health.Replace("\"milvus\":true", "\"milvus\":\"true\"");
             else if (scenario == "customer-dependency-extra") health = health.Replace("\"reranker\":true", "\"reranker\":true,\"extra\":true");
-            Write(context, 200, health, false);
+            Write(context, healthStatus, health, false);
             return;
         }
         Write(context, 404, "not-found-secret", false);
@@ -339,7 +357,8 @@ try {
     if ($server.RedirectTargetCount -ne 0) { throw 'Status redirects must not be followed.' }
 
     foreach ($scenarioName in @(
-        'ready-string-true', 'ready-number', 'ready-string-false', 'ready-array', 'ready-extra'
+        'ready-string-true', 'ready-number', 'ready-string-false', 'ready-array',
+        'ready-extra', 'ready-empty'
     )) {
         $result = Invoke-Scenario -Name $scenarioName -Scenario $scenarioName
         $step = @($result.Report.steps | Where-Object { $_.name -eq 'python-health-ready' })[0]
@@ -349,9 +368,16 @@ try {
         }
     }
 
+    $notReady = Invoke-Scenario -Name 'ready-not-ready' -Scenario 'ready-not-ready'
+    $notReadyStep = @($notReady.Report.steps | Where-Object { $_.name -eq 'python-health-ready' })[0]
+    if ($notReady.ExitCode -ne 2 -or $notReadyStep.status -ne 'blocked' -or
+        $notReadyStep.stableErrorCode -ne 'SERVICE_NOT_READY') {
+        throw 'HTTP 503 exact not_ready response must be blocked/SERVICE_NOT_READY.'
+    }
+
     foreach ($scenarioName in @(
         'customer-string-true', 'customer-number', 'customer-string-false',
-        'customer-array', 'customer-extra', 'customer-dependency-string',
+        'customer-array', 'customer-extra', 'customer-empty', 'customer-dependency-string',
         'customer-dependency-extra'
     )) {
         $result = Invoke-Scenario -Name $scenarioName -Scenario $scenarioName -UseToken $true
@@ -361,6 +387,36 @@ try {
             throw "$scenarioName must fail strict customer health JSON validation."
         }
     }
+
+    $disabled = Invoke-Scenario -Name 'customer-disabled' -Scenario 'customer-disabled' -UseToken $true
+    $disabledStep = @($disabled.Report.steps | Where-Object { $_.name -eq 'authenticated-customer-service-health' })[0]
+    if ($disabled.ExitCode -ne 2 -or $disabledStep.status -ne 'blocked' -or
+        $disabledStep.stableErrorCode -ne 'CUSTOMER_SERVICE_RAG_DISABLED') {
+        throw 'HTTP 200 exact disabled health with empty dependencies must be blocked.'
+    }
+    $degraded = Invoke-Scenario -Name 'customer-degraded' -Scenario 'customer-degraded' -UseToken $true
+    $degradedStep = @($degraded.Report.steps | Where-Object { $_.name -eq 'authenticated-customer-service-health' })[0]
+    if ($degraded.ExitCode -ne 2 -or $degradedStep.status -ne 'blocked' -or
+        $degradedStep.stableErrorCode -ne 'CUSTOMER_SERVICE_DEPENDENCY_UNAVAILABLE') {
+        throw 'HTTP 503 exact degraded health must preserve its stable blocked reason.'
+    }
+
+    $validatorWrapper = Join-Path $tempRoot 'validator-throws.ps1'
+    @'
+param([string]$GatePath, [string]$ReadyUri)
+$ErrorActionPreference = 'Stop'
+. $GatePath | Out-Null
+function Throwing-HealthValidator { throw 'validator-internal-secret' }
+$result = Invoke-HttpValidationStep -Name 'validator-throws' -Uri $ReadyUri `
+    -ValidateBody ${function:Throwing-HealthValidator} -ExpectedStatusCodes @(200) `
+    -EvidenceReference 'runtime/validator-throws'
+if ($result.status -ne 'failed' -or $result.stableErrorCode -ne 'HEALTH_RESPONSE_INVALID') {
+    throw "Validator exception escaped semantic mapping: $($result.status)/$($result.stableErrorCode)"
+}
+'@ | Set-Content -Encoding UTF8 -LiteralPath $validatorWrapper
+    & $shellPath -NoProfile -ExecutionPolicy Bypass -File $validatorWrapper `
+        $scriptPath "http://127.0.0.1:$port/valid/python/health/ready" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Validator exceptions must map to HEALTH_RESPONSE_INVALID.' }
 
     $beforeRedirect = $server.RedirectTargetCount
     $authRedirect = Invoke-Scenario -Name 'customer-redirect' -Scenario 'customer-redirect' -UseToken $true
