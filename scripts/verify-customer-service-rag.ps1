@@ -136,10 +136,19 @@ function Invoke-HttpValidationStep {
             -DurationMs $stopwatch.ElapsedMilliseconds -StableErrorCode $null `
             -EvidenceReference $EvidenceReference
     } catch {
-        if ($StatusOnly -and $null -ne (Get-HttpStatusCode -ErrorRecord $_)) {
-            return New-StepResult -Name $Name -Status 'passed' -ExitCode 0 `
-                -DurationMs $stopwatch.ElapsedMilliseconds -StableErrorCode $null `
-                -EvidenceReference $EvidenceReference
+        if ($StatusOnly) {
+            $statusCode = Get-HttpStatusCode -ErrorRecord $_
+            if ($null -ne $statusCode) {
+                if ($statusCode -ge 200 -and $statusCode -lt 400) {
+                    return New-StepResult -Name $Name -Status 'passed' -ExitCode 0 `
+                        -DurationMs $stopwatch.ElapsedMilliseconds -StableErrorCode $null `
+                        -EvidenceReference $EvidenceReference
+                }
+                return New-StepResult -Name $Name -Status 'failed' -ExitCode 1 `
+                    -DurationMs $stopwatch.ElapsedMilliseconds `
+                    -StableErrorCode 'HTTP_STATUS_UNEXPECTED' `
+                    -EvidenceReference $EvidenceReference
+            }
         }
         $stableCode = Get-StableHttpFailure -ErrorRecord $_
         $status = if ($stableCode -in @('SERVICE_UNREACHABLE', 'HTTP_TIMEOUT', 'SERVICE_NOT_READY')) {
