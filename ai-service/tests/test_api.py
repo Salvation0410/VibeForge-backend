@@ -205,6 +205,23 @@ def test_customer_service_answer_auth_disabled_and_question_bounds(
     assert service.questions == []
 
 
+def test_customer_service_answer_request_contract_requires_request_id_and_rejects_extra(
+    app_factory, auth_headers, settings,
+):
+    settings.customer_service_rag_enabled = True
+    with TestClient(app_factory(
+        customer_service_rag_service=FakeCustomerServiceRag(),
+        knowledge_etl_service=FakeKnowledgeEtlService(),
+    )) as client:
+        missing = client.post("/internal/v1/customer-service/answers",
+                              json={"question": "hello"}, headers=auth_headers)
+        extra = client.post("/internal/v1/customer-service/answers",
+                            json={"requestId": "req-extra", "question": "hello", "score": 1},
+                            headers=auth_headers)
+    assert missing.status_code == 422
+    assert extra.status_code == 422
+
+
 def test_customer_service_answer_response_is_bounded_and_has_no_raw_fields(
     app_factory, auth_headers, settings,
 ):
