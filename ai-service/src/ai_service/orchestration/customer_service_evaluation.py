@@ -132,7 +132,10 @@ async def evaluate_customer_service(
     citation_validity = [
         _citations_valid(entry, result) for entry, result in results
     ]
-    latencies = [_valid_latency(result.latency_ms) for _, result in results]
+    latencies = [
+        _valid_latency(result.latency_ms, entry.id)
+        for entry, result in results
+    ]
     return EvaluationReport(
         parsed.schema_version,
         parsed.dataset_version,
@@ -201,12 +204,20 @@ def _citations_valid(entry: EvaluationEntry, result: EvaluationResult) -> bool:
     )
 
 
-def _valid_latency(value: float) -> float:
+def _valid_latency(value: float, entry_id: str) -> float:
     try:
-        number = float(value)
+        number = (
+            float(value)
+            if not isinstance(value, bool) and isinstance(value, (int, float))
+            else math.nan
+        )
     except (TypeError, ValueError, OverflowError):
-        return 0.0
-    return number if math.isfinite(number) and number >= 0 else 0.0
+        number = math.nan
+    if not math.isfinite(number) or number < 0:
+        raise ValueError(
+            f"invalid latency_ms for evaluation entry {entry_id}"
+        )
+    return number
 
 
 def _mean(values: Sequence[float | bool]) -> float:

@@ -124,14 +124,14 @@ $headers = @{ Authorization = "Bearer $env:AI_SERVICE_INTERNAL_BEARER_TOKEN" }
 Invoke-RestMethod http://localhost:8000/internal/v1/customer-service/health -Headers $headers
 ```
 
-关闭 `AI_SERVICE_CUSTOMER_SERVICE_RAG_ENABLED` 时响应为 `disabled`、`reason=CUSTOMER_SERVICE_RAG_DISABLED`，且不会导入、初始化或连接 Milvus、CloseAI、文档 ETL 与 GPU Reranker。开启后仅当 `answerService/answerModel/embedding/etl/leaseValidator/milvus/reranker` 全部为 true 才为 healthy；answer service 缺失或任一依赖 false 都以 `CUSTOMER_SERVICE_DEPENDENCY_UNAVAILABLE` 降级，探针超时/异常使用 `CUSTOMER_SERVICE_HEALTH_PROBE_TIMEOUT` / `CUSTOMER_SERVICE_HEALTH_PROBE_FAILED`。模型、Embedding 和 Reranker 只做本地生命周期检查，不发送真实模型请求；摘要不包含连接 URI、密钥或异常正文。即使客服 degraded，`/health/ready` 仍只由 checkpoint 决定。
+关闭 `AI_SERVICE_CUSTOMER_SERVICE_RAG_ENABLED` 时响应为 `disabled`、`reason=CUSTOMER_SERVICE_RAG_DISABLED`，且不会导入、初始化或连接 Milvus、CloseAI Embedding、文档 ETL 与 GPU Reranker。开启后仅当 `answerService/answerModel/embedding/etl/leaseValidator/milvus/reranker` 全部为严格布尔 true 才为 healthy；缺键和其他类型按 false，额外 provider 键被忽略且不输出。answer service 缺失或任一依赖 false 都以 `CUSTOMER_SERVICE_DEPENDENCY_UNAVAILABLE` 降级，探针超时、共享 fallback worker 正忙、异常分别使用 `CUSTOMER_SERVICE_HEALTH_PROBE_TIMEOUT` / `CUSTOMER_SERVICE_HEALTH_PROBE_BUSY` / `CUSTOMER_SERVICE_HEALTH_PROBE_FAILED`。同步自定义探针由单个 daemon single-flight worker 执行，不占用 asyncio 默认 executor；旧探针仍在途时后续轮询不会创建新线程。回答模型复用 `AI_SERVICE_MODEL_*` 配置的 `OpenAICompatibleModel`，CloseAI 只提供 Embedding；模型、Embedding 和 Reranker 只做本地生命周期检查，不发送真实模型请求。摘要不包含连接 URI、密钥或异常正文。即使客服 degraded，`/health/ready` 仍只由 checkpoint 决定。
 
 ### 4.1 客服 RAG 启动顺序
 
 1. 启动 MySQL、Redis 和私有 OSS，并完成 Spring 知识表迁移；真实凭据只放在部署环境。
 2. 启动 Spring，确认内部 lease health、管理员知识接口和 outbox worker 可用。Python 与 Spring 两个方向当前使用部署约定的共享 token，但示例和文档不得写真实值。
 3. 启动 Docker Milvus，确认数据库和 `AI_SERVICE_MILVUS_COLLECTION_ALIAS`。alias 是稳定读入口，物理 collection 是不可变版本；默认 retention 为 2 代。
-4. 配置 CloseAI Base URL/API Key、OSS HTTPS 白名单，以及 GPU Reranker model/device。`local_cross_encoder` 对同一 model+device 只允许一个 owner；多 Uvicorn worker 不能共享同一卡上的本地模型。
+4. 配置 CloseAI Embedding Base URL/API Key、`AI_SERVICE_MODEL_*` OpenAI 兼容回答模型、OSS HTTPS 白名单，以及 GPU Reranker model/device。`local_cross_encoder` 对同一 model+device 只允许一个 owner；多 Uvicorn worker 不能共享同一卡上的本地模型。
 5. 先保持客服开关关闭启动 Python，检查 `/health/ready`；再开启开关并滚动重启，检查认证客服 health。
 6. 使用管理员页面 `/admin/customer-service/knowledge` 上传 PDF/DOCX/MD/TXT。文件经 Spring 私有 OSS 和 outbox 进入 ETL；任务按 `PENDING -> RUNNING -> SUCCEEDED` 推进，可重试失败回到 `PENDING`，耗尽重试进入 `FAILED`。观察 `documentId/documentVersion/etlVersion/status/errorCode`，不要记录签名 URL 或 lease proof。
 7. ETL 成功后执行 synthetic smoke、no-answer、prompt-injection 与引用核对；真实环境结果需单独保存脱敏证据。
@@ -193,7 +193,7 @@ Spring 工具幂等状态和成功结果保存在现有 Spring Redis 配置中�
 
 版本化 fixture 位于 `ai-service/tests/fixtures/customer_service_eval.json`，schema 为 `customer-service-rag-eval/v1`。它只包含 synthetic/non-sensitive 问题，并显式标出 expected document IDs 与 `expectedAnswerable`。评估 helper 位于 `ai_service.orchestration.customer_service_evaluation`，必须注入 fake/recorded runner；默认测试不连接 OSS、CloseAI、Milvus 或 GPU。
 
-指标为 Recall@8、MRR@3、NDCG@3、no-answer accuracy、citation validity，以及 count/min/p50/p95/max/mean latency。检索 ID 先按首次出现去重；重复或未知 citation 计为无效；0 样本返回 0。真实阈值只能在经审批的业务评估集和真实依赖环境中确定，synthetic fixture 不能用于设定生产 `RAG_MIN_RERANK_SCORE`。
+指标为 Recall@8、MRR@3、NDCG@3、no-answer accuracy、citation validity，以及 count/min/p50/p95/max/mean latency。检索 ID 先按首次出现去重；重复或未知 citation 计为无效；0 样本返回 0。latency 只接受有限、非负数字，不接受字符串或 bool；不可转换、NaN、Inf 或负数会 fail-closed 抛出只含 entry id 的稳定 `ValueError`，不会按 0 计入。真实阈值只能在经审批的业务评估集和真实依赖环境中确定，synthetic fixture 不能用于设定生产 `RAG_MIN_RERANK_SCORE`。
 
 截至 2026-10-01，真实 OSS、CloseAI、Docker Milvus、GPU 模型加载/显存/吞吐、浏览器与 Spring-Python E2E 均未在本轮执行，状态保持 pending。
 

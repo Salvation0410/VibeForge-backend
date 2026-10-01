@@ -185,7 +185,8 @@ Copy-Item .env.example .env
 | 环境变量 | 作用 | 运维约束 |
 | --- | --- | --- |
 | `AI_SERVICE_CUSTOMER_SERVICE_RAG_ENABLED` | 客服 RAG 总开关 | 默认 `false`；先完成依赖验证再开启 |
-| `AI_SERVICE_CLOSEAI_API_KEY` / `AI_SERVICE_CLOSEAI_BASE_URL` | Embedding/回答供应商 | 不写入仓库、日志或健康响应 |
+| `AI_SERVICE_CLOSEAI_API_KEY` / `AI_SERVICE_CLOSEAI_BASE_URL` | CloseAI Embedding 供应商 | 仅用于向量化，不写入仓库、日志或健康响应 |
+| `AI_SERVICE_MODEL_API_KEY` / `AI_SERVICE_MODEL_BASE_URL` / `AI_SERVICE_MODEL_NAME` | 客服回答及既有生成共用的 OpenAI 兼容模型 | 由 `OpenAICompatibleModel` 复用，不假定为 CloseAI |
 | `AI_SERVICE_MILVUS_URI` / `AI_SERVICE_MILVUS_TOKEN` / `AI_SERVICE_MILVUS_DATABASE` | Milvus 连接 | 本地可使用 Docker Milvus；生产使用受控网络和密钥注入 |
 | `AI_SERVICE_MILVUS_COLLECTION_ALIAS` | 稳定逻辑别名 | 默认 `customer_service_knowledge`；查询只读 alias 当前物理版本 |
 | `AI_SERVICE_RAG_COLLECTION_RETENTION_GENERATIONS` | 物理 collection 保留代数 | 默认 `2`，保留当前和一个可回滚版本 |
@@ -330,7 +331,8 @@ Invoke-RestMethod http://localhost:8000/internal/v1/customer-service/health -Hea
 
 - 开关关闭时返回 HTTP 200、`status=disabled`、`reason=CUSTOMER_SERVICE_RAG_DISABLED`、`ready=false`，且不探测外部依赖。
 - 只有 `answerService/answerModel/embedding/etl/leaseValidator/milvus/reranker` 七项全部为 true 才返回 `status=healthy`、`reason=CUSTOMER_SERVICE_READY`。answer service 缺失、模型适配器/Embedding/Reranker 本地生命周期不可用、Milvus/lease 探测失败都会返回 HTTP 503、`status=degraded`。
-- degraded 使用稳定脱敏 reason：依赖失败为 `CUSTOMER_SERVICE_DEPENDENCY_UNAVAILABLE`，整体探针超时或异常分别为 `CUSTOMER_SERVICE_HEALTH_PROBE_TIMEOUT`、`CUSTOMER_SERVICE_HEALTH_PROBE_FAILED`。模型、Embedding 和 Reranker 只检查本地对象/进程生命周期，不发送真实供应商请求；Milvus 与 lease validator 沿用现有轻量健康调用。
+- degraded 使用稳定脱敏 reason：依赖失败为 `CUSTOMER_SERVICE_DEPENDENCY_UNAVAILABLE`，整体探针超时、已有不兼容同步探针占用共享 fallback worker、异常分别为 `CUSTOMER_SERVICE_HEALTH_PROBE_TIMEOUT`、`CUSTOMER_SERVICE_HEALTH_PROBE_BUSY`、`CUSTOMER_SERVICE_HEALTH_PROBE_FAILED`。模型、Embedding 和 Reranker 只检查本地对象/进程生命周期，不发送真实供应商请求；Milvus 与 lease validator 沿用现有轻量健康调用。
+- 依赖摘要只接受并输出上述固定七键；缺键、非严格布尔 true 值都按 false，provider 的额外诊断键会被忽略且不影响 healthy。同步自定义探针使用单个 daemon single-flight worker，不占用 asyncio 默认 executor；超时后重复轮询只等待同一个在途探针，不会继续创建线程或排队，完成后下一次轮询可读取结果并恢复。
 - 响应只包含 `enabled/status/reason/ready/degraded` 和依赖布尔值，不包含 URI、令牌、异常正文或供应商响应。
 - 客服降级不会把 `/health/ready` 变为 503；该端点仍只反映 checkpoint/代码生成 readiness。
 
@@ -432,13 +434,13 @@ uv lock --check
 - `NDCG@3`：answerable 样例按二元相关性计算并以理想 DCG 归一化。
 - `no-answer accuracy`：`expectedAnswerable=false` 样例中正确拒答的比例。
 - `citation validity`：answerable 结果必须回答、至少一个引用、无重复且所有引用属于 expected IDs；no-answer 结果必须拒答且无引用。未知或重复 citation 计为无效。
-- latency 输出 `count/min/p50/p95/max/mean` 毫秒摘要；空数据集所有比率和延迟均为 0，不发生除零。
+- latency 输出 `count/min/p50/p95/max/mean` 毫秒摘要；只接受有限、非负的数字（不接受字符串或 bool）。不可转换、NaN、Inf 或负数会 fail-closed 抛出只包含 entry id 的稳定 `ValueError`，不得静默改为 0 后计入；空数据集所有比率和延迟均为 0，不发生除零。
 
 默认自动化只运行 fake/injected provider。真实 OSS、CloseAI、Docker Milvus、GPU Reranker、浏览器和端到端评估仍为 pending，未执行时不得写为通过。
 
 ### 客服 RAG 启动、回滚与人工验证
 
-推荐启动顺序：MySQL/Redis/私有 OSS -> Spring -> Docker Milvus -> Python（先保持 RAG 关闭）-> 检查 `/health/ready` -> 配置 CloseAI/GPU/alias -> 开启 RAG 并滚动启动 Python -> 检查认证客服 health -> 由管理员页面上传知识文件并观察 ETL 任务终态 -> 执行 synthetic smoke 和人工问答。
+推荐启动顺序：MySQL/Redis/私有 OSS -> Spring -> Docker Milvus -> Python（先保持 RAG 关闭）-> 检查 `/health/ready` -> 配置 CloseAI Embedding、`AI_SERVICE_MODEL_*` 回答模型、GPU/alias -> 开启 RAG 并滚动启动 Python -> 检查认证客服 health -> 由管理员页面上传知识文件并观察 ETL 任务终态 -> 执行 synthetic smoke 和人工问答。
 
 上传只能走 Spring 管理接口/页面，Spring 保存私有 OSS 对象并通过 outbox 驱动 Python ETL。任务状态为 `PENDING -> RUNNING -> SUCCEEDED`，可重试失败回到 `PENDING`，耗尽重试进入 `FAILED`。运维人员应记录 `documentId/documentVersion/etlVersion/status/errorCode`，只按稳定错误码排查；常见类别包括 `KNOWLEDGE_DOWNLOAD_*`、`KNOWLEDGE_DOCUMENT_*`、`KNOWLEDGE_EMBEDDING_*`、`KNOWLEDGE_MUTATION_LEASE_*`、`KNOWLEDGE_VECTOR_*` 和 `KNOWLEDGE_REBUILD_*`。不要复制签名 URL、lease proof 或供应商正文。全量 rebuild 先写新的物理 collection，完成校验后原子切换 alias；保留代数和 grace window 内的旧版本用于回滚，禁止手工删除 current/protected/ownership 不明的 collection。
 

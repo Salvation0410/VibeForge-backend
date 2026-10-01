@@ -4,6 +4,7 @@ import asyncio
 import json
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -207,6 +208,193 @@ async def test_health_probe_times_out_fail_safe_without_blocking_event_loop():
     }
 
 
+@pytest.mark.asyncio
+async def test_sync_dependency_health_runs_at_most_one_daemon_worker_at_a_time():
+    active = 0
+    max_active = 0
+    lock = threading.Lock()
+
+    def probe():
+        nonlocal active, max_active
+        import time
+
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+        try:
+            assert threading.current_thread().daemon is True
+            time.sleep(0.01)
+            return True
+        finally:
+            with lock:
+                active -= 1
+
+    provider = CustomerServiceDependencyHealth({
+        name: probe for name in (
+            "answerModel", "answerService", "embedding", "etl",
+            "leaseValidator", "milvus", "reranker",
+        )
+    })
+
+    summary = await probe_customer_service_health(
+        provider, enabled=True, timeout_seconds=0.5,
+    )
+
+    assert summary.ready is True
+    assert max_active == 1
+
+
+@pytest.mark.asyncio
+async def test_blocking_sync_health_provider_uses_one_daemon_single_flight_worker():
+    started = threading.Event()
+    release = threading.Event()
+
+    class BlockingProvider:
+        def __init__(self):
+            self.starts = 0
+            self.worker_daemon = None
+
+        def probe(self):
+            self.starts += 1
+            self.worker_daemon = threading.current_thread().daemon
+            started.set()
+            release.wait()
+            return {
+                "answerModel": True,
+                "answerService": True,
+                "embedding": True,
+                "etl": True,
+                "leaseValidator": True,
+                "milvus": True,
+                "reranker": True,
+            }
+
+    provider = BlockingProvider()
+    try:
+        first = await probe_customer_service_health(
+            provider, enabled=True, timeout_seconds=0.02,
+        )
+        assert started.wait(0.2)
+        second = await probe_customer_service_health(
+            provider, enabled=True, timeout_seconds=0.02,
+        )
+        third = await probe_customer_service_health(
+            provider, enabled=True, timeout_seconds=0.02,
+        )
+
+        assert provider.starts == 1
+        assert provider.worker_daemon is True
+        assert {first.reason, second.reason, third.reason} == {
+            "CUSTOMER_SERVICE_HEALTH_PROBE_TIMEOUT"
+        }
+        assert await asyncio.wait_for(
+            asyncio.to_thread(lambda: "default-executor-available"), timeout=0.2,
+        ) == "default-executor-available"
+
+        release.set()
+        recovered = await probe_customer_service_health(
+            provider, enabled=True, timeout_seconds=0.2,
+        )
+        assert recovered.ready is True
+        assert recovered.reason == "CUSTOMER_SERVICE_READY"
+        assert provider.starts == 1
+    finally:
+        release.set()
+
+
+@pytest.mark.asyncio
+async def test_non_weakref_sync_providers_return_stable_busy_reason():
+    started = threading.Event()
+    release = threading.Event()
+
+    class Provider:
+        __slots__ = ("blocking", "starts")
+
+        def __init__(self, *, blocking):
+            self.blocking = blocking
+            self.starts = 0
+
+        def probe(self):
+            self.starts += 1
+            if self.blocking:
+                started.set()
+                release.wait()
+            return {
+                name: True for name in (
+                    "answerModel", "answerService", "embedding", "etl",
+                    "leaseValidator", "milvus", "reranker",
+                )
+            }
+
+    blocking = Provider(blocking=True)
+    other = Provider(blocking=False)
+    try:
+        timed_out = await probe_customer_service_health(
+            blocking, enabled=True, timeout_seconds=0.02,
+        )
+        assert started.wait(0.2)
+        busy = await probe_customer_service_health(
+            other, enabled=True, timeout_seconds=0.02,
+        )
+
+        assert timed_out.reason == "CUSTOMER_SERVICE_HEALTH_PROBE_TIMEOUT"
+        assert busy.reason == "CUSTOMER_SERVICE_HEALTH_PROBE_BUSY"
+        assert blocking.starts == 1
+        assert other.starts == 0
+    finally:
+        release.set()
+
+
+@pytest.mark.asyncio
+async def test_health_output_ignores_optional_provider_diagnostics():
+    class Provider:
+        async def probe(self):
+            return {
+                "answerModel": True,
+                "answerService": True,
+                "embedding": True,
+                "etl": True,
+                "leaseValidator": True,
+                "milvus": True,
+                "reranker": True,
+                "optionalDiagnostic": False,
+            }
+
+    summary = await probe_customer_service_health(Provider(), enabled=True)
+
+    assert summary.ready is True
+    assert summary.dependencies == {
+        "answerModel": True,
+        "answerService": True,
+        "embedding": True,
+        "etl": True,
+        "leaseValidator": True,
+        "milvus": True,
+        "reranker": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_health_requires_strict_boolean_dependency_values():
+    class Provider:
+        async def probe(self):
+            return {
+                "answerModel": 1,
+                "answerService": True,
+                "embedding": True,
+                "etl": True,
+                "leaseValidator": True,
+                "milvus": True,
+                "reranker": True,
+            }
+
+    summary = await probe_customer_service_health(Provider(), enabled=True)
+
+    assert summary.ready is False
+    assert summary.reason == "CUSTOMER_SERVICE_DEPENDENCY_UNAVAILABLE"
+    assert summary.dependencies["answerModel"] is False
+
+
 def test_customer_service_health_degrades_when_answer_service_is_missing(
     app_factory, auth_headers, settings,
 ):
@@ -376,3 +564,43 @@ async def test_offline_evaluator_handles_empty_dataset_without_division_by_zero(
         "count": 0, "min": 0.0, "p50": 0.0,
         "p95": 0.0, "max": 0.0, "mean": 0.0,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "invalid_latency",
+    [
+        float("nan"), float("inf"), float("-inf"), -0.01,
+        "12.5", "invalid", True,
+        pytest.param(10 ** 10000, id="overflowing-int"),
+    ],
+)
+async def test_offline_evaluator_rejects_invalid_latency_without_sensitive_text(
+    invalid_latency,
+):
+    dataset = {
+        "schemaVersion": "customer-service-rag-eval/v1",
+        "datasetVersion": "invalid-latency-test",
+        "entries": [{
+            "id": "latency-entry-1",
+            "question": "sensitive question body must not appear",
+            "expectedAnswerable": False,
+            "expectedDocumentIds": [],
+        }],
+    }
+
+    async def runner(_entry):
+        return EvaluationResult(
+            retrieved_document_ids=(),
+            answered=False,
+            citation_document_ids=(),
+            latency_ms=invalid_latency,
+        )
+
+    with pytest.raises(ValueError) as captured:
+        await evaluate_customer_service(dataset, runner)
+
+    assert str(captured.value) == (
+        "invalid latency_ms for evaluation entry latency-entry-1"
+    )
+    assert "sensitive question body" not in str(captured.value)

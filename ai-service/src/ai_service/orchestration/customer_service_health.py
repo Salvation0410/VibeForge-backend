@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from dataclasses import dataclass
+import threading
+import weakref
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol
 
 
-REQUIRED_CUSTOMER_SERVICE_DEPENDENCIES = frozenset({
+REQUIRED_CUSTOMER_SERVICE_DEPENDENCIES = (
     "answerModel",
     "answerService",
     "embedding",
@@ -15,7 +17,10 @@ REQUIRED_CUSTOMER_SERVICE_DEPENDENCIES = frozenset({
     "leaseValidator",
     "milvus",
     "reranker",
-})
+)
+
+_UNSET = object()
+_SYNC_PROBE_POLL_SECONDS = 0.005
 
 
 class CustomerServiceHealthProvider(Protocol):
@@ -36,17 +41,25 @@ class CustomerServiceDependencyHealth:
     """Probe injected dependencies without exposing provider details."""
 
     def __init__(self, dependencies: Mapping[str, Any]) -> None:
-        self._dependencies = dict(dependencies)
+        self._dependencies = {
+            name: dependencies.get(name)
+            for name in REQUIRED_CUSTOMER_SERVICE_DEPENDENCIES
+        }
+        self._sync_runner = _DaemonSingleFlightProbe()
 
     def failure_summary(self) -> dict[str, bool]:
-        return {name: False for name in sorted(self._dependencies)}
+        return _unavailable_dependencies()
 
     async def probe(self) -> dict[str, bool]:
-        names = sorted(self._dependencies)
-        results = await asyncio.gather(*(
-            _probe_dependency(self._dependencies[name]) for name in names
+        results: list[bool] = []
+        for name in REQUIRED_CUSTOMER_SERVICE_DEPENDENCIES:
+            dependency = self._dependencies[name]
+            if isinstance(dependency, CustomerServiceDependencyReference):
+                dependency = dependency.resolve()
+            results.append(await _probe_dependency(dependency, self._sync_runner))
+        return dict(zip(
+            REQUIRED_CUSTOMER_SERVICE_DEPENDENCIES, results, strict=True,
         ))
-        return dict(zip(names, results, strict=True))
 
 
 class CustomerServiceDependencyReference:
@@ -54,21 +67,140 @@ class CustomerServiceDependencyReference:
 
     def __init__(self, getter: Callable[[], Any]) -> None:
         self._getter = getter
+        self._sync_runner = _DaemonSingleFlightProbe()
+
+    def resolve(self) -> Any:
+        return self._getter()
 
     async def health_ready(self) -> bool:
-        return await _probe_dependency(self._getter())
+        return await _probe_dependency(self.resolve(), self._sync_runner)
 
 
-def _failure_summary(provider: Any) -> Mapping[str, bool]:
+@dataclass(slots=True)
+class _SyncProbeRun:
+    key: object
+    done: threading.Event = field(default_factory=threading.Event)
+    value: Any = _UNSET
+    error: Exception | None = None
+
+
+class _SyncProbeBusyError(RuntimeError):
+    pass
+
+
+class _DaemonSingleFlightProbe:
+    """Run at most one blocking sync probe without using the default executor."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._run: _SyncProbeRun | None = None
+
+    async def invoke(self, probe: Callable[[], Any], *, key: object = None) -> Any:
+        with self._lock:
+            current = self._run
+            if current is not None and current.key != key:
+                if current.done.is_set():
+                    self._run = None
+                    current = None
+                else:
+                    raise _SyncProbeBusyError(
+                        "customer service sync health probe busy"
+                    )
+            if current is None:
+                current = _SyncProbeRun(key=key)
+                self._run = current
+                threading.Thread(
+                    target=self._execute,
+                    args=(current, probe),
+                    name="customer-service-health-probe",
+                    daemon=True,
+                ).start()
+
+        while not current.done.is_set():
+            await asyncio.sleep(_SYNC_PROBE_POLL_SECONDS)
+
+        with self._lock:
+            if self._run is current:
+                self._run = None
+        if current.error is not None:
+            raise current.error
+        if current.value is _UNSET:
+            raise RuntimeError("customer service sync health probe failed")
+        return current.value
+
+    @staticmethod
+    def _execute(current: _SyncProbeRun, probe: Callable[[], Any]) -> None:
+        try:
+            current.value = probe()
+        except Exception as error:
+            current.error = error
+        except BaseException:
+            current.error = RuntimeError(
+                "customer service sync health probe failed"
+            )
+        finally:
+            current.done.set()
+
+
+_provider_runner_lock = threading.Lock()
+_provider_runners: dict[
+    int, tuple[weakref.ReferenceType[Any], _DaemonSingleFlightProbe]
+] = {}
+_fallback_provider_runner = _DaemonSingleFlightProbe()
+
+
+def _discard_provider_runner(
+    provider_id: int,
+    reference: weakref.ReferenceType[Any],
+) -> None:
+    with _provider_runner_lock:
+        current = _provider_runners.get(provider_id)
+        if current is not None and current[0] is reference:
+            _provider_runners.pop(provider_id, None)
+
+
+def _provider_sync_runner(
+    provider: Any,
+) -> tuple[_DaemonSingleFlightProbe, object]:
+    provider_id = id(provider)
     try:
-        fallback = getattr(provider, "failure_summary", None)
-        raw = fallback() if callable(fallback) else {}
+        reference = weakref.ref(
+            provider,
+            lambda value: _discard_provider_runner(provider_id, value),
+        )
+    except TypeError:
+        return _fallback_provider_runner, provider_id
+    try:
+        with _provider_runner_lock:
+            current = _provider_runners.get(provider_id)
+            if current is not None and current[0]() is provider:
+                return current[1], None
+            runner = _DaemonSingleFlightProbe()
+            _provider_runners[provider_id] = (reference, runner)
+            return runner, None
     except Exception:
-        return {}
-    return raw if isinstance(raw, Mapping) else {}
+        return _fallback_provider_runner, provider_id
 
 
-async def _probe_dependency(dependency: Any) -> bool:
+async def _invoke_provider(provider: Any) -> Any:
+    probe = getattr(provider, "probe", None)
+    if not callable(probe):
+        raise TypeError("customer service health provider requires probe")
+    if inspect.iscoroutinefunction(probe):
+        return await probe()
+    runner, key = _provider_sync_runner(provider)
+    value = await runner.invoke(probe, key=key)
+    return await value if inspect.isawaitable(value) else value
+
+
+def _unavailable_dependencies() -> dict[str, bool]:
+    return {name: False for name in REQUIRED_CUSTOMER_SERVICE_DEPENDENCIES}
+
+
+async def _probe_dependency(
+    dependency: Any,
+    sync_runner: _DaemonSingleFlightProbe,
+) -> bool:
     try:
         probe = getattr(dependency, "health_ready", None)
         if probe is None:
@@ -80,11 +212,13 @@ async def _probe_dependency(dependency: Any) -> bool:
         if inspect.iscoroutinefunction(probe):
             value = await probe()
         else:
-            value = await asyncio.to_thread(probe)
+            value = await sync_runner.invoke(probe, key=id(dependency))
             if inspect.isawaitable(value):
                 value = await value
         return value is True
     except asyncio.CancelledError:
+        raise
+    except _SyncProbeBusyError:
         raise
     except Exception:
         return False
@@ -109,32 +243,28 @@ async def probe_customer_service_health(
         )
     reason: str | None = None
     try:
-        async with asyncio.timeout(timeout_seconds):
-            raw = await provider.probe()
+        raw = await asyncio.wait_for(
+            _invoke_provider(provider), timeout=timeout_seconds,
+        )
     except asyncio.CancelledError:
         raise
     except TimeoutError:
         reason = "CUSTOMER_SERVICE_HEALTH_PROBE_TIMEOUT"
-        raw = _failure_summary(provider)
+        raw = {}
+    except _SyncProbeBusyError:
+        reason = "CUSTOMER_SERVICE_HEALTH_PROBE_BUSY"
+        raw = {}
     except Exception:
         reason = "CUSTOMER_SERVICE_HEALTH_PROBE_FAILED"
-        raw = _failure_summary(provider)
+        raw = {}
     if not isinstance(raw, Mapping):
         reason = "CUSTOMER_SERVICE_HEALTH_PROBE_FAILED"
-        raw = _failure_summary(provider)
-    valid_items = [
-        (name, value)
-        for name, value in raw.items()
-        if isinstance(name, str) and 0 < len(name) <= 64
-    ]
+        raw = {}
     dependencies = {
-        name: value is True
-        for name, value in sorted(valid_items, key=lambda item: item[0])
+        name: raw.get(name) is True
+        for name in REQUIRED_CUSTOMER_SERVICE_DEPENDENCIES
     }
-    for name in REQUIRED_CUSTOMER_SERVICE_DEPENDENCIES:
-        dependencies.setdefault(name, False)
-    dependencies = dict(sorted(dependencies.items()))
-    ready = bool(dependencies) and all(dependencies.values())
+    ready = all(dependencies.values())
     if reason is None:
         reason = (
             "CUSTOMER_SERVICE_READY"
