@@ -5,11 +5,13 @@ import json
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from ai_service.infrastructure.milvus_knowledge import MilvusKnowledgeStore
 from ai_service.orchestration.customer_service_evaluation import (
     EvaluationResult,
     evaluate_customer_service,
@@ -17,6 +19,7 @@ from ai_service.orchestration.customer_service_evaluation import (
 )
 from ai_service.orchestration.customer_service_health import (
     CustomerServiceDependencyHealth,
+    dispose_customer_service_health_provider,
     probe_customer_service_health,
 )
 
@@ -242,6 +245,209 @@ async def test_sync_dependency_health_runs_at_most_one_daemon_worker_at_a_time()
 
     assert summary.ready is True
     assert max_active == 1
+
+
+@pytest.mark.asyncio
+async def test_async_health_provider_is_single_flight_and_recovers_after_timeout():
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class Provider:
+        def __init__(self):
+            self.calls = 0
+
+        async def probe(self):
+            self.calls += 1
+            started.set()
+            await release.wait()
+            return {
+                name: True for name in (
+                    "answerModel", "answerService", "embedding", "etl",
+                    "leaseValidator", "milvus", "reranker",
+                )
+            }
+
+    provider = Provider()
+    requests = [
+        asyncio.create_task(probe_customer_service_health(
+            provider, enabled=True, timeout_seconds=0.03,
+        ))
+        for _ in range(8)
+    ]
+    await asyncio.wait_for(started.wait(), timeout=0.1)
+    summaries = await asyncio.gather(*requests)
+
+    assert provider.calls == 1
+    assert {summary.reason for summary in summaries} == {
+        "CUSTOMER_SERVICE_HEALTH_PROBE_TIMEOUT"
+    }
+
+    release.set()
+    await asyncio.sleep(0)
+    recovered = await probe_customer_service_health(
+        provider, enabled=True, timeout_seconds=0.2,
+    )
+    assert recovered.ready is True
+    assert provider.calls == 1
+
+    reprobed = await probe_customer_service_health(
+        provider, enabled=True, timeout_seconds=0.2,
+    )
+    assert reprobed.ready is True
+    assert provider.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_async_dependency_is_single_flight_across_direct_checker_probes():
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class Dependency:
+        def __init__(self):
+            self.calls = 0
+
+        async def health_ready(self):
+            self.calls += 1
+            started.set()
+            await release.wait()
+            return True
+
+    dependency = Dependency()
+    provider = CustomerServiceDependencyHealth({
+        name: dependency if name == "answerModel" else object()
+        for name in (
+            "answerModel", "answerService", "embedding", "etl",
+            "leaseValidator", "milvus", "reranker",
+        )
+    })
+    probes = [asyncio.create_task(provider.probe()) for _ in range(8)]
+    await asyncio.wait_for(started.wait(), timeout=0.1)
+    assert dependency.calls == 1
+
+    release.set()
+    results = await asyncio.gather(*probes)
+    assert all(result["answerModel"] is True for result in results)
+    assert dependency.calls == 1
+
+    await provider.probe()
+    assert dependency.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_async_health_provider_dispose_cancels_background_probe_boundedly():
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+
+    class Provider:
+        async def probe(self):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                stopped.set()
+
+    provider = Provider()
+    summary = await probe_customer_service_health(
+        provider, enabled=True, timeout_seconds=0.01,
+    )
+    assert summary.reason == "CUSTOMER_SERVICE_HEALTH_PROBE_TIMEOUT"
+    await asyncio.wait_for(started.wait(), timeout=0.1)
+
+    started_at = time.perf_counter()
+    await dispose_customer_service_health_provider(provider)
+    elapsed = time.perf_counter() - started_at
+
+    assert elapsed < 0.2
+    assert stopped.is_set()
+
+
+@pytest.mark.asyncio
+async def test_milvus_health_timeout_is_hard_and_shared_across_concurrent_requests(
+    settings,
+):
+    started = threading.Event()
+    finished = threading.Event()
+    release = threading.Event()
+
+    class BlockingMilvusClient:
+        def __init__(self):
+            self.calls = 0
+            self.active = 0
+            self.max_active = 0
+            self.lock = threading.Lock()
+
+        def list_collections(self, **_kwargs):
+            with self.lock:
+                self.calls += 1
+                self.active += 1
+                self.max_active = max(self.max_active, self.active)
+            started.set()
+            try:
+                release.wait()
+                return []
+            finally:
+                with self.lock:
+                    self.active -= 1
+                finished.set()
+
+    class AsyncHealthy:
+        async def health_ready(self):
+            return True
+
+    client = BlockingMilvusClient()
+    store = MilvusKnowledgeStore(
+        settings, client_factory=lambda **_kwargs: client,
+    )
+    provider = CustomerServiceDependencyHealth({
+        "answerModel": AsyncHealthy(),
+        "answerService": AsyncHealthy(),
+        "embedding": AsyncHealthy(),
+        "etl": AsyncHealthy(),
+        "leaseValidator": AsyncHealthy(),
+        "milvus": store,
+        "reranker": AsyncHealthy(),
+    })
+    timer = threading.Timer(0.3, release.set)
+    timer.daemon = True
+    timer.start()
+    try:
+        started_at = time.perf_counter()
+        summaries = await asyncio.gather(*(
+            probe_customer_service_health(
+                provider, enabled=True, timeout_seconds=0.03,
+            )
+            for _ in range(8)
+        ))
+        elapsed = time.perf_counter() - started_at
+
+        assert elapsed < 0.2
+        assert {summary.reason for summary in summaries} == {
+            "CUSTOMER_SERVICE_HEALTH_PROBE_TIMEOUT"
+        }
+        assert started.wait(0.1)
+        assert client.calls == 1
+        assert client.max_active == 1
+        assert await asyncio.wait_for(
+            asyncio.to_thread(lambda: "default-executor-available"), timeout=0.1,
+        ) == "default-executor-available"
+
+        release.set()
+        assert await asyncio.to_thread(finished.wait, 0.3)
+        recovered = await probe_customer_service_health(
+            provider, enabled=True, timeout_seconds=0.2,
+        )
+        assert recovered.ready is True
+        assert client.calls == 1
+
+        reprobed = await probe_customer_service_health(
+            provider, enabled=True, timeout_seconds=0.2,
+        )
+        assert reprobed.ready is True
+        assert client.calls == 2
+        assert client.max_active == 1
+    finally:
+        release.set()
+        timer.cancel()
 
 
 @pytest.mark.asyncio

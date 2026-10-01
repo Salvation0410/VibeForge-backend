@@ -333,6 +333,7 @@ Invoke-RestMethod http://localhost:8000/internal/v1/customer-service/health -Hea
 - 只有 `answerService/answerModel/embedding/etl/leaseValidator/milvus/reranker` 七项全部为 true 才返回 `status=healthy`、`reason=CUSTOMER_SERVICE_READY`。answer service 缺失、模型适配器/Embedding/Reranker 本地生命周期不可用、Milvus/lease 探测失败都会返回 HTTP 503、`status=degraded`。
 - degraded 使用稳定脱敏 reason：依赖失败为 `CUSTOMER_SERVICE_DEPENDENCY_UNAVAILABLE`，整体探针超时、已有不兼容同步探针占用共享 fallback worker、异常分别为 `CUSTOMER_SERVICE_HEALTH_PROBE_TIMEOUT`、`CUSTOMER_SERVICE_HEALTH_PROBE_BUSY`、`CUSTOMER_SERVICE_HEALTH_PROBE_FAILED`。模型、Embedding 和 Reranker 只检查本地对象/进程生命周期，不发送真实供应商请求；Milvus 与 lease validator 沿用现有轻量健康调用。
 - 依赖摘要只接受并输出上述固定七键；缺键、非严格布尔 true 值都按 false，provider 的额外诊断键会被忽略且不影响 healthy。同步自定义探针使用单个 daemon single-flight worker，不占用 asyncio 默认 executor；超时后重复轮询只等待同一个在途探针，不会继续创建线程或排队，完成后下一次轮询可读取结果并恢复。
+- async provider 和 async dependency 按 health provider/checker 实例及 dependency key 共享一个后台 Task。请求超时只取消当前等待者，不取消 Milvus 等底层探针，因此 1 秒健康上限不会被 cancellation drain 延长；同一在途探针不会重复调用，完成结果由下一轮消费，随后才允许重新探测。lifespan 关闭会有界取消并短暂 drain 后台健康 Task，不无限等待底层同步 RPC。
 - 响应只包含 `enabled/status/reason/ready/degraded` 和依赖布尔值，不包含 URI、令牌、异常正文或供应商响应。
 - 客服降级不会把 `/health/ready` 变为 503；该端点仍只反映 checkpoint/代码生成 readiness。
 

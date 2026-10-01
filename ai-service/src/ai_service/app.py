@@ -24,6 +24,7 @@ from ai_service.orchestration.workflow import GenerationWorkflow
 from ai_service.orchestration.customer_service_health import (
     CustomerServiceDependencyHealth,
     CustomerServiceDependencyReference,
+    dispose_customer_service_health_provider,
 )
 
 
@@ -279,6 +280,16 @@ def create_app(
             try:
                 seen: set[int] = set()
                 resource_error: BaseException | None = None
+                health_provider = getattr(
+                    app.state, "customer_service_health_provider", None,
+                )
+                if health_provider is not None:
+                    try:
+                        await dispose_customer_service_health_provider(
+                            health_provider
+                        )
+                    except BaseException as error:
+                        resource_error = error
                 for resource in reversed(resources):
                     if id(resource) in seen:
                         continue

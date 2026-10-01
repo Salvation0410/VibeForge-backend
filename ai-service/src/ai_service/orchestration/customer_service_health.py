@@ -4,7 +4,7 @@ import asyncio
 import inspect
 import threading
 import weakref
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol
 
@@ -46,6 +46,8 @@ class CustomerServiceDependencyHealth:
             for name in REQUIRED_CUSTOMER_SERVICE_DEPENDENCIES
         }
         self._sync_runner = _DaemonSingleFlightProbe()
+        self._async_runner = _AsyncSingleFlightProbe()
+        self._provider_async_runner = _AsyncSingleFlightProbe()
 
     def failure_summary(self) -> dict[str, bool]:
         return _unavailable_dependencies()
@@ -56,10 +58,22 @@ class CustomerServiceDependencyHealth:
             dependency = self._dependencies[name]
             if isinstance(dependency, CustomerServiceDependencyReference):
                 dependency = dependency.resolve()
-            results.append(await _probe_dependency(dependency, self._sync_runner))
+            results.append(await _probe_dependency(
+                dependency,
+                self._sync_runner,
+                self._async_runner,
+                key=(name, id(dependency)),
+            ))
         return dict(zip(
             REQUIRED_CUSTOMER_SERVICE_DEPENDENCIES, results, strict=True,
         ))
+
+    async def close_health_probes(self) -> None:
+        await self._provider_async_runner.cancel()
+        await self._async_runner.cancel()
+        for dependency in self._dependencies.values():
+            if isinstance(dependency, CustomerServiceDependencyReference):
+                await dependency.close_health_probes()
 
 
 class CustomerServiceDependencyReference:
@@ -68,12 +82,131 @@ class CustomerServiceDependencyReference:
     def __init__(self, getter: Callable[[], Any]) -> None:
         self._getter = getter
         self._sync_runner = _DaemonSingleFlightProbe()
+        self._async_runner = _AsyncSingleFlightProbe()
 
     def resolve(self) -> Any:
         return self._getter()
 
     async def health_ready(self) -> bool:
-        return await _probe_dependency(self.resolve(), self._sync_runner)
+        dependency = self.resolve()
+        return await _probe_dependency(
+            dependency,
+            self._sync_runner,
+            self._async_runner,
+            key=id(dependency),
+        )
+
+    async def close_health_probes(self) -> None:
+        await self._async_runner.cancel()
+
+
+@dataclass(slots=True)
+class _AsyncProbeRun:
+    key: object
+    task: asyncio.Task[Any]
+
+
+class _AsyncProbeBusyError(RuntimeError):
+    pass
+
+
+def _consume_async_task(task: asyncio.Task[Any]) -> None:
+    if task.cancelled():
+        return
+    try:
+        task.exception()
+    except (asyncio.CancelledError, Exception):
+        pass
+
+
+async def _await_probe(awaitable: Awaitable[Any]) -> Any:
+    return await awaitable
+
+
+class _AsyncSingleFlightProbe:
+    """Share one awaitable probe task without propagating waiter cancellation."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._run: _AsyncProbeRun | None = None
+
+    async def invoke(
+        self,
+        probe: Callable[[], Awaitable[Any]],
+        *,
+        key: object = None,
+    ) -> Any:
+        loop = asyncio.get_running_loop()
+        with self._lock:
+            current = self._run
+            if current is not None:
+                if current.key != key or current.task.get_loop() is not loop:
+                    if current.task.done():
+                        _consume_async_task(current.task)
+                        self._run = None
+                        current = None
+                    else:
+                        raise _AsyncProbeBusyError(
+                            "customer service async health probe busy"
+                        )
+            if current is None:
+                awaitable = probe()
+                if not inspect.isawaitable(awaitable):
+                    raise TypeError("async health probe must return an awaitable")
+                task = loop.create_task(_await_probe(awaitable))
+                task.add_done_callback(_consume_async_task)
+                current = _AsyncProbeRun(key=key, task=task)
+                self._run = current
+
+        try:
+            return await asyncio.shield(current.task)
+        finally:
+            if current.task.done():
+                with self._lock:
+                    if self._run is current:
+                        self._run = None
+
+    async def invoke_awaitable(self, awaitable: Awaitable[Any], *, key: object) -> Any:
+        used = False
+
+        def probe() -> Awaitable[Any]:
+            nonlocal used
+            used = True
+            return awaitable
+
+        try:
+            return await self.invoke(probe, key=key)
+        finally:
+            if not used:
+                close = getattr(awaitable, "close", None)
+                if callable(close):
+                    close()
+
+    async def cancel(self, *, key: object = _UNSET) -> None:
+        with self._lock:
+            current = self._run
+            if current is None or (key is not _UNSET and current.key != key):
+                return
+        task = current.task
+        loop = task.get_loop()
+        if task.done():
+            _consume_async_task(task)
+            with self._lock:
+                if self._run is current:
+                    self._run = None
+            return
+        running_loop = asyncio.get_running_loop()
+        if loop is running_loop:
+            task.cancel()
+            done, _ = await asyncio.wait({task}, timeout=0.1)
+            for completed in done:
+                _consume_async_task(completed)
+            if task.done():
+                with self._lock:
+                    if self._run is current:
+                        self._run = None
+        elif loop.is_running():
+            loop.call_soon_threadsafe(task.cancel)
 
 
 @dataclass(slots=True)
@@ -147,6 +280,11 @@ _provider_runners: dict[
     int, tuple[weakref.ReferenceType[Any], _DaemonSingleFlightProbe]
 ] = {}
 _fallback_provider_runner = _DaemonSingleFlightProbe()
+_provider_async_runner_lock = threading.Lock()
+_provider_async_runners: dict[
+    int, tuple[weakref.ReferenceType[Any], _AsyncSingleFlightProbe]
+] = {}
+_fallback_provider_async_runner = _AsyncSingleFlightProbe()
 
 
 def _discard_provider_runner(
@@ -157,6 +295,16 @@ def _discard_provider_runner(
         current = _provider_runners.get(provider_id)
         if current is not None and current[0] is reference:
             _provider_runners.pop(provider_id, None)
+
+
+def _discard_provider_async_runner(
+    provider_id: int,
+    reference: weakref.ReferenceType[Any],
+) -> None:
+    with _provider_async_runner_lock:
+        current = _provider_async_runners.get(provider_id)
+        if current is not None and current[0] is reference:
+            _provider_async_runners.pop(provider_id, None)
 
 
 def _provider_sync_runner(
@@ -182,15 +330,47 @@ def _provider_sync_runner(
         return _fallback_provider_runner, provider_id
 
 
+def _provider_async_runner_for(
+    provider: Any,
+) -> tuple[_AsyncSingleFlightProbe, object]:
+    owned = getattr(provider, "_provider_async_runner", None)
+    if isinstance(owned, _AsyncSingleFlightProbe):
+        return owned, None
+    provider_id = id(provider)
+    try:
+        reference = weakref.ref(
+            provider,
+            lambda value: _discard_provider_async_runner(provider_id, value),
+        )
+    except TypeError:
+        return _fallback_provider_async_runner, provider_id
+    try:
+        with _provider_async_runner_lock:
+            current = _provider_async_runners.get(provider_id)
+            if current is not None and current[0]() is provider:
+                return current[1], None
+            runner = _AsyncSingleFlightProbe()
+            _provider_async_runners[provider_id] = (reference, runner)
+            return runner, None
+    except Exception:
+        return _fallback_provider_async_runner, provider_id
+
+
 async def _invoke_provider(provider: Any) -> Any:
     probe = getattr(provider, "probe", None)
     if not callable(probe):
         raise TypeError("customer service health provider requires probe")
     if inspect.iscoroutinefunction(probe):
-        return await probe()
+        runner, key = _provider_async_runner_for(provider)
+        return await runner.invoke(probe, key=key)
     runner, key = _provider_sync_runner(provider)
     value = await runner.invoke(probe, key=key)
-    return await value if inspect.isawaitable(value) else value
+    if not inspect.isawaitable(value):
+        return value
+    async_runner, async_key = _provider_async_runner_for(provider)
+    return await async_runner.invoke_awaitable(
+        value, key=("sync", async_key),
+    )
 
 
 def _unavailable_dependencies() -> dict[str, bool]:
@@ -200,6 +380,9 @@ def _unavailable_dependencies() -> dict[str, bool]:
 async def _probe_dependency(
     dependency: Any,
     sync_runner: _DaemonSingleFlightProbe,
+    async_runner: _AsyncSingleFlightProbe,
+    *,
+    key: object,
 ) -> bool:
     try:
         probe = getattr(dependency, "health_ready", None)
@@ -210,15 +393,17 @@ async def _probe_dependency(
         if probe is None:
             return dependency is not None
         if inspect.iscoroutinefunction(probe):
-            value = await probe()
+            value = await async_runner.invoke(probe, key=key)
         else:
             value = await sync_runner.invoke(probe, key=id(dependency))
             if inspect.isawaitable(value):
-                value = await value
+                value = await async_runner.invoke_awaitable(value, key=key)
         return value is True
     except asyncio.CancelledError:
         raise
     except _SyncProbeBusyError:
+        raise
+    except _AsyncProbeBusyError:
         raise
     except Exception:
         return False
@@ -254,6 +439,9 @@ async def probe_customer_service_health(
     except _SyncProbeBusyError:
         reason = "CUSTOMER_SERVICE_HEALTH_PROBE_BUSY"
         raw = {}
+    except _AsyncProbeBusyError:
+        reason = "CUSTOMER_SERVICE_HEALTH_PROBE_BUSY"
+        raw = {}
     except Exception:
         reason = "CUSTOMER_SERVICE_HEALTH_PROBE_FAILED"
         raw = {}
@@ -278,3 +466,15 @@ async def probe_customer_service_health(
         not ready,
         dependencies,
     )
+
+
+async def dispose_customer_service_health_provider(provider: Any) -> None:
+    """Best-effort cancellation for background probe tasks during lifespan close."""
+
+    runner, key = _provider_async_runner_for(provider)
+    await runner.cancel(key=key)
+    close_probes = getattr(provider, "close_health_probes", None)
+    if callable(close_probes):
+        result = close_probes()
+        if inspect.isawaitable(result):
+            await result
