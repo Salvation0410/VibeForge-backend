@@ -19,6 +19,38 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class CustomerServiceAiClientTest {
     @Test
+    void answerSendsRequestIdAndRejectsMalformedContract() throws Exception {
+        var body = new AtomicReference<String>();
+        var server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/internal/v1/customer-service/answers", exchange -> {
+            body.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            writeJson(exchange, "{\"requestId\":\"req-1\",\"answered\":true,\"answer\":\"ok\",\"sources\":[],\"degraded\":false}");
+        });
+        server.start();
+        try {
+            var result = client(server).answer(new CustomerServiceAiClient.AnswerRequest("req-1", "hello"));
+            assertEquals("req-1", result.requestId());
+            assertTrue(body.get().contains("\"requestId\":\"req-1\""));
+        } finally { server.stop(0); }
+    }
+
+    @Test
+    void answerRejectsRequestIdMismatchDegradedAndUnknownFields() throws Exception {
+        for (String payload : List.of(
+                "{\"requestId\":\"other\",\"answered\":true,\"answer\":\"ok\",\"sources\":[],\"degraded\":false}",
+                "{\"requestId\":\"req-1\",\"answered\":true,\"answer\":\"ok\",\"sources\":[],\"degraded\":true}",
+                "{\"requestId\":\"req-1\",\"answered\":true,\"answer\":\"ok\",\"sources\":[],\"degraded\":false,\"score\":1}")) {
+            var server = HttpServer.create(new InetSocketAddress(0), 0);
+            server.createContext("/internal/v1/customer-service/answers", exchange -> writeJson(exchange, payload));
+            server.start();
+            try {
+                var error = assertThrows(CustomerServiceAiClient.CallException.class,
+                        () -> client(server).answer(new CustomerServiceAiClient.AnswerRequest("req-1", "hello")));
+                assertTrue(error.code().contains("INVALID") || error.code().contains("DEGRADED"));
+            } finally { server.stop(0); }
+        }
+    }
+    @Test
     void sendsCamelCaseLeaseAndDoesNotLeakResponseBody() throws Exception {
         var body = new AtomicReference<String>();
         var server = HttpServer.create(new InetSocketAddress(0), 0);
