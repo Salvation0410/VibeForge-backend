@@ -74,12 +74,16 @@ public class CustomerServiceAnswerServiceImpl implements CustomerServiceAnswerSe
 
     private boolean validChunk(CustomerServiceAiClient.AnswerSource source, CustomerServiceKnowledgeDocument document) {
         Matcher matcher = CHUNK_ID.matcher(source.chunkId());
-        if (!matcher.matches() || !matcher.group(1).equals(source.documentId())
-                || Long.parseLong(matcher.group(2)) != source.documentVersion()) return false;
-        long index = Long.parseLong(matcher.group(3));
-        return index >= 0 && document.getChunkCount() != null && index < document.getChunkCount()
-                && document.getIsDelete() != null && document.getIsDelete() == 0
-                && ("READY".equalsIgnoreCase(document.getStatus()) || "ACTIVE".equalsIgnoreCase(document.getStatus()));
+        if (!matcher.matches() || !matcher.group(1).equals(source.documentId())) return false;
+        try {
+            if (Long.parseLong(matcher.group(2)) != source.documentVersion()) return false;
+            long index = Long.parseLong(matcher.group(3));
+            return index >= 0 && document.getChunkCount() != null && index < document.getChunkCount()
+                    && document.getIsDelete() != null && document.getIsDelete() == 0
+                    && ("READY".equalsIgnoreCase(document.getStatus()) || "ACTIVE".equalsIgnoreCase(document.getStatus()));
+        } catch (NumberFormatException ignored) {
+            return false;
+        }
     }
 
     private CustomerServiceKnowledgeDocument findReady(String id, boolean ignored) { return findReady(id); }
