@@ -10,6 +10,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.*;
+import com.yupi.yuaicodemother.ratelimit.annotation.RateLimit;
+import org.springframework.web.bind.annotation.PostMapping;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 class CustomerServiceControllerTest {
     @Test
@@ -39,5 +42,16 @@ class CustomerServiceControllerTest {
         String json = cn.hutool.json.JSONUtil.toJsonStr(response.getData());
         org.junit.jupiter.api.Assertions.assertFalse(json.contains("degraded"));
         org.junit.jupiter.api.Assertions.assertFalse(json.contains("score"));
+    }
+
+    @Test
+    void routeIsUserRateLimitedAndDtoRejectsExtraFields() throws Exception {
+        var method = CustomerServiceController.class.getMethod("ask", CustomerServiceAskRequest.class,
+                HttpServletRequest.class);
+        org.junit.jupiter.api.Assertions.assertEquals("/ask", method.getAnnotation(PostMapping.class).value()[0]);
+        org.junit.jupiter.api.Assertions.assertEquals(com.yupi.yuaicodemother.ratelimit.enums.RateLimitType.USER,
+                method.getAnnotation(RateLimit.class).limitType());
+        assertThrows(Exception.class, () -> new ObjectMapper().readValue(
+                "{\"question\":\"hello\",\"score\":1}", CustomerServiceAskRequest.class));
     }
 }
