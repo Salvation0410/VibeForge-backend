@@ -8,31 +8,86 @@ param(
     [string]$SpringBaseUrl = 'http://localhost:8123/api',
     [string]$PythonBaseUrl = 'http://localhost:8000',
     [string]$FrontendBaseUrl = 'http://localhost:5173',
+    [string]$ReportPath,
     [string]$EvidenceDirectory,
-    [string]$EvidenceFileName = 'customer-service-rag-validation.json',
+    [string]$EvidenceFileName,
     [ValidateRange(1, 120)]
     [int]$TimeoutSeconds = 5
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+Add-Type -AssemblyName System.Net.Http
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$validationGateVersion = '1.0'
+$validationGateVersion = '1.1'
 $allowedStatuses = @('passed', 'failed', 'blocked', 'not-run')
+$maxJsonResponseBytes = 65536
 
-function Resolve-SafeBaseUri {
+function Test-LoopbackAuthority {
+    param([Parameter(Mandatory = $true)][string]$Value)
+    $match = [regex]::Match($Value, '^[A-Za-z][A-Za-z0-9+.-]*://([^/]+)')
+    if (-not $match.Success) { return $false }
+    $authority = $match.Groups[1].Value
+    if ($authority.StartsWith('[')) {
+        $closing = $authority.IndexOf(']')
+        if ($closing -lt 0) { return $false }
+        $hostLiteral = $authority.Substring(0, $closing + 1)
+        $suffix = $authority.Substring($closing + 1)
+        if ($suffix.Length -gt 0 -and $suffix -notmatch '^:\d+$') { return $false }
+        return $hostLiteral -ceq '[::1]'
+    }
+    $hostLiteral = ($authority -split ':', 2)[0]
+    if ($hostLiteral -ceq 'localhost') { return $true }
+    if ($hostLiteral -notmatch '^127(?:\.\d{1,3}){3}$') { return $false }
+    $address = $null
+    return [System.Net.IPAddress]::TryParse($hostLiteral, [ref]$address) -and
+        $address.GetAddressBytes()[0] -eq 127
+}
+
+function Resolve-SafeRequestUri {
     param([Parameter(Mandatory = $true)][string]$Value, [string]$Name)
-
     $uri = $null
     if (-not [Uri]::TryCreate($Value, [UriKind]::Absolute, [ref]$uri) -or
         $uri.Scheme -notin @('http', 'https') -or
         -not [string]::IsNullOrEmpty($uri.UserInfo) -or
         -not [string]::IsNullOrEmpty($uri.Query) -or
         -not [string]::IsNullOrEmpty($uri.Fragment)) {
-        throw "$Name must be an absolute HTTP(S) base URL without user info, query, or fragment."
+        throw 'URL_POLICY_INVALID'
     }
-    return $Value.TrimEnd('/')
+    if ($uri.Scheme -eq 'http' -and -not (Test-LoopbackAuthority -Value $Value)) {
+        throw 'REMOTE_HTTP_NOT_ALLOWED'
+    }
+    return $uri
+}
+
+function Resolve-SafeBaseUri {
+    param([Parameter(Mandatory = $true)][string]$Value, [string]$Name)
+    $uri = Resolve-SafeRequestUri -Value $Value -Name $Name
+    return $uri.AbsoluteUri.TrimEnd('/')
+}
+
+function Assert-SafeEvidenceReference {
+    param([Parameter(Mandatory = $true)][string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value) -or $Value.Contains('\') -or
+        $Value.Contains(':') -or $Value.Contains('?') -or $Value.Contains('#') -or
+        [IO.Path]::IsPathRooted($Value)) {
+        throw 'EVIDENCE_REFERENCE_INVALID'
+    }
+    $decoded = $null
+    try { $decoded = [Uri]::UnescapeDataString($Value) }
+    catch { throw 'EVIDENCE_REFERENCE_INVALID' }
+    if ($decoded -cne $Value -or $decoded.Contains('\') -or $decoded.Contains(':') -or
+        $decoded.Contains('?') -or $decoded.Contains('#') -or [IO.Path]::IsPathRooted($decoded)) {
+        throw 'EVIDENCE_REFERENCE_INVALID'
+    }
+    $segments = @($decoded -split '/')
+    if ($segments.Count -eq 0 -or @($segments | Where-Object {
+        [string]::IsNullOrWhiteSpace($_) -or $_ -in @('.', '..') -or
+        $_ -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$'
+    }).Count -gt 0) {
+        throw 'EVIDENCE_REFERENCE_INVALID'
+    }
 }
 
 function New-StepResult {
@@ -48,9 +103,7 @@ function New-StepResult {
         [Parameter(Mandatory = $true)][string]$EvidenceReference
     )
 
-    if ($EvidenceReference -match '(?i)^[a-z]+://|\?|token|authorization|cookie|\.\.') {
-        throw 'Evidence reference must be a sanitized relative or logical reference.'
-    }
+    Assert-SafeEvidenceReference -Value $EvidenceReference
     return [ordered]@{
         name = $Name
         status = $Status
@@ -64,37 +117,69 @@ function New-StepResult {
     }
 }
 
-function Get-StableHttpFailure {
-    param([System.Management.Automation.ErrorRecord]$ErrorRecord)
-
-    $statusCode = $null
-    try {
-        if ($null -ne $ErrorRecord.Exception.Response) {
-            $statusCode = [int]$ErrorRecord.Exception.Response.StatusCode
-        }
-    } catch {
-        $statusCode = $null
+function Test-ExactJsonObject {
+    param($Value, [string[]]$RequiredFields)
+    if ($null -eq $Value -or $Value.GetType().FullName -ne 'System.Management.Automation.PSCustomObject') {
+        return $false
     }
-    if ($statusCode -eq 503) { return 'SERVICE_NOT_READY' }
-    if ($statusCode -eq 401 -or $statusCode -eq 403) { return 'AUTHENTICATION_REJECTED' }
-    if ($null -ne $statusCode) { return 'HTTP_STATUS_UNEXPECTED' }
-    if ($ErrorRecord.Exception -is [System.Net.WebException] -and
-        $ErrorRecord.Exception.Status -eq [System.Net.WebExceptionStatus]::Timeout) {
-        return 'HTTP_TIMEOUT'
-    }
-    return 'SERVICE_UNREACHABLE'
+    $actual = @($Value.PSObject.Properties.Name | Sort-Object)
+    $required = @($RequiredFields | Sort-Object)
+    return @(Compare-Object $required $actual).Count -eq 0
 }
 
-function Get-HttpStatusCode {
-    param([System.Management.Automation.ErrorRecord]$ErrorRecord)
-    try {
-        if ($null -ne $ErrorRecord.Exception.Response) {
-            return [int]$ErrorRecord.Exception.Response.StatusCode
-        }
-    } catch {
-        return $null
+function Test-ExactType {
+    param($Value, [Type]$ExpectedType)
+    return $null -ne $Value -and $Value.GetType() -eq $ExpectedType
+}
+
+function Read-BoundedJsonBody {
+    param(
+        [Parameter(Mandatory = $true)][System.Net.Http.HttpResponseMessage]$Response,
+        [Parameter(Mandatory = $true)][System.Threading.CancellationToken]$CancellationToken
+    )
+    $declaredLength = $Response.Content.Headers.ContentLength
+    if ($null -ne $declaredLength -and [long]$declaredLength -gt $maxJsonResponseBytes) {
+        return @{ error = 'HTTP_RESPONSE_TOO_LARGE'; body = $null }
     }
-    return $null
+    $stream = $null
+    $memory = $null
+    try {
+        $stream = $Response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+        $memory = [IO.MemoryStream]::new()
+        $buffer = New-Object byte[] 8192
+        while ($true) {
+            $read = $stream.ReadAsync($buffer, 0, $buffer.Length, $CancellationToken).GetAwaiter().GetResult()
+            if ($read -eq 0) { break }
+            if ($memory.Length + $read -gt $maxJsonResponseBytes) {
+                return @{ error = 'HTTP_RESPONSE_TOO_LARGE'; body = $null }
+            }
+            $memory.Write($buffer, 0, $read)
+        }
+        try {
+            $encoding = [Text.UTF8Encoding]::new($false, $true)
+            $json = $encoding.GetString($memory.ToArray())
+            $body = $json | ConvertFrom-Json
+        } catch {
+            return @{ error = 'HEALTH_RESPONSE_INVALID'; body = $null }
+        }
+        return @{ error = $null; body = $body }
+    } finally {
+        if ($null -ne $memory) { $memory.Dispose() }
+        if ($null -ne $stream) { $stream.Dispose() }
+    }
+}
+
+function Test-TimeoutException {
+    param([Parameter(Mandatory = $true)][Exception]$Exception)
+    $current = $Exception
+    while ($null -ne $current) {
+        if ($current -is [OperationCanceledException] -or
+            $current -is [System.Threading.Tasks.TaskCanceledException]) {
+            return $true
+        }
+        $current = $current.InnerException
+    }
+    return $false
 }
 
 function Invoke-HttpValidationStep {
@@ -108,77 +193,96 @@ function Invoke-HttpValidationStep {
     )
 
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $handler = $null
+    $client = $null
+    $request = $null
+    $response = $null
+    $cancellation = $null
     try {
-        $response = Invoke-WebRequest -Uri $Uri -Method Get -Headers $Headers `
-            -TimeoutSec $TimeoutSeconds -MaximumRedirection 0 -UseBasicParsing
-        if ([int]$response.StatusCode -lt 200 -or [int]$response.StatusCode -ge 400) {
+        $safeUri = Resolve-SafeRequestUri -Value $Uri -Name $Name
+        $handler = [System.Net.Http.HttpClientHandler]::new()
+        $handler.AllowAutoRedirect = $false
+        $client = [System.Net.Http.HttpClient]::new($handler)
+        $client.Timeout = [System.Threading.Timeout]::InfiniteTimeSpan
+        $cancellation = [System.Threading.CancellationTokenSource]::new()
+        $cancellation.CancelAfter([TimeSpan]::FromSeconds($TimeoutSeconds))
+        $request = [System.Net.Http.HttpRequestMessage]::new(
+            [System.Net.Http.HttpMethod]::Get, $safeUri)
+        foreach ($entry in $Headers.GetEnumerator()) {
+            [void]$request.Headers.TryAddWithoutValidation($entry.Key, [string]$entry.Value)
+        }
+        $response = $client.SendAsync(
+            $request,
+            [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead,
+            $cancellation.Token).GetAwaiter().GetResult()
+        $statusCode = [int]$response.StatusCode
+        if ($StatusOnly) {
+            if ($statusCode -ge 200 -and $statusCode -lt 400) {
+                return New-StepResult -Name $Name -Status 'passed' -ExitCode 0 `
+                    -DurationMs $stopwatch.ElapsedMilliseconds -StableErrorCode $null `
+                    -EvidenceReference $EvidenceReference
+            }
             return New-StepResult -Name $Name -Status 'failed' -ExitCode 1 `
                 -DurationMs $stopwatch.ElapsedMilliseconds `
                 -StableErrorCode 'HTTP_STATUS_UNEXPECTED' -EvidenceReference $EvidenceReference
         }
-        if (-not $StatusOnly) {
-            $body = $null
-            try {
-                $body = $response.Content | ConvertFrom-Json
-            } catch {
-                return New-StepResult -Name $Name -Status 'failed' -ExitCode 1 `
-                    -DurationMs $stopwatch.ElapsedMilliseconds `
-                    -StableErrorCode 'HEALTH_RESPONSE_INVALID' -EvidenceReference $EvidenceReference
-            }
-            $validation = & $ValidateBody $body
-            if ($validation.status -ne 'passed') {
-                return New-StepResult -Name $Name -Status $validation.status -ExitCode $validation.exitCode `
-                    -DurationMs $stopwatch.ElapsedMilliseconds `
-                    -StableErrorCode $validation.stableErrorCode -EvidenceReference $EvidenceReference
-            }
+        if ($statusCode -ne 200) {
+            return New-StepResult -Name $Name -Status 'failed' -ExitCode 1 `
+                -DurationMs $stopwatch.ElapsedMilliseconds `
+                -StableErrorCode 'HTTP_STATUS_UNEXPECTED' -EvidenceReference $EvidenceReference
+        }
+        $readResult = Read-BoundedJsonBody -Response $response `
+            -CancellationToken $cancellation.Token
+        if (-not [string]::IsNullOrWhiteSpace([string]$readResult.error)) {
+            return New-StepResult -Name $Name -Status 'failed' -ExitCode 1 `
+                -DurationMs $stopwatch.ElapsedMilliseconds `
+                -StableErrorCode $readResult.error -EvidenceReference $EvidenceReference
+        }
+        $validation = & $ValidateBody $readResult.body
+        if ($validation.status -ne 'passed') {
+            return New-StepResult -Name $Name -Status $validation.status -ExitCode $validation.exitCode `
+                -DurationMs $stopwatch.ElapsedMilliseconds `
+                -StableErrorCode $validation.stableErrorCode -EvidenceReference $EvidenceReference
         }
         return New-StepResult -Name $Name -Status 'passed' -ExitCode 0 `
             -DurationMs $stopwatch.ElapsedMilliseconds -StableErrorCode $null `
             -EvidenceReference $EvidenceReference
     } catch {
-        if ($StatusOnly) {
-            $statusCode = Get-HttpStatusCode -ErrorRecord $_
-            if ($null -ne $statusCode) {
-                if ($statusCode -ge 200 -and $statusCode -lt 400) {
-                    return New-StepResult -Name $Name -Status 'passed' -ExitCode 0 `
-                        -DurationMs $stopwatch.ElapsedMilliseconds -StableErrorCode $null `
-                        -EvidenceReference $EvidenceReference
-                }
-                return New-StepResult -Name $Name -Status 'failed' -ExitCode 1 `
-                    -DurationMs $stopwatch.ElapsedMilliseconds `
-                    -StableErrorCode 'HTTP_STATUS_UNEXPECTED' `
-                    -EvidenceReference $EvidenceReference
-            }
-        }
-        $stableCode = Get-StableHttpFailure -ErrorRecord $_
-        $status = if ($stableCode -in @('SERVICE_UNREACHABLE', 'HTTP_TIMEOUT', 'SERVICE_NOT_READY')) {
-            'blocked'
+        $stableCode = if (Test-TimeoutException -Exception $_.Exception) {
+            'HTTP_TIMEOUT'
         } else {
-            'failed'
+            'SERVICE_UNREACHABLE'
         }
-        $exitCode = if ($status -eq 'blocked') { 2 } else { 1 }
-        return New-StepResult -Name $Name -Status $status -ExitCode $exitCode `
+        return New-StepResult -Name $Name -Status 'blocked' -ExitCode 2 `
             -DurationMs $stopwatch.ElapsedMilliseconds -StableErrorCode $stableCode `
             -EvidenceReference $EvidenceReference
     } finally {
         $stopwatch.Stop()
+        if ($null -ne $response) { $response.Dispose() }
+        if ($null -ne $request) { $request.Dispose() }
+        if ($null -ne $cancellation) { $cancellation.Dispose() }
+        if ($null -ne $client) { $client.Dispose() }
+        if ($null -ne $handler) { $handler.Dispose() }
     }
 }
 
 function Test-LiveBody {
     param($Body)
-    if ($null -ne $Body -and $Body.PSObject.Properties.Name -contains 'status' -and
-        $Body.status -eq 'live') {
+    if ((Test-ExactJsonObject -Value $Body -RequiredFields @('status')) -and
+        (Test-ExactType -Value $Body.status -ExpectedType ([string])) -and $Body.status -eq 'live') {
         return @{ status = 'passed'; exitCode = 0; stableErrorCode = $null }
     }
-    return @{ status = 'failed'; exitCode = 1; stableErrorCode = 'HEALTH_LIVE_INVALID' }
+    return @{ status = 'failed'; exitCode = 1; stableErrorCode = 'HEALTH_RESPONSE_INVALID' }
 }
 
 function Test-ReadyBody {
     param($Body)
-    if ($null -ne $Body -and $Body.PSObject.Properties.Name -contains 'status' -and
-        $Body.PSObject.Properties.Name -contains 'checkpoint' -and
-        $Body.status -eq 'ready' -and $Body.checkpoint -eq $true) {
+    if (-not (Test-ExactJsonObject -Value $Body -RequiredFields @('status', 'checkpoint')) -or
+        -not (Test-ExactType -Value $Body.status -ExpectedType ([string])) -or
+        -not (Test-ExactType -Value $Body.checkpoint -ExpectedType ([bool]))) {
+        return @{ status = 'failed'; exitCode = 1; stableErrorCode = 'HEALTH_RESPONSE_INVALID' }
+    }
+    if ($Body.status -eq 'ready' -and $Body.checkpoint -eq $true) {
         return @{ status = 'passed'; exitCode = 0; stableErrorCode = $null }
     }
     return @{ status = 'blocked'; exitCode = 2; stableErrorCode = 'SERVICE_NOT_READY' }
@@ -186,24 +290,102 @@ function Test-ReadyBody {
 
 function Test-CustomerHealthBody {
     param($Body)
-
-    if ($null -eq $Body -or $Body.PSObject.Properties.Name -notcontains 'ready' -or
-        $Body.PSObject.Properties.Name -notcontains 'enabled' -or
-        $Body.PSObject.Properties.Name -notcontains 'status' -or
-        $Body.PSObject.Properties.Name -notcontains 'reason') {
-        return @{ status = 'failed'; exitCode = 1; stableErrorCode = 'CUSTOMER_HEALTH_RESPONSE_INVALID' }
+    $topFields = @('enabled', 'status', 'reason', 'ready', 'degraded', 'dependencies')
+    $dependencyFields = @(
+        'answerService', 'answerModel', 'embedding', 'etl',
+        'leaseValidator', 'milvus', 'reranker')
+    if (-not (Test-ExactJsonObject -Value $Body -RequiredFields $topFields) -or
+        -not (Test-ExactType -Value $Body.enabled -ExpectedType ([bool])) -or
+        -not (Test-ExactType -Value $Body.status -ExpectedType ([string])) -or
+        -not (Test-ExactType -Value $Body.reason -ExpectedType ([string])) -or
+        -not (Test-ExactType -Value $Body.ready -ExpectedType ([bool])) -or
+        -not (Test-ExactType -Value $Body.degraded -ExpectedType ([bool])) -or
+        -not (Test-ExactJsonObject -Value $Body.dependencies -RequiredFields $dependencyFields) -or
+        @($dependencyFields | Where-Object {
+            -not (Test-ExactType -Value $Body.dependencies.$_ -ExpectedType ([bool]))
+        }).Count -gt 0 -or $Body.reason -notmatch '^[A-Z][A-Z0-9_]{0,127}$') {
+        return @{ status = 'failed'; exitCode = 1; stableErrorCode = 'HEALTH_RESPONSE_INVALID' }
     }
-    $reason = [string]$Body.reason
-    if ($reason -notmatch '^[A-Z][A-Z0-9_]{0,127}$') {
-        $reason = 'CUSTOMER_HEALTH_RESPONSE_INVALID'
-    }
+    $reason = $Body.reason
     if ($Body.enabled -eq $false) {
         return @{ status = 'blocked'; exitCode = 2; stableErrorCode = $reason }
     }
-    if ($Body.ready -eq $true -and $Body.status -eq 'healthy') {
+    $allDependenciesReady = @($dependencyFields | Where-Object {
+        $Body.dependencies.$_ -ne $true
+    }).Count -eq 0
+    if ($Body.ready -eq $true -and $Body.degraded -eq $false -and
+        $Body.status -eq 'healthy' -and $allDependenciesReady) {
         return @{ status = 'passed'; exitCode = 0; stableErrorCode = $null }
     }
     return @{ status = 'failed'; exitCode = 1; stableErrorCode = $reason }
+}
+
+function Resolve-ReportOutputPath {
+    if (-not [string]::IsNullOrWhiteSpace($ReportPath)) {
+        if (-not [string]::IsNullOrWhiteSpace($EvidenceDirectory) -or
+            -not [string]::IsNullOrWhiteSpace($EvidenceFileName)) {
+            throw 'REPORT_PATH_CONFLICT'
+        }
+        $resolved = [IO.Path]::GetFullPath($ReportPath)
+    } else {
+        $directory = if ([string]::IsNullOrWhiteSpace($EvidenceDirectory)) {
+            Join-Path $repositoryRoot 'target/ai-validation'
+        } else {
+            [IO.Path]::GetFullPath($EvidenceDirectory)
+        }
+        $fileName = $EvidenceFileName
+        if ([string]::IsNullOrWhiteSpace($fileName)) {
+            $timestamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
+            $runId = [guid]::NewGuid().ToString('N')
+            $fileName = "customer-service-rag-validation-$timestamp-$runId.json"
+        }
+        if ([IO.Path]::GetFileName($fileName) -ne $fileName -or
+            [IO.Path]::GetExtension($fileName) -ne '.json') {
+            throw 'REPORT_FILE_NAME_INVALID'
+        }
+        $resolved = Join-Path $directory $fileName
+    }
+    if (Test-Path -LiteralPath $resolved) { throw 'REPORT_PATH_EXISTS' }
+    return $resolved
+}
+
+function Write-AtomicJsonReport {
+    param(
+        [Parameter(Mandatory = $true)]$Report,
+        [Parameter(Mandatory = $true)][string]$OutputPath
+    )
+    $directory = Split-Path -Parent $OutputPath
+    if ([string]::IsNullOrWhiteSpace($directory)) { $directory = (Get-Location).Path }
+    [void](New-Item -ItemType Directory -Force -Path $directory)
+    if (Test-Path -LiteralPath $OutputPath) { throw 'REPORT_PATH_EXISTS' }
+    $tempPath = Join-Path $directory ('.' + [IO.Path]::GetFileName($OutputPath) + '.' +
+        [guid]::NewGuid().ToString('N') + '.tmp')
+    $stream = $null
+    $writer = $null
+    try {
+        $json = $Report | ConvertTo-Json -Depth 8
+        $stream = [IO.File]::Open(
+            $tempPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        $writer = [IO.StreamWriter]::new($stream, [Text.UTF8Encoding]::new($false))
+        $writer.Write($json)
+        $writer.Flush()
+        $stream.Flush($true)
+        $writer.Dispose()
+        $writer = $null
+        $stream = $null
+        if (Test-Path -LiteralPath $OutputPath) { throw 'REPORT_PATH_EXISTS' }
+        try { [IO.File]::Move($tempPath, $OutputPath) }
+        catch {
+            if (Test-Path -LiteralPath $OutputPath) { throw 'REPORT_PATH_EXISTS' }
+            throw 'REPORT_WRITE_FAILED'
+        }
+    } finally {
+        if ($null -ne $writer) { $writer.Dispose() }
+        elseif ($null -ne $stream) { $stream.Dispose() }
+        if (Test-Path -LiteralPath $tempPath) {
+            Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 function New-ManualPlanStep {
@@ -282,7 +464,16 @@ function Test-GroupSelected {
 $manualPlan = @(Get-ManualPlan)
 $anyExternalOptIn = $IncludeMilvus -or $IncludeCloseAi -or $IncludeGpu -or $IncludeOss -or $IncludeEndToEnd
 if (-not $Execute -and $anyExternalOptIn) {
-    Write-Error 'Real dependency opt-in switches require -Execute.'
+    Write-Host 'OPT_IN_REQUIRES_EXECUTE'
+    exit 1
+}
+
+try {
+    $SpringBaseUrl = Resolve-SafeBaseUri -Value $SpringBaseUrl -Name 'SpringBaseUrl'
+    $PythonBaseUrl = Resolve-SafeBaseUri -Value $PythonBaseUrl -Name 'PythonBaseUrl'
+    $FrontendBaseUrl = Resolve-SafeBaseUri -Value $FrontendBaseUrl -Name 'FrontendBaseUrl'
+} catch {
+    Write-Host $_.Exception.Message
     exit 1
 }
 
@@ -300,16 +491,10 @@ if (-not $Execute) {
     return
 }
 
-$SpringBaseUrl = Resolve-SafeBaseUri -Value $SpringBaseUrl -Name 'SpringBaseUrl'
-$PythonBaseUrl = Resolve-SafeBaseUri -Value $PythonBaseUrl -Name 'PythonBaseUrl'
-$FrontendBaseUrl = Resolve-SafeBaseUri -Value $FrontendBaseUrl -Name 'FrontendBaseUrl'
-if ([string]::IsNullOrWhiteSpace($EvidenceDirectory)) {
-    $EvidenceDirectory = Join-Path $repositoryRoot 'target/ai-validation'
-}
-if ([string]::IsNullOrWhiteSpace($EvidenceFileName) -or
-    [IO.Path]::GetFileName($EvidenceFileName) -ne $EvidenceFileName -or
-    [IO.Path]::GetExtension($EvidenceFileName) -ne '.json') {
-    throw 'EvidenceFileName must be a JSON leaf filename.'
+try { $outputPath = Resolve-ReportOutputPath }
+catch {
+    Write-Host $_.Exception.Message
+    exit 1
 }
 
 $steps = [System.Collections.Generic.List[object]]::new()
@@ -330,9 +515,18 @@ if ([string]::IsNullOrWhiteSpace($internalToken)) {
         -Status 'blocked' -ExitCode 2 -StableErrorCode 'VALIDATION_SECRET_MISSING' `
         -EvidenceReference 'runtime/customer-service-health'))
 } else {
+    try {
+        $customerHealthUri = (Resolve-SafeRequestUri `
+            -Value "$PythonBaseUrl/internal/v1/customer-service/health" `
+            -Name 'authenticated-customer-service-health').AbsoluteUri
+    } catch {
+        $internalToken = $null
+        Write-Host $_.Exception.Message
+        exit 1
+    }
     $headers = @{ Authorization = "Bearer $internalToken" }
     $steps.Add((Invoke-HttpValidationStep -Name 'authenticated-customer-service-health' `
-        -Uri "$PythonBaseUrl/internal/v1/customer-service/health" -Headers $headers `
+        -Uri $customerHealthUri -Headers $headers `
         -ValidateBody ${function:Test-CustomerHealthBody} `
         -EvidenceReference 'runtime/customer-service-health'))
     $headers.Clear()
@@ -366,9 +560,11 @@ $report = [ordered]@{
     steps = @($steps)
 }
 
-[void](New-Item -ItemType Directory -Force -Path $EvidenceDirectory)
-$outputPath = Join-Path $EvidenceDirectory $EvidenceFileName
-$report | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 -LiteralPath $outputPath
+try { Write-AtomicJsonReport -Report $report -OutputPath $outputPath }
+catch {
+    Write-Host $_.Exception.Message
+    exit 1
+}
 
 foreach ($step in $steps) {
     $suffix = if ([string]::IsNullOrWhiteSpace([string]$step.stableErrorCode)) { '' } else { " ($($step.stableErrorCode))" }

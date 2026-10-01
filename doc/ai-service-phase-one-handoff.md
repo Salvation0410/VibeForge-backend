@@ -30,7 +30,8 @@
 
 - Task 14 新增 `scripts/verify-customer-service-rag.ps1` 安全验收门和 `scripts/customer-service-rag-validation.tests.ps1` 静态契约测试。验收门默认只打印完整计划；`-Execute` 仅探测 Python live/ready、Spring/Frontend HTTP 状态和可选的认证客服 health。Milvus、CloseAI、GPU、OSS、完整 E2E 分别要求显式开关，当前因没有成熟的安全自动化入口而只记录 `blocked`/`not-run` 和稳定错误码，不复制生产协议、不自动执行重启、诱发 OOM、依赖故障或对象删除。
 - Task 14 本轮实际只运行了默认 dry-run、无外部开关的 `-Execute` 和脚本自身静态测试。2026-10-01 非秘密探测中 Python、Spring、Frontend 均未启动，四项探测为 `SERVICE_UNREACHABLE`；当前进程未提供内部令牌，认证客服 health 为 `VALIDATION_SECRET_MISSING`；Milvus、CloseAI、GPU、OSS、E2E 全部为 `OPT_IN_REQUIRED`，没有连接或产生外部副作用。脱敏报告只写入被忽略的 `target/ai-validation`，不纳入提交。
-- Task 14 规格复审后收紧 Spring/Frontend 状态探测：只有 HTTP 200–399 视为 `passed`；401、404、500 等带响应的非预期状态统一为 `failed/HTTP_STATUS_UNEXPECTED` 并使进程退出码为 1；没有 HTTP 响应才是 `blocked/SERVICE_UNREACHABLE`，blocked-only 退出码为 2。行为测试覆盖正常返回与异常携带状态两条 PowerShell 路径，并验证单独五类 opt-in 及全开组合都不会调用真实外部命令。
+- Task 14 两轮规格复审后收紧完整安全边界：Spring/Frontend 只有 HTTP 200–399 视为 `passed`，401/404/500 为 `failed/HTTP_STATUS_UNEXPECTED`，无响应为 `blocked/SERVICE_UNREACHABLE`；HTTP 使用禁用自动重定向的 .NET `HttpClient` 和 `ResponseHeadersRead`，status-only 不读正文，JSON 最多流式读取 64 KiB。ready 与认证客服 health 对字段集合、CLR 类型及固定七项依赖严格 fail-closed；测试由函数注入升级为真实本地 HTTP server，同时覆盖声明/实际超限、chunked、慢流、重定向和恶意 JSON。
+- URL 策略只允许 `localhost`、规范的 `127.0.0.0/8` 与 `[::1]` 使用 HTTP，其他目标必须 HTTPS；userinfo、query、fragment、非规范 loopback 表示和 DNS 混淆会在发请求前拒绝。认证 health 在组装 Authorization 前重新验证最终 URI，且重定向关闭，因此不会转发 token。报告默认使用 UTC 时间戳和随机 run ID，先在同目录唯一临时文件完整 flush/close，再原子移动到不存在的最终路径；显式 `-ReportPath` 已存在时在网络访问前拒绝，绝不覆盖旧证据。
 - 设计提交 `b61fc07`、实施计划提交 `be6b5db` 已完成。当前 Task 1–14 已实现：Task 13 增加关闭态延迟导入、独立客服健康摘要、版本化 synthetic 评估集、离线指标 helper 和运维/回滚文档，Task 14 增加安全验收门；下述真实环境验收仍未声称完成。
 - Task 1 的 MySQL 知识文档与 ETL outbox 表、对应 MyBatis-Flex 实体和 Mapper 已在提交 `8e18149` 完成。
 - Task 1 定向 schema 测试 2 项通过，`mvn clean -DskipTests compile` 通过，暂存差异的 `git diff --cached --check` 通过。仓库没有 `mvnw.cmd`，测试和编译使用系统 Maven；测试实际命令为 `mvn test -Dtest=CustomerServiceKnowledgeSchemaTest`。
@@ -377,7 +378,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-customer-serv
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-customer-service-rag.ps1 -Execute -IncludeMilvus
 ```
 
-`-IncludeCloseAi`、`-IncludeGpu`、`-IncludeOss`、`-IncludeEndToEnd` 与 `-IncludeMilvus` 相互独立，不会互相隐式开启。Docker 重启、诱发 OOM、依赖 outage 和对象删除始终保持 `manual-required`。证据目录、JSON 文件名、三个 base URL 和超时可参数化；报告不保存这些 URL，也不保存原始响应。
+`-IncludeCloseAi`、`-IncludeGpu`、`-IncludeOss`、`-IncludeEndToEnd` 与 `-IncludeMilvus` 相互独立，不会互相隐式开启。Docker 重启、诱发 OOM、依赖 outage 和对象删除始终保持 `manual-required`。证据目录、JSON 文件名、显式 `-ReportPath`、三个 base URL 和超时可参数化；默认报告名包含 UTC 时间戳和随机 run ID，报告不保存 URL、Location、query、原始响应或认证信息，也不会覆盖既有证据。
 
 ## 6. 当前自动化验证证据
 
@@ -393,7 +394,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-customer-serv
 | Java 客服登录 API 定向门禁 | `mvn "-Dtest=CustomerServiceAnswerServiceTest,CustomerServiceControllerTest,CustomerServiceAiClientTest" test` | 2026-10-01 Task 13 fresh：20 项通过 | 登录路由、请求边界、requestId 关联、degraded/unknown fields/source 严格校验、公开 VO 脱敏与 HTTP 客户端边界 |
 | Redis opt-in 集成 | `powershell -NoProfile -File scripts/verify-langgraph-real-gate.ps1 -Execute -IncludeRedis` | 最近真实环境 6 项通过 | 跨客户端回放、唯一执行、冲突与不确定态 |
 | PowerShell 脚本 | `powershell -NoProfile -File scripts/ai-validation-scripts.tests.ps1` | Windows PowerShell 5.1 与 PowerShell 7 检查通过 | 验收脚本参数、认证和脱敏约束 |
-| 客服 RAG 验收门静态与行为测试 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/customer-service-rag-validation.tests.ps1`；`pwsh -NoProfile -File scripts/customer-service-rag-validation.tests.ps1` | 2026-10-01 规格复审修复 fresh：Windows PowerShell 5.1.26100.4652 与 PowerShell 7.6.5 均退出码 0 | 默认 dry-run 零网络/uv/docker；HTTP 200/302/399 通过、401/404/500 失败并以 exit 1 优先；缺失 token blocked；五类单独 opt-in 和全开组合的安全入口、破坏性步骤、未选组及零真实外部命令契约 |
+| 客服 RAG 验收门静态与真实本地 HTTP 行为测试 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/customer-service-rag-validation.tests.ps1`；`pwsh -NoProfile -File scripts/customer-service-rag-validation.tests.ps1` | 2026-10-01 第二轮规格复审 fresh：Windows PowerShell 5.1.26100.4652 与 PowerShell 7.6.5 均退出码 0 | 本地 server 验证 HTTP 200/302/399、401/404/500、不跟随 Location、status-only 不泄露正文、64 KiB Content-Length/chunked 上限、慢流 timeout、ready/customer 严格字段与 CLR 类型、loopback/HTTPS URL 策略、token 不转发、逻辑 evidenceReference、旧报告不覆盖、并发默认报告唯一且有效；同时覆盖五类单独 opt-in、全开组合和零真实外部命令 |
 | 客服 RAG 验收门 dry-run | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-customer-service-rag.ps1` | 2026-10-01 fresh：退出码 0，仅打印计划 | 覆盖 health、Milvus、CloseAI、GPU、OSS 和 Spring/Python/Vue E2E 计划，不访问服务或创建报告 |
 | 客服 RAG 非秘密探测 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-customer-service-rag.ps1 -Execute` | 2026-10-01 fresh：退出码 2；Python live/ready、Spring、Frontend 均 `SERVICE_UNREACHABLE`，认证客服 health 为 `VALIDATION_SECRET_MISSING` | 安全门诚实记录未启动服务和缺失进程令牌；不能证明任何真实外部能力通过 |
 | 统一非外部数据库门禁 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1 -Execute` | 本轮未重新执行；此前历史基线为 6 个步骤通过 | 不能作为本轮新增多 Agent 测试数量的 fresh 证据 |
@@ -614,6 +615,7 @@ Vue 多 Agent 是 Python LangGraph 内部的功能开关，回滚时保持 LangG
 
 | 提交 | 内容 |
 | --- | --- |
+| 本加固提交（`fix: harden customer service RAG validation evidence`） | 使用跨 PowerShell 有界 .NET HTTP、严格 health JSON/URL/evidence 契约和原子唯一报告，并改用真实本地 server 验证 |
 | 本修复提交（`fix: enforce customer service RAG probe status`） | 修正 HTTP 4xx/5xx 状态探测误通过，并补齐跨 PowerShell 状态码、退出码和 opt-in 组合行为测试 |
 | 本提交（`test: add customer service RAG validation gate`） | 增加客服 RAG 默认 dry-run 安全验收门、双 PowerShell 静态测试和本轮 blocked/not-run 交接证据 |
 | `0d38ac7` | 使用 Milvus 专用同步 daemon 健康探针，隔离默认 executor 并收紧 lifespan 退出边界 |
