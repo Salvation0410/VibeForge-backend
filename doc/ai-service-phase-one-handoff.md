@@ -368,6 +368,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 | Java 网关 | `mvn "-Dtest=LangGraphAiGenerationGatewayTest" test` | 10 项通过 | HTTP/1.1、连接复用、大流隔离、空闲超时与恢复 |
 | Vue 构建器 | `mvn "-Dtest=VueProjectBuilderTest" test` | 16 项通过 | 构建错误边界、输出限制、父子进程回收 |
 | Java 生产编译 | `mvn clean -DskipTests compile` | 2026-10-01 Task 13 fresh：263 个生产源文件编译成功 | 当前生产源码可干净编译 |
+| Java 客服计划 focused | `mvn "-Dtest=CustomerServiceKnowledgeSchemaTest,KnowledgeDocumentFilePolicyTest,OssKnowledgeDocumentTest,CustomerServiceKnowledgeServiceTest,CustomerServiceKnowledgeEtlWorkerTest,CustomerServiceKnowledgeAdminControllerTest,CustomerServiceControllerTest,CustomerServiceAnswerServiceTest" test` | 2026-10-01 当前主 Agent fresh：计划中的 8 类测试退出码 0 | schema、文件策略、OSS adapter、知识服务/worker/admin API 和登录问答边界；不包含真实 OSS、MySQL 或 Python 联调 |
 | Java 客服登录 API 定向门禁 | `mvn "-Dtest=CustomerServiceAnswerServiceTest,CustomerServiceControllerTest,CustomerServiceAiClientTest" test` | 2026-10-01 Task 13 fresh：20 项通过 | 登录路由、请求边界、requestId 关联、degraded/unknown fields/source 严格校验、公开 VO 脱敏与 HTTP 客户端边界 |
 | Redis opt-in 集成 | `powershell -NoProfile -File scripts/verify-langgraph-real-gate.ps1 -Execute -IncludeRedis` | 最近真实环境 6 项通过 | 跨客户端回放、唯一执行、冲突与不确定态 |
 | PowerShell 脚本 | `powershell -NoProfile -File scripts/ai-validation-scripts.tests.ps1` | Windows PowerShell 5.1 与 PowerShell 7 检查通过 | 验收脚本参数、认证和脱敏约束 |
@@ -389,7 +390,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 重要限制：
 
 - 全量 `mvn test` 存在历史实验代码和外部依赖相关失败，当前不能声明全量 Java 测试通过。
-- Task 13 初始实现的一次中间运行在 Windows spawn 压力下触发既有 reranker 固定 `sleep(0.03)` 时序断言；该单测独立复跑通过，Milvus 专用同步健康探针复审修复后的最终完整 `uv run pytest` 605 项通过、1 项跳过。未为掩盖抖动修改业务实现或该测试同步策略。
+- 当前主 Agent 第一次完整 `uv run pytest` 在 Windows spawn 压力下命中既有 reranker 30ms 时序断言；同一单测随后连续 8 次独立执行均通过。Milvus 专用同步健康探针复审修复后，第二次完整 `uv run pytest` 退出码为 0，结果为 605 项通过、1 项跳过。未为掩盖抖动修改业务实现或该测试同步策略，也不能据此替代真实 GPU 压力验证。
 - 本轮统一入口未使用 `-IncludeRedis`；表中的真实 Redis 6 项来自最近一次独立真实环境验证，不冒充本轮 fresh 结果。
 - 本机 PostgreSQL Docker 容器存在，但独立数据库 `yu_ai_checkpoint` 尚未创建；本轮没有运行 `-IncludePostgres`，不得声称真实 PostgreSQL 集成通过。
 - Python 大部分测试使用 Fake Model、内存网关或 MockTransport，不能替代真实模型、真实 Spring 和完整前端验收。
@@ -588,8 +589,9 @@ Vue 多 Agent 是 Python LangGraph 内部的功能开关，回滚时保持 LangG
 
 | 提交 | 内容 |
 | --- | --- |
-| `763240d` | 为一般 async provider/dependency 增加共享健康 Task 与有界 lifespan 清理 |
-| `e36c106` | 限制同步健康探针 single-flight、固定七键摘要并严格校验 evaluator latency |
+| `0d38ac7` | 使用 Milvus 专用同步 daemon 健康探针，隔离默认 executor 并收紧 lifespan 退出边界 |
+| `763240d` | 为一般 async provider/dependency 增加 single-flight 共享健康 Task 与有界 lifespan 清理 |
+| `e36c106` | 有界化同步健康探针、固定七项公开字段并严格校验 evaluator latency |
 | `912346f` | 补齐 answer readiness、七项必需依赖、稳定 reason 和完整 lifespan disabled 验证 |
 | `4291790` | 增加客服健康隔离、版本化离线评估集和运行文档 |
 | `73885b8` | 拒绝客服回答中的失效来源和超限 chunk ID，补齐 Task 10 严格来源契约 |
