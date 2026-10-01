@@ -13,6 +13,13 @@ import static org.mockito.Mockito.*;
 import com.yupi.yuaicodemother.ratelimit.annotation.RateLimit;
 import org.springframework.web.bind.annotation.PostMapping;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import com.yupi.yuaicodemother.exception.BusinessException;
+import com.yupi.yuaicodemother.exception.ErrorCode;
+import com.yupi.yuaicodemother.exception.GlobalExceptionHandler;
 
 class CustomerServiceControllerTest {
     @Test
@@ -53,5 +60,18 @@ class CustomerServiceControllerTest {
                 method.getAnnotation(RateLimit.class).limitType());
         assertThrows(Exception.class, () -> new ObjectMapper().readValue(
                 "{\"question\":\"hello\",\"score\":1}", CustomerServiceAskRequest.class));
+    }
+
+    @Test
+    void webLayerMapsPostAndAnonymousToNotLogin() throws Exception {
+        CustomerServiceAnswerService answer = mock(CustomerServiceAnswerService.class);
+        SysUserService users = mock(SysUserService.class);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(users.getLoginUser(any())).thenThrow(new BusinessException(ErrorCode.NOT_LOGIN_ERROR));
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(new CustomerServiceController(answer, users))
+                .setControllerAdvice(new GlobalExceptionHandler()).build();
+        mvc.perform(post("/customer-service/ask").contentType("application/json")
+                        .content("{\"question\":\"hello\"}"))
+                .andExpect(status().isOk());
     }
 }
