@@ -28,7 +28,7 @@
 
 ### 客服机器人 RAG 实施进度
 
-- 设计提交 `b61fc07`、实施计划提交 `be6b5db` 已完成。当前 Task 1–10 的后端源码已实现，其中 Task 7 是 Spring/MySQL 知识文档管理、mutation coordinator 和 ETL worker，Task 8 已实现本地 GPU Reranker，Task 9 已实现带来源约束的 Grounded RAG 客服问答内部 API，Task 10 已实现 Spring 登录用户客服入口；前端接入和下述真实环境验收仍未声称完成。下一步按计划执行 Task 11：Vue 客服问答页面。
+- 设计提交 `b61fc07`、实施计划提交 `be6b5db` 已完成。当前 Task 1–11 已实现：Task 7 是 Spring/MySQL 知识文档管理、mutation coordinator 和 ETL worker，Task 8 已实现本地 GPU Reranker，Task 9 已实现带来源约束的 Grounded RAG 客服问答内部 API，Task 10 已实现 Spring 登录用户客服入口，Task 11 已在独立 Vue 前端仓库实现登录客服问答页面；下述真实环境验收仍未声称完成。下一步按计划执行 Task 12：Vue 知识库管理页面。
 - Task 1 的 MySQL 知识文档与 ETL outbox 表、对应 MyBatis-Flex 实体和 Mapper 已在提交 `8e18149` 完成。
 - Task 1 定向 schema 测试 2 项通过，`mvn clean -DskipTests compile` 通过，暂存差异的 `git diff --cached --check` 通过。仓库没有 `mvnw.cmd`，测试和编译使用系统 Maven；测试实际命令为 `mvn test -Dtest=CustomerServiceKnowledgeSchemaTest`。
 - 尚未在真实 MySQL 执行 DDL、CRUD 或并发任务认领验证，这些仍是人工待验收项。
@@ -67,6 +67,10 @@
 - Spring 调用 Python `POST /internal/v1/customer-service/answers` 时生成并传递 `requestId`，响应必须回传完全相同的 `requestId`。Java 严格要求 `degraded` 字段存在、类型为布尔且值为 `false`，拒绝响应和 source 中的未知字段、重复 source、缺失 locator、超限字段、失效或未完成索引的文档版本，以及不符合当前文档版本格式的 chunk ID；任一契约不满足均以脱敏的服务不可用语义失败，不向客户端透传供应商响应或内部原因。
 - 对外 `CustomerServiceAnswerVO` 只包含 `answered`、`answer` 和脱敏后的来源字段，不暴露 `degraded`、相似度或 rerank 分数、prompt、reasoning、内部错误正文。未登录请求保持统一 `code=40100` 语义。
 - Task 10 提交链为 `bf736f5`、`f9a377b`、`c9e923b`、`ba178af`、`5ef8611`、`2f9c053`、`fa42253`、`e61e5a8`、`73885b8`。2026-10-01 执行 `mvn -q "-Dtest=CustomerServiceAnswerServiceTest,CustomerServiceControllerTest,CustomerServiceAiClientTest" test`，20 项通过；在 `ai-service` 执行 `uv run pytest -q tests/test_api.py -k customer_service_answer`，5 项通过。两组均为 Fake/本地契约测试，不代表真实 Spring、Python、CloseAI、Milvus、OSS、GPU 或浏览器 E2E 已通过。
+- Task 11 位于独立前端仓库分支 `codex/customer-service-rag-ui`，提交链为 `4322156`、`04baf7d`、`1f38e39`、`4d91fb6`、`759f9a9`；这些前端提交没有合入或复制到后端 Git 历史。登录路由为 `/customer-service`，仅登录后显示“智能客服”导航，路由本身也声明 `requiresAuth=true`。
+- 当前页面只提供单轮问答：提交问题后调用 Spring `/customer-service/ask`，显示回答或拒答/不可用/已取消状态，并最多展示 3 条去重来源。公开类型只使用 `answered`、`answer`、`sources` 及 source 的 `documentId / documentVersion / documentName / chunkId / locator / excerpt`，不接收或展示分数、prompt、reasoning、`degraded` 等内部字段。
+- 每次请求使用独立 `AbortController`；用户取消、组件卸载或新序列替代旧序列后，迟到响应不得更新页面状态。问题提交前先 trim，并同时执行最多 4000 个 JavaScript UTF-16 code units 和最多 16000 UTF-8 bytes 的边界检查。首期不保存问答历史、不使用流式响应，也不启用长期记忆。
+- 2026-10-01 在前端隔离 worktree fresh 执行 `node --test --experimental-strip-types tests/optimizePrompt.test.ts tests/generationStreamProgress.test.ts tests/previewRefreshCoordinator.test.ts tests/customerService.test.ts`，30/30 项通过；`npm run type-check`、`npm run build-only` 和 `git diff --check` 均通过。构建只报告既有 chunk size 警告，没有新增构建错误。该验证未启动真实浏览器、登录会话、Spring、Python、CloseAI、Milvus、OSS 或 GPU。
 
 ### 已关闭的源码阻塞
 
@@ -262,6 +266,10 @@ START
 | `src/utils/generationStreamProgress.ts` | 80ms 刷新和 2000 字符尾部窗口 |
 | `src/utils/previewRefreshCoordinator.ts` | 当前成功请求只刷新一次预览 |
 | `src/utils/optimizePrompt.ts` | 三类简短优化提示 |
+| `src/views/customer-service/CustomerServiceView.vue` | 登录客服单轮问答、取消和最多 3 条来源展示 |
+| `src/api/customerService.ts` | Spring 客服问答公开请求与响应类型 |
+| `src/utils/customerService.ts` | 问题边界、来源规范化和请求生命周期治理 |
+| `tests/customerService.test.ts` | 客服页面纯函数、取消、迟到响应与卸载契约测试 |
 
 ## 5. 配置与本地服务
 
@@ -357,6 +365,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/new-ai-validation-re
 | Python 编译 | `uv run python -m compileall -q src` | 2026-10-01 REBUILD 收尾 fresh：退出码 0，无输出 | 当前 Python 源码可完成字节码编译 |
 | Python 全量 | `uv run pytest -q` | 2026-10-01 Task 9 fresh：576 项通过、1 项跳过、2 个依赖弃用警告 | 既有生成与质量阶段，以及客服知识 ETL、Grounded RAG、REBUILD、lease、流式 staging、预算、回答 deadline 和取消清理契约 |
 | Python 客服回答契约 | `uv run pytest -q tests/test_api.py -k customer_service_answer` | 2026-10-01 Task 10 fresh：5 项通过 | Python 内部问答请求、requestId 回传、字段边界、脱敏错误和 disabled/degraded 契约 |
+| Vue 客服与既有纯函数测试 | `node --test --experimental-strip-types tests/optimizePrompt.test.ts tests/generationStreamProgress.test.ts tests/previewRefreshCoordinator.test.ts tests/customerService.test.ts` | 2026-10-01 Task 11 fresh：30/30 项通过 | 单轮问答状态、4000 UTF-16/16000 UTF-8 边界、最多 3 来源、取消、迟到响应、卸载清理及既有生成体验契约 |
+| Vue 类型检查 | `npm run type-check` | 2026-10-01 Task 11 fresh：退出码 0 | 客服页面、路由、API 与工具类型一致 |
+| Vue 生产构建 | `npm run build-only` | 2026-10-01 Task 11 fresh：退出码 0；仅有既有 chunk size 警告 | 前端生产 bundle 可构建，不代表真实浏览器或后端联调通过 |
+| Vue 差异检查 | `git diff --check` | 2026-10-01 Task 11 fresh：退出码 0 | 前端分支差异没有尾随空格等补丁错误 |
 | Python 锁文件 | `uv lock --check` | 2026-10-01 REBUILD 收尾 fresh：退出码 0，解析 150 个包 | `uv.lock` 与项目依赖声明一致 |
 | 文档空白检查 | `git diff --check` | 2026-10-01 REBUILD 收尾 fresh：退出码 0，仅有 Git 的 LF/CRLF 工作树提示 | 本轮文档差异没有尾随空格等补丁错误 |
 | 当前工作树 | `git status --short` | 当前隔离分支工作树干净，最终提交后命令无输出 | 不把其他工作树或前端仓库状态混入本分支结论 |
@@ -482,9 +494,20 @@ Task 10 只完成了自动化契约验证，本轮没有启动真实 Spring、Py
 3. 人工构造 Python `requestId` 不匹配、`degraded=true`、未知字段、重复 source、缺失 locator、过期文档版本和超限 chunk ID，确认 Spring 全部 fail-closed，公开响应不泄露分数、prompt、reasoning、内部错误正文或供应商响应。
 4. 使用两个登录用户分别验证 USER 限流隔离，同一用户在 60 秒窗口内超过 10 次时被限流，另一用户不受其计数影响；确认日志和响应不包含问题正文、凭据或签名 URL。
 5. 使用中文、emoji、空白、4000 字符边界和 UTF-8 超限问题验证请求限制；同时覆盖 Python 超时、非 2xx、非法 JSON、响应体超限和客户端断开，确认稳定错误语义与资源收敛。
-6. 在浏览器完成客服页面接入后的登录、提问、拒答、错误、重试和来源跳转验收；该项依赖下一步 Task 11，当前尚无浏览器 E2E 证据。
+6. 在真实浏览器完成已实现客服页面的登录、提问、拒答、错误、重试和来源展示验收；当前只有 Node 纯函数、类型检查和构建证据，尚无浏览器 E2E 证据。
 
-### 7.10 Vue 多 Agent 功能回滚
+### 7.10 Vue 客服页面人工待验证
+
+Task 11 已完成源码和自动化门禁，但本轮没有启动真实浏览器、登录会话、Spring、Python、CloseAI、Milvus、OSS 或 GPU。以下项目仍需人工执行，不能写为通过：
+
+1. 使用未登录浏览器访问 `/customer-service`，确认路由守卫按现有登录策略处理，导航不显示“智能客服”；登录后确认导航出现并能进入页面，刷新后会话状态正确恢复。
+2. 连接真实 Spring/Python 服务，提交普通问题、无依据问题和后端错误，分别确认回答、拒答和服务不可用状态；响应只展示公开字段，最多 3 条来源且 locator、excerpt 和文档名符合预期。
+3. 在请求进行中点击取消并立即离开页面，确认 `AbortController` 中止请求，迟到成功或失败响应都不更新已卸载页面，也不出现控制台未处理异常。
+4. 验证空白、前后空格、中文、emoji、恰好/超过 4000 UTF-16 code units 和恰好/超过 16000 UTF-8 bytes 的输入边界，确认前后端拒绝语义一致且不会重复提交。
+5. 使用真实 OSS 文档、CloseAI、Docker Milvus 和 RTX 4050 GPU Reranker 完成上传、索引、问答、来源展示全链路，确认页面引用属于当前活动文档版本。
+6. 确认刷新或重新进入页面后不保留历史问答，本轮没有流式 token 展示，也没有跨请求长期记忆；这些是首期明确边界，不应误报为缺陷。
+
+### 7.11 Vue 多 Agent 功能回滚
 
 Vue 多 Agent 是 Python LangGraph 内部的功能开关，回滚时保持 LangGraph 引擎不变，按以下顺序执行：
 
@@ -628,7 +651,7 @@ Vue 多 Agent 已于 2026-09-30 本地快进合并到 `dev`，合并后 HEAD 为
 - `doc/ai-service-langchain-langgraph-refactor-design.md`：重构架构与边界设计。
 - `docs/superpowers/specs/2026-09-29-postgres-checkpoint-design.md`：PostgreSQL checkpoint 迁移、故障语义和长期记忆决策。
 - `docs/superpowers/specs/2026-09-29-vue-multi-agent-quality-review-design.md`：Vue 三角色质量审查、F1 错误语义、repair 和 checkpoint 边界。
-- `docs/superpowers/specs/2026-09-30-customer-service-rag-design.md`：客服机器人、OSS 文档 ETL、CloseAI Embedding、Milvus、GPU Reranker、Task 9 Grounded RAG 和 Task 10 Spring 登录客服 API 设计；Task 1–10 后端源码已实现，Task 7 的真实 MySQL/OSS/多实例、Task 8 的真实 GPU/POSIX/部署验收，以及 Task 9–10 的真实评估集/模型/Milvus/断连/浏览器/E2E 验收仍待完成。下一步为 Task 11 Vue 客服问答页面。
+- `docs/superpowers/specs/2026-09-30-customer-service-rag-design.md`：客服机器人、OSS 文档 ETL、CloseAI Embedding、Milvus、GPU Reranker、Task 9 Grounded RAG、Task 10 Spring 登录客服 API 和 Task 11 Vue 客服问答页面设计；Task 1–11 已实现，Task 7 的真实 MySQL/OSS/多实例、Task 8 的真实 GPU/POSIX/部署验收，以及 Task 9–11 的真实评估集/模型/Milvus/断连/浏览器/E2E 验收仍待完成。下一步为 Task 12 Vue 知识库管理页面。
 - `docs/superpowers/specs/2026-09-21-bounded-streaming-simple-prompts-design.md`：有限流式窗口和简短优化提示设计。
 - `docs/superpowers/specs/2026-09-21-circular-preview-spinner-design.md`：预览加载图正圆修复设计。
 
