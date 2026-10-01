@@ -54,8 +54,11 @@ class CustomerServiceAnswerServiceTest {
         CustomerServiceAskRequest request = new CustomerServiceAskRequest(); request.setQuestion("hello");
         CustomerServiceAiClient.AnswerSource source = new CustomerServiceAiClient.AnswerSource("7", "guide", 2,
                 "7:2:0", "section", "excerpt");
-        when(client.answer(any())).thenReturn(new CustomerServiceAiClient.AnswerResponse(
-                "x", true, "answer", List.of(source, source)));
+        when(client.answer(any())).thenAnswer(invocation -> {
+            CustomerServiceAiClient.AnswerRequest sent = invocation.getArgument(0);
+            return new CustomerServiceAiClient.AnswerResponse(
+                    sent.requestId(), true, "answer", List.of(source, source));
+        });
         assertThrows(RuntimeException.class, () -> service.answer(request, 1L));
     }
 }

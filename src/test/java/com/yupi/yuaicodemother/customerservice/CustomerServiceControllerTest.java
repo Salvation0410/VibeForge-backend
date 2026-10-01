@@ -72,6 +72,7 @@ class CustomerServiceControllerTest {
                 .setControllerAdvice(new GlobalExceptionHandler()).build();
         mvc.perform(post("/customer-service/ask").contentType("application/json")
                         .content("{\"question\":\"hello\"}"))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value(40100));
     }
 }
