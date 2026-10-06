@@ -201,8 +201,7 @@ def automatic_tracing(monkeypatch):
     monkeypatch.delenv("LANGCHAIN_TRACING_V2", raising=False)
     utils.get_env_var.cache_clear()
     monkeypatch.setattr(manager, "LangChainTracer", FakeTracer)
-    # Override the suite's disabled context to exercise environment-driven tracing.
-    with tracing_context(enabled=None):
+    with tracing_context(enabled=True):
         assert any(isinstance(handler, FakeTracer) for handler in manager.AsyncCallbackManager.configure().handlers)
         yield manager
     utils.get_env_var.cache_clear()

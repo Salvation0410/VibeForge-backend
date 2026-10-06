@@ -14,6 +14,7 @@ from ai_service.app import create_app
 from ai_service.config import Settings
 from ai_service.models.base import ModelTurn, ToolCall
 from ai_service.models.quality_review import ReviewerResult, ReviewerRole
+from ai_service.models.reranker import DisabledReranker
 
 
 if sys.platform == "win32":
@@ -173,6 +174,7 @@ def settings() -> Settings:
         spring_gateway_bearer_token="spring-secret",
         checkpoint_enabled=False,
         checkpoint_required=False,
+        rag_embedding_dimension=2,
     )
 
 
@@ -189,12 +191,14 @@ def disable_implicit_tracing(monkeypatch):
 
 @pytest.fixture
 def app_factory(settings: Settings):
-    def factory(*, model=None, gateway=None, checkpoint=None):
+    def factory(*, model=None, gateway=None, checkpoint=None, **kwargs):
+        kwargs.setdefault("reranker", DisabledReranker())
         return create_app(
             settings=settings,
             model=model or FakeModel(),
             tool_gateway=gateway or FakeToolGateway(),
             checkpoint=checkpoint or MemoryCheckpoint(),
+            **kwargs,
         )
 
     return factory
