@@ -14,6 +14,7 @@ from ai_service.infrastructure.checkpoint import (
 )
 from ai_service.infrastructure.postgres_checkpoint import PostgresCheckpoint
 from ai_service.infrastructure.spring_tools import SpringToolGateway
+from ai_service.infrastructure.langsmith_tracing import LangSmithTracer
 from ai_service.models.base import GenerationModel
 from ai_service.models.openai_compatible import OpenAICompatibleModel
 from ai_service.orchestration.cancellation import CancellationRegistry
@@ -54,6 +55,7 @@ def create_app(
     )
     cancellations = CancellationRegistry()
     active_generations = ActiveGenerationRegistry()
+    tracer = LangSmithTracer(config)
     workflow = GenerationWorkflow(
         model=generation_model,
         tool_gateway=gateway,
@@ -61,20 +63,26 @@ def create_app(
         cancellations=cancellations,
         active_generations=active_generations,
         settings=config,
+        tracer=tracer,
     )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         """管理 checkpoint 和 HTTP 工具客户端的启动与释放。"""
 
-        await checkpoint_store.start()
         try:
+            await checkpoint_store.start()
             yield
         finally:
-            await checkpoint_store.close()
-            close = getattr(gateway, "close", None)
-            if close is not None:
-                await close()
+            try:
+                await checkpoint_store.close()
+            finally:
+                try:
+                    close = getattr(gateway, "close", None)
+                    if close is not None:
+                        await close()
+                finally:
+                    await tracer.close()
 
     app = FastAPI(title="yu-ai-service", version="0.1.0", lifespan=lifespan)
     app.state.settings = config
@@ -83,6 +91,7 @@ def create_app(
     app.state.checkpoint = checkpoint_store
     app.state.cancellations = cancellations
     app.state.active_generations = active_generations
+    app.state.langsmith_tracer = tracer
     app.state.workflow = workflow
 
     register_routes(

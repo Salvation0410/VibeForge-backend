@@ -4,9 +4,11 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
+from langsmith import tracing_context
 
 from ai_service.api.schemas import EventError, GenerationEvent, GenerationRequest
 from ai_service.config import Settings
@@ -17,6 +19,7 @@ from ai_service.orchestration.cancellation import CancellationRegistry, Generati
 from ai_service.orchestration.active_generations import ActiveGenerationRegistry
 from ai_service.orchestration.events import EventEmitter
 from ai_service.orchestration.multi_agent_review import run_multi_agent_review
+from ai_service.infrastructure.langsmith_tracing import LangSmithTracer
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +110,7 @@ class GenerationWorkflow:
         cancellations: CancellationRegistry,
         settings: Settings,
         active_generations: ActiveGenerationRegistry | None = None,
+        tracer: LangSmithTracer | None = None,
     ):
         self.model = model
         self.tool_gateway = tool_gateway
@@ -114,6 +118,7 @@ class GenerationWorkflow:
         self.cancellations = cancellations
         self.active_generations = active_generations or ActiveGenerationRegistry()
         self.settings = settings
+        self.tracer = tracer
 
     async def run(self, request: GenerationRequest) -> list[GenerationEvent]:
         """完整执行工作流并返回本次请求产生的全部事件。"""
@@ -161,6 +166,9 @@ class GenerationWorkflow:
         """构造初始状态并执行图，将取消和异常转换为终止事件。"""
         thread_id = f"{request.app_id}:{request.request_id}"
         terminal: dict[str, Any] = {"published": False, "completed": False}
+        started_at = datetime.now(UTC)
+        trace_status = "failed"
+        trace_error = None
         graph = self._build_graph(emitter, thread_id, terminal)
         initial: WorkflowState = {
             "app_id": request.app_id,
@@ -174,8 +182,11 @@ class GenerationWorkflow:
             "tool_call_count": 0,
         }
         try:
-            await graph.ainvoke(initial, config={"configurable": {"thread_id": thread_id}})
+            with tracing_context(enabled=False):
+                await graph.ainvoke(initial, config={"configurable": {"thread_id": thread_id}})
+            trace_status = "completed" if terminal.get("completed") else "failed"
         except GenerationCancelled:
+            trace_status, trace_error = "cancelled", "cancelled"
             if not await self._complete_committed_publication(emitter, terminal):
                 await emitter.emit(
                     "failed",
@@ -184,6 +195,7 @@ class GenerationWorkflow:
                     error=EventError(code="cancelled", message="Generation was cancelled"),
                 )
         except asyncio.CancelledError:
+            trace_status, trace_error = "cancelled", "cancelled"
             if not convert_task_cancel:
                 raise
             if not await self._complete_committed_publication(emitter, terminal):
@@ -194,6 +206,7 @@ class GenerationWorkflow:
                     error=EventError(code="cancelled", message="Generation was cancelled"),
                 )
         except Exception as exc:
+            trace_error = _stable_error_code(exc)
             if not await self._complete_committed_publication(emitter, terminal):
                 await emitter.emit(
                     "failed",
@@ -201,6 +214,22 @@ class GenerationWorkflow:
                     error=EventError(code=_stable_error_code(exc), message=str(exc)),
                 )
         finally:
+            if self.tracer is not None:
+                if emitter.events and emitter.events[-1].error is not None:
+                    trace_error = emitter.events[-1].error.code
+                await self.tracer.record(
+                    name="generation",
+                    metadata={
+                        "request_id": request.request_id,
+                        "app_id": request.app_id,
+                        "code_gen_type": request.code_gen_type.value,
+                        "repair_count": terminal.get("repair_count", 0),
+                        "tool_call_count": terminal.get("tool_call_count", 0),
+                    },
+                    status="completed" if terminal.get("completed") else trace_status,
+                    error_code=None if terminal.get("completed") else trace_error,
+                    started_at=started_at,
+                )
             # checkpoint 清理属于终态维护动作，失败不能覆盖业务终态。
             try:
                 await self.checkpoint.cleanup_graph(thread_id)
@@ -236,12 +265,28 @@ class GenerationWorkflow:
         def guarded(name: str, function):
             # 统一处理取消检查、节点状态事件与业务 checkpoint。
             async def node(state: WorkflowState) -> dict[str, Any]:
+                started_at = datetime.now(UTC)
+                terminal.update(repair_count=state.get("repair_count", 0), tool_call_count=state.get("tool_call_count", 0))
                 self._raise_if_cancelled(thread_id)
                 await emitter.node_status(name, "started")
                 update = await function(state)
                 merged = {**state, **update}
+                terminal.update(repair_count=merged.get("repair_count", 0), tool_call_count=merged.get("tool_call_count", 0))
                 await self.checkpoint.save(thread_id, self._checkpoint_payload(merged, name))
                 await emitter.node_status(name, "completed")
+                if self.tracer is not None:
+                    await self.tracer.record(
+                        name=name,
+                        metadata={
+                            "request_id": state["request_id"],
+                            "app_id": state["app_id"],
+                            "code_gen_type": state["code_gen_type"],
+                            "repair_count": merged.get("repair_count", 0),
+                            "tool_call_count": merged.get("tool_call_count", 0),
+                        },
+                        status="completed",
+                        started_at=started_at,
+                    )
                 return update
 
             return node

@@ -202,6 +202,7 @@ Python AI_SERVICE_INTERNAL_BEARER_TOKEN
 - 固定尺寸加载图位于 Flex 容器时必须禁止收缩并保持 1:1 比例，避免长提示文字将圆形挤成椭圆。
 - 不大面积重写历史乱码注释，不进行无关重构。
 - 不提交生成文件、日志、下载产物、`.venv`、`.env` 或 `projects/`。
+- Git 提交信息必须使用中文，并符合 Conventional Commits 规范；格式为 `type(scope): 中文说明`，例如 `feat(ai): 接入LangSmith脱敏追踪`。提交前检查 `git log -1 --pretty=%s` 和 `git diff --check`，禁止使用无意义或纯英文提交信息。
 
 ## 工具边界与安全
 

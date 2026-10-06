@@ -51,6 +51,11 @@ AI_SERVICE_INTERNAL_BEARER_TOKEN=与Spring配置一致的服务令牌
 AI_SERVICE_SPRING_GATEWAY_BEARER_TOKEN=与Spring配置一致的工具令牌
 AI_SERVICE_MODEL_API_KEY=模型服务API Key
 AI_SERVICE_CHECKPOINT_POSTGRES_URL=postgresql://yu_ai_checkpoint:<set-outside-git>@localhost:5432/yu_ai_checkpoint
+# LangSmith 已有配置，默认关闭；开启时仅上传脱敏运行元数据。
+LANGSMITH_TRACING=false
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+LANGSMITH_API_KEY=replace-with-langsmith-key
+LANGSMITH_PROJECT=yu-ai-code-mother
 ```
 
 默认模型为 `deepseek-chat`，默认地址为 `https://api.deepseek.com/v1`。复杂推理节点可通过配置改用兼容服务提供的推理模型。
@@ -70,6 +75,8 @@ uv run python -m ai_service.infrastructure.checkpoint_setup
 ```
 
 `AI_SERVICE_CHECKPOINT_AUTO_SETUP=true` 适合本地开发。生产环境推荐先使用初始化命令完成 DDL，再将其设为 `false`，并让运行账号只保留所需的数据访问权限。当前不启用 `PostgresStore` 长期记忆；跨请求上下文仍由 Spring 聊天历史提供。
+
+LangSmith 追踪直接读取 `.env` 中的 `LANGSMITH_*` 变量。将 `LANGSMITH_TRACING` 设为 `true` 后重启 Python 服务即可启用；客户端初始化、网络发送或 flush 失败不会影响生成、取消和发布终态。源码、完整提示词、工具参数和模型原始响应不会上传。
 
 ## 3. 启动 Spring Boot
 

@@ -16,12 +16,12 @@
 
 ### LangSmith
 
-- 默认关闭。只有显式设置追踪开关并提供运行时凭据时才启用。
+- 默认关闭。开关、项目名、端点和密钥全部从现有 `ai-service/.env` 的 `LANGSMITH_TRACING`、`LANGSMITH_ENDPOINT`、`LANGSMITH_API_KEY`、`LANGSMITH_PROJECT` 读取，不新增另一套凭据来源。
 - 追踪内容限制为 requestId、appId、userId（如允许）、engine、codeGenType、node、tool 名称、耗时、repair/tool 计数、终态和稳定错误码等脱敏元数据。
 - 不上传完整 prompt、conversation、源码 artifact、tool arguments、tool results、模型原始响应、Bearer token、API key、Cookie 或绝对路径。
 - LangSmith 初始化失败、发送失败和关闭失败只记录脱敏日志，不影响业务终态。
 - 追踪配置和客户端生命周期由 Python AI 服务统一管理；不改变 Spring 对外 SSE 协议和内部 NDJSON 契约。
-- 依赖和配置必须兼容当前 LangChain/LangGraph 锁定版本，默认测试不得访问 LangSmith 网络。
+- 依赖和配置必须兼容当前 LangChain/LangGraph 锁定版本，默认测试不得访问 LangSmith 网络；启用时 SDK 初始化和发送失败均降级为空实现。
 
 ## 方案
 

@@ -104,6 +104,19 @@ Reviewer 提示词要求模型只返回没有 Markdown 围栏的纯 JSON。为�
 
 `repair_feedback` 的每个阻断问题固定为单独一行，字段顺序是 `severity`、`code`、`issue`、`evidence`、`repair`。字段值先折叠换行、制表符等空白，再把值内部的 `;`、`=` 规范化为全角分隔符，防止内容伪造结构字段；反馈不添加总标题，也不包含 Reviewer 身份或 category。
 
+### LangSmith 旁路追踪
+
+Python 工作流支持可选 LangSmith 旁路追踪。开关和配置直接来自 `ai-service/.env`：
+
+```dotenv
+LANGSMITH_TRACING=false
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+LANGSMITH_API_KEY=replace-with-langsmith-key
+LANGSMITH_PROJECT=yu-ai-code-mother
+```
+
+默认关闭；设置 `LANGSMITH_TRACING=true` 且提供完整凭据后才创建客户端。追踪只发送请求标识、应用标识、生成类型、节点、状态、错误码和有限计数。Prompt、对话、源码、工具参数和结果、模型原始响应及凭据由代码层过滤，LangSmith 不可用时生成流程继续按原有终态运行。关闭开关后无需改动 Spring、Vue 或 checkpoint。
+
 任一 Reviewer 超时、普通模型调用失败、返回非法结构，或源码快照失败，都按 F1 直接发送 `failed`，不回退到单 Reviewer、不盲目修复、也不把候选版本当作成功。稳定错误码包括 `MULTI_AGENT_REVIEW_TIMEOUT`、`MULTI_AGENT_REVIEW_MODEL_ERROR`、`MULTI_AGENT_REVIEW_INVALID_OUTPUT` 和 `MULTI_AGENT_REVIEW_SNAPSHOT_ERROR`。用户取消会继续沿用现有协作式取消语义，并取消仍在运行的 Reviewer 任务。Reviewer 边界直接收到 `SystemExit` 或 `KeyboardInterrupt` 时会先脱敏，再等待兄弟任务取消和清理完成后重新抛出；非整数 `SystemExit.code` 统一归一为 `1`，不会泄露原始异常内容。
 
 该能力不新增公开 SSE 事件，不改变 Spring 对业务数据、项目文件、构建、发布和对外 SSE 的所有权。完整源码快照、Reviewer summary、`reviewer_results`、`quality_issues` 和 minor 详情都不持久化；`ai_workflow_status` 仍只保存脱敏状态摘要。LangGraph 图 checkpoint 仅在阻断问题需要恢复到 repair 时保存最多 4000 字符的 `repair_feedback`，恢复后直接进入 repair，不重复调用已经完成的 Reviewer。终态仍执行 best-effort thread 清理，TTL 继续作为异常退出兜底。本轮不启用长期记忆，也不创建或注入 `PostgresStore`。

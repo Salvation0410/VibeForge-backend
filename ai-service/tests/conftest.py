@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import asyncio
+import sys
 from copy import deepcopy
 from collections import defaultdict
 from typing import Any
@@ -12,6 +14,12 @@ from ai_service.app import create_app
 from ai_service.config import Settings
 from ai_service.models.base import ModelTurn, ToolCall
 from ai_service.models.quality_review import ReviewerResult, ReviewerRole
+
+
+if sys.platform == "win32":
+    # psycopg async requires SelectorEventLoop on Windows; keep opt-in PostgreSQL
+    # integration tests runnable under pytest instead of failing in ProactorLoop.
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
 class FakeModel:
@@ -158,12 +166,25 @@ class MemoryCheckpoint:
 @pytest.fixture
 def settings() -> Settings:
     return Settings(
+        _env_file=None,
+        langsmith_tracing=False,
         internal_bearer_token="test-secret",
         spring_gateway_base_url="http://spring.test/api/internal/ai-tools",
         spring_gateway_bearer_token="spring-secret",
         checkpoint_enabled=False,
         checkpoint_required=False,
     )
+
+
+@pytest.fixture(autouse=True)
+def disable_implicit_tracing(monkeypatch):
+    # Offline tests must not export synthetic prompts through ambient callbacks.
+    monkeypatch.setenv("LANGSMITH_TRACING", "false")
+    monkeypatch.setenv("LANGCHAIN_TRACING_V2", "false")
+    from langsmith import tracing_context
+
+    with tracing_context(enabled=False):
+        yield
 
 
 @pytest.fixture

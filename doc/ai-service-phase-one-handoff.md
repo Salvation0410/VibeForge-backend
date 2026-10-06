@@ -439,6 +439,16 @@ Vue 多 Agent 是 Python LangGraph 内部的功能开关，回滚时保持 LangG
 
 详细设计见 `docs/superpowers/specs/2026-09-29-postgres-checkpoint-design.md`。
 
+### P0：完成真实链路和 LangSmith 脱敏验收
+
+- 模型路由未知类型已改为稳定错误码 `MODEL_ROUTE_INVALID`，不再回显模型原始内容。
+- LangSmith 已接入 Python 工作流旁路追踪，开关和凭据直接读取 `ai-service/.env` 中的 `LANGSMITH_TRACING`、`LANGSMITH_ENDPOINT`、`LANGSMITH_API_KEY`、`LANGSMITH_PROJECT`。
+- `LANGSMITH_TRACING=false` 或凭据不完整时不创建客户端；启用后只提交 request/app、生成类型、节点、状态、计数和错误码等白名单元数据。
+- Prompt、conversation、源码 artifact、工具参数/结果、模型原始响应、令牌、Cookie 和绝对路径不会上传；LangSmith 网络或 SDK 异常不得改变生成终态。
+- 仍待真实环境执行：PostgreSQL opt-in 集成、三服务 SSE 端到端、Redis 双 Spring 竞争，以及 LangSmith 显式开启后的脱敏和成本验证。
+
+2026-10-06 本轮续接验证：Docker daemon 与 PostgreSQL 16 容器可用，已使用现有本地配置创建独立 `yu_ai_checkpoint` 数据库；真实 checkpoint opt-in 测试退出码 0，覆盖 saver 写入、读取、状态摘要和过期清理。测试采用 Windows SelectorEventLoop，并与服务一致读取 `.env` 配置。Python 离线门禁为 `261 passed, 1 skipped`。LangSmith 自动图/模型追踪已显式关闭，仅允许有界队列中的白名单记录，SDK 日志异常正文被过滤。真实 LangSmith 远端脱敏、三服务端到端和本轮 Redis 双实例仍待执行。
+
 ### 长期记忆决策
 
 - 本轮不启用 `PostgresStore`，不保存跨 thread 用户偏好或应用事实。
@@ -454,8 +464,8 @@ Vue 多 Agent 是 Python LangGraph 内部的功能开关，回滚时保持 LangG
 ### P2：真实运行稳定后再做
 
 1. 拆分 Python 入口令牌和 Spring 工具网关令牌，并设计新旧令牌并存的轮换窗口。
-2. 增加 requestId、appId、userId、engine、node、tool、status、节点耗时、模型耗时和构建耗时的结构化观测。
-3. 如接入 LangSmith，保持旁路、采样和源码脱敏，观测故障不得改变业务终态。
+2. 在已有 LangSmith 节点追踪基础上，增加 requestId、appId、userId、engine、node、tool、status、节点耗时、模型耗时和构建耗时的统一结构化观测。
+3. 根据真实链路成本和质量结果配置 LangSmith 采样率；保持旁路和源码脱敏，观测故障不得改变业务终态。
 4. 只有单工作流真实验收、指标和回滚稳定后，才评估 CloseAI 单模型多 Agent。
 5. 灰度稳定期结束且完成回滚演练后，才评估删除 Legacy 和未接入主链路的 Java LangGraph4j 实验目录。
 6. 检查 Git 历史和部署配置中的 AI、OSS、邮件等历史凭据并执行轮换。

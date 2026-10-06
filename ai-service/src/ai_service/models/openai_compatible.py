@@ -5,6 +5,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
+from langsmith import tracing_context
 from pydantic import ValidationError
 
 from ai_service.config import Settings
@@ -36,9 +37,14 @@ class OpenAICompatibleModel:
             max_tokens=settings.model_max_tokens,
         )
 
+    async def _invoke(self, messages):
+        # Only the explicit metadata tracer may export runs.
+        with tracing_context(enabled=False):
+            return await self._client.ainvoke(messages)
+
     async def route(self, prompt: str) -> str:
         """要求模型返回唯一的生成类型标识。"""
-        response = await self._client.ainvoke(
+        response = await self._invoke(
             [
                 SystemMessage(content=ROUTING_SYSTEM_PROMPT),
                 HumanMessage(content=prompt),
@@ -51,7 +57,7 @@ class OpenAICompatibleModel:
         generation_instructions = generation_system_prompt(branch)
         if branch == "VUE_PROJECT":
             generation_instructions = f"{generation_instructions}\n\n{vue_tool_prompt()}"
-        response = await self._client.ainvoke(
+        response = await self._invoke(
             [
                 SystemMessage(content=generation_instructions),
                 HumanMessage(content=json.dumps(context, ensure_ascii=False)),
@@ -64,7 +70,7 @@ class OpenAICompatibleModel:
 
     async def review(self, artifact: str, context: dict[str, Any]) -> bool:
         """让模型以 PASS 或 REPAIR 判断产物是否通过质量检查。"""
-        response = await self._client.ainvoke(
+        response = await self._invoke(
             [
                 SystemMessage(content=QUALITY_REVIEW_SYSTEM_PROMPT),
                 HumanMessage(content=json.dumps({"artifact": artifact, **context}, ensure_ascii=False)),
@@ -79,7 +85,7 @@ class OpenAICompatibleModel:
         context: dict[str, Any],
     ) -> ReviewerResult:
         """让指定角色返回严格校验的结构化质量审查结果。"""
-        response = await self._client.ainvoke(
+        response = await self._invoke(
             [
                 SystemMessage(content=quality_review_system_prompt(role.value)),
                 HumanMessage(content=json.dumps({"artifact": artifact, **context}, ensure_ascii=False)),
@@ -99,7 +105,7 @@ class OpenAICompatibleModel:
         repair_instructions = REPAIR_SYSTEM_PROMPT
         if context.get("codeGenType") == "VUE_PROJECT":
             repair_instructions = f"{repair_instructions}\n\n{vue_tool_prompt()}"
-        response = await self._client.ainvoke(
+        response = await self._invoke(
             [
                 SystemMessage(content=repair_instructions),
                 HumanMessage(content=json.dumps({"artifact": artifact, **context}, ensure_ascii=False)),

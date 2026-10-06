@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from typing import Any
 
@@ -19,6 +20,8 @@ from ai_service.infrastructure.checkpoint import CheckpointStore
 from ai_service.models.base import GenerationModel
 from ai_service.orchestration.cancellation import CancellationRegistry
 from ai_service.orchestration.active_generations import ActiveGenerationRegistry
+
+logger = logging.getLogger(__name__)
 from ai_service.orchestration.workflow import GenerationWorkflow
 
 
@@ -63,9 +66,10 @@ def register_routes(
         try:
             code_gen_type = CodeGenType(raw_type)
         except ValueError as exc:
+            logger.warning("Model returned unsupported route type (length=%d)", len(str(raw_type)))
             raise HTTPException(
                 status_code=502,
-                detail=f"Model returned unsupported route: {raw_type}",
+                detail="MODEL_ROUTE_INVALID",
             ) from exc
         return RouteResponse(
             request_id=body.request_id or str(uuid.uuid4()),

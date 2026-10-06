@@ -72,6 +72,26 @@ async def test_route_uses_routing_system_prompt():
 
 
 @pytest.mark.asyncio
+async def test_model_calls_suppress_automatic_langsmith_tracing(monkeypatch):
+    from langsmith import tracing_context
+    from langsmith.utils import tracing_is_enabled
+
+    monkeypatch.setenv("LANGSMITH_TRACING", "true")
+    monkeypatch.setenv("LANGCHAIN_TRACING_V2", "true")
+
+    class PrivateClient(CapturingClient):
+        async def ainvoke(self, messages):
+            assert tracing_is_enabled() is False
+            return await super().ainvoke(messages)
+
+    model = model_with_response("html")
+    model._client = PrivateClient("html")
+    with tracing_context(enabled=True):
+        assert await model.route("private prompt") == "HTML"
+        assert tracing_is_enabled() is True
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("branch", ["HTML", "MULTI_FILE"])
 async def test_static_generation_uses_branch_system_prompt(branch):
     model = model_with_response("artifact")

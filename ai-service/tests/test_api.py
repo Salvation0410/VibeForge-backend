@@ -102,6 +102,22 @@ def test_route_returns_supported_generation_type(app_factory, auth_headers):
     }
 
 
+def test_route_rejects_unknown_model_type_without_echoing_model_output(app_factory, auth_headers):
+    class InvalidRouteModel(FakeModel):
+        async def route(self, prompt: str) -> str:
+            return "secret-model-output-with-prompt"
+
+    response = TestClient(app_factory(model=InvalidRouteModel())).post(
+        "/internal/v1/route",
+        json={"prompt": "Create a site"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "MODEL_ROUTE_INVALID"
+    assert "secret-model-output" not in response.text
+
+
 def test_all_generation_branches_complete_in_order(app_factory, auth_headers, ndjson_parser):
     for branch in ("HTML", "MULTI_FILE", "VUE_PROJECT"):
         model = FakeModel()

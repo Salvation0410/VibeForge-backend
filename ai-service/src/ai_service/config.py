@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field, HttpUrl, model_validator
+from pydantic import AliasChoices, Field, HttpUrl, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -38,6 +38,24 @@ class Settings(BaseSettings):
     max_repair_attempts: int = Field(default=2, ge=0, le=5)
     multi_agent_review_enabled: bool = False
     multi_agent_review_timeout_seconds: float = Field(default=60.0, gt=0, le=300)
+
+    # LangSmith 使用现有 .env 中的 LANGSMITH_* 变量，不复用 AI_SERVICE_ 前缀。
+    langsmith_tracing: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("LANGSMITH_TRACING", "langsmith_tracing"),
+    )
+    langsmith_endpoint: HttpUrl | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LANGSMITH_ENDPOINT", "langsmith_endpoint"),
+    )
+    langsmith_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LANGSMITH_API_KEY", "langsmith_api_key"),
+    )
+    langsmith_project: str = Field(
+        default="yu-ai-code-mother",
+        validation_alias=AliasChoices("LANGSMITH_PROJECT", "langsmith_project"),
+    )
 
     @model_validator(mode="after")
     def validate_checkpoint_pool(self) -> "Settings":

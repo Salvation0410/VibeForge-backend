@@ -9,20 +9,21 @@ from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
 from ai_service.infrastructure.postgres_checkpoint import PostgresCheckpoint
+from ai_service.config import Settings
 
 pytestmark = pytest.mark.skipif(
     os.getenv("AI_SERVICE_POSTGRES_INTEGRATION") != "true",
     reason="set AI_SERVICE_POSTGRES_INTEGRATION=true to use real PostgreSQL",
 )
 
-POSTGRES_URL = os.getenv(
-    "AI_SERVICE_CHECKPOINT_POSTGRES_URL",
-    "postgresql://postgres:postgres@localhost:5432/yu_ai_checkpoint",
-)
+def postgres_url() -> str:
+    # Match service configuration, including the local .env, without exposing it.
+    return Settings().checkpoint_postgres_url
 
 
 @pytest.mark.asyncio
 async def test_real_postgres_checkpoint_lifecycle_and_expiration_cleanup():
+    POSTGRES_URL = postgres_url()
     thread_id = f"integration:{uuid4().hex}"
     checkpoint = PostgresCheckpoint(
         POSTGRES_URL,
