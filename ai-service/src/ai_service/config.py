@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     multi_agent_review_enabled: bool = False
     multi_agent_review_timeout_seconds: float = Field(default=60.0, gt=0, le=300)
 
+    langsmith_tracing: bool = Field(default=False, validation_alias=AliasChoices("LANGSMITH_TRACING", "langsmith_tracing"))
+    langsmith_endpoint: HttpUrl | None = Field(default=None, validation_alias=AliasChoices("LANGSMITH_ENDPOINT", "langsmith_endpoint"))
+    langsmith_api_key: str | None = Field(default=None, repr=False, validation_alias=AliasChoices("LANGSMITH_API_KEY", "langsmith_api_key"))
+    langsmith_project: str = Field(default="yu-ai-code-mother", validation_alias=AliasChoices("LANGSMITH_PROJECT", "langsmith_project"))
+
     customer_service_rag_enabled: bool = False
     closeai_api_key: str = Field(
         default="",

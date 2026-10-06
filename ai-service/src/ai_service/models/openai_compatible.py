@@ -5,6 +5,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
+from langsmith import tracing_context
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError
 
 from ai_service.config import Settings
@@ -64,6 +65,10 @@ class OpenAICompatibleModel:
         """Report local adapter availability without sending a model request."""
 
         return getattr(self, "_client", None) is not None
+
+    async def _invoke(self, messages):
+        with tracing_context(enabled=False):
+            return await self._client.ainvoke(messages)
 
     async def route(self, prompt: str) -> str:
         """要求模型返回唯一的生成类型标识。"""
@@ -145,7 +150,7 @@ class OpenAICompatibleModel:
     ) -> CustomerServiceModelAnswer:
         """Generate and strictly validate a grounded single-turn answer."""
 
-        response = await self._client.ainvoke([
+        response = await self._invoke([
             SystemMessage(content=CUSTOMER_SERVICE_SYSTEM_PROMPT),
             HumanMessage(content=customer_service_user_prompt(
                 question, contexts,

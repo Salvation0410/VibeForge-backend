@@ -1,7 +1,7 @@
 # AI 服务 LangGraph 交接说明
 
-> 更新日期：2026-10-01
-> 当前分支：`codex/customer-service-rag`
+> 更新日期：2026-10-06
+> 当前分支：`dev`
 > 文档目标：让后续开发者用最短时间确认当前事实、验证证据、人工验收门和下一步优先级。
 
 ## 1. 五分钟接手摘要
@@ -21,7 +21,7 @@
 
 ### 当前最高优先级
 
-1. 先在本机现有 PostgreSQL Docker 容器中创建并初始化独立角色和数据库 `yu_ai_checkpoint`，配置 Python checkpoint 连接，执行 opt-in 集成测试并确认 `/health/ready`；当前代码与测试入口已就绪，但数据库尚未创建。
+1. 独立数据库 `yu_ai_checkpoint` 已创建，2026-10-06 真实 opt-in 集成测试通过；仍需启动真实服务验证 `/health/ready` 和故障模式。
 2. 在上述 checkpoint 环境可用后，再启动 Spring、Python 和 Vue 前端并开启 Vue 多 Agent 开关，完成首次生成、针对性 major 修复、停止传播、超时/错误凭据和延迟/token 成本人工验证。
 3. 继续 P1 真实 Uvicorn/代理压力和真实 npm 长构建压力，补充资源收敛证据。
 4. 长期记忆保持关闭；只有出现清晰的跨 thread 用户或应用记忆需求时才重新评估 `PostgresStore`。
@@ -418,7 +418,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-customer-serv
 - 全量 `mvn test` 存在历史实验代码和外部依赖相关失败，当前不能声明全量 Java 测试通过。
 - 当前主 Agent 第一次完整 `uv run pytest` 在 Windows spawn 压力下命中既有 reranker 30ms 时序断言；同一单测随后连续 8 次独立执行均通过。Milvus 专用同步健康探针复审修复后，第二次完整 `uv run pytest` 退出码为 0，结果为 605 项通过、1 项跳过。未为掩盖抖动修改业务实现或该测试同步策略，也不能据此替代真实 GPU 压力验证。
 - 本轮统一入口未使用 `-IncludeRedis`；表中的真实 Redis 6 项来自最近一次独立真实环境验证，不冒充本轮 fresh 结果。
-- 本机 PostgreSQL Docker 容器存在，但独立数据库 `yu_ai_checkpoint` 尚未创建；本轮没有运行 `-IncludePostgres`，不得声称真实 PostgreSQL 集成通过。
+- 2026-10-06 已确认 Docker daemon、PostgreSQL 16 容器和独立数据库可用，真实 checkpoint opt-in 集成退出码 0；服务 readiness 与故障模式仍待运行态验收。
 - Python 大部分测试使用 Fake Model、内存网关或 MockTransport，不能替代真实模型、真实 Spring 和完整前端验收。
 - pytest 的 2 个 warning 分别来自 Starlette `anyio.abc.BlockingPortal` 别名弃用和 LangGraph `allowed_objects` 默认值将变更；本轮没有把依赖 warning 写成测试失败，也没有扩大范围修改依赖。
 - 受控本地 HTTP/进程测试不能证明真实 Uvicorn、代理、供应商限流、网络背压或 npm 包装层在所有平台上的行为。
@@ -437,7 +437,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-customer-serv
 | P0 | 停止、断线和失败终态 | 用户确认已完成，本轮未复测 | 取消不发布新版本，失败保留旧预览，迟到回调不刷新，终态唯一 |
 | P0 | 双 Spring 工具竞争 | 用户确认已完成，本轮未复测 | 同一作用域只执行一次，另一实例回放同一成功结果，新作用域探针保持独立 |
 | P0 | 双引擎摘要与 Legacy 回滚 | 用户确认已完成，本轮未复测 | 同一主体路由稳定，可比较摘要，可切回 Legacy 且取消语义一致 |
-| P0 | 真实 PostgreSQL checkpoint | 待人工执行 | 本机 Docker 中独立 `yu_ai_checkpoint` 初始化成功，opt-in 集成测试通过，`/health/ready` 正常，并覆盖 optional、required、disabled 三种模式 |
+| P0 | 真实 PostgreSQL checkpoint | 数据库与集成测试通过；服务验收待执行 | `/health/ready` 正常，并覆盖 optional、required、disabled 三种模式 |
 | P0 | Vue 三 Reviewer 真实模型链路 | 待人工执行 | 首次生成、major 修复、取消、超时、非法输出和错误凭据均符合 F1/S1 约定，候选发布与旧预览语义正确 |
 | P0 | Spring/Python/Vue 完整 SSE 端到端 | 待人工执行 | 真实模型和真实工具网关下事件顺序、唯一终态、历史回源、单次预览刷新及失败保留旧版本均正确 |
 | P1 | 多 Agent 成本与质量对比 | 待人工执行 | 对比开关关闭/开启后的延迟、token、repair 次数、成功率和多轮需求回归识别质量，形成是否灰度开启的证据 |
@@ -592,7 +592,9 @@ Vue 多 Agent 是 Python LangGraph 内部的功能开关，回滚时保持 LangG
 - Prompt、conversation、源码 artifact、工具参数/结果、模型原始响应、令牌、Cookie 和绝对路径不会上传；LangSmith 网络或 SDK 异常不得改变生成终态。
 - 仍待真实环境执行：PostgreSQL opt-in 集成、三服务 SSE 端到端、Redis 双 Spring 竞争，以及 LangSmith 显式开启后的脱敏和成本验证。
 
-2026-10-06 本轮续接验证：Docker daemon 与 PostgreSQL 16 容器可用，已使用现有本地配置创建独立 `yu_ai_checkpoint` 数据库；真实 checkpoint opt-in 测试退出码 0，覆盖 saver 写入、读取、状态摘要和过期清理。测试采用 Windows SelectorEventLoop，并与服务一致读取 `.env` 配置。Python 离线门禁为 `261 passed, 1 skipped`。LangSmith 自动图/模型追踪已显式关闭，仅允许有界队列中的白名单记录，SDK 日志异常正文被过滤。真实 LangSmith 远端脱敏、三服务端到端和本轮 Redis 双实例仍待执行。
+2026-10-06 本轮续接验证：Docker daemon 与 PostgreSQL 16 容器可用，已使用现有本地配置创建独立 `yu_ai_checkpoint` 数据库；真实 checkpoint opt-in 测试退出码 0，覆盖 saver 写入、读取、状态摘要和过期清理。测试采用 Windows SelectorEventLoop，并与服务一致读取 `.env` 配置。复用本地 RAG 与 Vue 功能分支后，主工作区最终 Python 门禁为 `620 passed, 1 skipped`，compileall、lock 检查和 RAG 依赖实际导入通过；Java 干净编译及 128 项定向测试通过；前端 44 项测试、type-check、build-only 通过。隔离 RAG 分支首次 Python 全量命中取消测试时序失败，单独复跑通过；合并后首次测试暴露遗漏 tracing import，补齐后最终全量通过。PowerShell 验收脚本契约测试通过。LangSmith 自动图/模型追踪已显式关闭，仅允许有界队列中的白名单记录，SDK 日志异常正文被过滤。真实 LangSmith 远端脱敏、三服务端到端和本轮 Redis 双实例仍待执行。
+
+RAG 实现现已合入后端与独立前端的 `dev`，Spring/Python 开关默认关闭。真实 OSS 下载白名单未配置，本轮 Docker 列表未发现 Milvus；未执行真实 OSS、CloseAI Embedding、Milvus、GPU 推理、浏览器及端到端验收，也未依据真实评估确定生产相关性阈值。六条合成评估样本只验证 evaluator 契约，不能替代上线前 50 条可回答及 20 条无答案评估集。本轮 `verify-customer-service-rag.ps1 -Execute -TimeoutSeconds 3` 非秘密探测失败：live/ready/Spring/Frontend 为 `HTTP_TIMEOUT`，认证客服 health 为 `VALIDATION_SECRET_MISSING`；外部步骤均未运行，不能理解为生产可启用。
 
 ### 长期记忆决策
 

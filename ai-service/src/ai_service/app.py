@@ -112,6 +112,7 @@ def create_app(
     )
     cancellations = CancellationRegistry()
     active_generations = ActiveGenerationRegistry()
+    tracer = LangSmithTracer(config)
     initial_etl_service = knowledge_etl_service
     initial_mutation_coordinator = mutation_coordinator
     initial_reranker = reranker
@@ -130,9 +131,9 @@ def create_app(
     async def lifespan(_: FastAPI):
         """管理 checkpoint 和 HTTP 工具客户端的启动与释放。"""
 
-        await checkpoint_store.start()
         resources: list[Any] = []
         try:
+            await checkpoint_store.start()
             try:
                 if config.customer_service_rag_enabled:
                     # Import and initialize the optional stack behind the feature gate.
@@ -309,9 +310,12 @@ def create_app(
                 try:
                     await checkpoint_store.close()
                 finally:
-                    close = getattr(gateway, "close", None)
-                    if close is not None:
-                        await close()
+                    try:
+                        close = getattr(gateway, "close", None)
+                        if close is not None:
+                            await close()
+                    finally:
+                        await tracer.close()
 
     app = FastAPI(title="yu-ai-service", version="0.1.0", lifespan=lifespan)
     app.state.settings = config
