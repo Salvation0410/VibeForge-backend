@@ -139,6 +139,26 @@ Python 不读取业务 MySQL，不接收 Cookie、Session、用户角色、应�
 
 Spring 必须在同一个 MySQL 事务内更新文档状态并写入 Outbox。文件内容、签名 URL、Embedding、模型响应和堆栈不得写入 Outbox。
 
+### 4.3 跨实例 mutation coordinator
+
+用户确认的架构细化如下：Spring/MySQL Outbox 是客服知识库唯一的跨实例 mutation coordinator。Python 不得以进程内锁、Redis 临时锁或 Milvus 当前状态替代这一业务事实源。
+
+- Task 7 负责基于 MySQL claim/版本状态签发并验证不可伪造 lease，维护单调 fencing token 和冲突域。
+- lease 至少绑定 `scope / operation / fence / expiry / proof`。document scope 之间按同一 `documentId` 互斥；collection rebuild scope 与该知识库全部 document scope 互斥。
+- Task 6 的认证内部 ETL API 必须把 lease 原样、完整地传给 Python Milvus store，禁止 Python 自行补造或降级为本地锁。
+- Python store 的 `upsert_document_version`、`delete_document` 和 `rebuild_collection` 缺少、过期、伪造、撤销或 scope/operation/fence 不匹配的 lease 时一律 fail-closed；默认 coordinator 为 `DenyAll`。
+- permit 必须持续到已启动的同步 Milvus mutation RPC 得到确定结果后才能释放，避免取消请求时后台线程仍在写入而下一个持有者已经进入。
+
+Task 6 与 Task 7 之间固定使用现有 Spring gateway Bearer 认证，并约定以下两个接口：
+
+- `POST /api/internal/customer-service/knowledge-mutation-leases:validate`。请求体严格为 camelCase 六字段 `scope`、`operationId`、`operation`、`fence`、`expiresAt`、`proof`；其中 `operation` 只能是 `INDEX / DELETE / REBUILD`，`expiresAt` 是 Unix epoch seconds。成功响应使用 Spring `BaseResponse`：`{code: 0, data: {verified: true, current: true, scope, operationId, operation, fence, expiresAt}, message: "ok"}`。Python 必须逐项与原始 lease 和当前 store 动作匹配，不得生成、覆盖或规范化 lease 字段。
+- `GET /api/internal/customer-service/knowledge-mutation-leases/health`。这是无 mutation、无 lease 请求体的只读探测；可用时返回 `{code: 0, data: {ready: true}, message: "ok"}`。
+- 404、超时、非 JSON、非零 `code`、`verified/current` 非 true、字段缺失或任意字段不匹配，均 fail-closed。错误和日志不得包含 Bearer、proof、响应正文或签名 URL。
+
+Task 7 必须在 Spring 中实现这两个接口，并以 MySQL coordinator 状态作为验证和 health 的事实来源；Python health 不得仅因 coordinator 对象存在就报告可用。
+
+Task 5 只实现上述 Python store 契约和 fail-closed 边界。Task 6 已实现认证传递、远程验证适配器和只读 health 探测；Task 7 的 MySQL 签发、验证、冲突仲裁及两个 Spring 接口尚未实现，不得描述为已有端到端索引能力。
+
 ## 5. 文件上传与 OSS
 
 管理员接口仅接受：
@@ -214,11 +234,16 @@ AI_SERVICE_CLOSEAI_API_KEY=
 AI_SERVICE_CLOSEAI_BASE_URL=
 AI_SERVICE_RAG_EMBEDDING_MODEL=openai:text-embedding-3-large
 AI_SERVICE_RAG_EMBEDDING_BATCH_SIZE=
+AI_SERVICE_RAG_EMBEDDING_DIMENSION=3072
+AI_SERVICE_RAG_MAX_EMBEDDING_ELEMENTS=8000000
+AI_SERVICE_RAG_ETL_MAX_CONCURRENCY=1
 AI_SERVICE_RAG_CHUNK_SIZE=1000
 AI_SERVICE_RAG_CHUNK_OVERLAP=150
 ```
 
 Embedding 返回后必须校验数量、维度和所有值均为有限数。密钥不得进入日志、异常、测试快照或 Git。
+
+单个 ETL 默认最多生成 8,000,000 个 embedding float 元素，覆盖 2,000,000 字符上限按 1000/150 切分、使用 3072 维模型时约 7,230,000 个元素的正常范围，同时拒绝接近 10,000 chunks 的极端峰值。8,000,000 个元素若按 Python `list[float]` 的对象与引用开销保守估算约为 256 MiB；这是防 OOM 的近似预算，不是精确 RSS。配置显式声明 embedding dimension，默认 3072。REBUILD 另设默认 64 MiB 的累计 UTF-8 chunk 文本预算；每份文档解析分块后立即累计 chunk、投影 embedding elements 和文本字节，任一超限即停止，且不得继续下载下一份文档。Embedding 仍在全部文档预算预检通过后才开始，因此任何累计预算失败都不会调用 provider。Provider 和 service 都必须再验证实际返回向量维度与配置完全一致。进程内共享 semaphore 默认只允许 1 个 INDEX/REBUILD ETL 执行，等待或执行任务取消时必须自动释放 permit。功能关闭时不得初始化 semaphore 或任何 RAG 外部依赖。
 
 ### 6.4 Load
 
@@ -231,6 +256,15 @@ Python 是唯一允许写客服 Milvus collection 的组件：
 5. 返回 chunk 数量、索引版本和稳定状态，不返回向量或全文。
 
 `documentId + documentVersion + etlVersion + embeddingModelVersion` 构成幂等边界。旧任务晚完成时不得覆盖新版本。
+
+Task 5 的实现对上述流程作了以下安全细化：
+
+- chunk、manifest、tombstone 和 collection metadata 都记录 mutation fence；删除先于 manifest 到达时也能用确定性 tombstone 阻止同版本随后发布。
+- 向量在写入和写后校验前统一 canonicalize 为 float32，避免真实 `FLOAT_VECTOR` round-trip 量化被误判为数据损坏。
+- 文档历史使用 Milvus query iterator 分页读取，并以 10000 条为 fail-closed 硬上限。
+- 所有同步 Milvus RPC 使用可配置 timeout。mutation RPC 由可追踪 task 执行并 shield；调用方取消后先等待底层 RPC 得到确定结果，再释放 permit 和本地锁并重新抛出取消。
+- staging 清理前必须重新读取 alias。readback 不确定或 staging 已成为当前 alias 目标时保留 staging，禁止误删正在服务的集合。
+- pymilvus 2.6 的 COSINE `distance` 按“数值越大越相似”解释；内部 `score` 保存相似度，语义距离为 `1 - score`。
 
 ## 7. Milvus 设计
 
@@ -256,7 +290,9 @@ Python 是唯一允许写客服 Milvus collection 的组件：
 
 collection 必须按知识库、Embedding 模型、向量维度和 schema 版本隔离。模型或维度变化时创建新 collection，禁止原地混写。
 
-全量重建写入新的物理 collection，完成完整性验证后通过稳定 alias 原子切换。切换失败时旧 alias 继续服务。
+全量重建写入新的物理 collection，完成完整性验证后通过稳定 alias 原子切换。切换失败时旧 alias 继续服务。空文档集合是合法重建：已有 alias 时继承并验证受控 collection 的模型、维度和 schema；首次空重建使用配置模型、维度和当前 schema 创建空 staging 后切换 alias，从而清空旧知识。重建 staging 名由 alias、lease operationId/fence、ETL 版本和不含 signed URL 的文档集 fingerprint 确定性派生，metadata 保存同一身份与预期计数。通过幂等探测后先创建并验证 staging，再逐文档消费异步迭代器；chunk 固定按最多 100 行写入、canonicalize 并逐批 readback，manifest 逐文档写入验证，不保留全量 rows。全部文档的顺序 fingerprint、文档数和 chunk 数验证完成后写入并回读 completion marker，只有 marker 成功才切 alias；幂等重放也必须验证 marker，不能只信 metadata。失败或取消沿既有 alias readback 语义清理或保留 staging，旧 alias 不被半成品覆盖。
+
+alias 必须符合 Milvus identifier 规则（首字符、字符集、最大 255 字符）。物理 canonical、staging 和 control 名使用同一稳定 base prefix 并为最长后缀预留空间；完整 alias 必须进入 canonical/staging fingerprint，control 名也必须包含完整 alias 的 hash。即使两个 255 字符 alias 的前 254 字符完全相同，三类物理名称和数据仍必须相互隔离，且 staging 名保持以 `canonical + "_staging_"` 开头。
 
 ## 8. Reranker
 
@@ -470,6 +506,7 @@ AI_SERVICE_CLOSEAI_API_KEY=
 AI_SERVICE_CLOSEAI_BASE_URL=
 AI_SERVICE_RAG_EMBEDDING_MODEL=openai:text-embedding-3-large
 AI_SERVICE_RAG_EMBEDDING_BATCH_SIZE=
+AI_SERVICE_RAG_REBUILD_MAX_TEXT_BYTES=67108864
 
 AI_SERVICE_MILVUS_URI=
 AI_SERVICE_MILVUS_TOKEN=
@@ -532,6 +569,7 @@ AI_SERVICE_RAG_DOWNLOAD_MAX_BYTES=20971520
 - Fake CloseAI Embedding，不在默认测试连接真实网络。
 - Embedding 维度、数量、NaN 和 Infinity 校验。
 - Fake Milvus 或受控测试容器覆盖幂等、旧版本保护和 alias 切换。
+- Fake Milvus 覆盖 float32 round-trip、取消期间 permit 保持、alias readback 不确定时保留 staging、分页/10000 条上限，以及长 alias 的业务/control 数据隔离。
 - Fake Reranker 覆盖排序、超时、OOM 和降级。
 - 引用只能属于最终 Top 3。
 - 文档 Prompt Injection 不得改变系统规则。
@@ -574,14 +612,15 @@ AI_SERVICE_RAG_DOWNLOAD_MAX_BYTES=20971520
 
 1. 真实私有 OSS 上传和短期签名 URL 下载。
 2. PDF、DOCX、Markdown、TXT 的真实解析和来源定位。
-3. CloseAI `text-embedding-3-large` 的维度、批量限制、限流和错误响应。
-4. 本机 Docker Milvus 的 collection、索引、查询、alias 切换和重启恢复。
+3. CloseAI `text-embedding-3-large` 的真实维度、批量限制、限流和错误响应。
+4. 本机 Docker Milvus 的 schema、dynamic fields、Strong consistency、分页、批量写入、collection/索引/查询、alias 切换和重启恢复。
 5. GPU 上 BGE Reranker 的显存、并发、P95 和 OOM 行为。
 6. Spring、Python、OSS、CloseAI、Milvus 和 Vue 的完整端到端问答。
 7. 文档替换失败时旧知识继续服务。
 8. Embedding 模型变更后的新 collection 全量重建和切换。
 9. 知识缺失、Prompt Injection、错误凭据、网络超时和依赖故障。
 10. 日志、错误响应和后台页面不泄露凭据、签名 URL 或知识全文。
+11. Task 6/7 完成后验证 Spring/MySQL lease 的认证传递、签发/验证、fencing、document/collection 冲突域和取消期间 permit 生命周期。
 
 未实际执行时必须明确标记待人工验证，不得声称 Docker、真实 CloseAI、GPU 或端到端流程通过。
 

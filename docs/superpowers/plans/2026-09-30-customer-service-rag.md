@@ -457,13 +457,16 @@ git commit -m "feat: parse and split customer service documents"
 
 ### Task 5: Implement CloseAI Embeddings and Milvus Versioned Storage
 
+**完成状态（2026-09-30）：** Task 5 已完成。架构细化为 Spring/MySQL Outbox 是唯一跨实例 mutation coordinator；本任务只实现 Python 的显式 lease 契约与 fail-closed Milvus 边界，未实现 Task 6 的认证传递或 Task 7 的 MySQL 签发/验证。
+
 **Files:**
 - Create: `ai-service/src/ai_service/models/embeddings.py`
 - Create: `ai-service/src/ai_service/infrastructure/milvus_knowledge.py`
+- Modify: `ai-service/src/ai_service/config.py`
 - Test: `ai-service/tests/test_milvus_knowledge.py`
 - Modify: `ai-service/tests/conftest.py`
 
-- [ ] **Step 1: Write embedding and Milvus tests**
+- [x] **Step 1: Write embedding and Milvus tests**
 
 Cover batched document embeddings, query embeddings, count mismatch, dimension mismatch, NaN rejection, idempotent version writes, stale-version rejection, document disable/delete, staging validation, and alias switch rollback.
 
@@ -474,7 +477,7 @@ def test_embedding_provider_rejects_non_finite_vector():
         provider.validate([[0.2, float("nan")]], expected_count=1)
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 ```powershell
 Set-Location ai-service
@@ -483,7 +486,7 @@ uv run pytest tests/test_milvus_knowledge.py
 
 Expected: FAIL because providers and store do not exist.
 
-- [ ] **Step 3: Implement `EmbeddingProvider`**
+- [x] **Step 3: Implement `EmbeddingProvider`**
 
 Define:
 
@@ -498,16 +501,22 @@ class EmbeddingProvider(Protocol):
 
 Initialize CloseAI once from settings using model `openai:text-embedding-3-large`. Batch deterministically, validate output, and convert provider exceptions into stable internal errors without including response bodies or keys.
 
-- [ ] **Step 4: Implement `MilvusKnowledgeStore`**
+实际实现使用 `langchain.embeddings.init_embeddings` 创建并复用底层客户端，按配置批量执行 document embedding，独立支持 query embedding，校验输出数量、跨批维度和所有值均为有限数。供应商异常只暴露稳定内部错误码，不回显 API Key 或响应正文。真实 CloseAI 尚未调用。
+
+- [x] **Step 4: Implement `MilvusKnowledgeStore`**
 
 Expose focused methods:
 
 ```python
 class KnowledgeStore(Protocol):
-    async def upsert_document_version(self, document: IndexedDocument) -> IndexResult:
+    async def upsert_document_version(
+        self, document: IndexedDocument, *, lease: KnowledgeMutationLease
+    ) -> IndexResult:
         raise NotImplementedError
 
-    async def delete_document(self, document_id: str, document_version: int) -> None:
+    async def delete_document(
+        self, document_id: str, document_version: int, *, lease: KnowledgeMutationLease
+    ) -> None:
         raise NotImplementedError
 
     async def search(self, vector: list[float], limit: int) -> list[RetrievedChunk]:
@@ -516,6 +525,8 @@ class KnowledgeStore(Protocol):
     async def rebuild_collection(
         self,
         documents: AsyncIterator[IndexedDocument],
+        *,
+        lease: KnowledgeMutationLease,
     ) -> RebuildResult:
         raise NotImplementedError
 
@@ -525,7 +536,17 @@ class KnowledgeStore(Protocol):
 
 Store document/version/chunk metadata, enforce a single vector dimension per collection, filter `isActive`, and switch a stable alias only after complete staging validation.
 
-- [ ] **Step 5: Run focused tests**
+实际实现还包括：
+
+- `upsert/delete/rebuild` 显式要求不可伪造的 `scope / operation / fence / expiry / proof`；默认 `DenyAllKnowledgeMutationCoordinator`，缺失、伪造、过期、撤销或不匹配一律 fail-closed。
+- 同一 document scope 串行；collection rebuild scope 与全部 document scope 互斥。进程内 `asyncio.Lock` 仅是优化，不承担跨实例正确性。
+- versioned chunk/manifest、旧版本保护、写后 readback、增量收敛、全量 staging + alias、确定性 tombstone，以及 fence metadata。
+- REBUILD 在幂等探测后先创建 staging，逐文档消费异步迭代器，chunk 每批最多 100 行且逐批 readback；文档 manifest 分别验证，全部计数和顺序 fingerprint 匹配后才写 completion marker 并切 alias，不在内存中汇总全部 rows。
+- 写入与校验统一 float32 canonicalization；文档历史使用 query iterator 分页并设置 10000 条硬上限。
+- 同步 RPC 使用可配置 timeout；取消时 shield 并 drain 已启动 RPC，确定结束后才释放 permit/锁。所有 drop 前 readback alias，不确定时保留 staging。
+- pymilvus 2.6 COSINE `distance` 按相似度处理；完整 alias 进入 canonical/staging fingerprint，control 名包含完整 alias hash，所有派生名合法且不超过 255 字符。
+
+- [x] **Step 5: Run focused tests**
 
 ```powershell
 uv run pytest tests/test_milvus_knowledge.py
@@ -533,12 +554,18 @@ uv run pytest tests/test_milvus_knowledge.py
 
 Expected: PASS without connecting to real Milvus.
 
-- [ ] **Step 6: Commit**
+实际结果：`tests/test_milvus_knowledge.py` 49 项通过；完整 Python 测试 375 项通过、1 项跳过；`compileall`、`uv lock --check` 和 `git diff --check` 通过。测试使用 Fake CloseAI/Fake Milvus，未连接真实服务。
+
+- [x] **Step 6: Commit**
 
 ```powershell
 git add ai-service/src/ai_service/models/embeddings.py ai-service/src/ai_service/infrastructure/milvus_knowledge.py ai-service/tests/conftest.py ai-service/tests/test_milvus_knowledge.py
 git commit -m "feat: add CloseAI embeddings and Milvus store"
 ```
+
+实际提交链包含初始实现与双轮安全加固，可概括为 `e052d20`、`6a6771f`、`6970873`、`2a865b6`、`a5841dd`、`a6ee768`。
+
+人工待验：真实 CloseAI；真实 Docker Milvus 的 schema、dynamic fields、Strong consistency、分页、批量写入、alias 切换和重启恢复；Task 6/7 完成后的 Spring lease 集成。
 
 ### Task 6: Expose Authenticated Python ETL API
 
@@ -574,11 +601,18 @@ Expected: FAIL because the route is absent.
 
 - [ ] **Step 3: Add camel-case schemas**
 
-Add `KnowledgeEtlRequest`, `KnowledgeEtlResponse`, `KnowledgeDeleteRequest`, and stable error models. Limit IDs to 128 characters, file names to 255, URL length, allowed file types, and SHA-256 format.
+Add `KnowledgeEtlRequest`, `KnowledgeEtlResponse`, `KnowledgeDeleteRequest`, and stable error models. Limit IDs to 128 characters, file names to 255, URL length, allowed file types, and SHA-256 format. Mutation 请求必须通过认证 schema 携带 Spring 签发的 `scope / operation / fence / expiry / proof`，并原样传给 Milvus store；不得在 Python 内构造替代 lease。
+
+固定 Spring Bearer 验证契约如下：
+
+- `POST /api/internal/customer-service/knowledge-mutation-leases:validate`，请求体只允许 camelCase 六字段 `scope / operationId / operation / fence / expiresAt / proof`；`operation` 为 `INDEX / DELETE / REBUILD`，`expiresAt` 为 Unix epoch seconds。
+- 成功响应是 `{code: 0, data: {verified: true, current: true, scope, operationId, operation, fence, expiresAt}, message: "ok"}`；Python 逐项匹配原请求和当前 store 动作，禁止自行生成或覆盖 operation 等 lease 字段。
+- `GET /api/internal/customer-service/knowledge-mutation-leases/health` 是无请求体、无 mutation 的只读探测，成功响应 `{code: 0, data: {ready: true}, message: "ok"}`。
+- 404、timeout、非 JSON、非零 code、撤销、过期、verified/current 非 true 或任意字段不匹配全部 fail-closed，且不得记录 Bearer、proof、vendor body 或签名 URL。
 
 - [ ] **Step 4: Compose ETL dependencies in `create_app`**
 
-Only instantiate downloader, embedding provider, Milvus store, and ETL service when `customer_service_rag_enabled` is true. Add optional injectable parameters so unit tests use fakes. Close HTTP/Milvus resources in lifespan without changing checkpoint lifecycle.
+Only instantiate downloader, embedding provider, Milvus store, and ETL service when `customer_service_rag_enabled` is true. Add optional injectable parameters so unit tests use fakes. Close HTTP/Milvus resources in lifespan without changing checkpoint lifecycle. `MilvusClient` 构造是同步操作，必须通过 async factory/offload 初始化，禁止阻塞 FastAPI event loop。
 
 - [ ] **Step 5: Implement routes**
 
@@ -624,7 +658,7 @@ Assert upload creates document and Outbox in one transaction, OSS failure create
 
 - [ ] **Step 2: Write worker claim tests**
 
-Assert two workers cannot claim the same task, expired claims are recoverable, stale results do not overwrite a newer document version, deterministic errors stop retrying, transient errors back off to a maximum of five attempts, and Python receives a short-lived signed URL only during execution.
+Assert two workers cannot claim the same task, expired claims are recoverable, stale results do not overwrite a newer document version, deterministic errors stop retrying, transient errors back off to a maximum of five attempts, and Python receives a short-lived signed URL only during execution. 另需断言 MySQL coordinator 签发和验证不可伪造 lease、fence 单调递增、同 document scope 不重叠、collection rebuild scope 与全部 document scope 冲突，以及过期/撤销 lease 被 Python fail-closed 拒绝。
 
 - [ ] **Step 3: Run tests and verify failure**
 
@@ -643,6 +677,10 @@ Create `CustomerServiceProperties` with `@Component` and `@ConfigurationProperti
 Follow the JDK `HttpClient` and Bearer pattern from `LangGraphAiGenerationGateway`, but use bounded JSON responses and a short ETL timeout. Error messages must include stable codes, not response bodies or signed URLs.
 
 - [ ] **Step 6: Implement service and worker**
+
+Spring/MySQL Outbox 是唯一跨实例 mutation coordinator。Task 7 必须把任务 claim、document/collection 冲突域、lease expiry、proof 验证和 fencing token 放在可审计的 MySQL 状态转换中；Redis 或 Python 本地锁不得成为正确性来源。Worker 只有持有有效 permit 时才能调用 Task 6 接口，并必须把 lease 传到 Python。
+
+Task 7 还必须实现上述两个 Spring Bearer 内部接口：validate POST 从 MySQL coordinator 状态验证六字段并返回逐字段匹配结果；health GET 只读检查 coordinator 是否可验证 lease，不签发或构造虚假 mutation lease。接口缺失或不可用时 Task 6 health 必须保持 degraded/503。
 
 Use conditional updates for claiming:
 
@@ -675,6 +713,10 @@ Stage only customer-service Spring files, application configuration, and tests:
 ```powershell
 git commit -m "feat: manage customer service knowledge documents"
 ```
+
+**完成状态（2026-10-01）：** Task 7 的 Spring/MySQL 文档管理、Outbox claim、全局 guard + 审计 lease、HMAC proof、内部验证接口、INDEX/DELETE worker 和管理员接口已实现。proof 不使用新的配置明文，而是从现有 `ai.token` 加固定上下文经 SHA-256 派生 HMAC-SHA256 密钥，proof 不落库也不记日志。collection rebuild 被建模为独立 `REBUILD` outbox，worker 执行期持有 collection lease 并调用 `/internal/v1/customer-service/knowledge:rebuild`。Python 端现已补齐该 Bearer 认证 endpoint：严格匹配 Java camelCase 契约，原样传递六字段 collection lease，在 permit 生命周期内逐文档下载、解析并复用 Task 5 staging + alias 原子发布；每份文档解析后立即检查累计 chunk、embedding elements 和默认 64 MiB UTF-8 文本预算，超限时不下载下一份文档且不调用 provider。Milvus staging 逐文档消费，chunk 每批最多 100 行并逐批回读，最后以 completion marker 守护 alias 切换和幂等回放。空集合、失败和取消继续保留旧 alias。真实 Spring/Python/OSS/CloseAI/Milvus 联调仍待独立验收。
+
+Task 7 后续审查修复增加了已存量 Task 1 表的独立 MySQL 8 升级脚本 `sql/alter_customer_service_knowledge_task7.sql`，其在建立活动 hash 唯一索引前显式输出重复预检结果，并通过 `information_schema` 选择幂等 DDL。collection scope 与 Python 统一为 `collection:<alias>`，alias 默认 `customer_service_knowledge`。启用功能时，Spring 会在启动阶段拒绝不足以覆盖请求准备与 Python timeout 的 claim/lease 配置。可选真实 MySQL 测试 `CustomerServiceKnowledgeMySqlIT` 只能对专用临时库运行：设置 `CUSTOMER_SERVICE_MYSQL_IT_URL/USER/PASSWORD`，再执行 `mvn -Dtest=CustomerServiceKnowledgeMySqlIT test`。
 
 ### Task 8: Implement Local GPU Reranker
 

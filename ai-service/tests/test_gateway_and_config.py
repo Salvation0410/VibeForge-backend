@@ -737,3 +737,190 @@ def test_multi_agent_review_config_uses_ai_service_environment_prefix(monkeypatc
 
     assert settings.multi_agent_review_enabled is True
     assert settings.multi_agent_review_timeout_seconds == 45.5
+
+
+def _rag_settings(**overrides):
+    env_file = overrides.pop("_env_file", None)
+    return Settings(
+        _env_file=env_file,
+        internal_bearer_token="internal-token",
+        spring_gateway_base_url="http://spring.test",
+        spring_gateway_bearer_token="gateway-token",
+        **overrides,
+    )
+
+
+def test_customer_service_rag_defaults_are_disabled_and_bounded(monkeypatch):
+    for name in (
+        "AI_SERVICE_CUSTOMER_SERVICE_RAG_ENABLED",
+        "CLOSEAI_API_KEY",
+        "CLOSEAI_BASE_URL",
+        "AI_SERVICE_CLOSEAI_API_KEY",
+        "AI_SERVICE_CLOSEAI_BASE_URL",
+        "AI_SERVICE_MILVUS_URI",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = _rag_settings()
+
+    assert settings.customer_service_rag_enabled is False
+    assert settings.closeai_api_key == ""
+    assert settings.closeai_base_url == ""
+    assert settings.rag_chunk_size == 1000
+    assert settings.rag_chunk_overlap == 150
+    assert settings.rag_retrieval_top_k == 8
+    assert settings.rag_final_top_k == 3
+    assert settings.rag_max_embedding_elements == 8_000_000
+    assert settings.rag_etl_max_concurrency == 1
+    assert settings.rag_min_rerank_score is None
+    assert settings.rag_answer_timeout_seconds == 60
+    assert settings.rag_prompt_max_bytes == 16_384
+    assert settings.rag_collection_retention_generations == 2
+    assert settings.rag_collection_cleanup_grace_seconds == 120
+    assert settings.rag_collection_cleanup_timeout_seconds == 5
+    assert settings.rag_collection_cleanup_scan_limit == 100
+    assert settings.milvus_uri == "http://localhost:19530"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "field"),
+    [
+        ({"rag_chunk_size": 150, "rag_chunk_overlap": 150}, "rag_chunk_overlap"),
+        ({"rag_chunk_size": 100, "rag_chunk_overlap": 150}, "rag_chunk_overlap"),
+        ({"rag_retrieval_top_k": 2, "rag_final_top_k": 3}, "rag_final_top_k"),
+    ],
+)
+def test_customer_service_rag_rejects_inconsistent_bounds(overrides, field):
+    with pytest.raises(ValidationError, match=field):
+        _rag_settings(**overrides)
+
+
+@pytest.mark.parametrize("missing", ["milvus_uri", "closeai_api_key", "closeai_base_url"])
+def test_customer_service_rag_requires_connections_only_when_enabled(missing):
+    required = {
+        "milvus_uri": "http://localhost:19530",
+        "closeai_api_key": "test-closeai-key",
+        "closeai_base_url": "https://closeai.test/v1",
+    }
+    required[missing] = ""
+
+    with pytest.raises(ValidationError, match=missing):
+        _rag_settings(customer_service_rag_enabled=True, **required)
+
+
+def test_customer_service_rag_local_reranker_requires_cuda():
+    with pytest.raises(ValidationError, match="rag_reranker_device"):
+        _rag_settings(rag_reranker_provider="local_cross_encoder", rag_reranker_device="cpu")
+
+
+def test_customer_service_rag_accepts_legacy_closeai_environment(monkeypatch):
+    monkeypatch.setenv("CLOSEAI_API_KEY", "legacy-key")
+    monkeypatch.setenv("CLOSEAI_BASE_URL", "https://legacy.test/v1")
+    monkeypatch.delenv("AI_SERVICE_CLOSEAI_API_KEY", raising=False)
+    monkeypatch.delenv("AI_SERVICE_CLOSEAI_BASE_URL", raising=False)
+
+    settings = _rag_settings(customer_service_rag_enabled=True)
+
+    assert settings.closeai_api_key == "legacy-key"
+    assert settings.closeai_base_url == "https://legacy.test/v1"
+
+
+def test_customer_service_rag_prefixed_closeai_environment_takes_priority(monkeypatch):
+    monkeypatch.setenv("CLOSEAI_API_KEY", "legacy-key")
+    monkeypatch.setenv("CLOSEAI_BASE_URL", "https://legacy.test/v1")
+    monkeypatch.setenv("AI_SERVICE_CLOSEAI_API_KEY", "prefixed-key")
+    monkeypatch.setenv("AI_SERVICE_CLOSEAI_BASE_URL", "https://prefixed.test/v1")
+
+    settings = _rag_settings(customer_service_rag_enabled=True)
+
+    assert settings.closeai_api_key == "prefixed-key"
+    assert settings.closeai_base_url == "https://prefixed.test/v1"
+
+
+def test_customer_service_rag_prefixed_closeai_dotenv_takes_priority(monkeypatch, tmp_path):
+    for name in (
+        "CLOSEAI_API_KEY",
+        "CLOSEAI_BASE_URL",
+        "AI_SERVICE_CLOSEAI_API_KEY",
+        "AI_SERVICE_CLOSEAI_BASE_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    env_file = tmp_path / "rag.env"
+    env_file.write_text(
+        "CLOSEAI_API_KEY=legacy-key\n"
+        "CLOSEAI_BASE_URL=https://legacy.test/v1\n"
+        "AI_SERVICE_CLOSEAI_API_KEY=prefixed-key\n"
+        "AI_SERVICE_CLOSEAI_BASE_URL=https://prefixed.test/v1\n",
+        encoding="utf-8",
+    )
+
+    settings = _rag_settings(_env_file=env_file, customer_service_rag_enabled=True)
+
+    assert settings.closeai_api_key == "prefixed-key"
+    assert settings.closeai_base_url == "https://prefixed.test/v1"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "field"),
+    [
+        ({"rag_chunk_size": 0}, "rag_chunk_size"),
+        ({"rag_chunk_overlap": -1}, "rag_chunk_overlap"),
+        ({"rag_retrieval_top_k": 0}, "rag_retrieval_top_k"),
+        ({"rag_final_top_k": 0}, "rag_final_top_k"),
+        ({"rag_embedding_batch_size": 0}, "rag_embedding_batch_size"),
+        ({"rag_max_embedding_elements": 0}, "rag_max_embedding_elements"),
+        ({"rag_etl_max_concurrency": 0}, "rag_etl_max_concurrency"),
+        ({"rag_reranker_batch_size": 0}, "rag_reranker_batch_size"),
+        ({"rag_reranker_timeout_seconds": 0}, "rag_reranker_timeout_seconds"),
+        ({"rag_download_max_bytes": 0}, "rag_download_max_bytes"),
+        ({"rag_download_connect_timeout_seconds": 0}, "rag_download_connect_timeout_seconds"),
+        ({"rag_download_read_timeout_seconds": 0}, "rag_download_read_timeout_seconds"),
+        ({"rag_min_rerank_score": float("nan")}, "rag_min_rerank_score"),
+    ],
+)
+def test_customer_service_rag_rejects_invalid_numeric_settings(overrides, field):
+    with pytest.raises(ValidationError, match=field):
+        _rag_settings(**overrides)
+
+
+def test_customer_service_rag_nonlocal_reranker_can_use_cpu():
+    settings = _rag_settings(rag_reranker_provider="disabled", rag_reranker_device="cpu")
+
+    assert settings.rag_reranker_device == "cpu"
+
+
+def test_disabled_reranker_rejects_rerank_score_threshold():
+    with pytest.raises(ValidationError, match="rag_min_rerank_score"):
+        _rag_settings(
+            rag_reranker_provider="disabled",
+            rag_reranker_device="cpu",
+            rag_min_rerank_score=0.5,
+        )
+
+
+def test_collection_cleanup_grace_must_exceed_request_and_rpc_timeouts():
+    with pytest.raises(ValidationError, match="rag_collection_cleanup_grace_seconds"):
+        _rag_settings(
+            rag_answer_timeout_seconds=60,
+            milvus_rpc_timeout_seconds=30,
+            rag_collection_cleanup_grace_seconds=91,
+        )
+    settings = _rag_settings(
+        rag_answer_timeout_seconds=60,
+        milvus_rpc_timeout_seconds=30,
+        rag_collection_cleanup_grace_seconds=92,
+    )
+    assert settings.rag_collection_cleanup_grace_seconds == 92
+
+
+def test_collection_cleanup_bounds_must_be_safe():
+    with pytest.raises(ValidationError, match="rag_collection_cleanup_scan_limit"):
+        _rag_settings(
+            rag_collection_retention_generations=5,
+            rag_collection_cleanup_scan_limit=4,
+        )
+    with pytest.raises(ValidationError, match="rag_collection_cleanup_timeout_seconds"):
+        _rag_settings(
+            rag_collection_cleanup_timeout_seconds=120,
+            rag_collection_cleanup_grace_seconds=120,
+        )

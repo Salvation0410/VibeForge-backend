@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import importlib
+import sys
+
 import pytest
 
 from ai_service.prompts import (
@@ -90,3 +93,10 @@ def test_unknown_review_role_is_rejected():
 def test_unknown_generation_branch_is_rejected():
     with pytest.raises(ValueError, match="Unsupported generation branch"):
         generation_system_prompt("UNKNOWN")
+
+
+def test_customer_service_prompt_module_imports_without_models_runtime_dependency():
+    sys.modules.pop("ai_service.prompts.customer_service", None)
+    module = importlib.import_module("ai_service.prompts.customer_service")
+    assert module.customer_service_user_prompt
+    assert "ai_service.models.base" not in module.__dict__

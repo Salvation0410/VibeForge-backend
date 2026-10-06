@@ -6,31 +6,131 @@ import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
+import com.aliyun.oss.HttpMethod;
+import com.aliyun.oss.model.CannedAccessControlList;
 import com.aliyun.oss.model.ObjectMetadata;
 import com.aliyun.oss.model.PutObjectRequest;
 import com.yupi.yuaicodemother.config.OssProperties;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.exception.ErrorCode;
 import com.yupi.yuaicodemother.exception.ThrowUtils;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.ByteArrayInputStream;
+import java.net.URL;
+import java.time.Instant;
+import java.util.Date;
 import java.util.Set;
+import java.util.UUID;
+import java.util.function.Supplier;
 
 /**
  * OSS file upload manager.
  */
 @Component
-@RequiredArgsConstructor
 public class OssManager {
 
     private static final Set<String> ALLOWED_IMAGE_EXTENSIONS = Set.of("jpg", "jpeg", "png", "gif", "webp", "bmp");
 
     private final OssProperties ossProperties;
+    private final Supplier<OSS> ossClientFactory;
+
+    @Autowired
+    public OssManager(OssProperties ossProperties) {
+        this(ossProperties, () -> new OSSClientBuilder().build(
+                normalizeEndpoint(ossProperties.getEndpoint()),
+                ossProperties.getAccessKeyId(),
+                ossProperties.getAccessKeySecret()));
+    }
+
+    public OssManager(OssProperties ossProperties, Supplier<OSS> ossClientFactory) {
+        this.ossProperties = ossProperties;
+        this.ossClientFactory = ossClientFactory;
+    }
+
+    public record KnowledgeObject(String objectKey, String displayName, String fileType, long size, String sha256) { }
+
+    /** Uploads a private knowledge document; no permanent public URL is returned. */
+    public KnowledgeObject uploadKnowledgeDocument(MultipartFile file) {
+        var document = new KnowledgeDocumentFilePolicy(ossProperties.getMaxKnowledgeDocumentSize()).validate(file);
+        validateOssConfig();
+        String objectKey = knowledgePrefix() + UUID.randomUUID().toString().replace("-", "")
+                + "." + document.fileType();
+        ObjectMetadata metadata = new ObjectMetadata();
+        metadata.setContentLength(document.size());
+        metadata.setObjectAcl(CannedAccessControlList.Private);
+        metadata.setContentType(switch (document.fileType()) {
+            case "pdf" -> "application/pdf";
+            case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            case "md" -> "text/markdown";
+            case "txt" -> "text/plain";
+            default -> throw new IllegalStateException("Unknown validated document type");
+        });
+        try (InputStream input = new ByteArrayInputStream(document.bytes())) {
+            OSS client = ossClientFactory.get();
+            try {
+                client.putObject(new PutObjectRequest(ossProperties.getBucketName(), objectKey, input, metadata));
+            } finally {
+                client.shutdown();
+            }
+            return new KnowledgeObject(objectKey, document.displayName(), document.fileType(),
+                    document.size(), document.sha256());
+        } catch (Exception e) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "知识文档上传失败");
+        }
+    }
+
+    public URL generateKnowledgeDownloadUrl(String objectKey) {
+        validateKnowledgeObjectKey(objectKey);
+        validateOssConfig();
+        long ttl = ossProperties.getKnowledgeSignedUrlTtlSeconds();
+        ThrowUtils.throwIf(ttl <= 0 || ttl > 3600, ErrorCode.SYSTEM_ERROR, "知识文档签名有效期配置无效");
+        try {
+            OSS client = ossClientFactory.get();
+            try {
+                return client.generatePresignedUrl(ossProperties.getBucketName(), objectKey,
+                        Date.from(Instant.now().plusSeconds(ttl)), HttpMethod.GET);
+            } finally {
+                client.shutdown();
+            }
+        } catch (Exception e) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "知识文档下载链接生成失败");
+        }
+    }
+
+    public void deleteKnowledgeObject(String objectKey) {
+        validateKnowledgeObjectKey(objectKey);
+        validateOssConfig();
+        try {
+            OSS client = ossClientFactory.get();
+            try {
+                client.deleteObject(ossProperties.getBucketName(), objectKey);
+            } finally {
+                client.shutdown();
+            }
+        } catch (Exception e) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "知识文档删除失败");
+        }
+    }
+
+    private void validateKnowledgeObjectKey(String objectKey) {
+        String prefix = knowledgePrefix();
+        ThrowUtils.throwIf(objectKey == null || !objectKey.startsWith(prefix)
+                        || !objectKey.substring(prefix.length()).matches("[0-9a-f]{32}\\.(pdf|docx|md|txt)"),
+                ErrorCode.PARAMS_ERROR, "知识文档对象键无效");
+    }
+
+    private String knowledgePrefix() {
+        String dir = ossProperties.getKnowledgeDir();
+        ThrowUtils.throwIf(dir == null || !dir.matches("[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*"),
+                ErrorCode.SYSTEM_ERROR, "知识文档目录配置无效");
+        return dir + "/";
+    }
 
     /**
      * Uploads a user avatar and returns the public URL.
@@ -64,17 +164,12 @@ public class OssManager {
         validateOssConfig();
 
         String normalizedObjectKey = normalizeObjectKey(objectKey);
-        String endpoint = normalizeEndpoint(ossProperties.getEndpoint());
         ObjectMetadata metadata = new ObjectMetadata();
         metadata.setContentLength(file.length());
         metadata.setContentType(StrUtil.blankToDefault(FileUtil.getMimeType(file.getName()), "application/octet-stream"));
 
         try (InputStream inputStream = FileUtil.getInputStream(file)) {
-            OSS ossClient = new OSSClientBuilder().build(
-                    endpoint,
-                    ossProperties.getAccessKeyId(),
-                    ossProperties.getAccessKeySecret()
-            );
+            OSS ossClient = ossClientFactory.get();
             try {
                 PutObjectRequest putObjectRequest = new PutObjectRequest(
                         ossProperties.getBucketName(),
@@ -93,18 +188,12 @@ public class OssManager {
     }
 
     private String uploadImageFile(MultipartFile imageFile, String objectKey, String bizName) {
-        String endpoint = normalizeEndpoint(ossProperties.getEndpoint());
-
         ObjectMetadata metadata = new ObjectMetadata();
         metadata.setContentLength(imageFile.getSize());
         metadata.setContentType(StrUtil.blankToDefault(imageFile.getContentType(), "application/octet-stream"));
 
         try (InputStream inputStream = imageFile.getInputStream()) {
-            OSS ossClient = new OSSClientBuilder().build(
-                    endpoint,
-                    ossProperties.getAccessKeyId(),
-                    ossProperties.getAccessKeySecret()
-            );
+            OSS ossClient = ossClientFactory.get();
             try {
                 PutObjectRequest putObjectRequest = new PutObjectRequest(
                         ossProperties.getBucketName(),
@@ -169,7 +258,7 @@ public class OssManager {
         return StrUtil.removePrefix(objectKey, "/");
     }
 
-    private String normalizeEndpoint(String endpoint) {
+    private static String normalizeEndpoint(String endpoint) {
         if (StrUtil.startWithAnyIgnoreCase(endpoint, "http://", "https://")) {
             return endpoint;
         }
