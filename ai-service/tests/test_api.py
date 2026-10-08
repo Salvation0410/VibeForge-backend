@@ -2369,6 +2369,7 @@ def test_spring_business_error_code_reaches_failed_event(app_factory, auth_heade
         bearer_token="gateway-token",
         transport=httpx.MockTransport(handler),
     )
+
     with TestClient(app_factory(gateway=gateway)) as client:
         events = ndjson_parser(client.post(
             "/internal/v1/generations:stream",
@@ -2383,6 +2384,14 @@ def test_spring_business_error_code_reaches_failed_event(app_factory, auth_heade
     }
     assert len([request for request in requests if request["toolName"] == "artifact_publish"]) == 1
     assert not [event for event in events if event["type"] == "completed"]
+
+
+@pytest.mark.parametrize("error_code", ["VUE_PROJECT_DIR_MISSING", "VUE_PACKAGE_JSON_MISSING"])
+def test_after_build_fails_immediately_when_vue_project_was_not_written(error_code):
+    assert _after_build(
+        {"build": {"built": False, "errorCode": error_code}, "repair_count": 0},
+        max_attempts=2,
+    ) == "fail"
 
 
 def test_html_remains_completed_when_graph_checkpoint_fails_after_publication(

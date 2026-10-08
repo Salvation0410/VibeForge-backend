@@ -102,19 +102,18 @@ public class JsonMessageStreamHandler {
                                           StringBuilder aiResponseStringBuilder,
                                           List<ChatHistoryOriginal> originalChatHistoryList,
                                           Set<String> seenToolIds) {
-        // 解析 JSON
-        //先取基类 拿到type 从而可以判断转化为具体哪个子类
+        // 先解析公共消息类型，再按 type 转换为具体消息对象。
         StreamMessage streamMessage = JSONUtil.toBean(chunk, StreamMessage.class);
         StreamMessageTypeEnum typeEnum = StreamMessageTypeEnum.getEnumByValue(streamMessage.getType());
         switch (typeEnum) {
             case AI_RESPONSE -> {
                 AiResponseMessage aiMessage = JSONUtil.toBean(chunk, AiResponseMessage.class);
                 String data = aiMessage.getData();
-                // 直接拼接响应
+                // 文本片段同时写入展示消息和最终聊天记录。
                 chatHistoryStringBuilder.append(data);
                 // 记录AI响应内容
                 aiResponseStringBuilder.append(data);
-                //返回给前端的值
+                // 只把当前片段返回给前端，避免重复发送历史内容。
                 return data;
             }
             case TOOL_REQUEST -> {
@@ -127,6 +126,14 @@ public class JsonMessageStreamHandler {
                     seenToolIds.add(toolId);
                     // 根据工具名称获取工具实例
                     BaseTool tool = toolManager.getTool(toolName);
+                    if (tool == null) {
+                        // LangGraph 的内部工具事件也会经过旧版展示处理器；这些工具由 Python 工作流执行，不能当作 Legacy 工具告警。
+                        if (isLangGraphInternalTool(toolName)) {
+                            return "";
+                        }
+                        log.warn("未注册的工具请求: {}", toolName);
+                        return String.format("\n\n[执行工具] %s\n\n", toolName);
+                    }
                     // 返回格式化的工具调用信息
                     return tool.generateToolRequestResponse();
                 } else {
@@ -135,14 +142,21 @@ public class JsonMessageStreamHandler {
                 }
             }
             case TOOL_EXECUTED -> {
-                //解析工具调用的信息
+                // 先记录工具请求和结果，保证原始聊天记录可以完整回放。
                 processToolExecutionMessage(aiResponseStringBuilder,chunk,originalChatHistoryList);
-                //格式化处理
+                // 将工具结果转换为用户可读的展示文本。
                 ToolExecutedMessage toolExecutedMessage = JSONUtil.toBean(chunk, ToolExecutedMessage.class);
                 String toolName = toolExecutedMessage.getName();
                 JSONObject jsonObject = JSONUtil.parseObj(toolExecutedMessage.getArguments());
                 // 根据工具名称获取工具实例并生成相应的结果格式
                 BaseTool tool = toolManager.getTool(toolName);
+                if (tool == null) {
+                    if (isLangGraphInternalTool(toolName)) {
+                        return "";
+                    }
+                    log.warn("未注册的工具执行结果: {}", toolName);
+                    return "";
+                }
                 String result = tool.generateToolExecutedResult(jsonObject);
                 // 输出前端和要持久化的内容
                 String output = String.format("\n\n%s\n\n", result);
@@ -187,6 +201,12 @@ public class JsonMessageStreamHandler {
         originalChatHistoryList.add(toolResultHistory);
         // AI 响应内容暂时结束，置空 aiResponseStringBuilder
         aiResponseStringBuilder.setLength(0);
+    }
+
+    private boolean isLangGraphInternalTool(String toolName) {
+        return Set.of("dir_read", "file_read", "file_write", "file_modify", "file_delete",
+                "artifact_context", "artifact_validate", "artifact_publish", "project_build",
+                "vue_source_snapshot").contains(toolName);
     }
 
     }

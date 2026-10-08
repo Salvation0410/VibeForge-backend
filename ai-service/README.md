@@ -133,7 +133,7 @@ START
   -> END
 ```
 
-Vue 分支允许模型请求 Spring 工具，但工具调用次数受 `AI_SERVICE_VUE_MAX_TOOL_CALLS` 限制。每次工具调用都带有确定性的 `toolCallId`，供 Spring 执行幂等控制。
+Vue 分支允许模型请求 Spring 工具，但工具调用次数受 `AI_SERVICE_VUE_MAX_TOOL_CALLS` 限制。源码必须通过 `file_write`/`file_modify` 写入，模型 `content` 只用于简短状态确认，避免重复回传源码触发输出长度上限。每次工具调用都带有确定性的 `toolCallId`，供 Spring 执行幂等控制。若构建发现项目目录或 `package.json` 缺失，工作流直接以稳定构建错误结束，不再要求模型重复生成。
 
 Vue 多 Agent 质量审查开启时，首次生成和每次修复重新通过硬校验、重新构建成功后，都会调用 Spring 工作流专用且模型不可调用的 `vue_source_snapshot`，以当前项目真实源码而不是旧 artifact 作为三个 Reviewer 的审查输入。开关关闭时保持原有兼容行为，仅至少完成一次修复的 Vue 在单 Reviewer 质量检查前读取快照。HTML、MULTI_FILE 分支均不调用该工具。快照最多返回 24 个文件，单文件内容最多 12000 个字符，总内容最多 60000 个字符；Spring 遍历的项目总访问条目（根目录之外的目录、文件和访问失败条目）最多 20000 个，其中合格源码候选最多 10000 个，并只读取按 `package.json`、入口文件、`src/App.vue`、其余路径稳定排序后的最佳 24 个候选，每个源文件最大 1 MiB。
 
