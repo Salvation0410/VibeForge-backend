@@ -76,7 +76,7 @@ public class JsonMessageStreamHandler {
                         // 批量入库
                         chatHistoryOriginalService.addOriginalChatMessageBatch(originalChatHistoryList);
                     }
-                    // AI response入库(两种情况： 1.没有进行工具调用 2.工具调用后 ai返回结果)
+                    // AI 响应入库（两种情况：1. 未进行工具调用；2. 工具调用后 AI 返回结果）。
                     String aiResponseStr = aiResponseStringBuilder.toString();
                     if (StrUtil.isNotBlank(aiResponseStr)) {
                         chatHistoryOriginalService.addOriginalChatMessage(appId, aiResponseStr, ChatHistoryMessageTypeEnum.AI.getValue(), loginUser.getId());

@@ -27,7 +27,7 @@ public class CustomerServiceProperties {
         if (!enabled) return;
         if (serviceUrl == null || !serviceUrl.matches("https?://[^\\s/]+(?::\\d+)?(?:/.*)?"))
             throw new IllegalStateException("AI_CUSTOMER_SERVICE_SERVICE_URL is invalid");
-        // Python permits 255 alias characters, but its lease scope is capped at 256 including "collection:".
+        // Python 允许 alias 最多 255 个字符，但包含 "collection:" 前缀后租约作用域上限为 256 个字符。
         if (collectionAlias == null || !collectionAlias.matches("[A-Za-z_][A-Za-z0-9_]{0,244}"))
             throw new IllegalStateException("AI_CUSTOMER_SERVICE_COLLECTION_ALIAS is invalid");
         if (timeoutSeconds < 1 || timeoutSeconds > 300

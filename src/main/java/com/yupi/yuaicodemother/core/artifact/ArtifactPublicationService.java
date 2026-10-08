@@ -188,7 +188,7 @@ public class ArtifactPublicationService {
         }
     }
 
-    /** dry-run 校验结果；确定性错误与烟测结果分开返回，便于运维定位。 */
+    /** 预演校验结果；确定性错误与烟测结果分开返回，便于运维定位。 */
     public record HtmlInspectionResult(boolean valid, List<ArtifactValidationError> errors,
                                        HtmlSmokeTestResult smokeTest) {
         public HtmlInspectionResult {

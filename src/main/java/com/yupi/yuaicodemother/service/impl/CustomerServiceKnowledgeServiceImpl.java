@@ -209,7 +209,7 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
         LocalDateTime now = LocalDateTime.now();
         task.setCreateTime(now);
         task.setUpdateTime(now);
-        // Scheduling timestamps must use the worker's UTC clock, independently of the server timezone.
+        // 调度时间统一使用 worker 的 UTC 时钟，不能受服务器本地时区影响。
         task.setNextRetryTime(LocalDateTime.now(ZoneOffset.UTC));
         if (outboxMapper.insert(task) != 1) throw new IllegalStateException("KNOWLEDGE_OUTBOX_WRITE_FAILED");
         log.info("Knowledge task queued: taskId={}, documentId={}, operation={}, version={}, nextRetryTimeUtc={}",

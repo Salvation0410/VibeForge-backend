@@ -126,13 +126,13 @@ class CustomerServiceRagService:
                 RerankedChunk(item, float(item.score))
                 for item in candidates[:self._final_top_k]
             ]
-            # Disabled is an intentional operating mode, not a runtime degradation incident.
+            # disabled 是明确的运维模式，不属于运行时降级故障。
             degraded = not self._reranker_disabled
 
         if not ranked:
             return _no_answer(degraded=degraded)
         if self._min_rerank_score is not None:
-            # A rerank threshold cannot be safely compared with Milvus scores on fallback.
+            # 降级时不能把重排阈值与 Milvus 原始分数直接比较。
             if degraded:
                 return _no_answer(degraded=True)
             ranked = [item for item in ranked if item.score >= self._min_rerank_score]

@@ -27,7 +27,7 @@ from ai_service.infrastructure.milvus_knowledge import (
 from ai_service.models.embeddings import EmbeddingOutputError, EmbeddingProvider
 
 
-# Limits also apply after decompression and text extraction, where input byte limits alone do not help.
+# 解压和文本提取后仍需限制大小，仅限制输入字节数无法防止展开后的资源耗尽。
 MAX_EXTRACTED_CHARS = 2_000_000
 MAX_CHUNKS = 10_000
 MAX_SECTIONS = 10_000
@@ -336,7 +336,7 @@ async def parse_and_split_download(
         try:
             return await asyncio.shield(worker)
         except asyncio.CancelledError:
-            # The temp file belongs to the worker until parsing and splitting both finish.
+            # 临时文件在解析和切分全部完成前由当前 worker 持有。
             while not worker.done():
                 try:
                     await asyncio.shield(worker)

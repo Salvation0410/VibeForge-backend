@@ -29,7 +29,7 @@ import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
-/** Validates a knowledge document before it crosses the OSS boundary. */
+/** 知识文档进入 OSS 边界前的格式、大小和安全校验策略。 */
 public final class KnowledgeDocumentFilePolicy {
     private static final long HARD_MAX_BYTES = 20L * 1024 * 1024;
     private static final int MAX_NAME_LENGTH = 128;
@@ -110,7 +110,7 @@ public final class KnowledgeDocumentFilePolicy {
                 || bytes[3] != 'F' || bytes[4] != '-') {
             throw invalid("文件内容与类型不匹配");
         }
-        // Python pypdf checks encryption during ETL; page text can legally contain "/Encrypt".
+        // Python 的 pypdf 会在 ETL 阶段检查加密；页面正文可以合法包含 "/Encrypt" 文本。
     }
 
     private static void validateDocx(byte[] bytes) {

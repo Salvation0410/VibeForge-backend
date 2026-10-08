@@ -11,29 +11,29 @@ import java.util.Map;
 public class SimpleGraphApp {
 
     public static void main(String[] args) throws GraphStateException {
-        // Initialize nodes
+        // 初始化节点。
         GreeterNode greeterNode = new GreeterNode();
         ResponderNode responderNode = new ResponderNode();
 
-        // Define the graph structure
+        // 定义图结构。
 
         //定义 graph 结构
        var stateGraph = new StateGraph<>(SimpleState.SCHEMA, initData -> new SimpleState(initData))
             .addNode("greeter", node_async(greeterNode))
             .addNode("responder", node_async(responderNode))
-            // Define edges
-            .addEdge(START, "greeter") // Start with the greeter node
+            // 定义边，从问候节点开始。
+            .addEdge(START, "greeter") // 从问候节点开始
             .addEdge("greeter", "responder")
-            .addEdge("responder", END)   // End after the responder node
+            .addEdge("responder", END)   // 响应节点执行后结束
              ;
-        // Compile the graph
+        // 编译图。
         //每次都系要先编译一手
         var compiledGraph = stateGraph.compile();
 
-        // Run the graph
-        // The `stream` method returns an AsyncGenerator.
-        // For simplicity, we'll collect results. In a real app, you might process them as they arrive.
-        // Here, the final state after execution is the item of interest.
+        // 运行图。
+        // `stream` 方法返回 AsyncGenerator。
+        // 示例直接收集结果；真实应用可以在结果到达时逐项处理。
+        // 这里关注执行结束后的最终状态。
 
         for (var item : compiledGraph.stream( Map.of( SimpleState.MESSAGES_KEY, "Let's, begin!" ) ) ) {
 

@@ -7,7 +7,7 @@ import java.io.Serializable;
 import java.util.List;
 
 /**
- * Cursor-based page result for feeds that need stable infinite scrolling.
+ * 为需要稳定无限滚动的列表提供基于游标的分页结果。
  */
 @Data
 public class CursorPage<T> implements Serializable {
@@ -16,17 +16,17 @@ public class CursorPage<T> implements Serializable {
     private static final long serialVersionUID = 1L;
 
     /**
-     * Current page records.
+     * 当前页记录。
      */
     private List<T> records;
 
     /**
-     * Cursor for the next page. Blank means there is no next page.
+     * 下一页游标；为空表示没有下一页。
      */
     private String nextCursor;
 
     /**
-     * Whether the client can request another page with nextCursor.
+     * 客户端是否可以使用 nextCursor 请求下一页。
      */
     private Boolean hasMore;
 }

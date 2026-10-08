@@ -9,7 +9,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Scope;
 
 /**
- * AI code generation type routing service factory.
+ * AI 代码生成类型路由服务工厂。
  */
 @Configuration
 @Slf4j

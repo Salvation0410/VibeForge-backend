@@ -20,10 +20,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 /**
- * Optional isolated integration test for a MySQL 8 server. It creates and drops only a random schema.
- * Set CUSTOMER_SERVICE_MYSQL_IT_EXECUTE=true together with CUSTOMER_SERVICE_MYSQL_IT_URL,
- * CUSTOMER_SERVICE_MYSQL_IT_USER and CUSTOMER_SERVICE_MYSQL_IT_PASSWORD, then run
- * mvn -Dtest=CustomerServiceKnowledgeMySqlIT test.
+ * 面向 MySQL 8 的可选隔离集成测试，只创建和删除随机命名的测试 schema。
+ * 设置 CUSTOMER_SERVICE_MYSQL_IT_EXECUTE=true、CUSTOMER_SERVICE_MYSQL_IT_URL、
+ * CUSTOMER_SERVICE_MYSQL_IT_USER 和 CUSTOMER_SERVICE_MYSQL_IT_PASSWORD 后，执行
+ * mvn -Dtest=CustomerServiceKnowledgeMySqlIT test。
  */
 @EnabledIfEnvironmentVariable(named = "CUSTOMER_SERVICE_MYSQL_IT_URL", matches = ".+")
 @EnabledIfEnvironmentVariable(named = "CUSTOMER_SERVICE_MYSQL_IT_EXECUTE", matches = "(?i:true)")

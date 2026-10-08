@@ -42,7 +42,7 @@ public class ChatHistoryOriginal implements Serializable {
     private String message;
 
     /**
-     * user/ai/toolExecutionRequest/toolExecutionResult
+     * user/ai/toolExecutionRequest/toolExecutionResult 消息类型。
      */
     @Column("messageType")
     private String messageType;

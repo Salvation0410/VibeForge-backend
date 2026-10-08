@@ -3,7 +3,7 @@ package com.yupi.yuaicodemother.enums;
 import lombok.Getter;
 
 /**
- * Sort type shared by community post and comment feeds.
+ * 社区帖子和评论列表共用的排序类型。
  */
 @Getter
 public enum CommunitySortTypeEnum {

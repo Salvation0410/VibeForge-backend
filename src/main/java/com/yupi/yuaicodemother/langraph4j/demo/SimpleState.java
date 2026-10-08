@@ -12,8 +12,8 @@ import java.util.*;
 class SimpleState extends AgentState {
     public static final String MESSAGES_KEY = "messages";
 
-    // Define the schema for the state.
-    // MESSAGES_KEY will hold a list of strings, and new messages will be appended.
+    // 定义状态结构。
+    // MESSAGES_KEY 保存字符串列表，新消息会追加到列表末尾。
 
     //创建一个schema 通过appender方法增加数据 [1,] [a,2]
     public static final Map<String, Channel<?>> SCHEMA = Map.of(

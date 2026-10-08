@@ -1,4 +1,4 @@
-"""LangGraph Studio adapter for the existing generation workflow."""
+"""为现有代码生成工作流提供 LangGraph Studio 图适配器。"""
 
 from __future__ import annotations
 

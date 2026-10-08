@@ -136,7 +136,7 @@ def create_app(
             await checkpoint_store.start()
             try:
                 if config.customer_service_rag_enabled:
-                    # Import and initialize the optional stack behind the feature gate.
+                    # 只有开启客服 RAG 后才导入和初始化可选依赖，避免影响代码生成启动。
                     from ai_service.infrastructure.knowledge_download import KnowledgeDownloader
                     from ai_service.infrastructure.milvus_knowledge import MilvusKnowledgeStore
                     from ai_service.infrastructure.spring_knowledge_lease import (
@@ -250,7 +250,7 @@ def create_app(
                         })
                     )
             except Exception:
-                # Optional customer-service dependencies never take code generation down.
+                # 客服可选依赖初始化失败时降级客服能力，不能拖垮代码生成服务。
                 seen: set[int] = set()
                 for resource in reversed(resources):
                     if id(resource) in seen:

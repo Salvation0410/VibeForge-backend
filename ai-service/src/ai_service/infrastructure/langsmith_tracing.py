@@ -103,7 +103,7 @@ class LangSmithTracer:
             )
             self._worker = Thread(target=self._send_records, name="langsmith-metadata", daemon=True)
             self._worker.start()
-        except Exception as exc:  # pragma: no cover - depends on optional SDK/runtime
+        except Exception as exc:  # pragma: no cover - 依赖可选 SDK 和运行时环境
             self.enabled = False
             logger.warning("LangSmith tracing disabled: client initialization failed (%s)", type(exc).__name__)
 
@@ -168,7 +168,7 @@ class LangSmithTracer:
             })
         except Full:
             pass  # 观测队列饱和时丢弃记录，不能阻塞业务或累积无界任务。
-        except Exception as exc:  # pragma: no cover - network/provider dependent
+        except Exception as exc:  # pragma: no cover - 依赖网络和供应商服务
             logger.warning("LangSmith tracing failed: %s", type(exc).__name__)
 
     async def close(self) -> None:

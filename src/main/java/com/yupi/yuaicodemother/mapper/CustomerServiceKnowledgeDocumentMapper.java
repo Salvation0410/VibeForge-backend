@@ -24,8 +24,8 @@ public interface CustomerServiceKnowledgeDocumentMapper extends BaseMapper<Custo
     @Select("SELECT COUNT(*) FROM customer_service_knowledge_document WHERE isDelete=0")
     long countDocuments();
 
-    // OSS keeps only the current object. An older indexedVersion cannot be rebuilt after replacement,
-    // so collection rebuild fails closed to documents whose current version is fully indexed and active.
+    // OSS 只保留当前对象，旧 indexedVersion 在对象替换后无法重新构建，
+    // 因此 collection 重建只接受当前版本已完整索引且处于 ACTIVE 状态的文档。
     @Select("SELECT * FROM customer_service_knowledge_document WHERE isDelete=0 AND status='ACTIVE' AND indexedVersion>0 AND indexedVersion=documentVersion ORDER BY id LIMIT #{limit}")
     List<CustomerServiceKnowledgeDocument> listRebuildableLimited(@Param("limit") int limit);
 

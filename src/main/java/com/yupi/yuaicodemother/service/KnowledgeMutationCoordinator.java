@@ -25,6 +25,9 @@ import java.time.ZoneOffset;
 import java.util.HexFormat;
 import java.util.Set;
 
+/**
+ * 负责签发、校验和回收客服知识库变更租约，保证跨 Spring 与 Python 的操作顺序。
+ */
 @Service
 public class KnowledgeMutationCoordinator {
     private static final Set<String> OPERATIONS = Set.of("INDEX", "DELETE", "REBUILD");
@@ -169,7 +172,7 @@ public class KnowledgeMutationCoordinator {
         }
     }
 
-    // The internal Python contract requires integers even when MVC serializes frontend IDs as strings.
+    // Python 内部契约要求使用整数，即使 MVC 将前端传入的 ID 序列化为字符串。
     public static final class LeaseLongSerializer extends JsonSerializer<Long> {
         @Override
         public void serialize(Long value, JsonGenerator generator, SerializerProvider provider) throws IOException {

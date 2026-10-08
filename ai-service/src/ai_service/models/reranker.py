@@ -266,7 +266,7 @@ def _score_flag_batch(
 
 
 def _load_flag_reranker(model_name: str, **kwargs: Any) -> Any:
-    # Keep importing FlagEmbedding out of disabled startup and module import paths.
+    # 禁用 Reranker 时不导入 FlagEmbedding，避免启动和模块导入触发可选依赖加载。
     if version("FlagEmbedding") != "1.4.2":
         raise RuntimeError("unsupported FlagEmbedding runtime")
     from FlagEmbedding import FlagReranker

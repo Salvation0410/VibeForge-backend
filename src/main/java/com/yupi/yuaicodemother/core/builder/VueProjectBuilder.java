@@ -616,7 +616,7 @@ public class VueProjectBuilder {
             try {
                 process.descendants().forEach(capturedDescendants::add);
             } catch (RuntimeException ignored) {
-                // The root may exit while its descendants are being enumerated.
+                // 根目录可能在遍历子目录期间退出。
             }
         }
 
@@ -658,7 +658,7 @@ public class VueProjectBuilder {
             try {
                 closeable.close();
             } catch (IOException ignored) {
-                // Best-effort cleanup after a bounded process wait.
+                // 进程有界等待结束后执行尽力清理。
             }
         }
 

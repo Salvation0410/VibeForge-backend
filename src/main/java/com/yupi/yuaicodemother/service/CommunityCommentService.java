@@ -17,42 +17,42 @@ import java.util.List;
 public interface CommunityCommentService extends IService<CommunityComment> {
 
     /**
-     * Adds a comment or nested reply to an approved post.
+     * 向已审核帖子添加评论或嵌套回复。
      */
     Long addComment(CommunityCommentAddRequest request, SysUser loginUser);
 
     /**
-     * Lists comments under a post or parent comment with cursor pagination.
+     * 使用游标分页查询帖子或父评论下的评论。
      */
     CursorPage<CommunityCommentVO> listCommentVOByCursor(CommunityCommentQueryRequest request, SysUser loginUserOrNull);
 
     /**
-     * Toggles current user's comment like and updates the like counter.
+     * 切换当前用户评论点赞状态，并更新点赞计数。
      */
     CommunityLikeResultVO toggleCommentLike(Long commentId, SysUser loginUser);
 
     /**
-     * Converts comment entities to frontend view objects.
+     * 将评论实体转换为前端视图对象。
      */
     List<CommunityCommentVO> getCommentVOList(List<CommunityComment> comments, SysUser loginUserOrNull);
 
     /**
-     * Pages comments for the admin console with flexible filters.
+     * 使用灵活筛选条件为管理端分页查询评论。
      */
     Page<CommunityCommentVO> listCommentVOByPageForAdmin(CommunityCommentAdminQueryRequest request, SysUser adminUser);
 
     /**
-     * Gets a single comment detail for the admin console.
+     * 为管理端查询单条评论详情。
      */
     CommunityCommentVO getCommentVOByIdForAdmin(Long commentId, SysUser adminUser);
 
     /**
-     * Soft deletes a comment subtree and repairs denormalized counters.
+     * 软删除评论子树，并修复冗余计数。
      */
     Boolean adminDeleteComment(Long commentId);
 
     /**
-     * Reviews a comment subtree and repairs public counters for visible comments.
+     * 审核评论子树，并修复可见评论的公开计数。
      */
     Boolean reviewComment(CommunityCommentReviewRequest request, SysUser adminUser);
 }

@@ -8,7 +8,7 @@ import uvicorn
 
 
 def main() -> None:
-    """Start Uvicorn with a psycopg-compatible event loop on Windows."""
+    """使用兼容 psycopg 的事件循环启动 Uvicorn，Windows 下固定使用 SelectorEventLoop。"""
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     config = uvicorn.Config(

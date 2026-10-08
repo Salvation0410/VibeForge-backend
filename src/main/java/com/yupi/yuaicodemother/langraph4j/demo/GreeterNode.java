@@ -5,7 +5,7 @@ import org.bsc.langgraph4j.action.NodeAction;
 import java.util.List;
 import java.util.Map;
 
-// Node that adds a greeting
+// 添加问候语的节点。
 
 /**
  * 定义工作节点
@@ -18,7 +18,7 @@ class GreeterNode implements NodeAction<SimpleState> {
     }
 }
 
-// Node that adds a response
+// 添加响应内容的节点。
 class ResponderNode implements NodeAction<SimpleState> {
     @Override
     public Map<String, Object> apply(SimpleState state) {

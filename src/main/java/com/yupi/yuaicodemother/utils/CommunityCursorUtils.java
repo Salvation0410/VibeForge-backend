@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
 import java.util.Base64;
 
 /**
- * Encodes feed cursor fields into an opaque string for frontend pagination.
+ * 将列表游标字段编码为供前端分页使用的不透明字符串。
  */
 public final class CommunityCursorUtils {
 

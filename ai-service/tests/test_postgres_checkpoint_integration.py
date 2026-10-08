@@ -17,7 +17,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 def postgres_url() -> str:
-    # Match service configuration, including the local .env, without exposing it.
+    # 使用与服务相同的配置来源（包括本地 .env），但不暴露其中的凭据。
     return Settings().checkpoint_postgres_url
 
 

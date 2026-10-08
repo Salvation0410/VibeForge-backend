@@ -25,6 +25,9 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
+/**
+ * 从 Spring outbox 领取知识库任务，校验租约后调用 Python 完成索引、删除或重建。
+ */
 @Component
 @ConditionalOnProperty(prefix = "ai.customer-service", name = "enabled", havingValue = "true")
 public class CustomerServiceKnowledgeEtlWorker {
@@ -107,7 +110,7 @@ public class CustomerServiceKnowledgeEtlWorker {
                     task.getId(), task.getDocumentId(), task.getOperation());
         } catch (LostClaimException ignored) {
             log.info("Knowledge task claim lost: taskId={}", task.getId());
-            // Another worker reclaimed the task while this worker was preparing the request.
+            // 当前 worker 准备请求期间，任务已被其他 worker 重新认领。
         } catch (StaleTaskException error) {
             log.info("Knowledge task skipped as stale: taskId={}", task.getId());
             finishSafely(task, "SKIPPED", "KNOWLEDGE_TASK_STALE");
@@ -128,7 +131,7 @@ public class CustomerServiceKnowledgeEtlWorker {
                 try {
                     coordinator.revoke(lease);
                 } catch (RuntimeException ignored) {
-                    // The lease has a bounded expiry; revoke failure must not stop the worker loop.
+                    // 租约有明确的过期时间；撤销失败不能中断 worker 主循环。
                 }
             }
         }
@@ -286,7 +289,7 @@ public class CustomerServiceKnowledgeEtlWorker {
         try {
             outboxMapper.finish(task.getId(), owner, status, code);
         } catch (RuntimeException ignored) {
-            // A later expired-claim reclaim remains possible; never terminate the poll loop here.
+            // 后续仍可能重新认领过期任务，此处不能终止轮询循环。
         }
     }
 

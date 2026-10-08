@@ -230,7 +230,7 @@ class MilvusKnowledgeStore:
         self._mutation_coordinator = (
             mutation_coordinator or DenyAllKnowledgeMutationCoordinator()
         )
-        # Local serialization is an optimization; persisted manifests provide cross-worker safety.
+        # 进程内串行化只是性能优化，跨 worker 的安全性由持久化 manifest 保证。
         self._write_lock = asyncio.Lock()
 
     @asynccontextmanager
@@ -289,8 +289,8 @@ class MilvusKnowledgeStore:
         try:
             return await asyncio.shield(task)
         except asyncio.CancelledError as cancelled:
-            # The thread cannot be stopped. Keep the mutation permit held until the bounded
-            # pymilvus RPC has a definite outcome, then preserve caller cancellation.
+            # 后台线程无法强制停止；在有界 pymilvus RPC 得到确定结果前保持变更许可，
+            # 然后再保留调用方的取消语义。
             while not task.done():
                 try:
                     await asyncio.shield(task)
@@ -558,7 +558,7 @@ class MilvusKnowledgeStore:
             if owned:
                 await self._call("drop_collection", collection)
         except (Exception, asyncio.CancelledError):
-            # Cleanup is best effort. Any uncertain alias or ownership state preserves staging.
+            # 清理只做尽力而为；alias 或所有权状态只要不确定，就保留暂存 collection。
             return
 
     async def _cleanup_retired_collections(
@@ -1502,7 +1502,7 @@ class MilvusKnowledgeStore:
             return
         except Exception:
             pass
-        # A concurrent initializer is success only when it selected the same collection.
+        # 并发初始化只有在最终选择了同一个 collection 时才算成功。
         if await self._alias_target() != collection:
             raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_MISMATCH")
 

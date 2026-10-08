@@ -3,7 +3,7 @@ package com.yupi.yuaicodemother.enums;
 import lombok.Getter;
 
 /**
- * Review status for community comments.
+ * 社区评论的审核状态。
  */
 @Getter
 public enum CommunityCommentStatusEnum {

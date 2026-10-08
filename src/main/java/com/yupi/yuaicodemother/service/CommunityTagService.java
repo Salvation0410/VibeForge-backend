@@ -10,22 +10,22 @@ import java.util.List;
 public interface CommunityTagService extends IService<CommunityTag> {
 
     /**
-     * Lists enabled tags for public post publishing and filtering.
+     * 查询供公开发帖和筛选使用的启用标签。
      */
     List<CommunityTagVO> listEnabledTags();
 
     /**
-     * Lists all tags for admin management.
+     * 查询供管理员管理的全部标签。
      */
     List<CommunityTagVO> listAllTags();
 
     /**
-     * Creates or updates a tag from the admin console.
+     * 在管理端创建或更新标签。
      */
     Boolean saveTag(CommunityTagSaveRequest request);
 
     /**
-     * Converts tag entity to frontend-safe view object.
+     * 将标签实体转换为前端安全视图对象。
      */
     CommunityTagVO getTagVO(CommunityTag tag);
 }

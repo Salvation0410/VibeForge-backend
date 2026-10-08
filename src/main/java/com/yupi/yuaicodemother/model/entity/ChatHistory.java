@@ -43,7 +43,7 @@ public class ChatHistory implements Serializable {
     private String message;
 
     /**
-     * user/ai
+     * user/ai 消息角色。
      */
     @Column("messageType")
     private String messageType;

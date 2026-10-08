@@ -30,7 +30,7 @@ import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
- * OSS file upload manager.
+ * OSS 文件上传管理器。
  */
 @Component
 public class OssManager {
@@ -55,7 +55,7 @@ public class OssManager {
 
     public record KnowledgeObject(String objectKey, String displayName, String fileType, long size, String sha256) { }
 
-    /** Uploads a private knowledge document; no permanent public URL is returned. */
+    /** 上传私有知识文档，不返回永久公开地址。 */
     public KnowledgeObject uploadKnowledgeDocument(MultipartFile file) {
         var document = new KnowledgeDocumentFilePolicy(ossProperties.getMaxKnowledgeDocumentSize()).validate(file);
         validateOssConfig();
@@ -133,7 +133,7 @@ public class OssManager {
     }
 
     /**
-     * Uploads a user avatar and returns the public URL.
+     * 上传用户头像并返回公开地址。
      */
     public String uploadAvatar(MultipartFile avatarFile) {
         validateImageFile(avatarFile, ossProperties.getMaxAvatarSize(), "头像");
@@ -146,7 +146,7 @@ public class OssManager {
     }
 
     /**
-     * Uploads a community post image and returns the public URL.
+     * 上传社区帖子图片并返回公开地址。
      */
     public String uploadCommunityImage(MultipartFile imageFile) {
         validateImageFile(imageFile, ossProperties.getMaxAvatarSize(), "社区图片");
@@ -156,7 +156,7 @@ public class OssManager {
     }
 
     /**
-     * Uploads a local file and returns the public URL.
+     * 上传本地文件并返回公开地址。
      */
     public String uploadFile(String objectKey, File file) {
         ThrowUtils.throwIf(StrUtil.isBlank(objectKey), ErrorCode.PARAMS_ERROR, "OSS objectKey cannot be blank");

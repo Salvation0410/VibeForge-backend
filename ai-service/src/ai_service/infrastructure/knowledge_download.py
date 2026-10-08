@@ -186,7 +186,7 @@ class KnowledgeDownloader:
                         digest = hashlib.sha256()
                         size = 0
                         with os.fdopen(fd, "wb") as output:
-                            # MockTransport can return an already-buffered Response; wire responses use raw bytes.
+                            # MockTransport 可能返回已缓冲的响应，真实网络响应则使用原始字节流。
                             blocks = (response.aiter_bytes(chunk_size=65536) if response.is_stream_consumed
                                       else response.aiter_raw(chunk_size=65536))
                             async for block in blocks:

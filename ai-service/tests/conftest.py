@@ -18,8 +18,8 @@ from ai_service.models.reranker import DisabledReranker
 
 
 if sys.platform == "win32":
-    # psycopg async requires SelectorEventLoop on Windows; keep opt-in PostgreSQL
-    # integration tests runnable under pytest instead of failing in ProactorLoop.
+    # Windows 下 psycopg 异步连接需要 SelectorEventLoop；让可选 PostgreSQL 集成测试
+    # 在 pytest 中可运行，避免被 ProactorLoop 直接失败。
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
@@ -180,7 +180,7 @@ def settings() -> Settings:
 
 @pytest.fixture(autouse=True)
 def disable_implicit_tracing(monkeypatch):
-    # Offline tests must not export synthetic prompts through ambient callbacks.
+    # 离线测试不能通过进程环境中的回调导出合成提示词。
     monkeypatch.setenv("LANGSMITH_TRACING", "false")
     monkeypatch.setenv("LANGCHAIN_TRACING_V2", "false")
     from langsmith import tracing_context
