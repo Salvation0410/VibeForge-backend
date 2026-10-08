@@ -635,12 +635,14 @@ class GenerationWorkflow:
             if turn.content:
                 content_parts.append(turn.content)
                 await emitter.emit("content_delta", node, data={"content": turn.content})
-            if not turn.tool_calls or tool_count >= self.settings.vue_max_tool_calls:
+            if not turn.tool_calls:
                 break
 
+            # 不得静默丢弃本轮未执行的写入请求，否则半成品会进入校验与构建。
+            if tool_count + len(turn.tool_calls) > self.settings.vue_max_tool_calls:
+                raise ValueError("VUE_TOOL_CALL_LIMIT_EXCEEDED: Vue file tool budget exhausted")
+
             for call in turn.tool_calls:
-                if tool_count >= self.settings.vue_max_tool_calls:
-                    break
                 self._raise_if_cancelled(thread_id)
                 arguments = validate_vue_tool_call(call.name, call.arguments)
                 tool_count += 1

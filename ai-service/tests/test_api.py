@@ -2504,7 +2504,8 @@ def test_multi_file_records_publication_before_tool_finished_event(
     assert any(call["name"] == "artifact_publish" for call in gateway.calls)
 
 
-def test_vue_agent_tool_calls_are_bounded_and_identified(app_factory, auth_headers, ndjson_parser):
+def test_vue_agent_tool_calls_are_bounded_and_identified(app_factory, auth_headers, ndjson_parser, settings):
+    settings.vue_max_tool_calls = 4
     model = FakeModel(vue_tool_calls=10)
     gateway = FakeToolGateway()
     client = TestClient(app_factory(model=model, gateway=gateway))
@@ -2525,6 +2526,9 @@ def test_vue_agent_tool_calls_are_bounded_and_identified(app_factory, auth_heade
     assert all(call["arguments"]["codeGenType"] == "VUE_PROJECT" for call in vue_calls)
     assert len([event for event in events if event["type"] == "tool_started" and event["node"] == "vue_agent"]) == 4
     assert len([event for event in events if event["type"] == "tool_finished" and event["node"] == "vue_agent"]) == 4
+    assert events[-1]["type"] == "failed"
+    assert events[-1]["error"]["code"] == "VUE_TOOL_CALL_LIMIT_EXCEEDED"
+    assert not [call for call in gateway.calls if call["name"] == "project_build"]
 
 
 @pytest.mark.parametrize(

@@ -69,7 +69,7 @@ VUE_PROJECT_SYSTEM_PROMPT = """你是一位资深 Vue 3 前端架构师，负责
 - 只能请求工具调用，不得提供 appId 或 codeGenType，这些字段由工作流注入。
 - 工具调用必须使用严格 JSON：{"content":"...","toolCalls":[{"name":"file_read","arguments":{"relativeFilePath":"src/App.vue"}}]}。
 - 可用工具名称和参数以工作流提供的版本化契约为准；禁止猜测其他工具。
-- 一次只请求实际需要的工具，工具调用次数有限；不要重复写入相同内容。
+- 一次只请求实际需要的工具，工具调用次数有限；首次生成至少确保 `package.json`、`vite.config.js`、`index.html`、`src/main.js` 和 `src/App.vue` 都已写入，不要重复写入相同内容。
 - 不要删除 package.json、锁文件、入口文件或构建配置，除非用户明确要求。"""
 
 
