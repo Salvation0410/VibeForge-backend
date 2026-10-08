@@ -1,5 +1,43 @@
 # Yu AI Service
 
+LangGraph Studio 本地调试步骤见 [LangGraph Studio 调试说明](../doc/langgraph-studio-debug.md)。
+
+在 `ai-service` 目录启动本地 Studio Agent Server：
+
+```powershell
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
+uv run --with "langgraph-cli[inmem]" python -m ai_service.studio_server
+```
+
+Studio 的 **Configure connection** 填写 Base URL `http://127.0.0.1:2024`，
+自定义 Header 留空，连接后选择 `yu_ai_generation`。启动器从 `.env` 读取凭据；
+仅有 `LANGGRAPH_API_KEY` 时自动映射为官方要求的 `LANGSMITH_API_KEY`，已有后者优先。
+Studio 进程关闭自动云追踪，业务 `.env` 的脱敏旁路追踪开关保持原值。
+
+图输入使用 snake_case 字段，例如：
+
+```json
+{
+  "app_id": "专用测试应用ID",
+  "request_id": "studio-每次新的唯一ID",
+  "prompt": "制作一个简单的待办页面",
+  "code_gen_type": "HTML",
+  "conversation": [],
+  "metadata": {},
+  "repair_count": 0,
+  "tool_call_count": 0
+}
+```
+
+支持 `HTML`、`MULTI_FILE`、`VUE_PROJECT`。执行时调用真实模型和 Spring 工具，
+可能写入、构建和发布应用，因此使用专用测试应用，并避免前端同时对同一应用生成。
+该入口绕过 Spring 对外入口的应用租约；Studio 连通不能代替完整 SSE、聊天记录和取消验收。
+Agent Server 管理本地调试 checkpoint，项目 PostgreSQL checkpoint 在该入口关闭；
+本地 `.langgraph_api/` 可能含 prompt 和源码，已加入忽略规则。
+
+在 PyCharm 中启动与查看知识库处理日志，见 [知识库 PyCharm 调试说明](../doc/knowledge-pycharm-debug.md)。项目提供 `.run/AI Service.run.xml`，运行模块为 `ai_service.server`。
+
 `yu-ai-service` 是 `yu-ai-code-mother` 的独立 AI 编排服务，使用 Python 3.12、FastAPI、LangChain 和 LangGraph 实现代码生成、工具调用、质量检查和有限次数修复。
 
 该服务只负责 AI 能力，不直接访问 MySQL 或项目目录。用户鉴权、应用与聊天记录、文件安全、Vue 构建、部署、下载以及面向前端的 SSE 均由 Spring Boot 后端负责。
@@ -38,16 +76,27 @@ ai-service/
 │   │   └── schemas.py          # HTTP 请求、响应和 NDJSON 事件模型
 │   ├── orchestration/
 │   │   ├── workflow.py         # LangGraph 状态图和节点路由
+│   │   ├── customer_service_rag.py # 客服检索、重排和回答
+│   │   ├── document_etl.py     # 知识文档下载、解析、切分和索引
 │   │   ├── events.py           # 递增序号事件生成器
 │   │   └── cancellation.py     # 协作式取消状态
 │   ├── models/
 │   │   ├── base.py             # 模型协议和公共返回类型
+│   │   ├── embeddings.py       # CloseAI/OpenAI 兼容 Embedding
+│   │   ├── quality_review.py   # 质量审查模型协议
+│   │   ├── reranker.py         # 本地/远程/禁用重排器
 │   │   └── openai_compatible.py # DeepSeek/OpenAI 兼容适配器
 │   └── infrastructure/
 │       ├── checkpoint.py       # checkpoint 协议与禁用实现
 │       ├── postgres_checkpoint.py # PostgreSQL saver、状态摘要和 TTL 清理
 │       ├── checkpoint_setup.py # 独立 schema 初始化命令
+│       ├── milvus_knowledge.py # Milvus collection、alias 和版本清理
+│       ├── knowledge_download.py # Spring 签名 URL 下载器
+│       ├── spring_knowledge_lease.py # 知识库变更租约校验
 │       └── spring_tools.py     # Spring 文件与构建工具网关
+├── src/ai_service/server.py    # Windows/生产启动入口（SelectorEventLoop）
+├── src/ai_service/studio_graph.py # LangGraph Studio 图适配器
+├── src/ai_service/studio_server.py # 本地 Studio Agent Server 启动器
 ├── tests/                      # 不访问真实模型的单元与契约测试
 ├── .env.example                # 环境变量示例
 ├── Dockerfile
@@ -55,7 +104,9 @@ ai-service/
 └── uv.lock
 ```
 
-应用的稳定启动入口是 `ai_service.app:create_app`。
+应用工厂是 `ai_service.app:create_app`；本地和 Windows 启动推荐使用
+`python -m ai_service.server`，该入口会在 Windows 显式选择兼容 psycopg 的
+`SelectorEventLoop`。LangGraph Studio 使用 `python -m ai_service.studio_server`。
 
 ## LangGraph 工作流
 
@@ -149,7 +200,7 @@ HTML 和多文件版本均写入 `<类型>_<appId>/.releases/<requestId>`，`.cu
 
 - Python `3.12`，项目不支持 Python 3.13
 - [`uv`](https://docs.astral.sh/uv/) 包和虚拟环境管理器
-- PostgreSQL 15 或更高版本；Python checkpoint 使用独立数据库 `yu_ai_checkpoint`
+- PostgreSQL 15 或更高版本（启用 checkpoint 或需要恢复能力时）；Python checkpoint 使用独立数据库 `yu_ai_checkpoint`
 - DeepSeek 或其他 OpenAI 兼容模型服务的 API Key
 - 可访问的 Spring Boot 后端
 - Docker，可选，仅在容器运行时需要
@@ -243,7 +294,7 @@ uv run python -m ai_service.infrastructure.checkpoint_setup
 
 Windows 上如果 uv 默认管理目录中的 Python 链接损坏，可能出现依赖检查成功但 Uvicorn 无法启动的问题。推荐首次启动时将 CPython 3.12.14 安装到当前用户的 `%LOCALAPPDATA%`，避开 uv 默认的 minor-version Junction 和 trampoline。
 
-首次初始化或重建环境前，先在运行 Uvicorn 的终端按 `Ctrl+C` 停止 AI 服务。Windows 会锁定正在使用的 `.venv` 文件；服务未停止时执行 `uv venv --clear` 会报“拒绝访问”。确认服务已停止后逐段执行：
+首次初始化或重建环境前，先在运行 Uvicorn 的终端按 `Ctrl+C` 停止 AI 服务，并关闭 PyCharm/VS Code 中使用该 `.venv` 的终端。Windows 会锁定正在使用的 `.venv` 文件；服务或 IDE 未停止时执行清理会报“拒绝访问”。下面的脚本遇到失败会立即停止，不会拿不完整环境继续同步：
 
 ```powershell
 $runtimeDir = "$env:LOCALAPPDATA/yu-ai-code-mother/python"
@@ -253,7 +304,10 @@ if ($LASTEXITCODE -ne 0) { throw "Python 3.12 installation failed" }
 $python = (Get-ChildItem "$runtimeDir/cpython-3.12.14-windows*/python.exe" | Select-Object -First 1).FullName
 if (-not $python) { throw "Python 3.12 executable not found" }
 
-uv venv --clear --python "$python" .venv
+if (Test-Path .venv) {
+  Remove-Item -Recurse -Force -ErrorAction Stop .venv
+}
+uv venv --python "$python" .venv
 if ($LASTEXITCODE -ne 0) { throw "Virtual environment creation failed" }
 
 uv sync --frozen --python "$python" --link-mode copy
@@ -262,14 +316,38 @@ if ($LASTEXITCODE -ne 0) { throw "Dependency synchronization failed" }
 
 初始化完成后，日常启动执行：
 
+> 下面的命令只复制代码块内容，不要复制 PowerShell 提示符（例如 `PS D:\VibeForge\...>`）或之前输出的日志。
+
 ```powershell
 $runtimeDir = "$env:LOCALAPPDATA/yu-ai-code-mother/python"
 $python = (Get-ChildItem "$runtimeDir/cpython-3.12.14-windows*/python.exe" | Select-Object -First 1).FullName
 if (-not $python) { throw "Python 3.12 executable not found; run the initialization steps first" }
 
 $env:PYTHONPATH = "$(Resolve-Path './.venv/Lib/site-packages');$(Resolve-Path './src')"
-& "$python" -m uvicorn ai_service.app:create_app --factory --host 0.0.0.0 --port 8000
+& "$python" -c "import click, uvicorn; print('依赖检查通过')"
+& "$python" -m ai_service.server
 ```
+
+如果启动时出现 `ModuleNotFoundError: No module named 'dotenv'`、`No module named 'click'` 或类似依赖导入错误，说明当前 `.venv` 不完整（常见原因是清理时文件被锁定，随后又继续执行了 `uv sync`）。先停止服务并关闭占用 `.venv` 的 IDE 终端，在 `ai-service` 目录执行以下修复命令，然后重新执行上面的日常启动步骤：
+
+```powershell
+$runtimeDir = "$env:LOCALAPPDATA/yu-ai-code-mother/python"
+$python = (Get-ChildItem "$runtimeDir/cpython-3.12.14-windows*/python.exe" | Select-Object -First 1).FullName
+if (-not $python) { throw "Python 3.12 executable not found; run the initialization steps first" }
+
+if (Test-Path .venv) {
+  Remove-Item -Recurse -Force -ErrorAction Stop .venv
+}
+uv venv --python "$python" .venv
+if ($LASTEXITCODE -ne 0) { throw "Virtual environment creation failed" }
+uv sync --frozen --python "$python" --link-mode copy
+if ($LASTEXITCODE -ne 0) { throw "Dependency synchronization failed" }
+
+$env:PYTHONPATH = "$(Resolve-Path './.venv/Lib/site-packages');$(Resolve-Path './src')"
+& "$python" -c "import click, uvicorn; print('click and uvicorn are ready')"
+```
+
+`click` 由 `uvicorn[standard]` 间接提供，已记录在 `uv.lock` 中，不需要单独执行 `pip install click`。如果同步后仍然缺少依赖，删除并重建虚拟环境，再重新执行“推荐方案”的初始化命令；不要混用其他 Python 解释器的 `site-packages`。
 
 ### 简化方案
 
@@ -277,12 +355,23 @@ $env:PYTHONPATH = "$(Resolve-Path './.venv/Lib/site-packages');$(Resolve-Path '.
 
 ```powershell
 uv sync --frozen --python 3.12
-uv run uvicorn ai_service.app:create_app --factory --host 0.0.0.0 --port 8000
+uv run python -m ai_service.server
 ```
 
-如果出现 `No Python at ...`，路径前带有异常引号，或 uv 报告 `Missing expected target directory for Python minor version link`，不要重复执行简化方案，改用上面的推荐方案重新初始化。模块名必须写成 `ai_service.app:create_app`，不要在下划线前添加反斜杠。
+如果出现 `No Python at ...`，路径前带有异常引号，或 uv 报告 `Missing expected target directory for Python minor version link`，不要重复执行简化方案，改用上面的推荐方案重新初始化。Windows 启动模块必须写成 `ai_service.server`，不要在下划线前添加反斜杠。
+
+Windows 启动必须使用 `ai_service.server`。该入口显式使用 `SelectorEventLoop`，兼容 psycopg 的异步 PostgreSQL checkpoint；直接执行 `uvicorn ai_service.app:create_app` 会让 Uvicorn 选择 `ProactorEventLoop`，从而出现 `Psycopg cannot use the 'ProactorEventLoop'`。
 
 服务默认监听 `http://localhost:8000`。
+
+启动后可在新 PowerShell 窗口执行健康检查：
+
+```powershell
+Invoke-RestMethod http://localhost:8000/health/live
+Invoke-RestMethod http://localhost:8000/health/ready
+```
+
+`/health/live` 只确认进程存活；`/health/ready` 只检查 checkpoint 存储是否可用。若 readiness 失败，先查看启动窗口中的脱敏错误，再核对 `.env`、PostgreSQL 和 checkpoint 配置；模型或 Spring 工具网关可用性在实际请求和客服独立健康接口中检查。
 
 Spring Boot 侧至少配置：
 
@@ -363,9 +452,18 @@ Authorization: Bearer <AI_SERVICE_INTERNAL_BEARER_TOKEN>
 | `POST /internal/v1/route` | 将提示词分类为 `HTML`、`MULTI_FILE` 或 `VUE_PROJECT` |
 | `POST /internal/v1/generations:stream` | 启动工作流并返回 `application/x-ndjson` 事件流 |
 | `POST /internal/v1/generations/{requestId}:cancel` | 协作式取消指定请求 |
+| `POST /internal/v1/customer-service/answers` | 基于当前知识库回答客服问题并返回最多 3 条来源 |
+| `POST /internal/v1/customer-service/knowledge:etl` | 对单个 PDF、DOCX、MD 或 TXT 文档执行索引 ETL |
+| `POST /internal/v1/customer-service/knowledge:delete` | 删除指定文档版本的向量数据 |
+| `POST /internal/v1/customer-service/knowledge:rebuild` | 按文档清单重建临时 collection 并切换 alias |
 | `GET /health/live` | 进程存活检查 |
 | `GET /health/ready` | PostgreSQL checkpoint 就绪检查 |
 | `GET /internal/v1/customer-service/health` | 认证的客服 RAG 独立健康摘要 |
+
+客服问答、知识库变更和客服健康接口都需要内部 Bearer 令牌。知识库 `etl`、`delete`
+和 `rebuild` 请求必须携带 Spring 签发的未过期 mutation lease；Python 只校验租约形状、
+作用域和操作类型，不自行生成或延长租约。知识库接口返回稳定错误码，禁用客服 RAG 时返回
+`CUSTOMER_SERVICE_RAG_DISABLED`。
 
 生成事件包含 `requestId`、递增的 `sequence`、`node`、`data` 和可选的 `error`。事件类型包括：
 

@@ -1,5 +1,7 @@
 # AI 服务启动说明
 
+需要在 PyCharm Run/Debug 控制台启动并查看知识库处理日志时，见 [知识库 PyCharm 调试说明](knowledge-pycharm-debug.md)。
+
 本文说明 `ai-service` 独立 LangChain + LangGraph 服务的本地启动、Docker 启动及与 Spring Boot 的联调方式。
 
 ## 源码目录说明
@@ -41,7 +43,7 @@ cd ai-service
 Copy-Item .env.example .env
 notepad .env
 uv sync --frozen --python 3.12
-uv run uvicorn ai_service.app:create_app --factory --host 0.0.0.0 --port 8000
+uv run python -m ai_service.server
 ```
 
 编辑 `.env` 时至少替换以下配置：

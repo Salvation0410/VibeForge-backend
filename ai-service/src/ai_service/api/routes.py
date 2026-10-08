@@ -202,6 +202,7 @@ def register_routes(
         if not customer_service_rag_enabled or service is None:
             return _stable_error("CUSTOMER_SERVICE_RAG_DISABLED")
         try:
+            logger.info("Knowledge INDEX started: documentId=%s version=%s", body.document_id, body.document_version)
             result = await service.index(
                 document_id=body.document_id,
                 document_version=body.document_version,
@@ -212,6 +213,8 @@ def register_routes(
                 etl_version=body.etl_version,
                 lease=_lease(body.lease),
             )
+            logger.info("Knowledge INDEX completed: documentId=%s chunks=%s idempotent=%s",
+                        result.document_id, result.chunk_count, result.idempotent)
             return KnowledgeEtlResponse(
                 operation="INDEX",
                 document_id=result.document_id,
@@ -220,6 +223,8 @@ def register_routes(
                 idempotent=result.idempotent,
             )
         except Exception as error:
+            logger.warning("Knowledge INDEX failed: documentId=%s errorType=%s",
+                           body.document_id, type(error).__name__)
             return _stable_exception(error, "KNOWLEDGE_ETL_FAILED")
 
     @app.post(

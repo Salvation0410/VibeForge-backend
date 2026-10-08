@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import re
 import unicodedata
 import zipfile
@@ -33,6 +34,7 @@ MAX_SECTIONS = 10_000
 MAX_ZIP_ENTRIES = 1_000
 MAX_ZIP_ENTRY_BYTES = 16 * 1024 * 1024
 MAX_ZIP_TOTAL_BYTES = 64 * 1024 * 1024
+logger = logging.getLogger(__name__)
 
 
 class DocumentETLError(RuntimeError):
@@ -390,11 +392,13 @@ class KnowledgeEtlService:
         file_type: str, signed_url: str, sha256: str, etl_version: str,
         lease: KnowledgeMutationLease,
     ):
+        logger.info("Knowledge INDEX downloading: documentId=%s", document_id)
         downloaded = await self._downloader.download(
             signed_url,
             expected_sha256=sha256,
             max_bytes=self._settings.rag_download_max_bytes,
         )
+        logger.info("Knowledge INDEX parsing: documentId=%s fileType=%s", document_id, file_type)
         chunks = await parse_and_split_download(
             downloaded,
             file_type=file_type,
@@ -406,6 +410,7 @@ class KnowledgeEtlService:
         dimension = self._settings.rag_embedding_dimension
         if len(chunks) * dimension > self._settings.rag_max_embedding_elements:
             raise EmbeddingOutputError("KNOWLEDGE_EMBEDDING_BUDGET_EXCEEDED")
+        logger.info("Knowledge INDEX embedding: documentId=%s chunks=%s", document_id, len(chunks))
         vectors = await self._embeddings.embed_documents(
             [chunk.content for chunk in chunks],
             max_elements=self._settings.rag_max_embedding_elements,
@@ -439,6 +444,7 @@ class KnowledgeEtlService:
             content_hash=sha256,
             chunks=indexed_chunks,
         )
+        logger.info("Knowledge INDEX storing: documentId=%s version=%s", document_id, document_version)
         return await self._store.upsert_document_version(document, lease=lease)
 
     async def delete(

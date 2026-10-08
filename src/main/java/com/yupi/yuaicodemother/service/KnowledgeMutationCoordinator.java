@@ -1,15 +1,22 @@
 package com.yupi.yuaicodemother.service;
 
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.databind.JsonSerializer;
+import com.fasterxml.jackson.databind.SerializerProvider;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+
 import com.yupi.yuaicodemother.config.AiEngineProperties;
 import com.yupi.yuaicodemother.config.CustomerServiceProperties;
 import com.yupi.yuaicodemother.mapper.CustomerServiceKnowledgeMutationLeaseMapper;
 import com.yupi.yuaicodemother.model.entity.CustomerServiceKnowledgeMutationLease;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
+import java.io.IOException;
 import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Instant;
@@ -28,6 +35,7 @@ public class KnowledgeMutationCoordinator {
     private final CustomerServiceProperties properties;
     private final Clock clock;
 
+    @Autowired
     public KnowledgeMutationCoordinator(CustomerServiceKnowledgeMutationLeaseMapper mapper,
                                         AiEngineProperties aiProperties,
                                         CustomerServiceProperties properties) {
@@ -151,11 +159,21 @@ public class KnowledgeMutationCoordinator {
                         String proof) { }
 
     public record Validation(boolean verified, boolean current, String scope, String operationId,
-                             String operation, long fence, long expiresAt) {
+                             String operation,
+                             @JsonSerialize(using = LeaseLongSerializer.class) long fence,
+                             @JsonSerialize(using = LeaseLongSerializer.class) long expiresAt) {
         static Validation invalid(Lease lease) {
             return new Validation(false, false, lease == null ? null : lease.scope(),
                     lease == null ? null : lease.operationId(), lease == null ? null : lease.operation(),
                     lease == null ? 0 : lease.fence(), lease == null ? 0 : lease.expiresAt());
+        }
+    }
+
+    // The internal Python contract requires integers even when MVC serializes frontend IDs as strings.
+    public static final class LeaseLongSerializer extends JsonSerializer<Long> {
+        @Override
+        public void serialize(Long value, JsonGenerator generator, SerializerProvider provider) throws IOException {
+            generator.writeNumber(value);
         }
     }
 }

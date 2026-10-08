@@ -9,6 +9,10 @@ import com.yupi.yuaicodemother.service.impl.CustomerServiceKnowledgeServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.TimeZone;
+import org.mockito.ArgumentCaptor;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -40,9 +44,34 @@ class CustomerServiceKnowledgeServiceTest {
         var result = service.upload(new MockMultipartFile("file", "guide.txt", "text/plain", "data".getBytes()), null, 7);
         assertEquals(11, result.getId());
         assertEquals(1, result.getDocumentVersion());
+        assertNotNull(result.getCreateTime());
+        assertNotNull(result.getUpdateTime());
         verify(documents).insert(any());
-        verify(outbox).insert(argThat(task -> "INDEX".equals(task.getOperation()) && task.getDocumentVersion() == 1));
+        verify(outbox).insert(argThat(task -> "INDEX".equals(task.getOperation())
+                && task.getDocumentVersion() == 1
+                && task.getCreateTime() != null
+                && task.getUpdateTime() != null));
         verify(oss, never()).deleteKnowledgeObject(any());
+    }
+
+    @Test
+    void firstTasksAreImmediatelyDueOnNonUtcServer() {
+        TimeZone previous = TimeZone.getDefault();
+        TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"));
+        try {
+            LocalDateTime before = LocalDateTime.now(ZoneOffset.UTC);
+            service.upload(new MockMultipartFile("file", "guide.txt", "text/plain", "data".getBytes()), null, 7);
+            service.rebuild(7);
+            LocalDateTime after = LocalDateTime.now(ZoneOffset.UTC);
+            var tasks = ArgumentCaptor.forClass(CustomerServiceKnowledgeEtlOutbox.class);
+            verify(outbox, times(2)).insert(tasks.capture());
+            for (var task : tasks.getAllValues()) {
+                assertFalse(task.getNextRetryTime().isBefore(before));
+                assertFalse(task.getNextRetryTime().isAfter(after));
+            }
+        } finally {
+            TimeZone.setDefault(previous);
+        }
     }
 
     @Test
@@ -70,6 +99,7 @@ class CustomerServiceKnowledgeServiceTest {
         var result = service.upload(new MockMultipartFile("file", "guide.txt", "text/plain", "data".getBytes()), 9L, 7);
         assertEquals(4, result.getDocumentVersion());
         assertEquals(2, result.getIndexedVersion());
+        assertNotNull(result.getUpdateTime());
     }
 
     @Test
@@ -85,7 +115,8 @@ class CustomerServiceKnowledgeServiceTest {
     void rebuildCreatesOneRealCollectionTask() {
         assertEquals(1, service.rebuild(7));
         verify(outbox).insert(argThat(task -> "REBUILD".equals(task.getOperation())
-                && task.getDocumentId() == 0 && task.getDocumentVersion() == 0));
+                && task.getDocumentId() == 0 && task.getDocumentVersion() == 0
+                && task.getCreateTime() != null && task.getUpdateTime() != null));
         verify(documents, never()).listRebuildableLimited(anyInt());
     }
 

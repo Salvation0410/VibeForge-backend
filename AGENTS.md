@@ -194,6 +194,7 @@ Python AI_SERVICE_INTERNAL_BEARER_TOKEN
 - 新增数据库字段时同步更新 entity、DTO/VO、mapper XML、迁移 SQL 和测试。
 - Java AI 改动通过 `AiGenerationGateway` 边界，不在 Controller 中直接调用模型。
 - Python API、编排、模型和基础设施分别放入现有四类包，不重新堆回顶层目录。
+- AI 服务（`ai-service/`）的 API、配置、编排、模型、基础设施、启动方式或运行行为发生变动时，按影响范围同步更新 `ai-service/README.md`；文档只描述当前已实现并可由代码或测试验证的能力，不把设计规划写成现状。
 - Python 不直接访问 MySQL 或项目目录；文件操作必须经过 Spring 工具网关。
 - 修改代码生成类型时检查 `CodeGenTypeEnum`、Python `CodeGenType`、Parser、Saver、Builder、Gateway 和 Workflow。
 - 保持公共 SSE 协议兼容；内部 Spring/Python 使用 NDJSON。

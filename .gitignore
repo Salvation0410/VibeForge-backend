@@ -7,6 +7,12 @@ doc/
 test/
 scripts/
 sql/
+!sql/
+sql/*
+!sql/alter_customer_service_knowledge_pending_time.sql
+!doc/
+doc/*
+!doc/knowledge-pycharm-debug.md
 .codex_tmp/
 .understand-anything/
 logs/
@@ -44,3 +50,6 @@ build/
 
 ### VS Code ###
 .vscode/
+
+
+/ai-service/.env

@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "yu_ai_generation": "ai_service.studio_graph:graph"
+  },
+  "env": {"LANGSMITH_TRACING": "false"}
+}

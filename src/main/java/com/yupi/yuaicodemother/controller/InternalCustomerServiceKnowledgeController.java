@@ -20,13 +20,13 @@ import java.security.MessageDigest;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/internal/customer-service/knowledge-mutation-leases")
+@RequestMapping("/internal/customer-service")
 @RequiredArgsConstructor
 public class InternalCustomerServiceKnowledgeController {
     private final KnowledgeMutationCoordinator coordinator;
     private final AiEngineProperties aiProperties;
 
-    @PostMapping(":validate")
+    @PostMapping("/knowledge-mutation-leases:validate")
     public BaseResponse<KnowledgeMutationCoordinator.Validation> validate(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestBody LeaseValidationRequest request) {
@@ -36,7 +36,7 @@ public class InternalCustomerServiceKnowledgeController {
                 request.expiresAt(), request.proof())));
     }
 
-    @GetMapping("/health")
+    @GetMapping("/knowledge-mutation-leases/health")
     public BaseResponse<Map<String, Boolean>> health(
             @RequestHeader(value = "Authorization", required = false) String authorization) {
         authenticate(authorization);

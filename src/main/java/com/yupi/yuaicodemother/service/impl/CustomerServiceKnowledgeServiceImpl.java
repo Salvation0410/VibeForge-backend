@@ -13,6 +13,7 @@ import com.yupi.yuaicodemother.model.vo.CustomerServiceKnowledgeDocumentVO;
 import com.yupi.yuaicodemother.model.vo.CustomerServiceKnowledgeTaskVO;
 import com.yupi.yuaicodemother.service.CustomerServiceKnowledgeService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,10 +22,12 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowledgeService {
     private final CustomerServiceKnowledgeDocumentMapper documentMapper;
@@ -48,8 +51,11 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
             if (documentMapper.findDuplicate(uploaded.sha256(), replacementId) != null)
                 throw new BusinessException(ErrorCode.OPERATION_ERROR, "知识文档内容已存在");
             CustomerServiceKnowledgeDocument document;
+            LocalDateTime now = LocalDateTime.now();
             if (replacementId == null) {
                 document = new CustomerServiceKnowledgeDocument();
+                document.setCreateTime(now);
+                document.setUpdateTime(now);
                 document.setDocumentVersion(1L);
                 document.setIndexedVersion(0L);
                 document.setEtlVersion(1L);
@@ -61,6 +67,7 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
                 ensureNotDeleted(document);
                 document.setDocumentVersion(document.getDocumentVersion() + 1);
                 document.setEtlVersion(document.getEtlVersion() + 1);
+                document.setUpdateTime(now);
             }
             document.setName(uploaded.displayName());
             document.setFileType(uploaded.fileType().toUpperCase());
@@ -116,6 +123,7 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
         document.setEtlVersion(document.getEtlVersion() + 1);
         document.setStatus("UPLOADED");
         document.setUpdatedBy(userId);
+        document.setUpdateTime(LocalDateTime.now());
         documentMapper.update(document);
         enqueue(document, "INDEX", document.getDocumentVersion());
         return toVO(document);
@@ -129,6 +137,7 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
         document.setEtlVersion(document.getEtlVersion() + 1);
         document.setStatus("DISABLED");
         document.setUpdatedBy(userId);
+        document.setUpdateTime(LocalDateTime.now());
         documentMapper.update(document);
         enqueue(document, "DELETE", activeVersion(document));
         return toVO(document);
@@ -142,6 +151,7 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
         document.setEtlVersion(document.getEtlVersion() + 1);
         document.setStatus("UPLOADED");
         document.setUpdatedBy(userId);
+        document.setUpdateTime(LocalDateTime.now());
         documentMapper.update(document);
         enqueue(document, "INDEX", document.getDocumentVersion());
         return toVO(document);
@@ -155,6 +165,7 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
         document.setEtlVersion(document.getEtlVersion() + 1);
         document.setStatus("DELETING");
         document.setUpdatedBy(userId);
+        document.setUpdateTime(LocalDateTime.now());
         document.setIsDelete(1);
         documentMapper.update(document);
         enqueue(document, "DELETE", activeVersion(document));
@@ -177,8 +188,13 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
         task.setOperation("REBUILD");
         task.setStatus("PENDING");
         task.setRetryCount(0);
-        task.setNextRetryTime(LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+        task.setCreateTime(now);
+        task.setUpdateTime(now);
+        task.setNextRetryTime(LocalDateTime.now(ZoneOffset.UTC));
         if (outboxMapper.insert(task) != 1) throw new IllegalStateException("KNOWLEDGE_REBUILD_OUTBOX_WRITE_FAILED");
+        log.info("Knowledge task queued: taskId={}, operation=REBUILD, nextRetryTimeUtc={}",
+                task.getId(), task.getNextRetryTime());
         return 1;
     }
 
@@ -190,8 +206,14 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
         task.setOperation(operation);
         task.setStatus("PENDING");
         task.setRetryCount(0);
-        task.setNextRetryTime(LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+        task.setCreateTime(now);
+        task.setUpdateTime(now);
+        // Scheduling timestamps must use the worker's UTC clock, independently of the server timezone.
+        task.setNextRetryTime(LocalDateTime.now(ZoneOffset.UTC));
         if (outboxMapper.insert(task) != 1) throw new IllegalStateException("KNOWLEDGE_OUTBOX_WRITE_FAILED");
+        log.info("Knowledge task queued: taskId={}, documentId={}, operation={}, version={}, nextRetryTimeUtc={}",
+                task.getId(), task.getDocumentId(), operation, targetVersion, task.getNextRetryTime());
     }
 
     private CustomerServiceKnowledgeDocument requireDocument(long id) {

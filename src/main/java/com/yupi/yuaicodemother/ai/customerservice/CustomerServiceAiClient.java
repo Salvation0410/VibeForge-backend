@@ -6,6 +6,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.yupi.yuaicodemother.config.AiEngineProperties;
 import com.yupi.yuaicodemother.config.CustomerServiceProperties;
 import com.yupi.yuaicodemother.service.KnowledgeMutationCoordinator;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayOutputStream;
@@ -34,6 +35,7 @@ public class CustomerServiceAiClient {
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
 
+    @Autowired
     public CustomerServiceAiClient(CustomerServiceProperties properties, AiEngineProperties aiProperties) {
         this(properties, aiProperties, new ObjectMapper(), HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(5)).build());

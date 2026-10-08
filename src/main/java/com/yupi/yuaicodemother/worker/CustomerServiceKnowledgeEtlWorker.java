@@ -9,6 +9,7 @@ import com.yupi.yuaicodemother.model.entity.CustomerServiceKnowledgeDocument;
 import com.yupi.yuaicodemother.model.entity.CustomerServiceKnowledgeEtlOutbox;
 import com.yupi.yuaicodemother.service.CustomerServiceKnowledgeTaskFinalizer;
 import com.yupi.yuaicodemother.service.KnowledgeMutationCoordinator;
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -67,6 +68,12 @@ public class CustomerServiceKnowledgeEtlWorker {
         this.clock = clock;
     }
 
+    @PostConstruct
+    public void logStartup() {
+        log.info("Knowledge worker enabled: pollIntervalMillis={}, batchSize={}, schedulingTimezone=UTC",
+                properties.getPollIntervalMillis(), properties.getBatchSize());
+    }
+
     @Scheduled(fixedDelayString = "${ai.customer-service.poll-interval-millis:5000}")
     public void poll() {
         LocalDateTime scanNow = now();
@@ -78,6 +85,8 @@ public class CustomerServiceKnowledgeEtlWorker {
     }
 
     public void execute(CustomerServiceKnowledgeEtlOutbox task) {
+        log.info("Knowledge task started: taskId={}, documentId={}, operation={}, retryCount={}",
+                task.getId(), task.getDocumentId(), task.getOperation(), task.getRetryCount());
         String operationId = "task_" + task.getId() + "_" + UUID.randomUUID().toString().replace("-", "");
         KnowledgeMutationCoordinator.Lease lease = null;
         try {
@@ -94,9 +103,13 @@ public class CustomerServiceKnowledgeEtlWorker {
             }
             if (!"INDEX".equals(task.getOperation()))
                 outboxMapper.finish(task.getId(), owner, "SUCCEEDED", null);
+            log.info("Knowledge task succeeded: taskId={}, documentId={}, operation={}",
+                    task.getId(), task.getDocumentId(), task.getOperation());
         } catch (LostClaimException ignored) {
+            log.info("Knowledge task claim lost: taskId={}", task.getId());
             // Another worker reclaimed the task while this worker was preparing the request.
         } catch (StaleTaskException error) {
+            log.info("Knowledge task skipped as stale: taskId={}", task.getId());
             finishSafely(task, "SKIPPED", "KNOWLEDGE_TASK_STALE");
         } catch (RebuildSnapshotChangedException error) {
             fail(task, "KNOWLEDGE_REBUILD_SNAPSHOT_CHANGED", true);
@@ -107,6 +120,8 @@ public class CustomerServiceKnowledgeEtlWorker {
         } catch (IllegalStateException error) {
             fail(task, stableCoordinatorCode(error), true);
         } catch (RuntimeException error) {
+            log.error("Knowledge task unexpected failure: taskId={}, documentId={}, errorType={}",
+                    task.getId(), task.getDocumentId(), error.getClass().getSimpleName());
             fail(task, "KNOWLEDGE_WORKER_FAILED", true);
         } finally {
             if (lease != null) {
@@ -229,6 +244,8 @@ public class CustomerServiceKnowledgeEtlWorker {
             int attempts = previousAttempts == Integer.MAX_VALUE ? Integer.MAX_VALUE : previousAttempts + 1;
             boolean retry = transientFailure && attempts < Math.max(1, properties.getRetryMax());
             LocalDateTime retryAt = computeRetryAt(attempts, retry);
+            log.warn("Knowledge task failed: taskId={}, documentId={}, errorCode={}, attempt={}, willRetry={}, nextRetryTimeUtc={}",
+                    task.getId(), task.getDocumentId(), code, attempts, retry, retryAt);
             if (!retry && "INDEX".equals(task.getOperation())) {
                 taskFinalizer.failIndex(task.getId(), owner, task.getDocumentId(), task.getDocumentVersion(),
                         task.getEtlVersion(), attempts, retryAt, code);
