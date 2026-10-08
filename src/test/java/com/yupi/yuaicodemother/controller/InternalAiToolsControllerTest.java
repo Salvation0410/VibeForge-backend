@@ -497,4 +497,63 @@ class InternalAiToolsControllerTest {
         assertEquals("Unsupported tool: search_reference", error.getMessage());
         verifyNoInteractions(idempotencyService);
     }
+
+    @Test
+    void readsMissingVueRootAsEmptyWithoutCreatingDirectory() {
+        var resolver = mock(ArtifactPathResolver.class);
+        Path root = tempDir.resolve("vue_project_42");
+        when(resolver.resolveActiveRoot(CodeGenTypeEnum.VUE_PROJECT, 42L)).thenReturn(root);
+        var controller = controller(mock(ArtifactPublicationService.class), resolver, passThroughIdempotencyService());
+
+        for (String relative : java.util.List.of("", ".")) {
+            var result = invokeTool(controller, "dir_read",
+                    Map.of("codeGenType", "VUE_PROJECT", "relativeDirPath", relative));
+            InternalAiToolSchemaAssertions.assertResponseValid("dir_read", result);
+            assertEquals(java.util.List.of(), result.get("entries"));
+        }
+        assertFalse(Files.exists(root));
+    }
+
+    @Test
+    void stillRejectsMissingSubdirectoryAndRootFile() throws Exception {
+        var resolver = mock(ArtifactPathResolver.class);
+        Path root = tempDir.resolve("vue_project_42");
+        when(resolver.resolveActiveRoot(CodeGenTypeEnum.VUE_PROJECT, 42L)).thenReturn(root);
+        var controller = controller(mock(ArtifactPublicationService.class), resolver, passThroughIdempotencyService());
+
+        assertThrows(BusinessException.class, () -> invokeTool(controller, "dir_read",
+                Map.of("codeGenType", "VUE_PROJECT", "relativeDirPath", "src")));
+        Files.writeString(root, "not a directory");
+        assertThrows(BusinessException.class, () -> invokeTool(controller, "dir_read",
+                Map.of("codeGenType", "VUE_PROJECT", "relativeDirPath", "")));
+    }
+
+    @Test
+    void listsExistingVueFilesAndRejectsTraversal() throws Exception {
+        var resolver = mock(ArtifactPathResolver.class);
+        when(resolver.resolveActiveRoot(CodeGenTypeEnum.VUE_PROJECT, 42L)).thenReturn(tempDir);
+        var controller = controller(mock(ArtifactPublicationService.class), resolver, passThroughIdempotencyService());
+        Files.createDirectories(tempDir.resolve("src"));
+        Files.writeString(tempDir.resolve("src/App.vue"), "<template>ready</template>");
+        Files.writeString(tempDir.resolve("package.json"), "{}");
+
+        var result = invokeTool(controller, "dir_read",
+                Map.of("codeGenType", "VUE_PROJECT", "relativeDirPath", ""));
+        assertEquals(java.util.List.of("package.json", Path.of("src", "App.vue").toString()), result.get("entries"));
+        BusinessException error = assertThrows(BusinessException.class, () -> invokeTool(controller, "dir_read",
+                Map.of("codeGenType", "VUE_PROJECT", "relativeDirPath", "../outside")));
+        assertEquals(ErrorCode.NO_AUTH_ERROR.getCode(), error.getCode());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"HTML", "MULTI_FILE"})
+    void doesNotTreatMissingPublishedRootAsEmptyVueProject(String type) {
+        var resolver = mock(ArtifactPathResolver.class);
+        when(resolver.resolveActiveRoot(CodeGenTypeEnum.valueOf(type), 42L))
+                .thenReturn(tempDir.resolve("missing"));
+        var controller = controller(mock(ArtifactPublicationService.class), resolver, passThroughIdempotencyService());
+
+        assertThrows(BusinessException.class, () -> invokeTool(controller, "dir_read",
+                Map.of("codeGenType", type, "relativeDirPath", "")));
+    }
 }

@@ -205,6 +205,7 @@ Python AI_SERVICE_INTERNAL_BEARER_TOKEN
 - 不大面积重写历史乱码注释，不进行无关重构。
 - 不提交生成文件、日志、下载产物、`.venv`、`.env` 或 `projects/`。
 - Git 提交信息必须使用中文，并符合 Conventional Commits 规范；格式为 `type(scope): 中文说明`，例如 `feat(ai): 接入LangSmith脱敏追踪`。提交前检查 `git log -1 --pretty=%s` 和 `git diff --check`，禁止使用无意义或纯英文提交信息。
+- 凡涉及代码改动，完成必要验证后必须提交 Git，不能仅将修改留在工作区。提交范围仅包含本次任务改动及其必要测试、文档，不得混入用户既有或无关修改；后端与前端分别在各自仓库提交。交付时报告提交哈希及验证结果，若验证或提交受阻必须明确说明原因。
 
 ## 工具边界与安全
 

@@ -115,7 +115,14 @@ public class InternalAiToolsController {
             Map<String, Object> args) {
         return switch (tool) {
             case FILE_READ -> Map.of("content", readFile(sandboxPath(appId, args, "relativeFilePath", false)));
-            case DIR_READ -> Map.of("entries", readDir(sandboxPath(appId, args, "relativeDirPath", true)));
+            case DIR_READ -> {
+                Path path = sandboxPath(appId, args, "relativeDirPath", true);
+                Path root = projectRoot(appId, text(args.get("codeGenType")));
+                // Vue 首次生成时尚未写入文件，读取缺失根目录应返回空列表，避免中断工具循环。
+                boolean emptyVueRoot = artifactType(args) == CodeGenTypeEnum.VUE_PROJECT
+                        && path.equals(root) && Files.notExists(path);
+                yield Map.of("entries", emptyVueRoot ? java.util.List.of() : readDir(path));
+            }
             case FILE_WRITE -> writeFile(appId, args);
             case FILE_MODIFY -> modifyFile(appId, args);
             case FILE_DELETE -> deleteFile(appId, args);
@@ -308,6 +315,9 @@ public class InternalAiToolsController {
      * @throws BusinessException 目录遍历失败时抛出
      */
     private java.util.List<String> readDir(Path path) {
+        if (Files.isRegularFile(path)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "directory path must not be a file");
+        }
         try (var stream = Files.walk(path)) {
             return stream.filter(Files::isRegularFile).sorted(Comparator.comparing(Path::toString))
                     .map(p -> path.relativize(p).toString()).toList();
