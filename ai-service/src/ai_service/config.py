@@ -37,8 +37,8 @@ class Settings(BaseSettings):
     checkpoint_ttl_seconds: int = Field(default=86400, ge=60)
     checkpoint_pool_min_size: int = Field(default=1, ge=1, le=20)
     checkpoint_pool_max_size: int = Field(default=5, ge=1, le=50)
-    # Vue 首次生成通常需要目录读取、基础文件写入和入口确认；复杂页面允许使用完整预算。
-    vue_max_tool_calls: int = Field(default=20, ge=1, le=20)
+    # Vue 项目可能包含路由页面和组件；为构建修复保留足够的文件工具调用预算。
+    vue_max_tool_calls: int = Field(default=40, ge=1, le=40)
     max_repair_attempts: int = Field(default=2, ge=0, le=5)
     multi_agent_review_enabled: bool = False
     multi_agent_review_timeout_seconds: float = Field(default=60.0, gt=0, le=300)

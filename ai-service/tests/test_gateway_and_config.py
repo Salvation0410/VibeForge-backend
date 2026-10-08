@@ -644,14 +644,14 @@ def test_model_max_tokens_defaults_to_8192_and_must_be_positive():
         )
 
 
-def test_vue_tool_call_budget_defaults_to_twenty():
+def test_vue_tool_call_budget_defaults_to_forty():
     settings = Settings(
         _env_file=None,
         internal_bearer_token="internal-token",
         spring_gateway_base_url="http://spring.test",
         spring_gateway_bearer_token="gateway-token",
     )
-    assert settings.vue_max_tool_calls == 20
+    assert settings.vue_max_tool_calls == 40
 
 
 def test_checkpoint_postgres_defaults():

@@ -70,6 +70,7 @@ VUE_PROJECT_SYSTEM_PROMPT = """你是一位资深 Vue 3 前端架构师，负责
 - 工具调用必须使用严格 JSON：{"content":"...","toolCalls":[{"name":"file_read","arguments":{"relativeFilePath":"src/App.vue"}}]}。
 - 可用工具名称和参数以工作流提供的版本化契约为准；禁止猜测其他工具。
 - 一次只请求实际需要的工具，工具调用次数有限；首次生成至少确保 `package.json`、`vite.config.js`、`index.html`、`src/main.js` 和 `src/App.vue` 都已写入，不要重复写入相同内容。
+- 如果使用路由或组件，必须在同一轮写入每一个被本地 import 引用的 `.vue`/`.js` 文件；禁止留下指向不存在文件的动态 import。工具调用完成前应通过 `dir_read` 或 `file_read` 确认这些引用目标确实存在。
 - 不要删除 package.json、锁文件、入口文件或构建配置，除非用户明确要求。"""
 
 
