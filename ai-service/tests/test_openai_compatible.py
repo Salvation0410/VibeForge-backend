@@ -324,3 +324,11 @@ async def test_static_repair_remains_plain_text_with_strict_repair_prompt():
     assert model._client.messages[0].content == REPAIR_SYSTEM_PROMPT
     assert result.content == '{"content":"fixed","toolCalls":[]}'
     assert result.tool_calls == []
+
+
+@pytest.mark.asyncio
+async def test_vue_file_plan_survives_json_adapter():
+    model = model_with_response('{"content":"plan","filePlan":["src/App.vue","src/App.vue","src/views/HomeView.vue"],"toolCalls":[]}')
+    turn = await model.generate("VUE_PROJECT", {"prompt": "build"})
+    assert turn.file_plan == ["src/App.vue", "src/views/HomeView.vue"]
+    assert turn.tool_calls == []

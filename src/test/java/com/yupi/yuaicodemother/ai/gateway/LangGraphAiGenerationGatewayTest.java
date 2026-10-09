@@ -36,6 +36,21 @@ class LangGraphAiGenerationGatewayTest {
     }
 
     @Test
+    void vueProgressUsesExistingTextMessageAndStaticBranchesIgnoreIt() throws Exception {
+        var gateway = gatewayReturning(event("node_status",
+                "{\"status\":\"progress\",\"message\":\"正在生成项目文件\"}")
+                + event("completed", "{}"));
+        var chunks = gateway.generate("build", CodeGenTypeEnum.VUE_PROJECT, 42L, 7L, "req-progress")
+                .collectList().block();
+        assertEquals(1, chunks.size());
+        var message = new ObjectMapper().readTree(chunks.getFirst());
+        assertEquals("ai_response", message.path("type").asText());
+        assertEquals("正在生成项目文件\n", message.path("data").asText());
+        assertTrue(gateway.generate("build", CodeGenTypeEnum.HTML, 42L, 7L, "req-static")
+                .collectList().block().isEmpty());
+    }
+
+    @Test
     void multiFileEmitsOnlyLastCandidateAfterCompleted() throws Exception {
         String body = event("content_delta", "{\"content\":\"first\"}")
                 + event("tool_started", "{\"tool\":\"artifact_validate\",\"toolCallId\":\"t1\"}")

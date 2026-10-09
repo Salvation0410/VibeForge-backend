@@ -2928,3 +2928,80 @@ def test_health_ready_reports_checkpoint_failure(app_factory):
     response = client.get("/internal/v1/health/ready")
     assert response.status_code == 503
     assert response.json()["status"] == "not_ready"
+
+
+def test_vue_truncation_retries_smaller_batch_without_partial_write(app_factory, auth_headers, ndjson_parser):
+    class RetryingModel(FakeModel):
+        async def generate(self, branch, context):
+            self.calls.append(("generate", context))
+            if len(self.calls) == 1:
+                return ModelTurn(content="discard", finish_reason="LENGTH", tool_calls=[
+                    ToolCall("file_write", {"relativeFilePath": "src/broken.vue", "content": "partial"})
+                ])
+            if len(self.calls) == 2:
+                assert context["vueGeneration"]["maxToolCallsPerTurn"] == 1
+                assert context["vueGeneration"]["remainingToolCalls"] == 40
+                return ModelTurn(content="written", tool_calls=[
+                    ToolCall("file_write", {"relativeFilePath": "src/App.vue", "content": "<template>ok</template>"})
+                ])
+            assert context["vueGeneration"]["writtenFiles"] == ["src/App.vue"]
+            return ModelTurn(content="done", finish_reason="STOP")
+
+    gateway = FakeToolGateway()
+    events = ndjson_parser(TestClient(app_factory(model=RetryingModel(), gateway=gateway)).post(
+        "/internal/v1/generations:stream", json=generation_payload("VUE_PROJECT"), headers=auth_headers,
+    ))
+    writes = [call for call in gateway.calls if call["name"] == "file_write"]
+    assert [call["arguments"]["relativeFilePath"] for call in writes] == ["src/App.vue"]
+    assert events[-1]["type"] == "completed"
+    assert not any(event.get("data", {}).get("content") == "discard" for event in events)
+
+
+def test_vue_file_plan_cannot_complete_with_missing_view(app_factory, auth_headers, ndjson_parser):
+    class PlannedModel(FakeModel):
+        async def generate(self, branch, context):
+            if not context["vueGeneration"]["filePlan"]:
+                return ModelTurn(content="plan", file_plan=["src/views/HomeView.vue"])
+            return ModelTurn(content="done")
+
+    gateway = FakeToolGateway()
+    events = ndjson_parser(TestClient(app_factory(model=PlannedModel(), gateway=gateway)).post(
+        "/internal/v1/generations:stream", json=generation_payload("VUE_PROJECT"), headers=auth_headers,
+    ))
+    assert events[-1]["error"]["code"] == "VUE_FILE_PLAN_INCOMPLETE"
+    assert not any(call["name"] == "project_build" for call in gateway.calls)
+
+
+def test_vue_repeated_truncation_has_exactly_two_retries(app_factory, auth_headers, ndjson_parser):
+    class TruncatedModel(FakeModel):
+        async def generate(self, branch, context):
+            self.calls.append(("generate", context))
+            return ModelTurn(content="discard", finish_reason="LENGTH")
+
+    model = TruncatedModel()
+    gateway = FakeToolGateway()
+    events = ndjson_parser(TestClient(app_factory(model=model, gateway=gateway)).post(
+        "/internal/v1/generations:stream", json=generation_payload("VUE_PROJECT"), headers=auth_headers,
+    ))
+    assert len(model.calls) == 3
+    assert events[-1]["error"]["code"] == "MODEL_OUTPUT_TRUNCATED"
+    assert not any(call["name"] == "project_build" for call in gateway.calls)
+
+
+def test_vue_oversized_batch_is_discarded_before_any_write(app_factory, auth_headers, ndjson_parser):
+    class OversizedModel(FakeModel):
+        async def generate(self, branch, context):
+            self.calls.append(("generate", context))
+            return ModelTurn(content="discard", tool_calls=[
+                ToolCall("file_write", {"relativeFilePath": f"src/{i}.vue", "content": "ok"})
+                for i in range(3)
+            ])
+
+    model = OversizedModel()
+    gateway = FakeToolGateway()
+    events = ndjson_parser(TestClient(app_factory(model=model, gateway=gateway)).post(
+        "/internal/v1/generations:stream", json=generation_payload("VUE_PROJECT"), headers=auth_headers,
+    ))
+    assert len(model.calls) == 3
+    assert not any(call["name"] == "file_write" for call in gateway.calls)
+    assert events[-1]["error"]["code"] == "VUE_TOOL_BATCH_LIMIT_EXCEEDED"

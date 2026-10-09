@@ -256,6 +256,18 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
             JsonNode event = objectMapper.readTree(line);
             String type = event.path("type").asText();
             JsonNode data = event.path("data");
+            if ("node_status".equals(type) && codeGenType == CodeGenTypeEnum.VUE_PROJECT
+                    && "started".equals(data.path("status").asText())
+                    && "project_build".equals(event.path("node").asText())) {
+                return new ParsedEvent(objectMapper.writeValueAsString(
+                        Map.of("type", "ai_response", "data", "文件校验已完成，正在构建项目。\n")), null, false);
+            }
+            // Vue 文件工具参数不计入文本字符数，通过兼容文本消息展示实际生成阶段。
+            if ("node_status".equals(type) && codeGenType == CodeGenTypeEnum.VUE_PROJECT
+                    && "progress".equals(data.path("status").asText())) {
+                return new ParsedEvent(objectMapper.writeValueAsString(
+                        Map.of("type", "ai_response", "data", data.path("message").asText() + "\n")), null, false);
+            }
             if ("content_delta".equals(type)) {
                 if (codeGenType != CodeGenTypeEnum.VUE_PROJECT) {
                     return new ParsedEvent("", data.path("content").asText(), false);

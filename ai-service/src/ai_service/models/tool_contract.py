@@ -149,7 +149,7 @@ def vue_tool_prompt() -> str:
         "appId and codeGenType are controlled by the workflow; you must not provide them.",
         "Return strict JSON in this shape: "
         '{"content":"...","toolCalls":[{"name":"file_read","arguments":{"relativeFilePath":"src/App.vue"}}]}.',
-        "When no tool is needed, return the artifact as content with an empty toolCalls list.",
+        "Return filePlan before first-generation file writes. Follow vueGeneration batch limits; when all files are ready, return only a short status as content with an empty toolCalls list.",
     ]
     return "\n".join(lines)
 

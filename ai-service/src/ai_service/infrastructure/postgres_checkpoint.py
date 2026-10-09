@@ -104,6 +104,8 @@ class PostgresCheckpoint:
             self._pool,
             serde=JsonPlusSerializer(allowed_json_modules=()),
         )
+        # 使用官方事务回退路径，避免图异常退出时显式 pipeline 中仍有未完成命令。
+        self._graph_saver.supports_pipeline = False
         self._required = required
         self._auto_setup = auto_setup
         self._ttl_seconds = ttl_seconds

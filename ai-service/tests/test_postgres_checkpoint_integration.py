@@ -110,3 +110,61 @@ async def test_real_postgres_checkpoint_lifecycle_and_expiration_cleanup():
                 (thread_id,),
             )
         await checkpoint.close()
+
+
+@pytest.mark.asyncio
+async def test_real_postgres_graph_failure_and_cancel_leave_pool_usable():
+    import asyncio
+    from typing import TypedDict
+    from langgraph.graph import StateGraph, START, END
+
+    class State(TypedDict):
+        mode: str
+
+    checkpoint = PostgresCheckpoint(
+        postgres_url(), required=True, auto_setup=True, ttl_seconds=60,
+        pool_min_size=1, pool_max_size=2,
+    )
+    await checkpoint.start()
+    saver = checkpoint.get_graph_saver()
+    entered = asyncio.Event()
+    threads = [f"integration:{uuid4().hex}" for _ in range(2)]
+
+    async def node(state):
+        if state["mode"] == "fail":
+            raise ValueError("simulated model truncation")
+        entered.set()
+        await asyncio.Event().wait()
+        return {}
+
+    builder = StateGraph(State)
+    builder.add_node("generate", node)
+    builder.add_edge(START, "generate")
+    builder.add_edge("generate", END)
+    graph = builder.compile(checkpointer=saver)
+    task = None
+    try:
+        with pytest.raises(ValueError, match="simulated model truncation"):
+            await graph.ainvoke({"mode": "fail"}, {"configurable": {"thread_id": threads[0]}})
+        await checkpoint.cleanup_graph(threads[0])
+        assert await checkpoint.ping()
+        task = asyncio.create_task(graph.ainvoke(
+            {"mode": "cancel"}, {"configurable": {"thread_id": threads[1]}},
+        ))
+        await asyncio.wait_for(entered.wait(), timeout=10)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await checkpoint.cleanup_graph(threads[1])
+        assert await checkpoint.ping()
+        assert await saver.aget_tuple({"configurable": {"thread_id": threads[1]}}) is None
+    finally:
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        for thread in threads:
+            await saver.adelete_thread(thread)
+        await checkpoint.close()

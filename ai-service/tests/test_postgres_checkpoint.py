@@ -267,3 +267,9 @@ async def test_setup_command_uses_required_auto_setup(monkeypatch):
         "started": True,
         "closed": True,
     }
+
+
+def test_postgres_saver_uses_transaction_fallback():
+    saver = FakeSaver()
+    checkpoint_with(FakePool(), saver)
+    assert saver.supports_pipeline is False

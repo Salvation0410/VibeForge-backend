@@ -132,7 +132,7 @@ class OpenAICompatibleModel:
         """结合验证和构建上下文生成修复后的完整产物。"""
         repair_instructions = REPAIR_SYSTEM_PROMPT
         if context.get("codeGenType") == "VUE_PROJECT":
-            repair_instructions = f"{repair_instructions}\n\n{vue_tool_prompt()}"
+            repair_instructions = f"{repair_instructions}\n\n{generation_system_prompt('VUE_PROJECT')}\n\n{vue_tool_prompt()}"
         response = await self._invoke(
             [
                 SystemMessage(content=repair_instructions),
@@ -205,7 +205,11 @@ def _vue_model_turn(response: Any) -> ModelTurn:
             ToolCall(name=item["name"], arguments=item.get("arguments", {}))
             for item in payload.get("toolCalls", [])
         ]
-        return _model_turn(response, payload.get("content", ""), calls)
+        turn = _model_turn(response, payload.get("content", ""), calls)
+        plan = payload.get("filePlan", [])
+        if isinstance(plan, list) and len(plan) <= 40 and all(isinstance(path, str) and 0 < len(path) <= 256 for path in plan):
+            turn.file_plan = list(dict.fromkeys(plan))
+        return turn
     except (json.JSONDecodeError, AttributeError, KeyError, TypeError):
         return _model_turn(response, raw)
 

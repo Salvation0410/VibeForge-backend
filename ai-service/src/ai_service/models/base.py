@@ -22,6 +22,7 @@ class ModelTurn:
     tool_calls: list[ToolCall] = field(default_factory=list)
     finish_reason: str | None = None
     token_usage: dict[str, int] = field(default_factory=dict)
+    file_plan: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
