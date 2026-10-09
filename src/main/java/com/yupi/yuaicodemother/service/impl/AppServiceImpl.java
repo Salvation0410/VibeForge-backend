@@ -40,6 +40,7 @@ import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.annotation.Transactional;
 import reactor.core.publisher.Flux;
@@ -329,6 +330,8 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
 
     @Override
     @Transactional
+    // 精选列表有多个分页缓存键，成功删除后统一失效，避免继续展示已逻辑删除的应用。
+    @CacheEvict(value = "good_app_page", allEntries = true, condition = "#result == true")
     public boolean removeById(Serializable id) {
         if (id == null) {
             return false;
