@@ -279,3 +279,9 @@ $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 ```
 
 `-Commit` 会以 `manual-recovery` 引擎发布新的不可变 HTML release，并与在线生成共用应用级互斥和发布门禁。脚本不包含凭据或 Cookie，只使用调用方传入的 `WebRequestSession`；它只读取 `CandidateFile`，不会搜索历史目录，也不会读取或修改 `projects/`。不得把损坏的平铺 `index.html` 直接作为候选，无法找到完整候选时应保留现场并从原始需求重新生成。
+
+## 输入审核联调
+
+重启 Python AI 服务和 Spring 后，走 LangGraph 的新建路由及已有应用生成会先审核需求。默认无需新增密钥，审核复用当前聊天模型配置；每轮增加一次独立模型调用，新建应用还会在类型路由时先审核一次。可配置项及稳定错误码见 [AI 服务输入审核说明](../ai-service/README.md#输入校验与语义审核)。
+
+验收时分别尝试普通咖啡店介绍网站、已有项目“保留图片只优化布局”、缺少接口的真实支付以及明确钓鱼窃密需求。前两种应正常生成；真实支付应询问接口或演示选择；窃密需求应拒绝。待澄清或拒绝时确认没有内部文件/构建工具调用，旧预览不刷新。审核服务故障应显示暂不可用，不能直接绕过审核生成。请确认使用 LangGraph 引擎；Legacy 不受本次审核控制。

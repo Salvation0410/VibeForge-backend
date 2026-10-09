@@ -29,6 +29,7 @@ from ai_service.api.schemas import (
 )
 from ai_service.infrastructure.checkpoint import CheckpointStore
 from ai_service.models.base import GenerationModel
+from ai_service.models.input_review import InputReviewError
 from ai_service.orchestration.cancellation import CancellationRegistry
 from ai_service.orchestration.active_generations import ActiveGenerationRegistry
 
@@ -344,7 +345,16 @@ def register_routes(
     async def route(body: RouteRequest) -> RouteResponse:
         """调用模型确定代码生成类型，并拒绝模型返回的未知类型。"""
 
-        raw_type = await generation_model.route(body.prompt)
+        request_id = body.request_id or str(uuid.uuid4())
+        try:
+            review = await workflow.input_reviewer.review(body.prompt, request_id=request_id)
+            raw_type = await generation_model.route(body.prompt)
+        except InputReviewError as error:
+            # 创建阶段未打开 SSE，仍以同一稳定错误码返回可阅读的中文提示。
+            return JSONResponse(status_code=503 if error.code == "INPUT_REVIEW_UNAVAILABLE" else 422,
+                                content={"requestId": request_id, "error": {
+                                    "code": error.code, "message": error.user_message,
+                                }})
         try:
             code_gen_type = CodeGenType(raw_type)
         except ValueError as exc:
@@ -354,8 +364,9 @@ def register_routes(
                 detail="MODEL_ROUTE_INVALID",
             ) from exc
         return RouteResponse(
-            request_id=body.request_id or str(uuid.uuid4()),
+            request_id=request_id,
             code_gen_type=code_gen_type,
+            warnings=[review.message] if review.decision == "ALLOW_WITH_WARNING" else [],
         )
 
     @app.post(

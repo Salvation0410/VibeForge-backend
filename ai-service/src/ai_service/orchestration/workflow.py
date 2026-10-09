@@ -19,6 +19,8 @@ from ai_service.orchestration.cancellation import CancellationRegistry, Generati
 from ai_service.orchestration.active_generations import ActiveGenerationRegistry
 from ai_service.orchestration.events import EventEmitter
 from ai_service.orchestration.image_intent import requests_image_assets
+from ai_service.orchestration.input_review import InputReviewer
+from ai_service.models.input_review import InputReviewError
 from ai_service.orchestration.multi_agent_review import run_multi_agent_review
 from ai_service.infrastructure.langsmith_tracing import LangSmithTracer
 
@@ -45,6 +47,7 @@ class WorkflowState(TypedDict, total=False):
     finish_reason: str | None
     token_usage: dict[str, int]
     publish: dict[str, Any]
+    input_review: dict[str, Any]
 
 
 def _raise_for_incomplete_model_turn(finish_reason: str | None) -> None:
@@ -126,6 +129,7 @@ class GenerationWorkflow:
         self.cancellations = cancellations
         self.active_generations = active_generations or ActiveGenerationRegistry()
         self.settings = settings
+        self.input_reviewer = InputReviewer(model, settings)
         self.tracer = tracer
 
     async def run(self, request: GenerationRequest) -> list[GenerationEvent]:
@@ -219,7 +223,8 @@ class GenerationWorkflow:
                 await emitter.emit(
                     "failed",
                     "workflow",
-                    error=EventError(code=_stable_error_code(exc), message=str(exc)),
+                    error=EventError(code=_stable_error_code(exc),
+                                     message=exc.user_message if isinstance(exc, InputReviewError) else str(exc)),
                 )
         finally:
             if self.tracer is not None:
@@ -300,9 +305,16 @@ class GenerationWorkflow:
             return node
 
         async def input_guard(state: WorkflowState) -> dict[str, Any]:
-            if not state["prompt"].strip():
-                raise ValueError("Prompt must not be blank")
-            return {}
+            result = await self.input_reviewer.review(
+                state["prompt"], request_id=state["request_id"], code_gen_type=state["code_gen_type"],
+                conversation=state.get("conversation", []), metadata=state.get("metadata", {}),
+            )
+            self._raise_if_cancelled(thread_id)
+            if result.decision == "ALLOW_WITH_WARNING":
+                await emitter.emit("node_status", "input_guard", data={
+                    "status": "input_warning", "message": result.message,
+                })
+            return {"input_review": result.model_dump()}
 
         async def context_prepare(state: WorkflowState) -> dict[str, Any]:
             current_artifact = await self._invoke_tool(

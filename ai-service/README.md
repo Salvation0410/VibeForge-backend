@@ -585,3 +585,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-rea
 
 
 首次 Vue 生成或明确要求新增、补充、替换、搜索或修复图片时，会在上下文准备阶段主动调用 image_search（既有项目的“保留图片”“不要替换图片”及图片布局美化不触发；按中英文动作与否定分句识别，不是出现图片关键词就触发），结果放入 imageAssets；常见中文主题映射为英文查询。成功写入的 content/newContent 必须包含搜索 URL，否则最多提醒两轮后失败；修复继承已写入标记。主动检索不占模型文件循环预算，模型主动搜图仍占预算。空结果或网关异常显示降级提示并继续；普通既有功能修改不强制插图。该检查只证明 URL 写入源码，实际图片加载仍需浏览器验收。图片与部署配置、IPv4/IPv6 404 排查见 [说明](../doc/image-and-deployment-troubleshooting.md)。
+
+## 输入校验与语义审核
+
+LangGraph 的 `input_guard` 和新建应用的 `/internal/v1/route` 共享输入审核服务，默认开启。规则检查先验证非空、异常控制字符、字符上限和上下文预算，再使用当前配置的聊天模型进行独立审核。审核只有四种严格结构化结果：正常放行、带提示放行、需要澄清、拒绝。
+
+审核覆盖内容安全、应用任务范围、关键冲突或缺失以及生成规模/能力边界。普通模糊需求采用合理默认值；已有应用的“优化一下”结合原始需求和近期用户需求理解。真实支付、登录、数据库等要求缺少接口契约或明确演示授权时要求澄清，不能擅自改成模拟功能。模型审核不保证识别所有风险，也不能替代 Spring 的权限、文件沙箱和发布校验。Legacy 引擎不接入本审核；灰度模式仅被选中走 LangGraph 的请求生效。
+
+Spring 在生成入口传入最多六条用户历史（每条最多 1000 个 UTF-16 字符）及最多 2000 字符的原始需求，并标记截断。Python 审核只使用有界用户需求；当前输入保持原文，不自动改写、裁剪或删减功能。被拒绝、待澄清或审核故障的请求在项目工具调用前结束；用户补充答案后发起下一轮审核，不是暂停后自动恢复同一请求。带提示放行的提示通过独立 `node_status` 展示，不写入最终静态产物。
+
+配置见 `.env.example`：`AI_SERVICE_INPUT_REVIEW_ENABLED=true`，单次审核超时 `AI_SERVICE_INPUT_REVIEW_TIMEOUT_SECONDS=15` 秒，失败最多额外重试 `AI_SERVICE_INPUT_REVIEW_MAX_RETRIES=1` 次；关闭语义审核仍保留规则检查。输入字符上限 `AI_SERVICE_INPUT_PROMPT_MAX_CHARS=20000`，API 另有 100000 字符硬上限。审核请求至多调用两次模型，每次包含 SDK 内部重试在内受该超时约束。审核输出最多 1024 tokens，拒绝截断、工具调用、额外字段和不合法 JSON；故障不会静默放行。
+
+`AI_SERVICE_MODEL_CONTEXT_WINDOW_TOKENS=65536` 必须按所用模型的实际窗口设置；`AI_SERVICE_MODEL_CONTEXT_OVERHEAD_TOKENS=4096` 用于预留协议开销。预算检查采用 UTF-8 字节数作为保守 token 上界，并预留输出额度，可能早于供应商实际限制拦截；它不是精确 tokenizer，也不保证输出不会达到上限。实际生成调用前会再次检查增长后的完整消息载荷。
+
+稳定错误码包括 `INPUT_EMPTY`、`INPUT_INVALID`、`INPUT_TOO_LONG`、`INPUT_CONTEXT_BUDGET_EXCEEDED`、`INPUT_REJECTED`、`INPUT_CLARIFICATION_REQUIRED`、`INPUT_REVIEW_UNAVAILABLE`。路由阶段返回结构化 JSON（审核故障 503，其余审核错误 422），生成阶段通过原有 `failed`/公共 SSE 错误通道返回中文原因。前端在审核失败时恢复原需求（不覆盖用户新输入），需要澄清时显示警告。路由响应含最多一条 `warnings`，当前 Java 路由只消费生成类型；生成入口重新审核并展示警告。
+
+离线审核测试：`uv run pytest tests/test_input_review.py`。真实模型的安全分类和跨服务完整交互需另行验收。

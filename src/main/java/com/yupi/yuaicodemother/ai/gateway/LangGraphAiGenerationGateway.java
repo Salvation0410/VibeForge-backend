@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yupi.yuaicodemother.config.AiEngineProperties;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
 import com.yupi.yuaicodemother.exception.ErrorCode;
+import com.yupi.yuaicodemother.exception.BusinessException;
+import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatusCode;
@@ -35,6 +37,8 @@ import java.util.concurrent.locks.LockSupport;
 @Component
 @RequiredArgsConstructor
 public class LangGraphAiGenerationGateway implements AiGenerationGateway {
+    @Resource
+    private GenerationInputContextProvider inputContextProvider;
     private final AiEngineProperties properties;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient = HttpClient.newBuilder()
@@ -68,6 +72,9 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
                 throw new IllegalStateException("LangGraph returned unsupported codeGenType: " + value);
             }
             return type;
+        } catch (BusinessException e) {
+            // 新建阶段的审核拒绝/澄清需要作为中文业务提示返回，不能包装成“系统错误”。
+            throw e;
         } catch (Exception e) {
             throw new IllegalStateException("LangGraph route request failed", e);
         }
@@ -96,12 +103,15 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
                 if (pending != null) pending.cancel(true);
             });
             try {
+                Map<String, Object> context = inputContextProvider == null
+                        ? Map.of("conversation", java.util.List.of(), "metadata", Map.of("userId", String.valueOf(userId)))
+                        : inputContextProvider.build(appId, userId, prompt, codeGenType);
                 Map<String, Object> body = Map.of(
                         "requestId", requestId,
                         "appId", String.valueOf(appId),
                         "prompt", prompt,
                         "codeGenType", codeGenType.name(),
-                        "metadata", Map.of("userId", userId == null ? "" : String.valueOf(userId)));
+                        "conversation", context.get("conversation"), "metadata", context.get("metadata"));
                 HttpRequest request = buildRequest("/internal/v1/generations:stream", body);
                 CompletableFuture<HttpResponse<InputStream>> pending = httpClient.sendAsync(
                         request, HttpResponse.BodyHandlers.ofInputStream());
@@ -256,6 +266,14 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
             JsonNode event = objectMapper.readTree(line);
             String type = event.path("type").asText();
             JsonNode data = event.path("data");
+            // 审核提示仅属于展示消息，不能与静态类型的最终产物合并。
+            if ("node_status".equals(type) && "input_guard".equals(event.path("node").asText())
+                    && "input_warning".equals(data.path("status").asText())) {
+                String notice = "生成提示：" + data.path("message").asText() + "\n";
+                return new ParsedEvent(codeGenType == CodeGenTypeEnum.VUE_PROJECT
+                        ? objectMapper.writeValueAsString(Map.of("type", "ai_response", "data", notice))
+                        : notice, null, false);
+            }
             if ("node_status".equals(type) && codeGenType == CodeGenTypeEnum.VUE_PROJECT
                     && "started".equals(data.path("status").asText())
                     && "project_build".equals(event.path("node").asText())) {
@@ -311,6 +329,20 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
      */
     private void ensureSuccess(int status, String body) {
         if (HttpStatusCode.valueOf(status).is2xxSuccessful()) return;
+        try {
+            JsonNode payload = objectMapper.readTree(body);
+            JsonNode error = payload.path("error");
+            if (error.path("code").asText().startsWith("INPUT_")) {
+                String message = error.path("message").asText("输入审核未通过，请调整需求后重试。");
+                if (message.length() > 1200) message = "输入审核未通过，请调整需求后重试。";
+                throw new BusinessException("INPUT_REVIEW_UNAVAILABLE".equals(error.path("code").asText())
+                        ? ErrorCode.OPERATION_ERROR : ErrorCode.PARAMS_ERROR, message);
+            }
+        } catch (BusinessException e) {
+            throw e;
+        } catch (IOException ignored) {
+            // 非审核协议错误按原有上游失败处理。
+        }
         throw new IllegalStateException("LangGraph request failed: HTTP " + status + " " + body);
     }
 }

@@ -896,6 +896,7 @@ def test_route_returns_supported_generation_type(app_factory, auth_headers):
     assert response.json() == {
         "requestId": "route-1",
         "codeGenType": "VUE_PROJECT",
+        "warnings": [],
     }
 
 

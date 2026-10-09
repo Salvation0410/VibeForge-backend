@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from ai_service.models.quality_review import ReviewerResult, ReviewerRole
+from ai_service.models.input_review import InputReviewResult
 
 
 @dataclass(slots=True)
@@ -44,6 +45,10 @@ class CustomerServiceModelAnswer:
 
 class GenerationModel(Protocol):
     """编排层依赖的模型能力协议，用于隔离具体模型供应商。"""
+
+    async def review_input(self, context: dict[str, Any]) -> InputReviewResult:
+        """返回严格输入审核决策，不改写用户原始需求。"""
+        ...
 
     async def route(self, prompt: str) -> str:
         """将用户需求分类为服务支持的代码生成类型。"""

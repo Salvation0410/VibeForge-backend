@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     model_temperature: float = 0.1
     model_max_tokens: int = Field(default=8192, ge=1)
 
+    # 审核默认开启；故障不能静默跳过。字节上界用于保守预算检查，非供应商精确 token 数。
+    input_review_enabled: bool = True
+    input_review_timeout_seconds: float = Field(default=15.0, gt=0, le=120)
+    input_review_max_retries: int = Field(default=1, ge=0, le=2)
+    input_prompt_max_chars: int = Field(default=20_000, ge=1, le=100_000)
+    model_context_window_tokens: int = Field(default=65_536, ge=1024)
+    model_context_overhead_tokens: int = Field(default=4096, ge=0)
+
     checkpoint_enabled: bool = True
     checkpoint_required: bool = False
     checkpoint_postgres_url: str = (
@@ -104,6 +112,12 @@ class Settings(BaseSettings):
     rag_download_max_bytes: int = Field(default=20971520, ge=1, le=104857600)
     rag_download_connect_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
     rag_download_read_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+
+    @model_validator(mode="after")
+    def validate_input_budget(self) -> "Settings":
+        if self.model_max_tokens + self.model_context_overhead_tokens >= self.model_context_window_tokens:
+            raise ValueError("模型上下文窗口必须大于输出额度与协议预留额度之和")
+        return self
 
     @model_validator(mode="after")
     def validate_checkpoint_pool(self) -> "Settings":

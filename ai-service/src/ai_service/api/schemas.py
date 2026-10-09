@@ -41,6 +41,7 @@ class RouteResponse(ApiModel):
     """代码类型路由结果。"""
     request_id: str
     code_gen_type: CodeGenType
+    warnings: list[str] = Field(default_factory=list, max_length=1)
 
 
 class GenerationRequest(ApiModel):

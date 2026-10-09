@@ -9,6 +9,8 @@ from langsmith import tracing_context
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError
 
 from ai_service.config import Settings
+from ai_service.models.input_review import InputReviewResult, check_context_budget
+from ai_service.prompts.input_review import INPUT_REVIEW_SYSTEM_PROMPT
 from ai_service.models.base import (
     CustomerServiceContext,
     CustomerServiceModelAnswer,
@@ -52,6 +54,7 @@ class OpenAICompatibleModel:
     """基于 LangChain ChatOpenAI 的模型适配器，默认连接 DeepSeek 兼容接口。"""
 
     def __init__(self, settings: Settings):
+        self._settings = settings
         self._customer_service_prompt_max_bytes = settings.rag_prompt_max_bytes
         self._client = ChatOpenAI(
             api_key=settings.model_api_key,
@@ -67,8 +70,36 @@ class OpenAICompatibleModel:
         return getattr(self, "_client", None) is not None
 
     async def _invoke(self, messages):
+        # 当前产物、历史及工具结果会继续增长，实际模型调用前再次检查完整载荷。
+        settings = getattr(self, "_settings", None)
+        if settings is not None:
+            check_context_budget(
+                [{"role": message.type, "content": message.content} for message in messages],
+                context_tokens=settings.model_context_window_tokens,
+                output_tokens=settings.model_max_tokens,
+                overhead_tokens=settings.model_context_overhead_tokens,
+            )
         with tracing_context(enabled=False):
             return await self._client.ainvoke(messages)
+
+    async def review_input(self, context: dict[str, Any]) -> InputReviewResult:
+        """独立审核调用只允许短结构化响应，截断、工具调用及无效 JSON 均不能放行。"""
+        messages = [SystemMessage(content=INPUT_REVIEW_SYSTEM_PROMPT),
+                    HumanMessage(content=json.dumps(context, ensure_ascii=False))]
+        check_context_budget(
+            [{"role": message.type, "content": message.content} for message in messages],
+            context_tokens=self._settings.model_context_window_tokens,
+            output_tokens=1024,
+            overhead_tokens=self._settings.model_context_overhead_tokens,
+        )
+        with tracing_context(enabled=False):
+            response = await self._client.bind(max_tokens=1024, temperature=0).ainvoke(messages)
+        metadata = getattr(response, "response_metadata", {}) or {}
+        finish_reason = str(metadata.get("finish_reason") or metadata.get("stop_reason") or "").upper()
+        if finish_reason in {"LENGTH", "MAX_TOKENS", "CONTENT_FILTER", "CONTENT_FILTERED"} or getattr(response, "tool_calls", None):
+            raise ValueError("审核响应不完整")
+        # 禁止容忍围栏、额外字段和类型转换，防止模型自由文本被误当作审核成功。
+        return InputReviewResult.model_validate_json(str(response.content).strip())
 
     async def route(self, prompt: str) -> str:
         """要求模型返回唯一的生成类型标识。"""

@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from ai_service.app import create_app
 from ai_service.config import Settings
 from ai_service.models.base import ModelTurn, ToolCall
+from ai_service.models.input_review import InputReviewResult
 from ai_service.models.quality_review import ReviewerResult, ReviewerRole
 from ai_service.models.reranker import DisabledReranker
 
@@ -48,6 +49,10 @@ class FakeModel:
         if "multiple" in lowered or "multi" in lowered:
             return "MULTI_FILE"
         return "HTML"
+
+    async def review_input(self, context: dict[str, Any]) -> InputReviewResult:
+        # 既有离线生成测试明确使用放行审核；专项测试通过覆写返回拒绝/澄清等结果。
+        return InputReviewResult(decision="ALLOW", reason="NONE", message="", questions=[])
 
     async def generate(self, branch: str, context: dict[str, Any]) -> ModelTurn:
         self.calls.append(("generate", {"branch": branch, "context": context}))

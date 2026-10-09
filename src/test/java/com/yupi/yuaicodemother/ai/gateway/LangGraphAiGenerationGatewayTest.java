@@ -29,6 +29,40 @@ class LangGraphAiGenerationGatewayTest {
     private HttpServer server;
     private ExecutorService serverExecutor;
 
+    @Test
+    void inputWarningDoesNotReplaceFinalArtifact() throws Exception {
+        String warning = "{\"requestId\":\"req-1\",\"type\":\"node_status\",\"node\":\"input_guard\","
+                + "\"data\":{\"status\":\"input_warning\",\"message\":\"建议分步扩展\"}}\n";
+        var gateway = gatewayReturning(warning + event("content_delta", "{\"content\":\"<html>完整产物</html>\"}")
+                + event("completed", "{}"));
+        for (var type : java.util.List.of(CodeGenTypeEnum.HTML, CodeGenTypeEnum.MULTI_FILE)) {
+            var chunks = gateway.generate("build", type, 42L, 7L, "req-warning").collectList().block();
+            assertEquals(java.util.List.of("生成提示：建议分步扩展\n", "<html>完整产物</html>"), chunks);
+        }
+        var vueChunks = gateway.generate("build", CodeGenTypeEnum.VUE_PROJECT, 42L, 7L, "req-vue").collectList().block();
+        assertEquals("生成提示：建议分步扩展\n", new ObjectMapper().readTree(vueChunks.getFirst()).path("data").asText());
+    }
+
+    @Test
+    void routeReviewFailurePreservesChineseMessage() throws Exception {
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/internal/v1/route", exchange -> {
+            byte[] body = "{\"error\":{\"code\":\"INPUT_CLARIFICATION_REQUIRED\",\"message\":\"请提供支付接口\"}}"
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(422, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+        var properties = new AiEngineProperties();
+        properties.setServiceUrl("http://127.0.0.1:" + server.getAddress().getPort());
+        properties.setToken("test-token");
+        var gateway = new LangGraphAiGenerationGateway(properties, new ObjectMapper());
+        var error = assertThrows(com.yupi.yuaicodemother.exception.BusinessException.class,
+                () -> gateway.route("真实支付", null, 7L, "review-route"));
+        assertEquals("请提供支付接口", error.getMessage());
+    }
+
     @AfterEach
     void stopServer() {
         if (server != null) server.stop(0);
