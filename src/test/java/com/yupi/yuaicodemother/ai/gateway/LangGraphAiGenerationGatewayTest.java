@@ -36,6 +36,20 @@ class LangGraphAiGenerationGatewayTest {
     }
 
     @Test
+    void vueFileToolPreservesArgumentsAndResultSeparately() throws Exception {
+        var gateway = gatewayReturning(event("tool_finished",
+                "{\"tool\":\"file_read\",\"toolCallId\":\"t1\",\"arguments\":{\"relativeFilePath\":\"src/App.vue\"},\"result\":{\"content\":\"source\"}}")
+                + event("completed", "{}"));
+        var chunks = gateway.generate("build", CodeGenTypeEnum.VUE_PROJECT, 42L, 7L, "req-file")
+                .collectList().block();
+        var mapper = new ObjectMapper();
+        var message = mapper.readTree(chunks.getFirst());
+        assertEquals("langgraph", message.path("engine").asText());
+        assertEquals("src/App.vue", mapper.readTree(message.path("arguments").asText()).path("relativeFilePath").asText());
+        assertEquals("source", mapper.readTree(message.path("result").asText()).path("content").asText());
+    }
+
+    @Test
     void vueProgressUsesExistingTextMessageAndStaticBranchesIgnoreIt() throws Exception {
         var gateway = gatewayReturning(event("node_status",
                 "{\"status\":\"progress\",\"message\":\"正在生成项目文件\"}")

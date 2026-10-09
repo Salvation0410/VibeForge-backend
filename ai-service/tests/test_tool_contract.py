@@ -17,6 +17,7 @@ from ai_service.models.tool_contract import (
 
 
 MODEL_TOOL_NAMES = {
+    "image_search",
     "dir_read",
     "file_read",
     "file_write",
@@ -26,6 +27,10 @@ MODEL_TOOL_NAMES = {
 
 SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
 VALID_CASES = {
+    "image_search": (
+        {"query": "travel landscape", "codeGenType": "VUE_PROJECT"},
+        {"ok": True, "images": [{"url": "https://images.pexels.com/photos/1/a.jpg", "description": "景色"}]},
+    ),
     "dir_read": (
         {"relativeDirPath": "", "codeGenType": "VUE_PROJECT"},
         {"entries": ["src/App.vue"]},

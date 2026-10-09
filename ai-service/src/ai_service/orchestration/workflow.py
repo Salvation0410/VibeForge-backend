@@ -758,6 +758,8 @@ class GenerationWorkflow:
             data={
                 "tool": name,
                 "toolCallId": tool_call_id,
+                "arguments": {key: value for key, value in arguments.items()
+                              if key in {"relativeFilePath", "relativeDirPath", "query"}},
                 "result": event_result(result) if event_result is not None else result,
             },
         )

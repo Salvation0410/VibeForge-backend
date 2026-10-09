@@ -142,6 +142,30 @@ public class JsonMessageStreamHandler {
                 }
             }
             case TOOL_EXECUTED -> {
+                // Python 工具结果与调用参数分开传输；不能交给要求完整源码的 Legacy 格式化器。
+                JSONObject envelope = JSONUtil.parseObj(chunk);
+                if ("langgraph".equals(envelope.getStr("engine"))) {
+                    processToolExecutionMessage(aiResponseStringBuilder, chunk, originalChatHistoryList);
+                    JSONObject args = JSONUtil.parseObj(envelope.getStr("arguments", "{}"));
+                    JSONObject toolResult = JSONUtil.parseObj(envelope.getStr("result", "{}"));
+                    String name = envelope.getStr("name", "工具");
+                    String label = switch (name) {
+                        case "file_write" -> "写入文件";
+                        case "file_read" -> "读取文件";
+                        case "dir_read" -> "读取目录";
+                        case "file_modify" -> "修改文件";
+                        case "file_delete" -> "删除文件";
+                        case "image_search" -> "搜索图片";
+                        default -> "";
+                    };
+                    if (label.isEmpty()) return "";
+                    String path = args.getStr("relativeFilePath",
+                            args.getStr("relativeDirPath", args.getStr("query", "")));
+                    String status = Boolean.FALSE.equals(toolResult.getBool("ok")) ? "未完成" : "完成";
+                    String output = "\n\n[工具调用] " + label + " " + path + "（" + status + "）\n\n";
+                    chatHistoryStringBuilder.append(output);
+                    return output;
+                }
                 // 先记录工具请求和结果，保证原始聊天记录可以完整回放。
                 processToolExecutionMessage(aiResponseStringBuilder,chunk,originalChatHistoryList);
                 // 将工具结果转换为用户可读的展示文本。
@@ -206,7 +230,7 @@ public class JsonMessageStreamHandler {
     private boolean isLangGraphInternalTool(String toolName) {
         return Set.of("dir_read", "file_read", "file_write", "file_modify", "file_delete",
                 "artifact_context", "artifact_validate", "artifact_publish", "project_build",
-                "vue_source_snapshot").contains(toolName);
+                "vue_source_snapshot", "image_search").contains(toolName);
     }
 
     }

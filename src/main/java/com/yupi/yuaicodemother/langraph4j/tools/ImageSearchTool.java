@@ -31,6 +31,10 @@ public class ImageSearchTool {
     @Tool("搜索内容相关的图片，用于网站内容展示")
     public List<ImageResource> searchContentImages(@P("搜索关键词") String query) {
         List<ImageResource> imageList = new ArrayList<>();
+        if (pexelsApiKey == null || pexelsApiKey.isBlank()) {
+            log.warn("Pexels 搜图未配置密钥，返回空图片列表");
+            return imageList;
+        }
         int searchCount = 12;
         // 调用 API，注意释放资源
         try (HttpResponse response = HttpRequest.get(PEXELS_API_URL)
@@ -38,6 +42,7 @@ public class ImageSearchTool {
                 .form("query", query)
                 .form("per_page", searchCount)
                 .form("page", 1)
+                .timeout(20000)
                 .execute()) {
             if (response.isOk()) {
                 JSONObject result = JSONUtil.parseObj(response.body());

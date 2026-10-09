@@ -3,6 +3,23 @@
   "schemaDialect": "https://json-schema.org/draft/2020-12/schema",
   "tools": [
     {
+      "name": "image_search",
+      "aliases": [],
+      "modelCallable": true,
+      "modelArguments": ["query"],
+      "description": "搜索 Pexels 实景图片，返回真实 URL 和说明；页面需将 URL 写入 img src，不得编造图片地址。",
+      "requestSchema": {
+        "type": "object",
+        "properties": {"query": {"type": "string", "minLength": 1, "maxLength": 200}, "codeGenType": {"type": "string", "enum": ["HTML", "MULTI_FILE", "VUE_PROJECT"]}},
+        "required": ["query", "codeGenType"], "additionalProperties": false
+      },
+      "responseSchema": {
+        "type": "object",
+        "properties": {"ok": {"type": "boolean"}, "images": {"type": "array", "maxItems": 6, "items": {"type": "object", "properties": {"url": {"type": "string"}, "description": {"type": "string"}}, "required": ["url", "description"]}}},
+        "required": ["ok", "images"], "additionalProperties": true
+      }
+    },
+    {
       "name": "dir_read",
       "aliases": ["readDir", "read_dir"],
       "modelCallable": true,

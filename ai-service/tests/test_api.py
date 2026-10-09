@@ -3005,3 +3005,38 @@ def test_vue_oversized_batch_is_discarded_before_any_write(app_factory, auth_hea
     assert len(model.calls) == 3
     assert not any(call["name"] == "file_write" for call in gateway.calls)
     assert events[-1]["error"]["code"] == "VUE_TOOL_BATCH_LIMIT_EXCEEDED"
+
+
+def test_vue_image_search_results_are_used_in_written_page(app_factory, auth_headers, ndjson_parser):
+    image_url = "https://images.pexels.com/photos/1/travel.jpg"
+
+    class ImageGateway(FakeToolGateway):
+        async def invoke(self, name, arguments, **kwargs):
+            result = await super().invoke(name, arguments, **kwargs)
+            if name == "image_search":
+                return {"ok": True, "images": [{"url": image_url, "description": "旅行景色"}]}
+            return result
+
+    class ImageModel(FakeModel):
+        async def generate(self, branch, context):
+            results = context.get("toolResults", [])
+            if not results:
+                return ModelTurn(content="search", tool_calls=[ToolCall("image_search", {"query": "travel landscape"})])
+            if len(results) == 1:
+                url = results[0]["result"]["images"][0]["url"]
+                return ModelTurn(content="write", tool_calls=[ToolCall("file_write", {
+                    "relativeFilePath": "src/App.vue", "content": f'<template><img src="{url}" alt="旅行景色"></template>',
+                })])
+            return ModelTurn(content="done")
+
+    gateway = ImageGateway()
+    events = ndjson_parser(TestClient(app_factory(model=ImageModel(), gateway=gateway)).post(
+        "/internal/v1/generations:stream", json=generation_payload("VUE_PROJECT"), headers=auth_headers,
+    ))
+    assert events[-1]["type"] == "completed"
+    write = next(call for call in gateway.calls if call["name"] == "file_write")
+    assert image_url in write["arguments"]["content"]
+    finished = [event["data"] for event in events if event["type"] == "tool_finished"]
+    write_event = next(data for data in finished if data["tool"] == "file_write")
+    assert write_event["arguments"] == {"relativeFilePath": "src/App.vue"}
+    assert "content" not in write_event["arguments"]

@@ -52,6 +52,7 @@ public final class InternalAiToolSchemaAssertions {
 
     public static Map<String, Object> validRequestExample(String name) {
         return switch (name) {
+            case "image_search" -> Map.of("query", "travel", "codeGenType", "VUE_PROJECT");
             case "dir_read" -> Map.of("relativeDirPath", "", "codeGenType", "VUE_PROJECT");
             case "file_read", "file_delete" ->
                     Map.of("relativeFilePath", "src/App.vue", "codeGenType", "VUE_PROJECT");
@@ -72,6 +73,7 @@ public final class InternalAiToolSchemaAssertions {
 
     public static Map<String, Object> validResponseExample(String name) {
         return switch (name) {
+            case "image_search" -> Map.of("ok", true, "images", List.of(Map.of("url", "https://images.pexels.com/a.jpg", "description", "景色")));
             case "dir_read" -> Map.of("entries", List.of("src/App.vue"));
             case "file_read" -> Map.of("content", "<template />");
             case "file_write" -> Map.of("ok", true, "path", "App.vue");

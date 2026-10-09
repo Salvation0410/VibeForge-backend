@@ -279,7 +279,7 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
                 return new ParsedEvent(objectMapper.writeValueAsString(Map.of("type", "tool_request", "id", data.path("toolCallId").asText(), "name", data.path("tool").asText(), "arguments", "{}")), null, false);
             }
             if ("tool_finished".equals(type) && codeGenType == CodeGenTypeEnum.VUE_PROJECT) {
-                return new ParsedEvent(objectMapper.writeValueAsString(Map.of("type", "tool_executed", "id", data.path("toolCallId").asText(), "name", data.path("tool").asText(), "arguments", objectMapper.writeValueAsString(data.path("result")))), null, false);
+                return new ParsedEvent(objectMapper.writeValueAsString(Map.of("type", "tool_executed", "engine", "langgraph", "id", data.path("toolCallId").asText(), "name", data.path("tool").asText(), "arguments", objectMapper.writeValueAsString(data.path("arguments").isObject() ? data.path("arguments") : objectMapper.createObjectNode()), "result", objectMapper.writeValueAsString(data.path("result")))), null, false);
             }
             if ("failed".equals(type)) {
                 JsonNode error = event.path("error");

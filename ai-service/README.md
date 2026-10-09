@@ -137,6 +137,8 @@ Vue 分支允许模型请求 Spring 工具，但工具调用次数受 `AI_SERVIC
 
 Vue 文件生成先规划 filePlan，再按每轮最多两个工具调用写入；截断或超批次响应整轮丢弃，最多重试两次，重试后每轮一个工具。模型上下文包含剩余预算、已写入和待生成文件；已声明清单尚未写完时拒绝构建。生成与修复都遵循该约束，单文件过大需拆分组件。阶段进度复用现有 SSE 文本消息；诊断日志只记录请求 ID、阶段、结束原因、输出 token 数和耗时，不记录源码与凭据。PostgreSQL saver 使用事务回退代替显式 pipeline；真实 PostgreSQL 生命周期、图失败及取消后连接复用已通过独立测试；真实模型与完整 SSE 仍需单独验收。
 
+Vue 的 image_search 通过 Spring 内部网关复用 Pexels 搜图客户端，每次最多返回六张图片的 URL 和说明，计入工具预算。需要实景图片的页面按提示先搜图，再把真实 URL 写入 Vue 模板或背景样式；原有图片保持不变。搜索没有结果或接口不可用时返回 ok=false 与空列表，不编造图片地址。此工具返回外部图片地址，不下载图片二进制文件，运行时需要浏览器能访问 Pexels 图片域名。Spring 需配置现有 pexels.api-key。工具完成事件分别携带安全的路径/关键词参数与执行结果，Java 展示路径和状态，不再将结果当成 Legacy 调用参数，也不重复输出源码。
+
 Vue 多 Agent 质量审查开启时，首次生成和每次修复重新通过硬校验、重新构建成功后，都会调用 Spring 工作流专用且模型不可调用的 `vue_source_snapshot`，以当前项目真实源码而不是旧 artifact 作为三个 Reviewer 的审查输入。开关关闭时保持原有兼容行为，仅至少完成一次修复的 Vue 在单 Reviewer 质量检查前读取快照。HTML、MULTI_FILE 分支均不调用该工具。快照最多返回 24 个文件，单文件内容最多 12000 个字符，总内容最多 60000 个字符；Spring 遍历的项目总访问条目（根目录之外的目录、文件和访问失败条目）最多 20000 个，其中合格源码候选最多 10000 个，并只读取按 `package.json`、入口文件、`src/App.vue`、其余路径稳定排序后的最佳 24 个候选，每个源文件最大 1 MiB。
 
 快照排除依赖和构建产物目录、隐藏目录、符号链接、锁文件及非文本扩展名，依赖/构建目录和锁文件的大小写变体同样排除；入选文件执行严格 UTF-8 与 NUL 检查。完整快照只在本次质量检查调用栈内传给当前 Reviewer，不写入 Spring 工具幂等 Redis、业务 checkpoint、LangGraph state/checkpoint 或 NDJSON 事件；快照读取或 Reviewer 系统异常产生的 pending checkpoint 只包含稳定的外层异常，不包含源码，阻断性审查结果则仅按下文规则保存有界 `repair_feedback`。`tool_finished` 事件只公开 `eligibleFileCount`、`includedFileCount`、`omittedFileCount` 和 `truncated` 四个统计字段。快照读取失败使用稳定的脱敏消息，错误响应不包含绝对项目路径；快照读取或 Reviewer 调用失败时不回退到旧 artifact，而是进入失败终态。

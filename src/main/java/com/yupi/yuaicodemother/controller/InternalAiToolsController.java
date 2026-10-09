@@ -19,6 +19,8 @@ import com.yupi.yuaicodemother.core.paser.MultiFileCodeParser;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.exception.ErrorCode;
+import com.yupi.yuaicodemother.langraph4j.tools.ImageSearchTool;
+import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -47,6 +49,8 @@ import java.util.Map;
 @RequestMapping("/internal/ai-tools")
 @RequiredArgsConstructor
 public class InternalAiToolsController {
+    @Resource
+    private ImageSearchTool imageSearchTool;
     private static final String MULTI_FILE_RELEASE_IMMUTABLE = "MULTI_FILE_RELEASE_IMMUTABLE";
     private static final String[] IMPORTANT_FILES = {"package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
             "vite.config.js", "vite.config.ts", "vue.config.js", "tsconfig.json", "index.html", "main.js", "main.ts", "App.vue"};
@@ -114,6 +118,18 @@ public class InternalAiToolsController {
             String requestId,
             Map<String, Object> args) {
         return switch (tool) {
+            case IMAGE_SEARCH -> {
+                String query = text(args.get("query"));
+                if (query.isBlank() || query.length() > 200) {
+                    throw new BusinessException(ErrorCode.PARAMS_ERROR, "image query must contain 1-200 characters");
+                }
+                // 复用现有 Pexels 客户端，仅返回少量可嵌入页面的图片，避免膨胀模型上下文。
+                var images = imageSearchTool.searchContentImages(query).stream().limit(6)
+                        .filter(image -> image.getUrl() != null && image.getUrl().startsWith("https://images.pexels.com/"))
+                        .map(image -> Map.of("url", image.getUrl(), "description",
+                                image.getDescription() == null ? query : image.getDescription())).toList();
+                yield Map.of("images", images, "ok", !images.isEmpty());
+            }
             case FILE_READ -> Map.of("content", readFile(sandboxPath(appId, args, "relativeFilePath", false)));
             case DIR_READ -> {
                 Path path = sandboxPath(appId, args, "relativeDirPath", true);
