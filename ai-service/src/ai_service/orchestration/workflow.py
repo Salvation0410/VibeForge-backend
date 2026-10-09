@@ -313,6 +313,33 @@ class GenerationWorkflow:
                 state["request_id"],
                 f"{state['request_id']}:artifact_context",
             )
+            # 图片属于可降级的外部依赖；首次 Vue 生成或明确配图请求时主动检索，避免模型跳过工具。
+            image_assets = []
+            needs_images = state["code_gen_type"] == "VUE_PROJECT" and (
+                not current_artifact.get("exists", False)
+                or any(word in state["prompt"].lower() for word in ("图片", "配图", "照片", "image", "photo"))
+            )
+            if needs_images:
+                query = state["prompt"].strip()[:160]
+                # 常见中文主题转换成 Pexels 更容易匹配的短查询，其他需求保留原始关键词。
+                for words, english in (("恋爱 情侣 日记 纪念", "couple love"), ("旅游 旅行 风景", "travel landscape"),
+                                       ("美食 餐厅 咖啡", "food cafe"), ("商城 商品 购物", "product lifestyle")):
+                    if any(word in query for word in words.split()):
+                        query = english
+                        break
+                try:
+                    images = await self._invoke_tool(
+                        emitter, "context_prepare", "image_search",
+                        {"codeGenType": state["code_gen_type"], "query": query},
+                        state["app_id"], state["request_id"], f"{state['request_id']}:image_search",
+                    )
+                    image_assets = images.get("images", []) if images.get("ok") else []
+                except Exception:
+                    logger.warning("图片检索降级 request_id=%s", state["request_id"])
+                if not image_assets:
+                    await emitter.emit("node_status", "context_prepare", data={
+                        "status": "progress", "message": "图片搜索暂未返回可用结果，请检查 Pexels 密钥或网络；继续生成页面。",
+                    })
             return {
                 "context": {
                     "appId": state["app_id"],
@@ -321,6 +348,7 @@ class GenerationWorkflow:
                     "conversation": state.get("conversation", []),
                     "metadata": state.get("metadata", {}),
                     "currentArtifact": current_artifact,
+                    "imageAssets": image_assets,
                 }
             }
 
@@ -628,6 +656,8 @@ class GenerationWorkflow:
         file_plan: list[str] = []
         written_files: set[str] = set()
         planning_turns = 0
+        image_retries = 0
+        image_used = bool(context.get("imageAssetsApplied")) or not bool(context.get("imageAssets"))
 
         while True:
             self._raise_if_cancelled(thread_id)
@@ -681,6 +711,12 @@ class GenerationWorkflow:
                         raise ValueError("VUE_FILE_PLAN_LIMIT_EXCEEDED: too many planning-only turns")
                     continue
             if not turn.tool_calls:
+                if not image_used:
+                    if image_retries >= 2:
+                        raise ValueError("VUE_IMAGE_USAGE_MISSING: searched images were not written into the page")
+                    image_retries += 1
+                    context["imageUsageFeedback"] = "尚未将 imageAssets 中的真实图片 URL 写入页面。请在合适的首屏/卡片中使用图片，完成后再结束。"
+                    continue
                 if any(path not in written_files for path in file_plan):
                     raise ValueError("VUE_FILE_PLAN_INCOMPLETE: planned Vue files were not written")
                 break
@@ -709,6 +745,10 @@ class GenerationWorkflow:
                 )
                 if call.name in {"file_write", "file_modify"} and result.get("ok", True):
                     written_files.add(arguments["relativeFilePath"])
+                    # 只认可成功写入源码的 URL；口头说明、搜索成功均不能代表页面已配图。
+                    if any(asset["url"] in arguments.get("content", arguments.get("newContent", "")) for asset in context.get("imageAssets", [])):
+                        image_used = True
+                        context["imageAssetsApplied"] = True
 
         return {
             "content": "\n".join(content_parts),

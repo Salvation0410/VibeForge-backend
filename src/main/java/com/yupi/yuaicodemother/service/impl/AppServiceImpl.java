@@ -40,6 +40,7 @@ import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.annotation.Transactional;
 import reactor.core.publisher.Flux;
 
@@ -56,6 +57,10 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Slf4j
 public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppService {
+
+    // 默认直接使用 Spring 部署资源入口，避免依赖未启动或根目录不匹配的 Nginx。
+    @Value("${app.deploy-base-url:http://127.0.0.1:8123/api/deployed}")
+    private String deployBaseUrl;
 
     private final SysUserService userService;
     private final AiGenerationGateway aiGenerationGateway;
@@ -229,7 +234,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         boolean updateResult = this.updateById(updateApp);
         ThrowUtils.throwIf(!updateResult, ErrorCode.OPERATION_ERROR, "Failed to update deploy info");
 
-        String appDeployUrl = String.format("%s/%s/", AppConstant.CODE_DEPLOY_HOST, deployKey);
+        String appDeployUrl = String.format("%s/%s/", deployBaseUrl.replaceAll("/+$", ""), deployKey);
         generateAppScreenshotAsync(appId, appDeployUrl);
         return appDeployUrl;
     }

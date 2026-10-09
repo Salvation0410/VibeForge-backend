@@ -2880,7 +2880,7 @@ def test_invalid_vue_tool_is_rejected_before_spring_gateway(app_factory, auth_he
         headers=auth_headers,
     ))
 
-    assert [call["name"] for call in gateway.calls] == ["artifact_context"]
+    assert [call["name"] for call in gateway.calls] == ["artifact_context", "image_search"]
     assert events[-1]["type"] == "failed"
     assert events[-1]["error"]["code"] == "INVALID_VUE_TOOL_CALL"
     assert "search_reference" in events[-1]["error"]["message"]
@@ -3040,3 +3040,61 @@ def test_vue_image_search_results_are_used_in_written_page(app_factory, auth_hea
     write_event = next(data for data in finished if data["tool"] == "file_write")
     assert write_event["arguments"] == {"relativeFilePath": "src/App.vue"}
     assert "content" not in write_event["arguments"]
+
+
+def test_vue_automatic_images_require_successful_source_write(app_factory, auth_headers, ndjson_parser):
+    url = "https://images.pexels.com/photos/1/love.jpg"
+
+    class Images(FakeToolGateway):
+        async def invoke(self, name, arguments, **kwargs):
+            result = await super().invoke(name, arguments, **kwargs)
+            return {"ok": True, "images": [{"url": url, "description": "情侣"}]} if name == "image_search" else result
+
+    class UsesImages(FakeModel):
+        async def generate(self, branch, context):
+            assert context["imageAssets"][0]["url"] == url
+            if not context.get("imageUsageFeedback"):
+                return ModelTurn(content="done")
+            if not context["toolResults"]:
+                return ModelTurn(content="write", tool_calls=[ToolCall("file_write", {
+                    "relativeFilePath": "src/App.vue", "content": f'<template><img src="{url}"></template>',
+                })])
+            return ModelTurn(content="done")
+
+    gateway = Images()
+    events = ndjson_parser(TestClient(app_factory(model=UsesImages(), gateway=gateway)).post(
+        "/internal/v1/generations:stream", json=generation_payload("VUE_PROJECT"), headers=auth_headers,
+    ))
+    assert events[-1]["type"] == "completed"
+    assert [c["name"] for c in gateway.calls].count("image_search") == 1
+    assert any(c["name"] == "file_write" and url in c["arguments"]["content"] for c in gateway.calls)
+
+
+def test_vue_empty_image_search_has_visible_fallback(app_factory, auth_headers, ndjson_parser):
+    class EmptyImages(FakeToolGateway):
+        async def invoke(self, name, arguments, **kwargs):
+            result = await super().invoke(name, arguments, **kwargs)
+            return {"ok": False, "images": []} if name == "image_search" else result
+
+    events = ndjson_parser(TestClient(app_factory(gateway=EmptyImages())).post(
+        "/internal/v1/generations:stream", json=generation_payload("VUE_PROJECT"), headers=auth_headers,
+    ))
+    assert events[-1]["type"] == "completed"
+    assert any("Pexels" in e.get("data", {}).get("message", "") for e in events)
+
+
+def test_vue_missing_image_usage_stops_after_two_reminders(app_factory, auth_headers, ndjson_parser):
+    class Images(FakeToolGateway):
+        async def invoke(self, name, arguments, **kwargs):
+            result = await super().invoke(name, arguments, **kwargs)
+            if name == "image_search":
+                return {"ok": True, "images": [{"url": "https://images.pexels.com/a.jpg", "description": "photo"}]}
+            return result
+
+    model = FakeModel(vue_tool_calls=0)
+    events = ndjson_parser(TestClient(app_factory(model=model, gateway=Images())).post(
+        "/internal/v1/generations:stream", json=generation_payload("VUE_PROJECT"), headers=auth_headers,
+    ))
+    assert events[-1]["type"] == "failed"
+    assert events[-1]["error"]["code"] == "VUE_IMAGE_USAGE_MISSING"
+    assert len([call for call in model.calls if call[0] == "generate"]) == 3

@@ -39,6 +39,7 @@ public class ImageSearchTool {
         // 调用 API，注意释放资源
         try (HttpResponse response = HttpRequest.get(PEXELS_API_URL)
                 .header("Authorization", pexelsApiKey)
+                .header("User-Agent", "VibeForge/1.0")
                 .form("query", query)
                 .form("per_page", searchCount)
                 .form("page", 1)
@@ -47,15 +48,19 @@ public class ImageSearchTool {
             if (response.isOk()) {
                 JSONObject result = JSONUtil.parseObj(response.body());
                 JSONArray photos = result.getJSONArray("photos");
+                if (photos == null) return imageList;
                 for (int i = 0; i < photos.size(); i++) {
                     JSONObject photo = photos.getJSONObject(i);
                     JSONObject src = photo.getJSONObject("src");
                     imageList.add(ImageResource.builder()
                             .category(ImageCategoryEnum.CONTENT)
                             .description(photo.getStr("alt", query))
-                            .url(src.getStr("medium"))
+                            .url(src.getStr("large", src.getStr("medium")))
                             .build());
                 }
+            } else {
+                // 只记录状态码，不记录鉴权头或上游响应正文。
+                log.warn("Pexels 搜图失败，HTTP 状态码: {}", response.getStatus());
             }
         } catch (Exception e) {
             log.error("Pexels API 调用失败: {}", e.getMessage(), e);
