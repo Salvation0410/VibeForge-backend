@@ -584,4 +584,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-rea
 - [LangChain + LangGraph 重构方案](../doc/ai-service-langchain-langgraph-refactor-design.md)
 
 
-首次 Vue 生成或明确配图请求会在上下文准备阶段主动调用 image_search，结果放入 imageAssets；常见中文主题映射为英文查询。成功写入的 content/newContent 必须包含搜索 URL，否则最多提醒两轮后失败；修复继承已写入标记。主动检索不占模型文件循环预算，模型主动搜图仍占预算。空结果或网关异常显示降级提示并继续；普通既有功能修改不强制插图。该检查只证明 URL 写入源码，实际图片加载仍需浏览器验收。图片与部署配置、IPv4/IPv6 404 排查见 [说明](../doc/image-and-deployment-troubleshooting.md)。
+首次 Vue 生成或明确要求新增、补充、替换、搜索或修复图片时，会在上下文准备阶段主动调用 image_search（既有项目的“保留图片”“不要替换图片”及图片布局美化不触发；按中英文动作与否定分句识别，不是出现图片关键词就触发），结果放入 imageAssets；常见中文主题映射为英文查询。成功写入的 content/newContent 必须包含搜索 URL，否则最多提醒两轮后失败；修复继承已写入标记。主动检索不占模型文件循环预算，模型主动搜图仍占预算。空结果或网关异常显示降级提示并继续；普通既有功能修改不强制插图。该检查只证明 URL 写入源码，实际图片加载仍需浏览器验收。图片与部署配置、IPv4/IPv6 404 排查见 [说明](../doc/image-and-deployment-troubleshooting.md)。

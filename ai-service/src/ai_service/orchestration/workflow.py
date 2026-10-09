@@ -18,6 +18,7 @@ from ai_service.models.tool_contract import validate_vue_tool_call
 from ai_service.orchestration.cancellation import CancellationRegistry, GenerationCancelled
 from ai_service.orchestration.active_generations import ActiveGenerationRegistry
 from ai_service.orchestration.events import EventEmitter
+from ai_service.orchestration.image_intent import requests_image_assets
 from ai_service.orchestration.multi_agent_review import run_multi_agent_review
 from ai_service.infrastructure.langsmith_tracing import LangSmithTracer
 
@@ -313,11 +314,11 @@ class GenerationWorkflow:
                 state["request_id"],
                 f"{state['request_id']}:artifact_context",
             )
-            # 图片属于可降级的外部依赖；首次 Vue 生成或明确配图请求时主动检索，避免模型跳过工具。
+            # 首次生成主动配图；既有项目仅对明确配图操作检索，不能把“保留图片”误判为新增。
             image_assets = []
             needs_images = state["code_gen_type"] == "VUE_PROJECT" and (
                 not current_artifact.get("exists", False)
-                or any(word in state["prompt"].lower() for word in ("图片", "配图", "照片", "image", "photo"))
+                or requests_image_assets(state["prompt"])
             )
             if needs_images:
                 query = state["prompt"].strip()[:160]

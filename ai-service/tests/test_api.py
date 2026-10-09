@@ -3098,3 +3098,58 @@ def test_vue_missing_image_usage_stops_after_two_reminders(app_factory, auth_hea
     assert events[-1]["type"] == "failed"
     assert events[-1]["error"]["code"] == "VUE_IMAGE_USAGE_MISSING"
     assert len([call for call in model.calls if call[0] == "generate"]) == 3
+
+
+@pytest.mark.parametrize("prompt", [
+    "请让当前页面更美观、更清晰，并适合电脑和手机使用。保留原有功能、文字、图片和操作方式。"
+    "不要删除或替换原有图片，也不要添加无关内容。只修改完成这次优化需要的文件，不要重建项目或添加无关功能，"
+    "并确保修改后可以正常运行。请完整完成所有修改，不要附带解释；如果无法完整生成，请不要输出残缺内容。",
+    "保留原有照片，只调整相册的布局和图片尺寸。",
+    "Keep existing images. Do not replace photos; only improve spacing.",
+])
+def test_vue_preserving_images_does_not_require_new_images(app_factory, auth_headers, ndjson_parser, prompt):
+    class UnexpectedImages(FakeToolGateway):
+        async def invoke(self, name, arguments, **kwargs):
+            result = await super().invoke(name, arguments, **kwargs)
+            if name == "image_search":
+                return {"ok": True, "images": [{"url": "https://images.pexels.com/new.jpg", "description": "photo"}]}
+            return result
+
+    class LayoutModel(FakeModel):
+        async def generate(self, branch, context):
+            self.calls.append(("generate", {"context": context}))
+            if not context["toolResults"]:
+                # 优化只修改布局，不重复写入原有图片 URL，也应允许正常构建完成。
+                return ModelTurn(content="调整布局", tool_calls=[ToolCall("file_modify", {
+                    "relativeFilePath": "src/App.vue",
+                    "oldContent": "gap: 8px", "newContent": "gap: 16px",
+                })])
+            return ModelTurn(content="完成")
+
+    gateway = UnexpectedImages(artifact_context={"exists": True, "entries": ["src/App.vue"]})
+    model = LayoutModel()
+    payload = {**generation_payload("VUE_PROJECT"), "prompt": prompt}
+    events = ndjson_parser(TestClient(app_factory(model=model, gateway=gateway)).post(
+        "/internal/v1/generations:stream", json=payload, headers=auth_headers,
+    ))
+    assert events[-1]["type"] == "completed"
+    assert not any(call["name"] == "image_search" for call in gateway.calls)
+    assert any(call["name"] == "file_modify" for call in gateway.calls)
+    context = next(data["context"] for name, data in model.calls if name == "generate")
+    assert context["imageAssets"] == []
+
+
+@pytest.mark.parametrize("prompt", [
+    "保留原有功能，为首页补充真实图片。",
+    "不要替换原有图片，但请给相册添加旅行照片。",
+    "修复首页无法加载的图片。",
+    "Keep existing images, but add new photos to the gallery.",
+])
+def test_vue_explicit_image_changes_still_search(app_factory, auth_headers, ndjson_parser, prompt):
+    gateway = FakeToolGateway(artifact_context={"exists": True, "entries": ["src/App.vue"]})
+    events = ndjson_parser(TestClient(app_factory(gateway=gateway)).post(
+        "/internal/v1/generations:stream", json={**generation_payload("VUE_PROJECT"), "prompt": prompt},
+        headers=auth_headers,
+    ))
+    assert events[-1]["type"] == "completed"
+    assert any(call["name"] == "image_search" for call in gateway.calls)
