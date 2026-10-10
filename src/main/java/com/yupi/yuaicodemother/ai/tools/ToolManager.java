@@ -24,6 +24,15 @@ public class ToolManager {
      */
     private final Map<String, BaseTool> toolMap = new HashMap<>();
 
+    /** Python AI 服务使用的规范工具名与历史 Java 工具名兼容映射。 */
+    private static final Map<String, String> PYTHON_TOOL_ALIASES = Map.of(
+            "file_read", "readFile",
+            "file_write", "writeFile",
+            "file_modify", "modifyFile",
+            "file_delete", "deleteFile",
+            "dir_read", "readDir"
+    );
+
     /**
      * 自动注入所有工具
      */
@@ -49,7 +58,15 @@ public class ToolManager {
      * @return 工具实例
      */
     public BaseTool getTool(String toolName) {
-        return toolMap.get(toolName);
+        if (toolName == null) {
+            return null;
+        }
+        BaseTool tool = toolMap.get(toolName);
+        if (tool != null) {
+            return tool;
+        }
+        String legacyName = PYTHON_TOOL_ALIASES.get(toolName);
+        return legacyName == null ? null : toolMap.get(legacyName);
     }
 
     /**

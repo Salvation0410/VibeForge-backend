@@ -84,6 +84,7 @@ class CustomerServiceRagService:
 
     async def answer(self, question: str) -> CustomerServiceAnswer:
         normalized_question = question.strip() if isinstance(question, str) else ""
+        # 依次执行向量检索、去重、重排、上下文裁剪和引用校验，防止越界内容进入回答。
         if not normalized_question or len(normalized_question) > MAX_QUESTION_CHARS:
             raise CustomerServiceRagError("CUSTOMER_SERVICE_INVALID_REQUEST")
 

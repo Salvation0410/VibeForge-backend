@@ -352,7 +352,7 @@ async def parse_and_split_download(
 
 
 class KnowledgeEtlService:
-    """Compose download, parsing, embedding, and the version-aware knowledge store."""
+    """编排下载、解析、向量化和带版本控制的知识库存储。"""
 
     def __init__(
         self,
@@ -376,6 +376,7 @@ class KnowledgeEtlService:
         lease: KnowledgeMutationLease,
     ):
         async with self._semaphore:
+            # 通过信号量限制并行 ETL 数量，避免下载、解析和向量化同时耗尽资源。
             return await self._index(
                 document_id=document_id,
                 document_version=document_version,
@@ -392,6 +393,7 @@ class KnowledgeEtlService:
         file_type: str, signed_url: str, sha256: str, etl_version: str,
         lease: KnowledgeMutationLease,
     ):
+        # 每一步都在进入下一阶段前校验大小、数量和向量维度，避免不可信结果写入 Milvus。
         logger.info("Knowledge INDEX downloading: documentId=%s", document_id)
         downloaded = await self._downloader.download(
             signed_url,
@@ -460,6 +462,7 @@ class KnowledgeEtlService:
         lease: KnowledgeMutationLease,
     ):
         async with self._semaphore:
+            # rebuild 先准备完整数据，全部成功后才由存储层切换 alias。
             total_chunks = 0
             total_text_bytes = 0
 

@@ -5,10 +5,10 @@ LangGraph Studio 本地调试步骤见 [LangGraph Studio 调试说明](../doc/la
 在 `ai-service` 目录启动本地 Studio Agent Server：
 
 ```powershell
-$env:PYTHONUTF8 = "1"
-$env:PYTHONIOENCODING = "utf-8"
 uv run --with "langgraph-cli[inmem]" python -m ai_service.studio_server
 ```
+
+请从 `ai-service` 目录通过上述 `uv run` 命令启动，不要直接运行全局 Conda 的 `langgraph dev`。Windows 默认代码页可能是 GBK，而 LangGraph CLI 子进程会按默认编码读取 UTF-8 文件；启动器会在创建子进程前启用 Python UTF-8 模式。
 
 Studio 的 **Configure connection** 填写 Base URL `http://127.0.0.1:2024`，
 自定义 Header 留空，连接后选择 `yu_ai_generation`。启动器从 `.env` 读取凭据；
@@ -133,7 +133,8 @@ START
   -> END
 ```
 
-Vue 分支允许模型请求 Spring 工具，但工具调用次数受 `AI_SERVICE_VUE_MAX_TOOL_CALLS` 限制，默认 40 次，包含生成与修复总预算。源码必须通过 `file_write`/`file_modify` 写入，模型 `content` 只用于简短状态确认，避免重复回传源码触发输出长度上限。每次工具调用都带有确定性的 `toolCallId`，供 Spring 执行幂等控制。若构建发现项目目录或 `package.json` 缺失，工作流直接以稳定构建错误结束，不再要求模型重复生成。
+Vue 分支允许模型请求 Spring 工具，但工具调用次数受 `AI_SERVICE_VUE_MAX_TOOL_CALLS` 限制，默认 40 次，覆盖生成与修复的总调用次数。若本轮工具请求超过剩余预算，返回 `VUE_TOOL_CALL_LIMIT_EXCEEDED`，不再静默丢弃剩余文件写入请求并构建半成品。源码必须通过 `file_write`/`file_modify` 写入，模型 `content` 只用于简短状态确认，避免重复回传源码触发输出长度上限。每次工具调用都带有确定性的 `toolCallId`，供 Spring 执行幂等控制。若构建发现项目目录或 `package.json` 缺失，工作流直接以稳定构建错误结束，不再要求模型重复生成。
+
 
 Vue 文件生成先规划 filePlan，再按每轮最多两个工具调用写入；截断或超批次响应整轮丢弃，最多重试两次，重试后每轮一个工具。模型上下文包含剩余预算、已写入和待生成文件；已声明清单尚未写完时拒绝构建。生成与修复都遵循该约束，单文件过大需拆分组件。阶段进度复用现有 SSE 文本消息；诊断日志只记录请求 ID、阶段、结束原因、输出 token 数和耗时，不记录源码与凭据。PostgreSQL saver 使用事务回退代替显式 pipeline；真实 PostgreSQL 生命周期、图失败及取消后连接复用已通过独立测试；真实模型与完整 SSE 仍需单独验收。
 
@@ -167,7 +168,7 @@ Python 工作流支持可选 LangSmith 旁路追踪。开关和配置直接来�
 LANGSMITH_TRACING=false
 LANGSMITH_ENDPOINT=https://api.smith.langchain.com
 LANGSMITH_API_KEY=replace-with-langsmith-key
-LANGSMITH_PROJECT=yu-ai-code-mother
+LANGSMITH_PROJECT=Yuki
 ```
 
 默认关闭；设置 `LANGSMITH_TRACING=true` 且提供完整凭据后才创建客户端。追踪只发送请求标识、应用标识、生成类型、节点、状态、错误码和有限计数。Prompt、对话、源码、工具参数和结果、模型原始响应及凭据由代码层过滤，LangSmith 不可用时生成流程继续按原有终态运行。关闭开关后无需改动 Spring、Vue 或 checkpoint。

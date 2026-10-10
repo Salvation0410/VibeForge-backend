@@ -118,6 +118,7 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
     @Override
     @Transactional
     public CustomerServiceKnowledgeDocumentVO reindex(long id, long userId) {
+        // 递增 ETL 版本，使迟到的旧 worker 结果无法覆盖本次重新索引任务。
         CustomerServiceKnowledgeDocument document = requireDocumentForUpdate(id);
         ensureNotDeleted(document);
         document.setEtlVersion(document.getEtlVersion() + 1);
@@ -132,6 +133,7 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
     @Override
     @Transactional
     public CustomerServiceKnowledgeDocumentVO disable(long id, long userId) {
+        // 先更新业务状态，再异步删除向量；删除失败时可通过任务历史重试。
         CustomerServiceKnowledgeDocument document = requireDocumentForUpdate(id);
         ensureNotDeleted(document);
         document.setEtlVersion(document.getEtlVersion() + 1);
@@ -160,6 +162,7 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
     @Override
     @Transactional
     public boolean delete(long id, long userId) {
+        // 数据库软删除与向量删除共用同一 ETL 版本，防止迟到任务重新激活文档。
         CustomerServiceKnowledgeDocument document = requireDocumentForUpdate(id);
         ensureNotDeleted(document);
         document.setEtlVersion(document.getEtlVersion() + 1);
@@ -199,6 +202,7 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
     }
 
     private void enqueue(CustomerServiceKnowledgeDocument document, String operation, long targetVersion) {
+        // outbox 与文档状态在同一事务中写入，由 worker 负责跨服务调用和重试。
         CustomerServiceKnowledgeEtlOutbox task = new CustomerServiceKnowledgeEtlOutbox();
         task.setDocumentId(document.getId());
         task.setDocumentVersion(targetVersion);

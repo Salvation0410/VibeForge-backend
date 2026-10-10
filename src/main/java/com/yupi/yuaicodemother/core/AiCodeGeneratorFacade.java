@@ -138,10 +138,10 @@ public class AiCodeGeneratorFacade {
      */
     private Flux<String> processTokenStream(TokenStream tokenStream, Long appId, String requestId) {
         return Flux.create(sink -> {
-            //监听tokenStream
+            // 订阅模型流，将文本片段、工具请求和工具结果转换为统一的前端消息。
             tokenStream.onPartialResponse((String partialResponse) -> {
                         AiResponseMessage aiResponseMessage = new AiResponseMessage(partialResponse);
-                        // .next方法 给新的流写数据
+                        // next 将新消息写入当前响应流。
                         sink.next(JSONUtil.toJsonStr(aiResponseMessage));
                     })
                     .onPartialToolExecutionRequest((index, toolExecutionRequest) -> {
@@ -157,8 +157,8 @@ public class AiCodeGeneratorFacade {
                             sink.error(new java.util.concurrent.CancellationException("生成请求已取消"));
                             return;
                         }
-                        // 执行 Vue 项目构建（同步执行，确保预览时项目已就绪）
-                        // TODO 可以考虑使用sse 向前端推送构建进度
+                        // 同步构建 Vue 项目，确保下游刷新预览时文件已经就绪。
+                        // 后续如需展示构建进度，应通过独立 SSE 事件扩展协议。
                         String projectPath = AppConstant.CODE_OUTPUT_ROOT_DIR + File.separator + "vue_project_" + appId;
                         vueProjectBuilder.buildProject(projectPath);
                         sink.complete();
@@ -184,11 +184,13 @@ public class AiCodeGeneratorFacade {
             tokenStream.onPartialResponse(chunk -> { content.append(chunk); sink.next(chunk); })
                     .onCompleteResponse(response -> {
                         try {
+                            // 只有模型正常结束、产物校验通过并完成发布后，才向下游发送完成信号。
                             if (cancelledRequests.remove(requestId)) {
                                 throw new java.util.concurrent.CancellationException("生成请求已取消");
                             }
                             ensureComplete(response.finishReason());
                             if (codeGenType == CodeGenTypeEnum.MULTI_FILE) {
+                                // 多文件发布由 Spring 统一解析和版本化，失败时保留上一活动版本。
                                 artifactPublicationService.publishMultiFile(appId, requestId, content.toString(),
                                         "legacy", response.finishReason() == null ? "" : response.finishReason().name());
                             } else {

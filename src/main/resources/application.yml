@@ -69,7 +69,7 @@ ai:
     enabled: ${AI_HTML_SMOKE_TEST_ENABLED:true}
     required: ${AI_HTML_SMOKE_TEST_REQUIRED:true}
     max-rewrite-source-chars: ${AI_HTML_MAX_REWRITE_SOURCE_CHARS:24000}
-  engine: ${AI_ENGINE:legacy}
+  engine: ${AI_ENGINE:langgraph}
   service-url: ${AI_SERVICE_URL:http://localhost:8000}
   token: ${AI_SERVICE_INTERNAL_BEARER_TOKEN:}
   generation-stream-idle-timeout-seconds: ${AI_GENERATION_STREAM_IDLE_TIMEOUT_SECONDS:600}
