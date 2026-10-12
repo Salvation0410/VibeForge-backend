@@ -1,0 +1,200 @@
+{
+  "schemaVersion": "product-knowledge/v1",
+  "version": "2026-10-12",
+  "scope": "single-physical-library",
+  "reviewStatus": "code-reviewed-human-review-pending",
+  "documents": [
+    {
+      "id": "01-platform-account",
+      "title": "平台使用说明与账号基础",
+      "path": "documents/01-platform-account.md",
+      "category": "platform-account",
+      "subcategory": "platform-account",
+      "contentStatus": "current",
+      "sectionStatusLabels": true,
+      "sourceType": "actual-product",
+      "audience": "user",
+      "version": 1,
+      "lastReviewed": "2026-10-12",
+      "sources": [
+        "frontend:src/pages/RegisterView.vue",
+        "frontend:src/pages/LoginView.vue",
+        "frontend:src/pages/ProfileView.vue",
+        "backend:src/main/java/com/yupi/yuaicodemother/controller/CustomerServiceController.java"
+      ]
+    },
+    {
+      "id": "02-app-generation",
+      "title": "应用生成与增量修改",
+      "path": "documents/02-app-generation.md",
+      "category": "app-generation",
+      "subcategory": "app-generation",
+      "contentStatus": "current",
+      "sectionStatusLabels": true,
+      "sourceType": "actual-product",
+      "audience": "user",
+      "version": 1,
+      "lastReviewed": "2026-10-12",
+      "sources": [
+        "backend:src/main/java/com/yupi/yuaicodemother/service/impl/AppServiceImpl.java",
+        "frontend:src/pages/AppChatView.vue"
+      ]
+    },
+    {
+      "id": "03-generation-requirements",
+      "title": "应用需求编写规范",
+      "path": "documents/03-generation-requirements.md",
+      "category": "app-generation",
+      "subcategory": "generation-requirements",
+      "contentStatus": "recommended",
+      "sectionStatusLabels": true,
+      "sourceType": "usage-recommendation",
+      "audience": "user",
+      "version": 1,
+      "lastReviewed": "2026-10-12",
+      "sources": [
+        "frontend:src/pages/DocsView.vue",
+        "backend:src/main/java/com/yupi/yuaicodemother/service/impl/AppServiceImpl.java"
+      ]
+    },
+    {
+      "id": "04-generation-types",
+      "title": "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南",
+      "path": "documents/04-generation-types.md",
+      "category": "app-generation",
+      "subcategory": "generation-types",
+      "contentStatus": "current",
+      "sectionStatusLabels": true,
+      "sourceType": "actual-product",
+      "audience": "user",
+      "version": 1,
+      "lastReviewed": "2026-10-12",
+      "sources": [
+        "backend:src/main/java/com/yupi/yuaicodemother/enums/CodeGenTypeEnum.java",
+        "backend:ai-service/src/ai_service/orchestration/workflow.py"
+      ]
+    },
+    {
+      "id": "05-images-preservation",
+      "title": "图片、素材与已有功能保留",
+      "path": "documents/05-images-preservation.md",
+      "category": "app-generation",
+      "subcategory": "images-preservation",
+      "contentStatus": "current",
+      "sectionStatusLabels": true,
+      "sourceType": "actual-product",
+      "audience": "user",
+      "version": 1,
+      "lastReviewed": "2026-10-12",
+      "sources": [
+        "backend:ai-service/src/ai_service/prompts/generation.py",
+        "frontend:src/utils/optimizePrompt.ts"
+      ]
+    },
+    {
+      "id": "06-preview-history",
+      "title": "预览、停止与聊天历史",
+      "path": "documents/06-preview-history.md",
+      "category": "preview-history",
+      "subcategory": "preview-history",
+      "contentStatus": "current",
+      "sectionStatusLabels": true,
+      "sourceType": "actual-product",
+      "audience": "user",
+      "version": 1,
+      "lastReviewed": "2026-10-12",
+      "sources": [
+        "frontend:src/utils/generationStreamProgress.ts",
+        "frontend:src/utils/previewRefreshCoordinator.ts",
+        "frontend:src/pages/AppChatView.vue"
+      ]
+    },
+    {
+      "id": "07-deployment-download",
+      "title": "部署、访问与代码下载",
+      "path": "documents/07-deployment-download.md",
+      "category": "deployment-download",
+      "subcategory": "deployment-download",
+      "contentStatus": "current",
+      "sectionStatusLabels": true,
+      "sourceType": "actual-product",
+      "audience": "user",
+      "version": 1,
+      "lastReviewed": "2026-10-12",
+      "sources": [
+        "backend:src/main/java/com/yupi/yuaicodemother/service/impl/AppServiceImpl.java",
+        "backend:src/main/java/com/yupi/yuaicodemother/controller/AppController.java",
+        "backend:src/main/java/com/yupi/yuaicodemother/service/impl/ProjectDownloadServiceImpl.java"
+      ]
+    },
+    {
+      "id": "08-community-features",
+      "title": "社区浏览、发帖与互动",
+      "path": "documents/08-community-features.md",
+      "category": "community",
+      "subcategory": "community-features",
+      "contentStatus": "current",
+      "sectionStatusLabels": true,
+      "sourceType": "actual-product",
+      "audience": "user",
+      "version": 1,
+      "lastReviewed": "2026-10-12",
+      "sources": [
+        "backend:src/main/java/com/yupi/yuaicodemother/service/impl/CommunityPostServiceImpl.java",
+        "backend:src/main/java/com/yupi/yuaicodemother/service/impl/CommunityCommentServiceImpl.java"
+      ]
+    },
+    {
+      "id": "09-community-guidelines",
+      "title": "社区发帖与互动规范",
+      "path": "documents/09-community-guidelines.md",
+      "category": "community",
+      "subcategory": "community-guidelines",
+      "contentStatus": "recommended",
+      "sectionStatusLabels": true,
+      "sourceType": "usage-recommendation",
+      "audience": "user",
+      "version": 1,
+      "lastReviewed": "2026-10-12",
+      "sources": [
+        "frontend:src/views/community/PostCreateView.vue",
+        "backend:src/main/java/com/yupi/yuaicodemother/controller/CommunityPostController.java"
+      ]
+    },
+    {
+      "id": "10-admin-knowledge",
+      "title": "管理后台与知识库维护",
+      "path": "documents/10-admin-knowledge.md",
+      "category": "admin-knowledge",
+      "subcategory": "admin-knowledge",
+      "contentStatus": "current",
+      "sectionStatusLabels": true,
+      "sourceType": "actual-product",
+      "audience": "admin",
+      "version": 1,
+      "lastReviewed": "2026-10-12",
+      "sources": [
+        "backend:src/main/java/com/yupi/yuaicodemother/controller/CustomerServiceKnowledgeAdminController.java",
+        "backend:src/main/java/com/yupi/yuaicodemother/mapper/CustomerServiceKnowledgeDocumentMapper.java",
+        "backend:ai-service/README.md"
+      ]
+    },
+    {
+      "id": "11-faq",
+      "title": "功能边界与常见问题",
+      "path": "documents/11-faq.md",
+      "category": "platform-account",
+      "subcategory": "faq",
+      "contentStatus": "current",
+      "sectionStatusLabels": true,
+      "sourceType": "actual-product",
+      "audience": "user",
+      "version": 1,
+      "lastReviewed": "2026-10-12",
+      "sources": [
+        "backend:ai-service/src/ai_service/orchestration/customer_service_rag.py",
+        "backend:docs/superpowers/specs/2026-09-30-customer-service-rag-design.md"
+      ]
+    }
+  ]
+}

@@ -13,6 +13,10 @@ sql/*
 !doc/
 doc/*
 !doc/knowledge-pycharm-debug.md
+!doc/knowledge/
+doc/knowledge/*
+!doc/knowledge/product/
+!doc/knowledge/product/**
 .codex_tmp/
 .understand-anything/
 logs/
