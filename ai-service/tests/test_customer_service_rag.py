@@ -119,6 +119,65 @@ def service(*, chunks=None, embeddings=None, store=None, reranker=None, model=No
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('case,reason', [
+    ('inactive', 'FILTERED_EMPTY'), ('threshold', 'THRESHOLD_EMPTY'),
+    ('reranker_threshold', 'RERANK_UNAVAILABLE_WITH_THRESHOLD'),
+    ('char_empty', 'CHAR_CONTEXT_EMPTY'), ('prompt_budget', 'PROMPT_BUDGET_EXHAUSTED'),
+    ('refusal', 'MODEL_REFUSED'), ('call_failure', 'MODEL_CALL_FAILED'),
+    ('parse_failure', 'MODEL_PARSE_FAILED'), ('invalid_citation', 'CITATION_INVALID'),
+])
+async def test_diagnostics_terminal_reasons_preserve_existing_response(case, reason):
+    from ai_service.models.openai_compatible import CustomerServiceModelOutputError
+    from ai_service.orchestration.customer_service_trace import CustomerServiceRagTrace
+
+    options = {'chunks': [chunk('c1', 'doc1')]}
+    question = 'question'
+    if case == 'inactive':
+        options['chunks'] = [chunk('c1', 'doc1', active=False)]
+    elif case == 'threshold':
+        options['rag_min_rerank_score'] = 0.99
+    elif case == 'reranker_threshold':
+        options.update(rag_min_rerank_score=0.99, reranker=FakeReranker(error=RuntimeError('private')))
+    elif case == 'char_empty':
+        options['chunks'] = [chunk('c1', 'doc1', content='\x00  \n')]
+    elif case == 'prompt_budget':
+        options['rag_prompt_max_bytes'] = 1024
+        question = '中' * 2000
+    elif case == 'refusal':
+        options['model'] = FakeAnswerModel(CustomerServiceModelAnswer(False, '', ()))
+    elif case == 'call_failure':
+        options['model'] = FakeAnswerModel(error=RuntimeError('private'))
+    elif case == 'parse_failure':
+        options['model'] = FakeAnswerModel(error=CustomerServiceModelOutputError())
+    elif case == 'invalid_citation':
+        options['model'] = FakeAnswerModel(CustomerServiceModelAnswer(True, 'private', ('unknown',)))
+    trace = CustomerServiceRagTrace('eval-reason', settings())
+    actual = await service(**options).answer(question, trace=trace)
+    expected = await service(**options).answer(question)
+    assert actual == expected
+    assert trace.snapshot()['terminal']['reasonCode'] == reason
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_filter_reasons_and_disabled_reranker_source():
+    from ai_service.orchestration.customer_service_trace import CustomerServiceRagTrace
+
+    trace = CustomerServiceRagTrace('eval-filter', settings())
+    await service(chunks=[
+        chunk('inactive', 'a', active=False), chunk('stale', 'b', version=1),
+        chunk('invalid', 'c', score=float('nan')), chunk('c1', 'doc1'),
+        chunk('c1', 'doc2'), chunk('c2', 'doc1'),
+    ], rag_reranker_provider='disabled', reranker=FakeReranker(error=RuntimeError())).answer('q', trace=trace)
+    data = trace.snapshot()
+    assert {item.get('dropReason') for item in data['filtered']} >= {
+        'inactive', 'stale_version', 'invalid_metadata', 'duplicate_chunk', 'duplicate_document',
+    }
+    assert data['reranked'][0]['scoreSource'] == 'retrieval_fallback'
+    assert data['terminal']['degraded'] is False
+    json.dumps(data, allow_nan=False)
+
+
+@pytest.mark.asyncio
 async def test_retrieves_top_eight_filters_stale_inactive_and_deduplicates_documents():
     hits = [
         chunk("inactive", "inactive-doc", active=False),

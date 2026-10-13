@@ -578,6 +578,26 @@ uv run pytest
 uv lock --check
 ```
 
+### 同请求客服 RAG 诊断
+
+`AI_SERVICE_RAG_DIAGNOSTICS_ENABLED=false` 和 `AI_SERVICE_RAG_DIAGNOSTICS_REQUEST_PREFIX=`
+是默认值。只有显式开启诊断且请求 `requestId` 匹配非空前缀时，才创建请求局部 trace；
+关闭时保留原回答调用形式，候选筛选、预算与回答策略不变。不维护全局请求缓存。
+
+专用 Python logger `customer_service.rag.trace` 默认级别为 INFO、`propagate=False`，
+不写入通用日志。运维可通过标准 `logging.config.dictConfig` 配置该 logger 的
+`FileHandler` 和 `%(message)s` formatter，收集每行一个 JSON；无需额外生产路径配置。
+handler 写入失败不会改变回答。HTTP 超时、断连和外部取消会取消并排空子任务后输出一次日志，
+分别标记 `TIMEOUT`、`CLIENT_DISCONNECTED`、`CANCELLED`；取消异常继续向上传递。
+
+结构版本为 `schemaVersion=customer-service-rag-trace/v1`，包含最长 128 字符的 `requestId`、
+UUID `traceId`、非敏感配置指纹、阶段耗时以及检索、过滤、重排、阈值、选择和两层预算元数据。
+每阶段最多 100 项，仅保存文档/分块身份、版本、排名、有限分数、删除原因和长度；
+预算阶段记录裁剪前后长度，模型与引用校验保留未执行的 null 状态。
+缺失阶段耗时表示该阶段未执行。终态记录 answered/refused/service_error/cancelled、
+稳定原因码和 degraded。日志不会保存问题、答案、正文、向量、异常详情或令牌，
+JSON 转义恶意请求标识中的换行。身份 ID 属于诊断数据，采集文件仍应使用运维访问控制。
+
 ### 离线客服评估
 
 `tests/fixtures/customer_service_eval.json` 使用 `customer-service-rag-eval/v1` schema 和独立 `datasetVersion`，内容全部是 synthetic/non-sensitive 样例，覆盖中文同义改写、错别字、稳定错误码、无答案和 prompt injection。无答案与恶意指令条目显式设置 `expectedAnswerable=false`。

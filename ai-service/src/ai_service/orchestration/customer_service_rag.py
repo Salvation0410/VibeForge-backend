@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import math
+import asyncio
 import re
 import unicodedata
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -12,6 +14,8 @@ from ai_service.models.base import CustomerServiceContext, GenerationModel
 from ai_service.models.embeddings import EmbeddingProvider
 from ai_service.models.reranker import RerankedChunk, RerankerProvider
 from ai_service.prompts.customer_service import fit_customer_service_contexts
+from ai_service.models.openai_compatible import CustomerServiceModelOutputError
+from ai_service.orchestration.customer_service_trace import CustomerServiceRagTrace
 
 
 MAX_QUESTION_CHARS = 4_000
@@ -25,7 +29,7 @@ SYSTEM_FALLBACK_TEXT = "系统暂时无法生成可靠回答，请稍后重试�
 
 
 class CustomerServiceRagError(RuntimeError):
-    """Stable RAG error that never carries provider details or user content."""
+    """稳定错误码，禁止携带供应商详情或用户内容。"""
 
     def __init__(self, code: str):
         self.code = code
@@ -51,7 +55,7 @@ class CustomerServiceAnswer:
 
 
 class CustomerServiceRagService:
-    """Single-turn retrieval and grounded-answer orchestration without persistence."""
+    """无持久化的单轮检索与有据回答编排。"""
 
     def __init__(
         self,
@@ -73,7 +77,7 @@ class CustomerServiceRagService:
         self._model = model
 
     def health_ready(self) -> bool:
-        """Validate the local answer pipeline shape without provider calls."""
+        """仅检查本地回答链路形状，不调用供应商。"""
 
         return all((
             callable(getattr(self._embeddings, "embed_query", None)),
@@ -82,14 +86,37 @@ class CustomerServiceRagService:
             callable(getattr(self._model, "answer_customer_service", None)),
         ))
 
-    async def answer(self, question: str) -> CustomerServiceAnswer:
+    async def answer(
+        self, question: str, *, trace: CustomerServiceRagTrace | None = None,
+    ) -> CustomerServiceAnswer:
+        try:
+            return await self._answer(question, trace=trace)
+        except asyncio.CancelledError:
+            if trace:
+                trace.finish('cancelled', 'CANCELLED')
+            raise
+
+    async def _answer(
+        self, question: str, *, trace: CustomerServiceRagTrace | None,
+    ) -> CustomerServiceAnswer:
+        def stage(name):
+            return trace.stage(name) if trace else nullcontext()
+
+        def refused(reason, degraded=False):
+            if trace:
+                trace.finish('refused', reason, degraded=degraded)
+            return _no_answer(degraded=degraded)
+
         normalized_question = question.strip() if isinstance(question, str) else ""
         # 依次执行向量检索、去重、重排、上下文裁剪和引用校验，防止越界内容进入回答。
         if not normalized_question or len(normalized_question) > MAX_QUESTION_CHARS:
+            if trace:
+                trace.finish('service_error', 'CUSTOMER_SERVICE_INVALID_REQUEST')
             raise CustomerServiceRagError("CUSTOMER_SERVICE_INVALID_REQUEST")
 
         try:
-            vector = await self._embeddings.embed_query(normalized_question)
+            with stage('embedding'):
+                vector = await self._embeddings.embed_query(normalized_question)
             if (
                 not isinstance(vector, list)
                 or len(vector) != self._embedding_dimension
@@ -100,28 +127,38 @@ class CustomerServiceRagService:
             ):
                 raise ValueError
         except Exception:
+            if trace:
+                trace.finish('service_error', 'CUSTOMER_SERVICE_EMBEDDING_UNAVAILABLE')
             raise CustomerServiceRagError(
                 "CUSTOMER_SERVICE_EMBEDDING_UNAVAILABLE"
             ) from None
         try:
-            retrieved = await self._store.search(
-                [float(value) for value in vector], self._retrieval_top_k,
-            )
+            with stage('retrieval'):
+                retrieved = await self._store.search(
+                    [float(value) for value in vector], self._retrieval_top_k,
+                )
         except Exception:
+            if trace:
+                trace.finish('service_error', 'CUSTOMER_SERVICE_VECTOR_STORE_UNAVAILABLE')
             raise CustomerServiceRagError(
                 "CUSTOMER_SERVICE_VECTOR_STORE_UNAVAILABLE"
             ) from None
 
-        candidates = _filter_and_dedupe(retrieved)
+        if trace:
+            trace.record('retrieved', retrieved if isinstance(retrieved, Sequence) and not isinstance(retrieved, (str, bytes)) else [])
+        with stage('filtering'):
+            candidates = _filter_and_dedupe(retrieved, trace=trace)
         if not candidates:
-            return _no_answer(degraded=False)
+            return refused('FILTERED_EMPTY' if retrieved else 'RAW_RETRIEVAL_EMPTY')
 
         degraded = False
+        score_source = 'retrieval_fallback' if self._reranker_disabled else 'reranker'
         try:
-            ranked = await self._reranker.rerank(
-                normalized_question, candidates, top_n=self._final_top_k,
-            )
-            ranked = _validate_ranked(ranked, candidates, self._final_top_k)
+            with stage('reranking'):
+                ranked = await self._reranker.rerank(
+                    normalized_question, candidates, top_n=self._final_top_k,
+                )
+                ranked = _validate_ranked(ranked, candidates, self._final_top_k)
         except Exception:
             ranked = [
                 RerankedChunk(item, float(item.score))
@@ -129,25 +166,50 @@ class CustomerServiceRagService:
             ]
             # disabled 是明确的运维模式，不属于运行时降级故障。
             degraded = not self._reranker_disabled
+            score_source = 'retrieval_fallback'
 
+        if trace:
+            trace.set_degraded(degraded)
+            trace.record('reranked', ranked, score_source=score_source)
         if not ranked:
-            return _no_answer(degraded=degraded)
+            return refused('RERANK_EMPTY', degraded)
+        before_threshold = ranked
         if self._min_rerank_score is not None:
             # 降级时不能把重排阈值与 Milvus 原始分数直接比较。
             if degraded:
-                return _no_answer(degraded=True)
-            ranked = [item for item in ranked if item.score >= self._min_rerank_score]
+                if trace:
+                    with stage('thresholding'):
+                        trace.record('thresholded', ranked, score_source=score_source, kept_ids=set(), drop_reason='rerank_unavailable_with_threshold')
+                return refused('RERANK_UNAVAILABLE_WITH_THRESHOLD', True)
+            with stage('thresholding'):
+                ranked = [item for item in ranked if item.score >= self._min_rerank_score]
+            if trace:
+                trace.record('thresholded', before_threshold, score_source=score_source, kept_ids={item.chunk.chunk_id for item in ranked}, drop_reason='below_threshold')
             if not ranked:
-                return _no_answer(degraded=False)
+                return refused('THRESHOLD_EMPTY')
 
-        contexts, chunks_by_id = _bounded_contexts(ranked)
+        if trace:
+            with stage('thresholding'):
+                trace.record('thresholded', before_threshold, score_source=score_source, kept_ids={item.chunk.chunk_id for item in ranked}, drop_reason='below_threshold')
+            with stage('selection'):
+                trace.record('selected', ranked, score_source=score_source, kept_ids={item.chunk.chunk_id for item in ranked[:MAX_CONTEXTS]}, drop_reason='top_k')
+        before_character = [CustomerServiceContext(item.chunk.chunk_id, item.chunk.content) for item in ranked]
+        all_chunks = {item.chunk.chunk_id: item.chunk for item in ranked}
+        with stage('characterBudget'):
+            contexts, chunks_by_id = _bounded_contexts(ranked)
+        if trace:
+            trace.contexts('characterBudget', before_character, contexts, all_chunks)
         if not contexts:
-            return _no_answer(degraded=degraded)
-        fitted = fit_customer_service_contexts(
-            normalized_question, contexts, max_bytes=self._prompt_max_bytes,
-        )
+            return refused('CHAR_CONTEXT_EMPTY', degraded)
+        with stage('byteBudget'):
+            fitted = fit_customer_service_contexts(
+                normalized_question, contexts, max_bytes=self._prompt_max_bytes,
+            )
         if fitted is None:
-            return _no_answer(degraded=degraded)
+            if trace:
+                trace.contexts('byteBudget', contexts, [], chunks_by_id)
+            return refused('PROMPT_BUDGET_EXHAUSTED', degraded)
+        before_byte = contexts
         contexts = [
             CustomerServiceContext(chunk_id, content)
             for chunk_id, content in fitted if content
@@ -155,13 +217,22 @@ class CustomerServiceRagService:
         chunks_by_id = {
             item.chunk_id: chunks_by_id[item.chunk_id] for item in contexts
         }
+        if trace:
+            trace.contexts('byteBudget', before_byte, contexts, all_chunks)
         if not contexts:
-            return _no_answer(degraded=degraded)
+            return refused('BYTE_CONTEXT_EMPTY', degraded)
+        reason = 'MODEL_CALL_FAILED'
         try:
-            model_answer = await self._model.answer_customer_service(
-                normalized_question, contexts,
-            )
+            if trace:
+                trace.model_called()
+            with stage('model'):
+                model_answer = await self._model.answer_customer_service(
+                    normalized_question, contexts,
+                )
+            if trace:
+                trace.model_answered(model_answer.answered)
             citations = model_answer.cited_chunk_ids
+            reason = 'CITATION_INVALID'
             if model_answer.answered:
                 if (
                     not model_answer.answer.strip()
@@ -170,8 +241,13 @@ class CustomerServiceRagService:
                     or len(citations) != len(set(citations))
                     or any(chunk_id not in chunks_by_id for chunk_id in citations)
                 ):
+                    if trace:
+                        trace.citations(False, citations)
                     raise ValueError
                 sources = tuple(_source(chunks_by_id[chunk_id]) for chunk_id in citations)
+                if trace:
+                    trace.citations(True, citations)
+                    trace.finish('answered', 'ANSWERED', degraded=degraded)
                 return CustomerServiceAnswer(
                     answered=True,
                     answer=model_answer.answer[:4_000],
@@ -179,17 +255,24 @@ class CustomerServiceRagService:
                     degraded=degraded,
                 )
             if model_answer.answer != "" or citations:
+                if trace:
+                    trace.citations(False, citations)
                 raise ValueError
-            return _no_answer(degraded=degraded)
-        except Exception:
+            return refused('MODEL_REFUSED', degraded)
+        except Exception as error:
+            if trace:
+                trace.finish('service_error', 'MODEL_PARSE_FAILED' if isinstance(error, CustomerServiceModelOutputError) else reason, degraded=degraded)
             return CustomerServiceAnswer(False, SYSTEM_FALLBACK_TEXT, (), degraded)
 
 
-def _filter_and_dedupe(chunks: object) -> list[RetrievedChunk]:
+def _filter_and_dedupe(
+    chunks: object, *, trace: CustomerServiceRagTrace | None = None,
+) -> list[RetrievedChunk]:
     if not isinstance(chunks, Sequence) or isinstance(chunks, (str, bytes)):
         return []
-    valid: list[RetrievedChunk] = []
-    for item in chunks:
+    valid: list[tuple[int, RetrievedChunk]] = []
+    records: list[dict] = []
+    for rank, item in enumerate(chunks, 1):
         try:
             score_is_finite = math.isfinite(float(item.score))
         except (AttributeError, TypeError, ValueError, OverflowError):
@@ -205,21 +288,35 @@ def _filter_and_dedupe(chunks: object) -> list[RetrievedChunk]:
             or not item.file_name
             or not score_is_finite
         ):
+            if trace and len(records) < 100:
+                reason = 'invalid_metadata'
+                if isinstance(item, RetrievedChunk):
+                    if not item.is_active:
+                        reason = 'inactive'
+                    elif item.current_document_version != item.document_version:
+                        reason = 'stale_version'
+                records.append(trace.metadata(item, rank, score=getattr(item, 'score', None), drop_reason=reason))
             continue
-        valid.append(item)
+        valid.append((rank, item))
 
     result: list[RetrievedChunk] = []
     chunk_ids: set[str] = set()
     document_ids: set[str] = set()
-    for item in valid:
+    for rank, item in valid:
         if (
             item.chunk_id in chunk_ids
             or item.document_id in document_ids
         ):
+            if trace and len(records) < 100:
+                records.append(trace.metadata(item, rank, score=item.score, drop_reason='duplicate_chunk' if item.chunk_id in chunk_ids else 'duplicate_document'))
             continue
         chunk_ids.add(item.chunk_id)
         document_ids.add(item.document_id)
         result.append(item)
+        if trace and len(records) < 100:
+            records.append(trace.metadata(item, rank, score=item.score))
+    if trace:
+        trace.filter_records(sorted(records, key=lambda item: item['rank']))
     return result
 
 

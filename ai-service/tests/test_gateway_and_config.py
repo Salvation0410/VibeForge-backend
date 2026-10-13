@@ -5,6 +5,21 @@ import pytest
 from pydantic import ValidationError
 
 from ai_service.config import Settings
+
+
+def test_rag_diagnostics_defaults_and_environment(monkeypatch):
+    base = dict(internal_bearer_token='token', spring_gateway_base_url='http://spring.test',
+                spring_gateway_bearer_token='token', customer_service_rag_enabled=False)
+    monkeypatch.delenv('AI_SERVICE_RAG_DIAGNOSTICS_ENABLED', raising=False)
+    monkeypatch.delenv('AI_SERVICE_RAG_DIAGNOSTICS_REQUEST_PREFIX', raising=False)
+    config = Settings(_env_file=None, **base)
+    assert config.rag_diagnostics_enabled is False
+    assert config.rag_diagnostics_request_prefix == ''
+    monkeypatch.setenv('AI_SERVICE_RAG_DIAGNOSTICS_ENABLED', 'true')
+    monkeypatch.setenv('AI_SERVICE_RAG_DIAGNOSTICS_REQUEST_PREFIX', 'eval-')
+    config = Settings(_env_file=None, **base)
+    assert config.rag_diagnostics_enabled is True
+    assert config.rag_diagnostics_request_prefix == 'eval-'
 from ai_service.infrastructure.spring_tools import (
     InvalidSpringToolRequest,
     SpringToolError,
