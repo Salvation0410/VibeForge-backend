@@ -613,6 +613,22 @@ JSON 转义恶意请求标识中的换行。身份 ID 属于诊断数据，采�
 
 默认自动化只运行 fake/injected provider。真实 OSS、CloseAI、Docker Milvus、GPU Reranker、浏览器和端到端评估仍为 pending，未执行时不得写为通过。
 
+产品知识评测器 `ai_service.orchestration.product_knowledge_evaluation` 默认只校验本地语料。
+`--live` 使用本机 FastAPI lifespan 初始化模型、Embedding、Milvus 和重排器；`--http-base-url`
+模式则只用现有 `AI_SERVICE_INTERNAL_BEARER_TOKEN` 调用已运行的客服回答 HTTP 接口，不创建应用、
+不加载本机 GPU owner，也不额外发送检索请求。HTTP 模式需同时提供 `--run-id`、`--document-map`、
+`--trace-file` 和新的 `--output` 路径；输出已存在时拒绝运行。`--case-ids` 可选择条目子集，
+此类报告标记 `diagnosticExperiment=true`，不能当作 90 题基线。
+
+每题 requestId 固定为 `<run-id>:<case-id>`，最多 128 字符；评测期间服务会向 JSONL trace 追加记录，评测器按 requestId 关联本轮新增的唯一记录。运行前需在服务进程设置 `AI_SERVICE_RAG_DIAGNOSTICS_ENABLED=true`、`AI_SERVICE_RAG_DIAGNOSTICS_REQUEST_PREFIX=<run-id>:`，并用 `customer_service.rag.trace` logger 的 `FileHandler` 按前文配置收集 JSONL。
+报告检查 trace schema、配置指纹一致性、阶段完整性和映射文档版本。每个阶段的 rank 必须严格递增，允许过滤后有排名空缺；过滤、阈值、选择和预算阶段的 kept 必须为布尔值，预算留存状态必须与非负裁剪长度一致。缺失、重复或不匹配时，
+相关聚合指标留空并以稳定诊断码列出。成功响应和超时后均最多等待 0.5 秒收集 trace，不重试 HTTP；JSONL 未写完的尾行留待下次读取。模型、引用必需字段、非负有限阶段耗时和唯一排名也必须符合 trace 契约。
+`stageMetrics` 分开报告原始检索、真实重排、阈值后、文档选择后和最终上下文文档排名。原始检索报告 `Recall@8`、`MRR@3`、`NDCG@3`；重排及后续候选阶段报告 `MRR@3`、
+`NDCG@3` 和 `Coverage@3`（answerable 问题中前三名至少命中一个目标文档的比例），不把最多 3 项的
+重排结果称为 `Recall@8`。reranker disabled 或回答降级时不产生真实重排和阈值指标；HTTP 错误、
+服务 fallback 或诊断错误也不会被计入正常排名成绩。独立 `answerMetrics` 保留可回答题实际回答率、无答案题安全拒答率、旧严格引用通过率（来源文档 ID 必须唯一）、HTTP 延迟平均/P95、错误及降级；故障保留在比例分母中，不能算为正确拒答。HTTP 延迟不包含等 trace 落盘的时间。
+评测请求会触发真实回答模型调用，需使用专用新 run ID、trace 文件和报告文件。HTTP 报告保存完整 answer 和响应 sources 供 90 题人工事实复核，仅允许输出到仓库已忽略的 `tmp/`；CLI 终端只输出无逐题正文的聚合摘要。评测器不自动配置或检查 ACL，`tmp/` 的 Git 忽略规则也不提供访问隔离；运行者须在运行前手动配置并核对目录 ACL，仅允许评测人员访问。不提交 Git、不上传公共日志，复核完成后按本地数据保留策略清理。常规 trace 仍禁止答案与知识摘录，也不保存令牌或异常正文。
+
 ### 客服 RAG 启动、回滚与人工验证
 
 推荐启动顺序：MySQL/Redis/私有 OSS -> Spring -> Docker Milvus -> Python（先保持 RAG 关闭）-> 检查 `/health/ready` -> 配置 CloseAI Embedding、`AI_SERVICE_MODEL_*` 回答模型、GPU/alias -> 开启 RAG 并滚动启动 Python -> 检查认证客服 health -> 由管理员页面上传知识文件并观察 ETL 任务终态 -> 执行 synthetic smoke 和人工问答。

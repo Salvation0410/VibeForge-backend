@@ -16,7 +16,7 @@
 
 已阅读并对照：根目录 `AGENTS.md`、`ai-service/README.md`、`doc/customer-service-rag-optimization-handoff-20261013.md`、现有 RAG/提示/重排/接口/评测实现及对应测试。
 
-本轮已确认本机六份交接证据文件均存在，解析了 `tmp/product-rag-http-20261013.json` 的聚合字段与失败题 ID；尚未逐条完成 38 条引用内容复核，也未连接运行服务核验当前索引或运行配置。下列数字是历史基线，不是本轮新评测。
+本轮已确认本机六份交接证据文件均存在，解析了 `tmp/product-rag-http-20261013.json` 的聚合字段与失败题 ID；已完成 38 条引用的 Agent 内容复核（人工待审），健康检查确认 Milvus 当前不可用，实时索引及运行配置仍待核验。下列数字是历史基线，不是本轮新评测。
 
 用户已确认本计划；执行范围以 Python 为主，不预设修改 Java、前端、ETL 分块、生产索引或知识正文。当前工作分支为 `codex/rag-request-diagnostics`，保留用户 `projects/` 文件。
 
@@ -87,11 +87,11 @@
 
 ### 任务 1：保留证据，核验运行环境
 
-- [ ] 检查 Git 状态，记录当前提交及用户既有文件；执行阶段按 worktree 技能检查是否需要隔离，不能直接假设新 checkout 的 `.env` 或证据已就绪。
-- [ ] 为历史 JSON、报告、映射和盘点计算 SHA-256；新运行使用 UTC 时间戳加随机后缀，创建 `tmp/rag-optimization/<runId>/`，禁止覆盖旧路径。
-- [ ] 解析全部 90 题，重算误拒答、允许来源不匹配和覆盖不足集合，保存逐题基线；保留来源与版本，不只保存聚合数字。
+- [x] 检查 Git 状态，记录当前提交及用户既有文件；执行阶段按 worktree 技能检查是否需要隔离，不能直接假设新 checkout 的 `.env` 或证据已就绪。
+- [x] 为历史 JSON、报告、映射和盘点计算 SHA-256；新运行使用 UTC 时间戳加随机后缀，创建 `tmp/rag-optimization/<runId>/`，禁止覆盖旧路径。
+- [x] 解析全部 90 题，重算误拒答、允许来源不匹配和覆盖不足集合，保存逐题基线；保留来源与版本，不只保存聚合数字。
 - [ ] 读取健康接口及只读索引状态，核验 alias、文档版本/摘要和旧手册状态。只输出 top-k、预算、阈值、模型/重排版本等必要非敏感配置；不打印完整 Settings 或 `.env`。
-- [ ] 对无法核验项注明历史快照/未验证。运行状态或文档摘要不同则先记录差异，后续建立当前基线，不把差异归功于优化。
+- [x] 对无法核验项注明历史快照/未验证。运行状态或文档摘要不同则先记录差异，后续建立当前基线，不把差异归功于优化。
 
 **产物：** 运行前检查表、受保护历史证据摘要、新运行目录和非敏感配置快照。此任务不写索引，不调用回答模型。
 
@@ -99,10 +99,10 @@
 
 **文件：** `customer_service_trace.py`、`customer_service_rag.py`、`api/routes.py`、`config.py`、`.env.example` 和对应测试。
 
-- [ ] 先补 Fake 测试：关闭时不输出；前缀不匹配不输出；两个交错并发请求的块和原因不串题；恶意 requestId 按 JSON 编码不能注入日志。
-- [ ] 新增配置 `rag_diagnostics_enabled=False`、`rag_diagnostics_request_prefix=""`。只有开启且前缀非空、请求 ID 匹配时才构建追踪；关闭时保持既有调用方式兼容。
-- [ ] 路由为每次受控请求创建独立 trace，通过 `_run_customer_service_answer` 传入 `answer(question, *, trace=None)`。所有中间状态留在局部对象，不写服务实例字段、不做全局 requestId 缓存。
-- [ ] 按下面契约记录排序、过滤原因和裁剪前后长度。每阶段最多 100 个候选，数值必须有限；长度只记录整数，不记录向量、问题、正文、模型答案、完整提示或异常文本。
+- [x] 先补 Fake 测试：关闭时不输出；前缀不匹配不输出；两个交错并发请求的块和原因不串题；恶意 requestId 按 JSON 编码不能注入日志。
+- [x] 新增配置 `rag_diagnostics_enabled=False`、`rag_diagnostics_request_prefix=""`。只有开启且前缀非空、请求 ID 匹配时才构建追踪；关闭时保持既有调用方式兼容。
+- [x] 路由为每次受控请求创建独立 trace，通过 `_run_customer_service_answer` 传入 `answer(question, *, trace=None)`。所有中间状态留在局部对象，不写服务实例字段、不做全局 requestId 缓存。
+- [x] 按下面契约记录排序、过滤原因和裁剪前后长度。每阶段最多 100 个候选，数值必须有限；长度只记录整数，不记录向量、问题、正文、模型答案、完整提示或异常文本。
 
 ```text
 schemaVersion = customer-service-rag-trace/v1
@@ -119,11 +119,11 @@ terminal: outcome（answered / refused / service_error / cancelled）,
           reasonCode, degraded
 ```
 
-- [ ] 明确终态原因至少包含：`RAW_RETRIEVAL_EMPTY`、`FILTERED_EMPTY`、`RERANK_EMPTY`、`THRESHOLD_EMPTY`、`RERANK_UNAVAILABLE_WITH_THRESHOLD`、`CHAR_CONTEXT_EMPTY`、`PROMPT_BUDGET_EXHAUSTED`、`BYTE_CONTEXT_EMPTY`、`MODEL_REFUSED`、`MODEL_CALL_FAILED`、`MODEL_PARSE_FAILED`、`CITATION_INVALID`、`ANSWERED`、`TIMEOUT`、`CLIENT_DISCONNECTED`、`CANCELLED`，并记录 embedding/store 稳定服务错误码。
-- [ ] 检查模型适配器的结构化输出异常类型，依已有类型区分调用与解析失败；若底层没有可靠分类，则记录 `MODEL_CALL_OR_PARSE_FAILED`，明确未能细分，不猜测原因。
-- [ ] RAG 记录阶段状态，路由在 finally 统一输出一次诊断终态；直接服务调用由调用方负责输出。超时/取消不吞掉 `CancelledError`，保持现有 drain 行为。
-- [ ] 通过专用标准 logger 输出一条 JSON 记录；日志采集配置把它导出到本机忽略目录，禁用传播以免混入普通业务日志。若未配置采集或日志写出失败，回答结果保持原样，评测则标记诊断缺失。
-- [ ] 增补空召回、无效版本、重排降级/disabled、阈值、两层预算、模型拒答、伪造引用、超时、取消、日志输出失败的测试，断言公共响应无诊断字段和敏感内容。
+- [x] 明确终态原因至少包含：`RAW_RETRIEVAL_EMPTY`、`FILTERED_EMPTY`、`RERANK_EMPTY`、`THRESHOLD_EMPTY`、`RERANK_UNAVAILABLE_WITH_THRESHOLD`、`CHAR_CONTEXT_EMPTY`、`PROMPT_BUDGET_EXHAUSTED`、`BYTE_CONTEXT_EMPTY`、`MODEL_REFUSED`、`MODEL_CALL_FAILED`、`MODEL_PARSE_FAILED`、`CITATION_INVALID`、`ANSWERED`、`TIMEOUT`、`CLIENT_DISCONNECTED`、`CANCELLED`，并记录 embedding/store 稳定服务错误码。
+- [x] 检查模型适配器的结构化输出异常类型，依已有类型区分调用与解析失败；若底层没有可靠分类，则记录 `MODEL_CALL_OR_PARSE_FAILED`，明确未能细分，不猜测原因。
+- [x] RAG 记录阶段状态，路由在 finally 统一输出一次诊断终态；直接服务调用由调用方负责输出。超时/取消不吞掉 `CancelledError`，保持现有 drain 行为。
+- [x] 通过专用标准 logger 输出一条 JSON 记录；日志采集配置把它导出到本机忽略目录，禁用传播以免混入普通业务日志。若未配置采集或日志写出失败，回答结果保持原样，评测则标记诊断缺失。
+- [x] 增补空召回、无效版本、重排降级/disabled、阈值、两层预算、模型拒答、伪造引用、超时、取消、日志输出失败的测试，断言公共响应无诊断字段和敏感内容。
 
 **先运行红测再实现，随后验证：**
 
@@ -149,7 +149,7 @@ uv run pytest tests/test_customer_service_trace.py tests/test_customer_service_r
 - [ ] 整理 11 题原因表：原始命中块、过滤丢失块、重排得分/排名、实际进入模型的片段、终态、对应 expectedFacts、已证实原因与未确定项。正文证据只从受控知识材料对照，不加入普通日志。
 - [ ] 修复评测展示：原始排名、真实重排（阈值前）、阈值后、文档选择后、最终上下文分别报告；降级/disabled 只报告原顺序，不填真实重排成绩。
 
-**拟实现后的命令契约：** 以下参数目前不存在，只有本任务完成后才可执行。
+**命令契约：** HTTP 工具通过复核及提交后可执行；真实运行仍须满足服务和诊断采集前提。
 
 ```powershell
 uv run python -m ai_service.orchestration.product_knowledge_evaluation --http-base-url http://localhost:8000 --run-id $ragRunId --document-map ../tmp/product-document-map.json --trace-file $ragTraceFile --output $ragReportFile
