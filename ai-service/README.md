@@ -400,6 +400,44 @@ $env:AI_TOOL_IDEMPOTENCY_LOCK_WAIT_MILLIS = "30000"
 
 ## Docker 启动
 
+### 本地 Milvus 与 checkpoint 容器
+
+本地客服 RAG 使用 Milvus `v3.0.2` 与独立 etcd `v3.5.33`。项目连接 `milvus-standalone`（宿主机端口 19530），该容器依赖 `milvus-etcd`；两者必须同时运行。Python checkpoint 使用独立的 `langgraph-postgres`（宿主机端口 5432）。Spring 的 MySQL、Redis 仍须另行启动。
+
+| 容器 | 作用 | 启动要求 |
+| --- | --- | --- |
+| `milvus-etcd` | Milvus 元数据 | 先启动并确认 endpoint health |
+| `milvus-standalone` | 向量索引与检索 | etcd 就绪后启动；确认 healthz 和真实查询 |
+| `langgraph-postgres` | Python checkpoint | Python AI 服务启动前就绪 |
+
+已有本地部署请进入保存 `standalone_embed.bat`、`user.yaml` 和 `volumes/` 的 Milvus 安装目录执行；这个运维脚本位于本机安装目录，不由本仓库分发，也不是新安装初始化入口：
+
+```powershell
+# 先进入现有 Milvus 安装目录，再统一管理两个依赖容器。
+.\standalone_embed.bat start
+# 正常停机与重新启动使用脚本，保持 Milvus 与 etcd 的顺序。
+.\standalone_embed.bat stop
+.\standalone_embed.bat restart
+docker start langgraph-postgres
+```
+
+手动启动已有容器时：
+
+```powershell
+docker start milvus-etcd
+docker exec milvus-etcd etcdctl --endpoints=http://127.0.0.1:2379 endpoint health
+# 上一步确认健康后再启动 Milvus。
+docker start milvus-standalone
+docker inspect milvus-standalone --format '{{.State.Health.Status}}'
+Invoke-RestMethod http://localhost:9091/healthz
+```
+
+etcd 镜像不含 `/bin/sh`，当前部署使用直接执行 `etcdctl` 验证健康；Docker Desktop 中显示 running 而没有 healthy 标签属正常现象。Milvus 的 healthy/healthz 仅是基础检查，还须核对认证客服 health 与实际问答。宿主机 Python 默认连接 `http://localhost:19530`；Python 容器访问宿主机 Milvus 时应设置 `AI_SERVICE_MILVUS_URI=http://host.docker.internal:19530`，不能使用容器自己的 localhost。
+
+`milvus-clone-v302`、`milvus-etcd-diagnostic`、`milvus-migration-diagnostic` 和 `milvus-standalone-v302-failed` 是排障或隔离验证容器，项目不依赖它们。`milvus-standalone-v300-rollback` 是停止的旧版本回滚容器，不应与生产容器同时启动。清理诊断容器前保留所需现场；不要随容器删除数据卷、安装目录内的 `volumes/` 或快照备份。回滚旧镜像必须先恢复对应的旧数据备份，不能让旧容器直接读取升级后的生产卷。
+
+### Python AI 容器
+
 确保 Docker daemon 已运行，在 `ai-service` 目录执行：
 
 ```powershell
