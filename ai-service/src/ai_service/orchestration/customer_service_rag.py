@@ -20,6 +20,7 @@ from ai_service.orchestration.customer_service_trace import CustomerServiceRagTr
 
 MAX_QUESTION_CHARS = 4_000
 MAX_CONTEXTS = 3
+MAX_CANDIDATES = 100
 MAX_CONTEXT_CHARS = 1_200
 MAX_TOTAL_CONTEXT_CHARS = 3_000
 MAX_EXCERPT_CHARS = 400
@@ -155,14 +156,16 @@ class CustomerServiceRagService:
         score_source = 'retrieval_fallback' if self._reranker_disabled else 'reranker'
         try:
             with stage('reranking'):
+                if self._reranker_disabled:
+                    raise ValueError
                 ranked = await self._reranker.rerank(
-                    normalized_question, candidates, top_n=self._final_top_k,
+                    normalized_question, candidates, top_n=len(candidates),
                 )
-                ranked = _validate_ranked(ranked, candidates, self._final_top_k)
+                ranked = _validate_ranked(ranked, candidates, len(candidates))
         except Exception:
             ranked = [
                 RerankedChunk(item, float(item.score))
-                for item in candidates[:self._final_top_k]
+                for item in candidates
             ]
             # disabled 是明确的运维模式，不属于运行时降级故障。
             degraded = not self._reranker_disabled
@@ -174,7 +177,7 @@ class CustomerServiceRagService:
         if not ranked:
             return refused('RERANK_EMPTY', degraded)
         before_threshold = ranked
-        if self._min_rerank_score is not None:
+        if self._min_rerank_score is not None and not self._reranker_disabled:
             # 降级时不能把重排阈值与 Milvus 原始分数直接比较。
             if degraded:
                 if trace:
@@ -188,11 +191,14 @@ class CustomerServiceRagService:
             if not ranked:
                 return refused('THRESHOLD_EMPTY')
 
+        with stage('selection'):
+            selected, selection_drops = _select_documents(ranked, self._final_top_k)
         if trace:
             with stage('thresholding'):
                 trace.record('thresholded', before_threshold, score_source=score_source, kept_ids={item.chunk.chunk_id for item in ranked}, drop_reason='below_threshold')
             with stage('selection'):
-                trace.record('selected', ranked, score_source=score_source, kept_ids={item.chunk.chunk_id for item in ranked[:MAX_CONTEXTS]}, drop_reason='top_k')
+                trace.record('selected', ranked, score_source=score_source, kept_ids={item.chunk.chunk_id for item in selected}, drop_reasons=selection_drops)
+        ranked = selected
         before_character = [CustomerServiceContext(item.chunk.chunk_id, item.chunk.content) for item in ranked]
         all_chunks = {item.chunk.chunk_id: item.chunk for item in ranked}
         with stage('characterBudget'):
@@ -301,17 +307,12 @@ def _filter_and_dedupe(
 
     result: list[RetrievedChunk] = []
     chunk_ids: set[str] = set()
-    document_ids: set[str] = set()
     for rank, item in valid:
-        if (
-            item.chunk_id in chunk_ids
-            or item.document_id in document_ids
-        ):
+        if item.chunk_id in chunk_ids or len(result) >= MAX_CANDIDATES:
             if trace and len(records) < 100:
-                records.append(trace.metadata(item, rank, score=item.score, drop_reason='duplicate_chunk' if item.chunk_id in chunk_ids else 'duplicate_document'))
+                records.append(trace.metadata(item, rank, score=item.score, drop_reason='duplicate_chunk' if item.chunk_id in chunk_ids else 'candidate_limit'))
             continue
         chunk_ids.add(item.chunk_id)
-        document_ids.add(item.document_id)
         result.append(item)
         if trace and len(records) < 100:
             records.append(trace.metadata(item, rank, score=item.score))
@@ -328,6 +329,7 @@ def _validate_ranked(
     if not isinstance(ranked, list) or len(ranked) > limit:
         raise ValueError
     allowed = {item.chunk_id: item for item in candidates}
+    retrieval_order = {item.chunk_id: index for index, item in enumerate(candidates)}
     seen: set[str] = set()
     validated: list[RerankedChunk] = []
     for item in ranked:
@@ -335,12 +337,34 @@ def _validate_ranked(
             not isinstance(item, RerankedChunk)
             or item.chunk.chunk_id not in allowed
             or item.chunk.chunk_id in seen
+            or not isinstance(item.score, (int, float))
+            or isinstance(item.score, bool)
             or not math.isfinite(float(item.score))
         ):
             raise ValueError
         seen.add(item.chunk.chunk_id)
-        validated.append(item)
-    return validated
+        # 重排器只决定分数，不允许替换已验证的正文、文档身份或来源元数据。
+        validated.append(RerankedChunk(allowed[item.chunk.chunk_id], float(item.score)))
+    return sorted(validated, key=lambda item: (-item.score, retrieval_order[item.chunk.chunk_id]))
+
+
+def _select_documents(
+    ranked: list[RerankedChunk], limit: int,
+) -> tuple[list[RerankedChunk], dict[str, str]]:
+    # 阈值后才按文档选择最高分块，重复块不占名额，后续文档可以补位。
+    selected: list[RerankedChunk] = []
+    seen_documents: set[str] = set()
+    drops: dict[str, str] = {}
+    for item in ranked:
+        if item.chunk.document_id in seen_documents:
+            drops[item.chunk.chunk_id] = 'duplicate_document'
+            continue
+        seen_documents.add(item.chunk.document_id)
+        if len(selected) >= limit:
+            drops[item.chunk.chunk_id] = 'top_k'
+            continue
+        selected.append(item)
+    return selected, drops
 
 
 def _bounded_contexts(

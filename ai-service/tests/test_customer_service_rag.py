@@ -170,15 +170,17 @@ async def test_diagnostics_filter_reasons_and_disabled_reranker_source():
     ], rag_reranker_provider='disabled', reranker=FakeReranker(error=RuntimeError())).answer('q', trace=trace)
     data = trace.snapshot()
     assert {item.get('dropReason') for item in data['filtered']} >= {
-        'inactive', 'stale_version', 'invalid_metadata', 'duplicate_chunk', 'duplicate_document',
+        'inactive', 'stale_version', 'invalid_metadata', 'duplicate_chunk',
     }
+    assert 'duplicate_document' not in {item.get('dropReason') for item in data['filtered']}
+    assert data['selected'][1]['dropReason'] == 'duplicate_document'
     assert data['reranked'][0]['scoreSource'] == 'retrieval_fallback'
     assert data['terminal']['degraded'] is False
     json.dumps(data, allow_nan=False)
 
 
 @pytest.mark.asyncio
-async def test_retrieves_top_eight_filters_stale_inactive_and_deduplicates_documents():
+async def test_retrieves_top_eight_filters_stale_inactive_and_deduplicates_chunks():
     hits = [
         chunk("inactive", "inactive-doc", active=False),
         chunk("stale", "versioned", version=1, current_version=2),
@@ -191,14 +193,14 @@ async def test_retrieves_top_eight_filters_stale_inactive_and_deduplicates_docum
         chunk("c4", "doc-4", score=0.95),
     ]
     store = FakeStore(hits)
-    reranker = FakeReranker({"c1": 0.2, "c3": 0.9, "c4": 0.8})
+    reranker = FakeReranker({"c1": 0.2, "c2": 0.1, "c3": 0.9, "c4": 0.8})
     model = FakeAnswerModel(CustomerServiceModelAnswer(True, "Grounded", ("c3", "c4", "c1")))
 
     result = await service(store=store, reranker=reranker, model=model).answer("How to deploy?")
 
     assert store.calls == [([0.1, 0.2], 8)]
-    assert [item.chunk_id for item in reranker.calls[0][1]] == ["c1", "c3", "c4"]
-    assert reranker.calls[0][2] == 3
+    assert [item.chunk_id for item in reranker.calls[0][1]] == ["c1", "c2", "c3", "c4"]
+    assert reranker.calls[0][2] == 4
     assert [source.chunk_id for source in result.sources] == ["c3", "c4", "c1"]
 
 
@@ -390,6 +392,109 @@ async def test_cancellation_propagates_without_model_fallback():
     candidate._embeddings.embed_query = cancelled
     with pytest.raises(asyncio.CancelledError):
         await candidate.answer("question")
+
+
+class ReturnedReranker(FakeReranker):
+    def __init__(self, output):
+        super().__init__()
+        self.output = output
+
+    async def rerank(self, question, chunks, *, top_n):
+        self.calls.append((question, list(chunks), top_n))
+        return self.output
+
+
+@pytest.mark.asyncio
+async def test_later_chunk_wins_and_three_distinct_documents_are_filled():
+    from ai_service.orchestration.customer_service_trace import CustomerServiceRagTrace
+
+    hits = [chunk('early', 'd1'), chunk('later', 'd1'), chunk('third', 'd1'),
+            chunk('d2', 'd2'), chunk('d3', 'd3'), chunk('d4', 'd4')]
+    reranker = FakeReranker({'early': .8, 'later': .99, 'third': .9, 'd2': .7, 'd3': .6, 'd4': .5})
+    model = FakeAnswerModel(CustomerServiceModelAnswer(True, 'Answer', ('later', 'd2', 'd3')))
+    trace = CustomerServiceRagTrace('eval-retention', settings())
+    result = await service(chunks=hits, reranker=reranker, model=model).answer('q', trace=trace)
+    assert result.answered
+    assert reranker.calls[0][1] == hits
+    assert reranker.calls[0][2] == len(hits)
+    assert [item.chunk_id for item in model.calls[0][1]] == ['later', 'd2', 'd3']
+    selected = {item['chunkId']: item for item in trace.snapshot()['selected']}
+    assert selected['early']['dropReason'] == 'duplicate_document'
+    assert selected['third']['dropReason'] == 'duplicate_document'
+    assert selected['d4']['dropReason'] == 'top_k'
+    assert all(item['kept'] for item in trace.snapshot()['filtered'])
+
+
+@pytest.mark.asyncio
+async def test_reranker_scores_are_sorted_with_retrieval_order_ties_and_original_objects():
+    from dataclasses import replace
+
+    hits = [chunk('c1', 'd1'), chunk('c2', 'd2'), chunk('c3', 'd3')]
+    replacement = replace(hits[1], content='malicious replacement', document_id='forged')
+    reranker = ReturnedReranker([RerankedChunk(hits[2], .4), RerankedChunk(replacement, .5), RerankedChunk(hits[0], .5)])
+    model = FakeAnswerModel(CustomerServiceModelAnswer(True, 'Answer', ('c2',)))
+    result = await service(chunks=hits, reranker=reranker, model=model).answer('q')
+    assert [item.chunk_id for item in model.calls[0][1]] == ['c1', 'c2', 'c3']
+    assert model.calls[0][1][1].content == hits[1].content
+    assert result.sources[0].document_id == 'd2'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('bad', ['duplicate', 'unknown', 'nan', 'infinite', 'bad_score'])
+async def test_invalid_reranker_outputs_fall_back_to_original_distinct_documents(bad):
+    hits = [chunk('c1', 'd1', score=.1), chunk('extra', 'd1', score=.99),
+            chunk('c2', 'd2', score=.8), chunk('c3', 'd3', score=.9)]
+    output = {
+        'duplicate': [RerankedChunk(hits[0], .9), RerankedChunk(hits[0], .8)],
+        'unknown': [RerankedChunk(chunk('unknown', 'unknown'), .9)],
+        'nan': [RerankedChunk(hits[0], float('nan'))],
+        'infinite': [RerankedChunk(hits[0], float('inf'))],
+        'bad_score': [RerankedChunk(hits[0], 'bad')],
+    }[bad]
+    model = FakeAnswerModel()
+    result = await service(chunks=hits, reranker=ReturnedReranker(output), model=model).answer('q')
+    assert result.degraded
+    assert [item.chunk_id for item in model.calls[0][1]] == ['c1', 'c2', 'c3']
+
+
+@pytest.mark.asyncio
+async def test_disabled_reranker_preserves_raw_order_even_when_provider_returns_sorted_scores():
+    hits = [chunk('c1', 'd1', score=.1), chunk('later', 'd1', score=.99), chunk('c2', 'd2', score=.8)]
+    reranker = FakeReranker()
+    model = FakeAnswerModel()
+    result = await service(chunks=hits, reranker=reranker, model=model, rag_reranker_provider='disabled').answer('q')
+    assert not result.degraded
+    assert [item.chunk_id for item in model.calls[0][1]] == ['c1', 'c2']
+    assert reranker.calls == []
+
+
+def test_candidate_retention_is_stable_and_bounded_to_one_hundred_unique_chunks():
+    from ai_service.orchestration.customer_service_rag import _filter_and_dedupe
+
+    hits = [chunk(str(index), 'same-document') for index in range(110)]
+    assert _filter_and_dedupe([hits[0], *hits]) == hits[:100]
+
+
+@pytest.mark.asyncio
+async def test_threshold_and_character_budgets_apply_after_distinct_document_selection():
+    hits = [chunk('c1', 'd1', content='中' * 2000), chunk('later', 'd1'),
+            chunk('c2', 'd2', content='中' * 2000), chunk('c3', 'd3', content='中' * 2000),
+            chunk('low', 'd4')]
+    model = FakeAnswerModel(CustomerServiceModelAnswer(True, 'Answer', ('c1', 'c2', 'c3')))
+    result = await service(chunks=hits, model=model, rag_min_rerank_score=.5,
+        reranker=FakeReranker({'c1': .9, 'later': .8, 'c2': .7, 'c3': .6, 'low': .4})).answer('q')
+    assert result.answered
+    assert [item.chunk_id for item in model.calls[0][1]] == ['c1', 'c2', 'c3']
+    assert [len(item.content) for item in model.calls[0][1]] == [1200, 1200, 600]
+    assert len({item.document_id for item in result.sources}) == 3
+
+
+@pytest.mark.asyncio
+async def test_final_top_k_applies_to_documents_after_duplicates():
+    model = FakeAnswerModel()
+    await service(chunks=[chunk('c1', 'd1'), chunk('later', 'd1'), chunk('c2', 'd2'), chunk('c3', 'd3')],
+        model=model, rag_final_top_k=2).answer('q')
+    assert [item.chunk_id for item in model.calls[0][1]] == ['c1', 'c2']
 
 
 def test_enabled_app_assembles_answer_service_from_shared_dependencies(

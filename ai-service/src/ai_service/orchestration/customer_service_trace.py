@@ -66,7 +66,7 @@ class CustomerServiceRagTrace:
             durations = self._data['stageDurationsMs']
             durations[name] = round(durations.get(name, 0) + (time.perf_counter() - started) * 1000, 3)
 
-    def record(self, stage: str, items, *, score_source: str | None = None, kept_ids=None, drop_reason=None) -> None:
+    def record(self, stage: str, items, *, score_source: str | None = None, kept_ids=None, drop_reason=None, drop_reasons=None) -> None:
         records = []
         for rank, item in enumerate(items):
             if rank >= 100:
@@ -78,7 +78,8 @@ class CustomerServiceRagTrace:
             if kept_ids is not None:
                 record['kept'] = getattr(chunk, 'chunk_id', None) in kept_ids
                 if not record['kept']:
-                    record['dropReason'] = drop_reason
+                    # 选择阶段需区分同文档重复与名额用尽；其他阶段沿用统一原因。
+                    record['dropReason'] = (drop_reasons or {}).get(getattr(chunk, 'chunk_id', None), drop_reason)
             records.append(record)
         self._data[stage] = records
 

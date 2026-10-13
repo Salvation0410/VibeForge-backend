@@ -245,7 +245,9 @@ Copy-Item .env.example .env
 
 `AI_SERVICE_RAG_MIN_RERANK_SCORE` 默认不设置，此时只对空检索结果执行拒答门。该阈值不得凭经验填写，必须在真实客服评估集上确定后再配置。启用阈值后，如果 Reranker 不可用，服务不会用量纲不同的 Milvus 分数替代阈值判断，而是保守返回无答案。`AI_SERVICE_RAG_RERANKER_PROVIDER=disabled` 是明确的运维模式，按 Milvus 原始顺序取前三且不标记运行时降级；disabled 模式禁止同时配置 rerank score 阈值。
 
-客服问答由 `AI_SERVICE_RAG_ANSWER_TIMEOUT_SECONDS` 限制完整 embedding、检索、重排和回答链路，客户端断开时同步取消在途任务。`AI_SERVICE_RAG_PROMPT_MAX_BYTES` 按最终 JSON 的 UTF-8 字节数限制模型输入，而不是按 Python 字符数估算。
+客服候选先校验活动版本和元数据，仅按 chunk ID 去重，按原检索顺序最多保留 100 块；同文档多个块全部参与重排。重排请求覆盖全部候选，返回结果校验身份、重复 ID 和有限分数，并始终使用原始候选正文与来源；按分数降序排列，并列保持原检索顺序。阈值仅用于真实重排分数，随后每个文档保留最高分块，重复文档不占名额，最多选择三个不同文档（受 final top-k 配置限制）。禁用或故障降级按原检索顺序执行同样的文档选择。诊断 `selected` 阶段分别标记 `duplicate_document` 和 `top_k`。
+
+客服问答由 `AI_SERVICE_RAG_ANSWER_TIMEOUT_SECONDS` 限制完整 embedding、检索、重排和回答链路，客户端断开时同步取消在途任务。单个上下文最多 1200 字符，合计最多 3000 字符；`AI_SERVICE_RAG_PROMPT_MAX_BYTES` 按最终 JSON 的 UTF-8 字节数限制模型输入，而不是按 Python 字符数估算。
 
 ### 客服 RAG 运维配置
 
