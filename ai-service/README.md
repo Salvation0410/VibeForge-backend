@@ -269,6 +269,8 @@ Copy-Item .env.example .env
 
 Milvus rebuild 默认通过 `AI_SERVICE_RAG_COLLECTION_RETENTION_GENERATIONS=2` 保留当前版本和一个回滚版本。alias 切换后，旧物理 collection 的退役时间写入对应 mutation control collection；只有 `retiredAt` 超过 `AI_SERVICE_RAG_COLLECTION_CLEANUP_GRACE_SECONDS` 才会 best-effort 删除。退役 marker 是持久化清理 backlog，按 marker 主键游标分轮消费，因此模型或向量维度迁移后仍能清理旧命名空间。没有 marker 的历史 collection 首次发现时只补记当前退役时间，不能按创建时间立即删除。新建 collection 元数据与 marker 都带有稳定 `aliasHash` 作为自动删除的所有权证明；升级前缺少 `aliasHash` 的历史 collection 会保留，必须由运维人员核验归属后人工清理。grace 必须大于客服总请求 timeout 与 Milvus RPC timeout 之和并留出安全余量。清理受 `AI_SERVICE_RAG_COLLECTION_CLEANUP_TIMEOUT_SECONDS=5` 总时限和 `AI_SERVICE_RAG_COLLECTION_CLEANUP_SCAN_LIMIT=100` 单轮处理上限约束，超过上限时通过持久化扫描游标分轮推进，不创建后台任务。该策略依赖所有查询都受总 deadline 约束来覆盖跨实例读者，无法从 Milvus 直接证明当前没有读者。control、list、describe 或 alias readback 任一不确定都会保留 collection，并在后续 rebuild 再尝试清理。
 
+mutation control collection 的占位向量维度固定为 2，以兼容 Milvus 3.x 对最小向量维度的限制。客服知识健康探测验证服务依赖可用性，但不会证明每个禁用文档的异步 Milvus 删除任务均已完成；请同时检查文档 ETL 任务状态。失败的删除任务可由管理员通过 `POST /api/admin/customer-service/knowledge/{id}/tasks/{taskId}:retry` 重新排队，接口只接受与当前禁用/删除文档版本匹配的失败 DELETE 任务。
+
 本机直接启动时，通常需要将 `.env` 中的 Spring 和 PostgreSQL 地址改为：
 
 ```dotenv

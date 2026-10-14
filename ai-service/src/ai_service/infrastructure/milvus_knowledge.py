@@ -20,6 +20,8 @@ from ai_service.config import Settings
 logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
+# Milvus 3.x 要求向量维度至少为 2，控制记录使用固定零向量占位。
+_CONTROL_VECTOR_DIMENSION = 2
 _ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,128}")
 _CHUNK_ID_PATTERN = re.compile(r"[A-Za-z0-9_.:-]{1,512}")
 _MILVUS_IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,254}")
@@ -606,7 +608,7 @@ class MilvusKnowledgeStore:
                 try:
                     await self._assert_permit(permit)
                     await call(
-                        "create_collection", name, dimension=1,
+                        "create_collection", name, dimension=_CONTROL_VECTOR_DIMENSION,
                         primary_field_name="id", id_type="string",
                         vector_field_name="embedding", metric_type="COSINE",
                         auto_id=False, max_length=64, enable_dynamic_field=True,
@@ -618,7 +620,7 @@ class MilvusKnowledgeStore:
             description = await call("describe_collection", name)
             metadata = self._metadata(description)
             if (
-                self._described_dimension(description) != 1
+                self._described_dimension(description) != _CONTROL_VECTOR_DIMENSION
                 or metadata.get("kind")
                 != "customer-service-knowledge-mutation-control"
                 or metadata.get("schemaVersion") != self._schema_version
@@ -665,7 +667,7 @@ class MilvusKnowledgeStore:
                 "mutationFence": fence,
                 "schemaVersion": self._schema_version,
                 "isActive": False,
-                "embedding": [0.0],
+                "embedding": [0.0] * _CONTROL_VECTOR_DIMENSION,
             }
             await self._assert_permit(permit)
             result = await call("upsert", control, data=[row])
@@ -687,7 +689,7 @@ class MilvusKnowledgeStore:
                 "mutationFence": fence,
                 "schemaVersion": self._schema_version,
                 "isActive": False,
-                "embedding": [0.0],
+                "embedding": [0.0] * _CONTROL_VECTOR_DIMENSION,
             } for collection in collections]
             await self._assert_permit(permit)
             result = await call("upsert", control, data=rows)
@@ -880,7 +882,7 @@ class MilvusKnowledgeStore:
                         "mutationFence": fence,
                         "schemaVersion": self._schema_version,
                         "isActive": False,
-                        "embedding": [0.0],
+                        "embedding": [0.0] * _CONTROL_VECTOR_DIMENSION,
                     }
                     await upsert_control_row(
                         control, retention_row,
@@ -951,7 +953,7 @@ class MilvusKnowledgeStore:
                         "mutationFence": fence,
                         "schemaVersion": self._schema_version,
                         "isActive": False,
-                        "embedding": [0.0],
+                        "embedding": [0.0] * _CONTROL_VECTOR_DIMENSION,
                     }
                     await upsert_control_row(
                         control, cursor_row,
@@ -1033,7 +1035,7 @@ class MilvusKnowledgeStore:
                         "mutationFence": fence,
                         "schemaVersion": self._schema_version,
                         "isActive": False,
-                        "embedding": [0.0],
+                        "embedding": [0.0] * _CONTROL_VECTOR_DIMENSION,
                     }
                     await upsert_control_row(
                         control, discovery_row,
@@ -1205,7 +1207,7 @@ class MilvusKnowledgeStore:
                 }, sort_keys=True, separators=(",", ":"))
                 try:
                     await self._call(
-                        "create_collection", name, dimension=1, primary_field_name="id",
+                        "create_collection", name, dimension=_CONTROL_VECTOR_DIMENSION, primary_field_name="id",
                         id_type="string", vector_field_name="embedding", metric_type="COSINE",
                         auto_id=False, max_length=64, enable_dynamic_field=True,
                         consistency_level="Strong", description=description,
@@ -1221,7 +1223,7 @@ class MilvusKnowledgeStore:
         except (TypeError, ValueError):
             raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_MISMATCH") from None
         if (
-            self._described_dimension(description) != 1
+            self._described_dimension(description) != _CONTROL_VECTOR_DIMENSION
             or metadata.get("kind") != "customer-service-knowledge-mutation-control"
             or metadata.get("schemaVersion") != self._schema_version
         ):
@@ -1257,7 +1259,7 @@ class MilvusKnowledgeStore:
             "recordType": "tombstone", "documentId": document_id,
             "documentVersion": document_version, "mutationFence": fence,
             "schemaVersion": self._schema_version, "isActive": False,
-            "embedding": [0.0],
+            "embedding": [0.0] * _CONTROL_VECTOR_DIMENSION,
         }
         await self._write_exact("upsert", collection, [row])
         actual = await self._get_rows(collection, [row["id"]])
@@ -1277,7 +1279,7 @@ class MilvusKnowledgeStore:
             description = await self._call("describe_collection", control)
             metadata = self._metadata(description)
             if (
-                self._described_dimension(description) != 1
+                self._described_dimension(description) != _CONTROL_VECTOR_DIMENSION
                 or metadata.get("kind")
                 != "customer-service-knowledge-mutation-control"
                 or metadata.get("schemaVersion") != self._schema_version

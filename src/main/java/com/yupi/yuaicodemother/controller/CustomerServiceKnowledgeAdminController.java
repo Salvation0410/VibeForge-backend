@@ -82,6 +82,14 @@ public class CustomerServiceKnowledgeAdminController {
         return ResultUtils.success(knowledgeService.taskHistory(id, limit));
     }
 
+    @PostMapping("/{id}/tasks/{taskId}:retry")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    public BaseResponse<Boolean> retryFailedTask(@PathVariable long id, @PathVariable long taskId,
+                                                  HttpServletRequest request) {
+        knowledgeService.retryFailedDelete(id, taskId, userId(request));
+        return ResultUtils.success(true);
+    }
+
     @PostMapping("/rebuild")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<Integer> rebuild(HttpServletRequest request) {

@@ -15,6 +15,26 @@ import java.util.List;
 
 class CustomerServiceAnswerServiceTest {
     @Test
+    void acceptsCitationForActiveIndexedDocument() {
+        CustomerServiceAiClient client = mock(CustomerServiceAiClient.class);
+        CustomerServiceProperties properties = new CustomerServiceProperties(); properties.setEnabled(true);
+        CustomerServiceKnowledgeDocumentMapper mapper = mock(CustomerServiceKnowledgeDocumentMapper.class);
+        CustomerServiceKnowledgeDocument document = CustomerServiceKnowledgeDocument.builder().id(7L).name("guide")
+                .documentVersion(2L).indexedVersion(2L).chunkCount(2).status("ACTIVE").isDelete(0).build();
+        when(mapper.findIncludingDeleted(7L)).thenReturn(document);
+        CustomerServiceAiClient.AnswerSource source = new CustomerServiceAiClient.AnswerSource("7", "guide", 2,
+                "7:2:1", "section", "excerpt");
+        when(client.answer(any())).thenAnswer(invocation -> {
+            CustomerServiceAiClient.AnswerRequest sent = invocation.getArgument(0);
+            return new CustomerServiceAiClient.AnswerResponse(sent.requestId(), true, "answer", List.of(source));
+        });
+        CustomerServiceAnswerServiceImpl service = new CustomerServiceAnswerServiceImpl(client, mapper, properties);
+        CustomerServiceAskRequest request = new CustomerServiceAskRequest(); request.setQuestion("hello");
+
+        assertEquals("answer", service.answer(request, 1L).getAnswer());
+    }
+
+    @Test
     void disabledDoesNotCallPython() {
         CustomerServiceAiClient client = mock(CustomerServiceAiClient.class);
         CustomerServiceProperties properties = new CustomerServiceProperties();

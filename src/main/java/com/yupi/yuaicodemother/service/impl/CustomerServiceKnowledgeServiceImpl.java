@@ -183,6 +183,31 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
 
     @Override
     @Transactional
+    public void retryFailedDelete(long documentId, long taskId, long userId) {
+        if (documentId <= 0 || taskId <= 0) throw new BusinessException(ErrorCode.PARAMS_ERROR);
+        CustomerServiceKnowledgeDocument document = requireDocument(documentId);
+        boolean disabled = "DISABLED".equals(document.getStatus()) && Integer.valueOf(0).equals(document.getIsDelete());
+        boolean deleting = "DELETING".equals(document.getStatus()) && Integer.valueOf(1).equals(document.getIsDelete());
+        if (!disabled && !deleting) throw new BusinessException(ErrorCode.OPERATION_ERROR, "当前文档状态不允许重试删除任务");
+
+        CustomerServiceKnowledgeEtlOutbox task = outboxMapper.selectOneById(taskId);
+        if (task == null || task.getDocumentId() == null || task.getDocumentId() != documentId
+                || !"DELETE".equals(task.getOperation()) || !"FAILED".equals(task.getStatus())
+                || task.getEtlVersion() == null || !task.getEtlVersion().equals(document.getEtlVersion())
+                || task.getDocumentVersion() == null || task.getDocumentVersion() != activeVersion(document)) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "失败任务与当前文档状态或版本不匹配");
+        }
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+        if (outboxMapper.requeueFailedDelete(taskId, documentId, task.getDocumentVersion(),
+                task.getEtlVersion(), now) != 1) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "任务状态已变化，请刷新后重试");
+        }
+        log.info("Knowledge delete task manually requeued: taskId={}, documentId={}, userId={}",
+                taskId, documentId, userId);
+    }
+
+    @Override
+    @Transactional
     public int rebuild(long userId) {
         CustomerServiceKnowledgeEtlOutbox task = new CustomerServiceKnowledgeEtlOutbox();
         task.setDocumentId(0L);
