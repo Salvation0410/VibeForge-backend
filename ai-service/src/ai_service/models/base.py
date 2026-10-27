@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
 from ai_service.models.quality_review import ReviewerResult, ReviewerRole
@@ -24,6 +25,19 @@ class ModelTurn:
     finish_reason: str | None = None
     token_usage: dict[str, int] = field(default_factory=dict)
     file_plan: list[str] = field(default_factory=list)
+
+
+TextDeltaCallback = Callable[[str], Awaitable[None]]
+
+
+class StreamingGenerationModel(Protocol):
+    """可选静态流式能力；回调仅用于展示，返回值才是完整候选。"""
+
+    async def generate_stream(self, branch: str, context: dict[str, Any], *,
+                              on_delta: TextDeltaCallback) -> ModelTurn: ...
+
+    async def repair_stream(self, artifact: str, context: dict[str, Any], *,
+                            on_delta: TextDeltaCallback) -> ModelTurn: ...
 
 
 @dataclass(frozen=True, slots=True)

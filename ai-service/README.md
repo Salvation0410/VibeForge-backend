@@ -144,7 +144,17 @@ Vue 首次生成与修复复用 `orchestration/vue_tool_loop.py` 的多节点实
 
 Vue 子图初始化时将完整 `toolResults` 从 `context` 移到私有 `vue_tool_results` 通道；模型调用时临时组装原有上下文，阶段结束时恢复公共 `context.toolResults`，后续审查和修复仍能读取完整工具历史。模型、校验及继续节点不重复写回历史通道，稳定上下文只在初始化、重试提示变化、首次成功应用图片及出口时更新。出口组装完公共字段后清空私有历史和文本副本，避免末尾 checkpoint 重复保存。没有裁剪历史，也不保证物理存储空间固定比例下降。`tests/test_subgraph_state_boundaries.py` 使用真实内存 saver 检查入口与运行中 checkpoint、实际通道写入、配置/回调继承、递归子图发现、重建恢复与父图字段保留。
 
-已成功工具到 checkpoint 写入之间仍存在不确定窗口，恢复可能携带同一工具 ID 重试，由 Spring 既有幂等状态处理，不能据此保证 exactly-once。调试断点仅用于测试，生产入口仍从初始状态启动并在终态清理检查点；模型仍使用 `ainvoke`，不提供逐 token 输出、生产重启自动续跑或旧版本 checkpoint 兼容。进一步优化入口与验证限制见 [子图重构交接文档](../doc/ai-service-subgraph-refactor-handoff.md)。
+已成功工具到 checkpoint 写入之间仍存在不确定窗口，恢复可能携带同一工具 ID 重试，由 Spring 既有幂等状态处理，不能据此保证 exactly-once。调试断点仅用于测试，生产入口仍从初始状态启动并在终态清理检查点；Vue 工具 JSON、路由和质量审查继续使用完整 `ainvoke` 响应，静态生成/修复文本流式见下节。不提供生产重启自动续跑或旧版本 checkpoint 兼容。进一步优化入口与验证限制见 [子图重构交接文档](../doc/ai-service-subgraph-refactor-handoff.md)。
+
+### HTML/MULTI_FILE 模型文本流式
+
+`OpenAICompatibleModel` 提供可选的 `generate_stream`/`repair_stream` 能力，静态生成与修复通过 `ChatOpenAI.astream(..., stream_usage=True)` 实时展示文本；适配器聚合完整块并返回候选、结束原因和 token 用量。未实现这两个可选方法的模型继续走原 generate/repair；已开始的流发生异常时不回退或重新调用非流式接口。Vue 的 JSON 工具参数仍完整解析、整批校验后执行，不做增量工具调用。
+
+`orchestration/static_generation.py` 将静态 NDJSON `content_delta.data.contentMode` 分为 `display_delta`（仅展示）与 `candidate`（本轮完整候选）。流正常结束且 finish_reason 为 STOP/END_TURN 后才发送 candidate；LENGTH/MAX_TOKENS、过滤、缺少正常结束标记、空流或供应商异常均不能进入发布。展示回调及任务取消会检查请求取消状态，关闭供应商流；上下文预算检查与自动 LangSmith 追踪关闭保持一致。展示分片不进入图状态，模型节点结束才保存完整候选，不能依靠 checkpoint 续接供应商 token 流。
+
+Spring 的 `LangGraphAiGenerationGateway` 保留完整候选缓存，展示增量使用只在 Java 内部识别的帧交给 `SimpleTextStreamHandler`，处理器解包后输出原有 SSE 文本。completed 后只有最终完整候选写入聊天历史，不重复向页面发送整段源码；旧草稿与被淘汰候选不混入最终历史。新一轮增量开始时清除旧候选，避免用上一轮候选填补未完成修复；未知内容模式或流式 completed 缺失候选会失败。旧未标记 contentMode 的事件继续按完整候选处理，Legacy 文本累加语义保留。
+
+公共 SSE 协议和前端无代码变更，仍使用 2000 字符窗口、80ms 刷新上限、成功终态回源与单次预览刷新。修复过程中可能展示多个草稿轮次，最终历史以成功候选为准。部署时先升级 Java 网关/处理器，再升级 Python；只有两侧都升级后才有实时展示。供应商需支持 OpenAI 兼容流和 usage 块；真实供应商以及 Spring/Python/浏览器完整链路需要独立验收，离线模拟测试不代表已完成端到端验收。
 
 Vue 分支允许模型请求 Spring 工具，但工具调用次数受 `AI_SERVICE_VUE_MAX_TOOL_CALLS` 限制，默认 40 次，覆盖生成与修复的总调用次数。若本轮工具请求超过剩余预算，返回 `VUE_TOOL_CALL_LIMIT_EXCEEDED`，不再静默丢弃剩余文件写入请求并构建半成品。源码必须通过 `file_write`/`file_modify` 写入，模型 `content` 只用于简短状态确认，避免重复回传源码触发输出长度上限。每次工具调用都带有确定性的 `toolCallId`，供 Spring 执行幂等控制。若构建发现项目目录或 `package.json` 缺失，工作流直接以稳定构建错误结束，不再要求模型重复生成。
 
@@ -532,7 +542,7 @@ Authorization: Bearer <AI_SERVICE_INTERNAL_BEARER_TOKEN>
 
 Python 与 Spring 之间使用 NDJSON；Spring 对前端的内容事件仍为 `data: {"d":"..."}`。只有产物成功发布后才发送命名 `done` 事件；模型截断、校验失败或发布失败会发送一个命名 `error` 事件，其中包含数字 `code`、稳定的 `errorCode`、`message` 和 `requestId`，且不会再发送 `done`。
 
-`completed.data` 只携带生成类型、质量、修复/工具计数以及发布或构建摘要，不重复携带完整源码。HTML/MULTI_FILE 的最终候选仍来自最后一个 `content_delta`，且只有 Spring 发布成功后 Java 才向现有下游提交该候选。
+`completed.data` 只携带生成类型、质量、修复/工具计数以及发布或构建摘要，不重复携带完整源码。HTML/MULTI_FILE 的最终候选来自最后一个 `content_delta` 的完整候选模式（新流式事件 `contentMode=candidate`，旧事件无模式）；`display_delta` 仅供展示。只有 Spring 发布成功并收到 completed 后 Java 才向历史处理器提交最终完整候选。
 
 业务 checkpoint 不保存完整源码或审查正文，`ai_workflow_status` 只保留 `node`、`requestId`、`appId`、`codeGenType`、`qualityPassed`、`repairCount` 和 `toolCallCount` 等状态与审计摘要。执行期节点恢复由 LangGraph 自动 checkpoint 承担，该 checkpoint 在请求执行期间仍可能包含完整产物；Vue 多 Agent 审查只额外保留最多 4000 字符的阻断性 `repair_feedback`，不保存 minor 详情、Reviewer summary、`reviewer_results` 或 `quality_issues`。从已完成的 `quality_review` 恢复时直接进入 repair，不重复执行 Reviewer。请求在成功、失败或取消进入终态后会立即 best-effort 清理对应 thread，TTL 仅作为异常退出时的兜底。若终态清理失败，只会使 checkpoint 就绪状态降级，不会反转已经确定的生成结果。
 

@@ -142,16 +142,30 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
                                 try (BufferedReader reader = new BufferedReader(new InputStreamReader(bodyStream, StandardCharsets.UTF_8))) {
                                     String line;
                                     String latestArtifact = null;
+                                    boolean hasDisplayDeltas = false;
                                     boolean completed = false;
                                     while (!sink.isCancelled() && (line = reader.readLine()) != null) {
                                         lastEventNanos.set(System.nanoTime());
                                         ParsedEvent event = parseEvent(line, codeGenType, requestId);
+                                        if (StaticGenerationStreamFrame.isDisplay(event.message())) {
+                                            hasDisplayDeltas = true;
+                                            // 新一轮草稿开始后，旧候选不能再冒充这一轮的完整产物。
+                                            latestArtifact = null;
+                                        }
                                         if (event.artifact() != null) latestArtifact = event.artifact();
                                         if (!event.message().isBlank()) sink.next(event.message());
                                         if (event.completed()) {
+                                            if (codeGenType != CodeGenTypeEnum.VUE_PROJECT
+                                                    && hasDisplayDeltas && latestArtifact == null) {
+                                                throw new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(),
+                                                        "LANGGRAPH_STATIC_CANDIDATE_MISSING", requestId,
+                                                        "模型流未返回完整候选，已保留上一版本", null);
+                                            }
                                             completed = true;
                                             if (codeGenType != CodeGenTypeEnum.VUE_PROJECT && latestArtifact != null) {
-                                                sink.next(latestArtifact);
+                                                sink.next(hasDisplayDeltas
+                                                        ? StaticGenerationStreamFrame.candidate(latestArtifact)
+                                                        : latestArtifact);
                                             }
                                             break;
                                         }
@@ -288,6 +302,15 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
             }
             if ("content_delta".equals(type)) {
                 if (codeGenType != CodeGenTypeEnum.VUE_PROJECT) {
+                    String contentMode = data.path("contentMode").asText("");
+                    if ("display_delta".equals(contentMode)) {
+                        return new ParsedEvent(StaticGenerationStreamFrame.display(data.path("content").asText()), null, false);
+                    }
+                    if (!contentMode.isEmpty() && !"candidate".equals(contentMode)) {
+                        throw new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(),
+                                "LANGGRAPH_CONTENT_MODE_INVALID", fallbackRequestId,
+                                "模型流返回未知内容模式", null);
+                    }
                     return new ParsedEvent("", data.path("content").asText(), false);
                 }
                 return new ParsedEvent(objectMapper.writeValueAsString(

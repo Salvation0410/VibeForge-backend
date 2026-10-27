@@ -65,6 +65,8 @@ Python 内部接口：
 
 流事件统一为 `content_delta`、`tool_started`、`tool_finished`、`node_status`、`completed`、`failed`，每个事件包含 `requestId`、递增序号、节点以及数据或错误字段。
 
+静态模型文本流式已区分 `content_delta.data.contentMode`：`display_delta` 只转为实时展示，`candidate` 表示本轮完整产物；旧无模式事件仍按完整候选兼容。Python 使用可选 generate_stream/repair_stream，在完整响应正常结束后才发 candidate，Vue JSON 工具响应保持完整解析再执行。Java 网关通过内部展示/候选帧复用原 `Flux<String>`，静态处理器只把成功终态后的最终候选写入历史，内部帧不出现在公共 SSE。新一轮展示增量会使旧候选失效；未知模式和流式终态缺少候选均失败。公共 SSE 与前端窗口/刷新语义保持不变，部署时先升级 Java 再升级 Python。具体边界见 `docs/superpowers/specs/2026-10-27-static-model-streaming-design.md`；生产任务恢复不属于本阶段。
+
 工具网关提供文件读取、目录读取、写入、修改、删除、产物保存和 Vue 构建。请求使用 Bearer 服务令牌；按 `appId` 固定沙箱目录，使用 `requestId + toolCallId` 在 Redis 中幂等，并执行路径穿越、参数和超时校验。
 
 ## 5. Spring Boot 改造

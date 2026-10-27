@@ -2,7 +2,7 @@
 
 日期：2026-10-27。本文描述本轮已实现内容及下一阶段的边界，设计来源为 `docs/superpowers/specs/2026-10-27-generation-subgraphs-design.md`。
 
-> 后续更新：本文第 1—8 节保留第一阶段交接基线；2026-10-27 已完成 Vue 多节点工具子图（第 9 节）以及子图输入与私有状态收敛（第 10 节）。第 6 节优先项一、二均已完成；当前结构和验证以第 9、10 节为准。
+> 后续更新：本文第 1—8 节保留第一阶段交接基线；2026-10-27 已完成 Vue 多节点工具子图（第 9 节）、子图输入与私有状态收敛（第 10 节）以及静态模型文本流式（第 11 节）。第 6 节优先项一、二及优先项三中的 HTML/MULTI_FILE 流式已完成，生产任务恢复仍未实现；当前能力和验证以第 9—11 节为准。
 
 ## 1. 已实现结构
 
@@ -189,3 +189,35 @@ compileall 和 lock 检查通过；排除 Reranker 后为 643 passed、2 skipped
 ### 下一阶段
 
 优先项三仍需要独立设计：模型文本流式输出与生产任务恢复各自有业务协议和验收要求，应分别实施。模型流式需区分展示增量和最终候选，并保留完整 Vue JSON 工具参数校验；生产恢复需落实任务状态、鉴权、租约/取消复核、发布核对和重连策略。真实 PostgreSQL 父子图恢复与清理可作为后续集成验收，不应将内存 saver 测试当作生产自动恢复保证。
+
+## 11. 静态模型文本流式（后续实施）
+
+设计：`docs/superpowers/specs/2026-10-27-static-model-streaming-design.md`。本阶段只实施 HTML/MULTI_FILE 首次生成及静态修复的模型文本流式，生产任务恢复单独推进。
+
+### 当前实现
+
+- `models/base.py` 定义可选 `StreamingGenerationModel` 与展示回调协议；原 generate/repair 保留。`OpenAICompatibleModel` 的 generate_stream/repair_stream 使用 ChatOpenAI.astream 并请求 stream_usage，按序聚合完整 AIMessageChunk，保留结束原因和用量。Vue、路由和质量审查继续使用完整响应。
+- `orchestration/static_generation.py` 由静态生成与修复节点共用，将 `content_delta.data.contentMode` 区分为 `display_delta` 与 `candidate`；前者只供展示，后者是本轮完整候选。STOP/END_TURN 才发送 candidate；截断、过滤、无正常结束标记、空流与供应商异常不能进入发布。旧模型未提供可选流式方法时走原接口，流中途失败不会回退重调模型。
+- 取消在展示回调和任务取消处生效，供应商异步迭代器在取消/错误时关闭；完整载荷预算和自动 LangSmith 追踪关闭沿用原逻辑。分片不写入 LangGraph state，完整候选仍在模型节点完成后进入检查点，不支持接续已断开的供应商 token 流。
+- Java `LangGraphAiGenerationGateway` 识别新内容模式，展示增量不替换完整候选，新一轮草稿开始使旧候选失效。未知模式和流式 completed 缺失候选会明确失败。旧未标记内容事件继续按完整候选兼容。
+- `StaticGenerationStreamFrame` 仅在 Java 网关与静态处理器之间区分展示/成功候选；`SimpleTextStreamHandler` 将展示帧解包为原 SSE 文本，只保存成功后的完整候选，不把草稿或修复前候选累加进最终历史，也不向页面重复发送整段最终源码。内部帧不进入浏览器和聊天历史。Legacy 累加和发布后历史落库失败不反转成功的语义保留。
+- 公共 SSE、Vue 工具 JSON 校验、修复与工具预算、2000 字符窗口、80ms 刷新、成功后回源及单次预览刷新不变。前端代码未修改，用户既有客服改动保留。
+
+### 部署与回滚
+
+先升级 Java 网关和静态处理器，再升级 Python，以获得实时展示；新 Java 兼容旧无模式事件。供应商需支持 OpenAI 兼容流式和 usage 块；不支持时明确失败，不进行隐式二次生成。没有新增环境变量、数据库迁移或持久化存储。回滚时按同一功能整体回滚 Java/Python，排空在途请求，不承诺跨版本 checkpoint 续跑。
+
+### 本阶段验证
+
+- 新增 `tests/test_static_model_streaming.py` 17 项，覆盖适配器块聚合/用量/追踪关闭/预算/流关闭、首片早于模型完成、两类静态生成、修复候选、截断/过滤/无结束标记/空流/断流零发布、断连取消与 Vue 不增量执行工具。旧实现先复现 12 项失败，Vue 兼容项原本通过，再补充预算、空流、断连、截断修复测试。
+- `uv run pytest -ra --tb=short`：707 passed、6 failed、2 skipped（96.28 秒）；六项失败仍是 Reranker owner 锁相关子进程用例，均报 `CUSTOMER_SERVICE_RERANKER_UNAVAILABLE`，失败栈包含 `_GpuOwnerLock.acquire`。未修改 Reranker 或本地 .env。
+- `uv run pytest --ignore=tests/test_reranker.py -ra`：677 passed、2 skipped（22.68 秒）。跳过均为未启用真实 PostgreSQL 集成测试。
+- `uv run python -m compileall -q src`、`uv lock --check` 通过。
+- `mvn clean -DskipTests compile` 与 `mvn test '-Dtest=LangGraphAiGenerationGatewayTest,SimpleTextStreamHandlerTest'` 通过，Java 两类专项共 23 项（新增 8 项）。本地 HTTP 模拟测试确认首片可在服务端发送 candidate/completed 前到达，最终历史仅为完整候选；没有连接真实 Python 或真实模型。
+- 前端三类既有流式/提示/预览测试 14 项通过；`npm run type-check`、`npm run build-only` 通过。构建报告既有动态导入和大包体提示，未改前端源码或依赖。
+
+真实供应商、Spring/Python HTTP 联调、Redis/Selenium、浏览器与完整 SSE、真实 PostgreSQL 父子图恢复本阶段均未验收；上述模拟测试不代表生产端到端通过。
+
+### 下一阶段建议
+
+生产任务恢复仍是独立业务能力：先落实持久化任务状态、请求鉴权和应用归属、租约重获/取消复核、Spring 发布权威结果核对、恢复调度与客户端重连策略，再开放恢复入口。可先补真实 PostgreSQL 父子命名空间恢复/清理集成验收作为基础，但不能直接将 ainvoke(None) 当作生产恢复接口。Vue 工具 JSON 如需文本增量展示，应独立设计只展示安全 content 字段的解析，不得流式执行未完整参数。

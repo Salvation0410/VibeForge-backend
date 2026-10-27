@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import com.yupi.yuaicodemother.config.AiEngineProperties;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
+import com.yupi.yuaicodemother.core.handler.SimpleTextStreamHandler;
+import com.yupi.yuaicodemother.model.entity.SysUser;
+import com.yupi.yuaicodemother.service.ChatHistoryService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.BaseSubscriber;
@@ -21,13 +24,92 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.*;
 
 class LangGraphAiGenerationGatewayTest {
     private HttpServer server;
     private ExecutorService serverExecutor;
+
+    @Test
+    void textDeltasAndRepairCandidatesReachHistoryWithoutDraftDuplication() throws Exception {
+        var gateway = gatewayReturning(event("content_delta", "{\"content\":\"old\",\"contentMode\":\"display_delta\"}")
+                + event("content_delta", "{\"content\":\"old candidate\",\"contentMode\":\"candidate\"}")
+                + event("content_delta", "{\"content\":\"new \",\"contentMode\":\"display_delta\"}")
+                + event("content_delta", "{\"content\":\"candidate\",\"contentMode\":\"display_delta\"}")
+                + event("content_delta", "{\"content\":\"new candidate\",\"contentMode\":\"candidate\"}")
+                + event("completed", "{}"));
+        for (var type : java.util.List.of(CodeGenTypeEnum.HTML, CodeGenTypeEnum.MULTI_FILE)) {
+            ChatHistoryService history = mock(ChatHistoryService.class);
+            var chunks = new SimpleTextStreamHandler().handle(
+                    gateway.generate("build", type, 42L, 7L, "req-stream"), history, 42,
+                    SysUser.builder().id(7L).build()).collectList().block();
+            assertEquals(java.util.List.of("old", "new ", "candidate"), chunks);
+            verify(history).addChatMessage(eq(42L), eq("new candidate"), anyString(), eq(7L));
+        }
+    }
+
+    @Test
+    void newDraftCannotReusePreviousCandidateOnCompleted() throws Exception {
+        var gateway = gatewayReturning(event("content_delta", "{\"content\":\"old\",\"contentMode\":\"candidate\"}")
+                + event("content_delta", "{\"content\":\"partial new\",\"contentMode\":\"display_delta\"}")
+                + event("completed", "{}"));
+        ChatHistoryService history = mock(ChatHistoryService.class);
+        GenerationStreamException error = assertThrows(GenerationStreamException.class,
+                () -> new SimpleTextStreamHandler().handle(
+                        gateway.generate("build", CodeGenTypeEnum.HTML, 42L, 7L, "req-stream"), history, 42,
+                        SysUser.builder().id(7L).build()).collectList().block());
+        assertEquals("LANGGRAPH_STATIC_CANDIDATE_MISSING", error.getErrorCode());
+        verifyNoInteractions(history);
+    }
+
+    @Test
+    void unknownContentModeFailsInsteadOfTreatingItAsCandidate() throws Exception {
+        var gateway = gatewayReturning(event("content_delta", "{\"content\":\"draft\",\"contentMode\":\"unknown\"}")
+                + event("completed", "{}"));
+        var error = assertThrows(GenerationStreamException.class,
+                () -> gateway.generate("build", CodeGenTypeEnum.HTML, 42L, 7L, "req-stream").collectList().block());
+        assertEquals("LANGGRAPH_CONTENT_MODE_INVALID", error.getErrorCode());
+    }
+
+    @Test
+    void displayIsDeliveredBeforeHttpServerSendsFinalCandidate() throws Exception {
+        CountDownLatch displayReceived = new CountDownLatch(1);
+        AtomicBoolean arrivedBeforeComplete = new AtomicBoolean();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/internal/v1/generations:stream", exchange -> {
+            exchange.sendResponseHeaders(200, 0);
+            exchange.getResponseBody().write(event("content_delta",
+                    "{\"content\":\"early\",\"contentMode\":\"display_delta\"}").getBytes(StandardCharsets.UTF_8));
+            exchange.getResponseBody().flush();
+            try {
+                arrivedBeforeComplete.set(displayReceived.await(5, TimeUnit.SECONDS));
+            } catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+            }
+            exchange.getResponseBody().write((event("content_delta",
+                    "{\"content\":\"early\",\"contentMode\":\"candidate\"}") + event("completed", "{}"))
+                    .getBytes(StandardCharsets.UTF_8));
+            exchange.close();
+        });
+        server.start();
+        AiEngineProperties properties = new AiEngineProperties();
+        properties.setServiceUrl("http://127.0.0.1:" + server.getAddress().getPort());
+        properties.setToken("test-token");
+        var gateway = new LangGraphAiGenerationGateway(properties, new ObjectMapper());
+        ChatHistoryService history = mock(ChatHistoryService.class);
+        var chunks = new SimpleTextStreamHandler().handle(
+                gateway.generate("build", CodeGenTypeEnum.HTML, 42L, 7L, "req-stream"), history, 42,
+                SysUser.builder().id(7L).build()).doOnNext(chunk -> displayReceived.countDown())
+                .collectList().block(Duration.ofSeconds(10));
+        assertTrue(arrivedBeforeComplete.get());
+        assertEquals(java.util.List.of("early"), chunks);
+        verify(history).addChatMessage(eq(42L), eq("early"), anyString(), eq(7L));
+    }
 
     @Test
     void inputWarningDoesNotReplaceFinalArtifact() throws Exception {

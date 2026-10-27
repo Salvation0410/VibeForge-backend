@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import aclosing
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -15,6 +16,7 @@ from ai_service.models.base import (
     CustomerServiceContext,
     CustomerServiceModelAnswer,
     ModelTurn,
+    TextDeltaCallback,
     ToolCall,
 )
 from ai_service.models.quality_review import (
@@ -69,7 +71,7 @@ class OpenAICompatibleModel:
 
         return getattr(self, "_client", None) is not None
 
-    async def _invoke(self, messages):
+    def _check_budget(self, messages):
         # 当前产物、历史及工具结果会继续增长，实际模型调用前再次检查完整载荷。
         settings = getattr(self, "_settings", None)
         if settings is not None:
@@ -79,8 +81,48 @@ class OpenAICompatibleModel:
                 output_tokens=settings.model_max_tokens,
                 overhead_tokens=settings.model_context_overhead_tokens,
             )
+
+    async def _invoke(self, messages):
+        self._check_budget(messages)
         with tracing_context(enabled=False):
             return await self._client.ainvoke(messages)
+
+    async def _stream_static_turn(self, messages, on_delta: TextDeltaCallback) -> ModelTurn:
+        """聚合完整响应才返回候选；任务取消、回调异常和供应商失败均关闭响应流。"""
+        self._check_budget(messages)
+        combined = None
+        with tracing_context(enabled=False):
+            async with aclosing(self._client.astream(messages, stream_usage=True)) as stream:
+                async for chunk in stream:
+                    combined = chunk if combined is None else combined + chunk
+                    text = chunk.text()
+                    if text:
+                        await on_delta(text)
+        if combined is None:
+            raise ValueError("MODEL_STREAM_INCOMPLETE: model returned an empty stream")
+        if combined.tool_calls:
+            raise ValueError("MODEL_STREAM_UNEXPECTED_TOOL_CALLS: static text cannot execute tools")
+        return _model_turn(combined, combined.text())
+
+    async def generate_stream(self, branch: str, context: dict[str, Any], *,
+                              on_delta: TextDeltaCallback) -> ModelTurn:
+        """静态分支文本可增量展示；Vue 工具 JSON 始终使用完整响应入口。"""
+        if branch not in {"HTML", "MULTI_FILE"}:
+            raise ValueError("STATIC_STREAM_UNSUPPORTED: only static artifacts support text deltas")
+        return await self._stream_static_turn([
+            SystemMessage(content=generation_system_prompt(branch)),
+            HumanMessage(content=json.dumps(context, ensure_ascii=False)),
+        ], on_delta)
+
+    async def repair_stream(self, artifact: str, context: dict[str, Any], *,
+                            on_delta: TextDeltaCallback) -> ModelTurn:
+        """静态修复与首次生成使用相同的增量/完整候选契约。"""
+        if context.get("codeGenType") not in {"HTML", "MULTI_FILE"}:
+            raise ValueError("STATIC_STREAM_UNSUPPORTED: Vue repair requires complete tool JSON")
+        return await self._stream_static_turn([
+            SystemMessage(content=REPAIR_SYSTEM_PROMPT),
+            HumanMessage(content=json.dumps({"artifact": artifact, **context}, ensure_ascii=False)),
+        ], on_delta)
 
     async def review_input(self, context: dict[str, Any]) -> InputReviewResult:
         """独立审核调用只允许短结构化响应，截断、工具调用及无效 JSON 均不能放行。"""

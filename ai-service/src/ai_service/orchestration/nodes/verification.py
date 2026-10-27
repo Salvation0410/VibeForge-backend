@@ -7,6 +7,7 @@ from ai_service.orchestration.events import EventEmitter
 from ai_service.orchestration.state import WorkflowState
 from ai_service.orchestration.routing import _raise_for_incomplete_model_turn
 from ai_service.orchestration.multi_agent_review import run_multi_agent_review
+from ai_service.orchestration.static_generation import invoke_static_model
 
 if TYPE_CHECKING:
     from ai_service.orchestration.workflow import GenerationWorkflow
@@ -144,11 +145,7 @@ def create_verification_nodes(
             repair_context["qualityReview"] = {
                 "repairFeedback": state["repair_feedback"]
             }
-        turn = await workflow.model.repair(
-            state.get("artifact", ""),
-            repair_context,
-        )
-        await emitter.emit("content_delta", "repair", data={"content": turn.content, "repairCount": count})
+        turn = await invoke_static_model(workflow, state, emitter, thread_id, repair_context=repair_context)
         return {
             "artifact": turn.content,
             "build": {},

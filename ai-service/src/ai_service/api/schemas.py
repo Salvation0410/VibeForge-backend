@@ -68,6 +68,13 @@ class EventError(ApiModel):
     message: str
 
 
+class StaticContentData(ApiModel):
+    """内部静态内容模式；展示增量不参与候选缓存，旧未标记事件仍表示完整候选。"""
+
+    content: str
+    content_mode: Literal["display_delta", "candidate"]
+
+
 class GenerationEvent(ApiModel):
     """通过 NDJSON 发送给 Spring 的标准工作流事件。"""
     type: Literal[
