@@ -6,6 +6,7 @@ import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -20,6 +21,7 @@ class GenerationLeaseServiceTest {
         AtomicReference<String> value = bucketValue(state);
         when(client.getLock("ai:generation:app:42")).thenReturn(lock);
         when(client.getLock("ai:generation:transition:42")).thenReturn(transitionLock);
+        when(transitionLock.tryLock()).thenReturn(true);
         when(client.<String>getBucket("ai:generation:state:42")).thenReturn(state);
         when(lock.tryLock()).thenReturn(true);
         var service = new GenerationLeaseService(client);
@@ -36,6 +38,9 @@ class GenerationLeaseServiceTest {
     void rejectsSecondGenerationWithoutWaiting() {
         RedissonClient client = mock(RedissonClient.class);
         RLock lock = mock(RLock.class);
+        RLock transitionLock = mock(RLock.class);
+        when(client.getLock("ai:generation:transition:42")).thenReturn(transitionLock);
+        when(transitionLock.tryLock()).thenReturn(true);
         when(client.getLock("ai:generation:app:42")).thenReturn(lock);
         when(lock.tryLock()).thenReturn(false);
         GenerationStreamException error = assertThrows(GenerationStreamException.class,
@@ -53,8 +58,11 @@ class GenerationLeaseServiceTest {
         AtomicReference<String> value = bucketValue(state);
         when(client.getLock("ai:generation:app:42")).thenReturn(appLock);
         when(client.getLock("ai:generation:transition:42")).thenReturn(transitionLock);
+        when(transitionLock.tryLock()).thenReturn(true);
         when(client.<String>getBucket("ai:generation:state:42")).thenReturn(state);
-        when(appLock.tryLock()).thenReturn(true);
+        AtomicBoolean held = new AtomicBoolean();
+        when(appLock.isLocked()).thenAnswer(call -> held.get());
+        when(appLock.tryLock()).thenAnswer(call -> { held.set(true); return true; });
         var service = new GenerationLeaseService(client);
 
         GenerationLease cancelled = service.acquire(42, "req-cancel");
@@ -72,6 +80,9 @@ class GenerationLeaseServiceTest {
     void committedArtifactRemainsSuccessfulWhenFinalStateWriteFails() throws Exception {
         RedissonClient client = mock(RedissonClient.class);
         RLock transitionLock = mock(RLock.class);
+        RLock appLock = mock(RLock.class);
+        when(client.getLock("ai:generation:app:42")).thenReturn(appLock);
+        when(appLock.isLocked()).thenReturn(true);
         RBucket<String> state = mock(RBucket.class);
         AtomicReference<String> value = new AtomicReference<>("req-1:ACTIVE");
         when(client.getLock("ai:generation:transition:42")).thenReturn(transitionLock);
@@ -93,6 +104,9 @@ class GenerationLeaseServiceTest {
     @Test
     void explicitCancellationAndStatusExposeStablePublicStates() {
         RedissonClient client = mock(RedissonClient.class);
+        RLock appLock = mock(RLock.class);
+        when(client.getLock("ai:generation:app:42")).thenReturn(appLock);
+        when(appLock.isLocked()).thenReturn(true);
         RLock transitionLock = mock(RLock.class);
         RBucket<String> state = mock(RBucket.class);
         AtomicReference<String> value = bucketValue(state);
@@ -117,6 +131,73 @@ class GenerationLeaseServiceTest {
         assertEquals(GenerationLeaseService.PublicState.COMMITTING, committing.state());
         assertFalse(committing.cancellationRequested());
         assertEquals("req-2:COMMITTING", value.get());
+    }
+
+    @Test
+    void lostLeaseRejectsCommitBeforeCallingAction() {
+        RedissonClient client = mock(RedissonClient.class);
+        RLock appLock = mock(RLock.class);
+        RLock transition = mock(RLock.class);
+        RBucket<String> state = mock(RBucket.class);
+        when(client.getLock("ai:generation:app:42")).thenReturn(appLock);
+        when(client.getLock("ai:generation:transition:42")).thenReturn(transition);
+        when(client.<String>getBucket("ai:generation:state:42")).thenReturn(state);
+        when(state.get()).thenReturn("req:ACTIVE");
+        AtomicBoolean invoked = new AtomicBoolean();
+        var service = new GenerationLeaseService(client);
+        var error = assertThrows(GenerationStreamException.class,
+                () -> service.commit(42, "req", () -> { invoked.set(true); return null; }));
+        assertEquals("GENERATION_LEASE_LOST", error.getErrorCode());
+        assertFalse(invoked.get());
+        verify(state, never()).set(anyString());
+    }
+
+    @Test
+    void staleStateWithoutLockDoesNotAppearRunningOrAcceptCancellation() {
+        RedissonClient client = mock(RedissonClient.class);
+        RLock appLock = mock(RLock.class);
+        RLock transition = mock(RLock.class);
+        RBucket<String> state = mock(RBucket.class);
+        when(client.getLock("ai:generation:app:42")).thenReturn(appLock);
+        when(client.getLock("ai:generation:transition:42")).thenReturn(transition);
+        when(client.<String>getBucket("ai:generation:state:42")).thenReturn(state);
+        when(state.get()).thenReturn("req:ACTIVE");
+        var service = new GenerationLeaseService(client);
+        assertEquals(GenerationLeaseService.PublicState.IDLE, service.getStatus(42).state());
+        assertEquals(GenerationLeaseService.PublicState.IDLE, service.cancelActive(42).state());
+        assertFalse(service.cancel(new GenerationLease(42, "req", appLock, 1)));
+        verify(state, never()).set(anyString());
+        verify(state, never()).delete();
+    }
+
+    @Test
+    void existingLockRejectsSameClientReentryWithoutOverwritingRequest() {
+        RedissonClient client = mock(RedissonClient.class);
+        RLock appLock = mock(RLock.class);
+        RLock transition = mock(RLock.class);
+        when(client.getLock("ai:generation:app:42")).thenReturn(appLock);
+        when(client.getLock("ai:generation:transition:42")).thenReturn(transition);
+        when(transition.tryLock()).thenReturn(true);
+        when(appLock.isLocked()).thenReturn(true);
+        var error = assertThrows(GenerationStreamException.class,
+                () -> new GenerationLeaseService(client).acquire(42, "new-request"));
+        assertEquals("GENERATION_IN_PROGRESS", error.getErrorCode());
+        verify(appLock, never()).tryLock();
+        verify(client, never()).getBucket(anyString());
+        verify(transition).unlock();
+    }
+
+    @Test
+    void busyTransitionRejectsImmediatelyBeforeAcquiringAppLock() {
+        RedissonClient client = mock(RedissonClient.class);
+        RLock appLock = mock(RLock.class);
+        RLock transition = mock(RLock.class);
+        when(client.getLock("ai:generation:app:42")).thenReturn(appLock);
+        when(client.getLock("ai:generation:transition:42")).thenReturn(transition);
+        assertEquals("GENERATION_IN_PROGRESS", assertThrows(GenerationStreamException.class,
+                () -> new GenerationLeaseService(client).acquire(42, "req")).getErrorCode());
+        verifyNoInteractions(appLock);
+        verify(transition, never()).unlock();
     }
 
     /** 用原子引用模拟 Redis bucket 的读取、写入和删除语义。 */

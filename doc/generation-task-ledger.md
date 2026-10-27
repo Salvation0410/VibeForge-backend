@@ -39,8 +39,21 @@ HTML/MULTI_FILE 的 COMMITTED 来自 VersionedArtifactStore 的提交标记与�
 
 执行状态、租约和发布证据分别读取，不是原子快照。FAILED 与 COMMITTED 可以同时存在（例如发布后传输失败），无租约也不能证明执行失败。查询不回写任务状态、不修复当前指针、不调用 Python、不自动恢复。原 `/chat/gen/code/status` 继续返回活动生命周期，不以任务终态替换其 IDLE 语义；公共 SSE 不新增事件。
 
-## 验证与后续
+## 真实资源验证与后续
 
-相关测试覆盖真实 Mapper XML 的请求唯一性、并发终态 CAS、取消幂等、查询保留与归属；服务测试覆盖三类生成、任务插入失败关闭、断连取消、早期取消、终态与实时证据隔离；临时目录测试验证提交证据和版本保留清理。测试不访问真实模型、业务 MySQL、Redis 或真实生成项目。
+真实资源验收测试位于 `src/test/java/com/yupi/yuaicodemother/core/artifact/GenerationTaskResourcesIT.java`，默认跳过。仅当目标配置是 `localhost` 的业务库 `yu_ai_code_mother` 和 Spring Redis database 1，且已显式设置进程环境变量 `AI_TASK_INTEGRATION=true` 时执行：
 
-后续应先完成真实 MySQL/Redis/文件系统联调与中断矩阵，再设计恢复认领协议：任务执行所有权/心跳/过期判定、持久化取消权威状态、Spring 发布事实核对和新的租约获取必须一起定义；最后增加 Python checkpoint 续跑与客户端重连。不能仅根据 RUNNING 或 `ainvoke(None)` 自动续跑。
+```powershell
+$env:AI_TASK_INTEGRATION = "true"
+mvn test '-Dtest=GenerationTaskResourcesIT'
+```
+
+夹具使用 application.yml/local 配置与标准 Spring 环境变量覆盖，预检账本表但不迁移；不打印连接凭据，不启动/停止/清空服务。测试写入随机应用 ID 和唯一请求 ID，结束后只删除精确任务行和三个对应 Redis 键，发布产物位于 JUnit 临时目录。不要在连接非本地库/Redis 或用户共享 fixture 的本地配置下开启该测试。
+
+测试覆盖真实 Mapper XML、数据库唯一约束和并发终态 CAS，插入确认丢失留下可查 RUNNING、取消落账失败但 Redis 仍禁止发布、发布后终态写失败与重建服务查询、丢失租约及后继租约安全。测试模型、文件构建、Spring/Python HTTP 仍由 fake 或局部临时目录替代。
+
+真实资源测试发现并修复 GenerationLeaseService 两个问题：其一，Redis 租约锁丢失但 ACTIVE 字符串残留时提交仍能执行；其二，Redisson 默认可重入使同客户端同线程可获取第二个同应用请求并覆盖状态。现在状态变更互斥锁保护租约获取和状态初始化，重入在 tryLock 前拒绝；提交执行前检查应用锁仍存活；取消和状态查询不会把无锁残留状态当成活动请求。检查与文件发布之间仍有 TOCTOU 窗口，Redis 锁到期/失联发生在实际文件写入期间时，本阶段没有 fencing token 阻止迟到写入；不得声称解决发布中的租约过期。
+
+纯测试覆盖真实 Mapper XML 的请求归属、取消与终态顺序、查询保留；服务测试覆盖三类生成、失败关闭和错误脱敏；临时目录测试验证发布证据和版本保留清理。真实提交 SQL 没有在产品路径外额外开启，真实文件写只位于系统生成临时目录。
+
+恢复调度仍未实现。下一阶段应设计持久化执行所有者、心跳和过期判定、跨资源 fencing/发布幂等、取消权威状态和恢复认领协议；接着验证 Python checkpoint 续跑及客户端重连。不能仅根据 RUNNING、无锁或 `ainvoke(None)` 自动续跑。

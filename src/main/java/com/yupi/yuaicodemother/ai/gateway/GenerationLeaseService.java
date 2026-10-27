@@ -45,16 +45,21 @@ public class GenerationLeaseService {
     public GenerationLease acquire(long appId, String requestId) {
         RLock lock = redissonClient.getLock("ai:generation:app:" + appId);
         long ownerThreadId = Thread.currentThread().threadId();
-        if (!lock.tryLock()) {
-            throw new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(), "GENERATION_IN_PROGRESS",
-                    requestId, "当前应用正在生成，请稍后再试", null);
-        }
+        RLock transitionLock = transitionLock(appId);
+        // 状态初始化必须与旧请求的提交/释放互斥；tryLock 保持忙时立即拒绝，不排队等待发布。
+        if (!transitionLock.tryLock()) throw inProgress(requestId);
         try {
-            stateBucket(appId).set(state(requestId, ACTIVE));
-            return new GenerationLease(appId, requestId, lock, ownerThreadId);
-        } catch (RuntimeException error) {
-            lock.unlockAsync(ownerThreadId);
-            throw error;
+            // Redisson 允许同客户端同线程重入，但业务上每个应用只能运行一个请求。
+            if (lock.isLocked() || !lock.tryLock()) throw inProgress(requestId);
+            try {
+                stateBucket(appId).set(state(requestId, ACTIVE));
+                return new GenerationLease(appId, requestId, lock, ownerThreadId);
+            } catch (RuntimeException error) {
+                lock.unlockAsync(ownerThreadId);
+                throw error;
+            }
+        } finally {
+            transitionLock.unlock();
         }
     }
 
@@ -70,6 +75,7 @@ public class GenerationLeaseService {
         try {
             RBucket<String> bucket = stateBucket(lease.appId());
             if (!Objects.equals(bucket.get(), state(lease.requestId(), ACTIVE))) return false;
+            if (!lease.lock().isLocked()) return false;
             bucket.set(state(lease.requestId(), CANCELLED));
             return true;
         } finally {
@@ -85,7 +91,7 @@ public class GenerationLeaseService {
         transitionLock.lock();
         try {
             RBucket<String> bucket = stateBucket(appId);
-            GenerationStateSnapshot current = parseSnapshot(bucket.get());
+            GenerationStateSnapshot current = liveSnapshot(appId, bucket.get());
             if (current.state() == PublicState.RUNNING) {
                 bucket.set(state(current.requestId(), CANCELLED));
                 return new GenerationStateSnapshot(current.requestId(), PublicState.STOPPING, true);
@@ -101,7 +107,7 @@ public class GenerationLeaseService {
         RLock transitionLock = transitionLock(appId);
         transitionLock.lock();
         try {
-            return parseSnapshot(stateBucket(appId).get());
+            return liveSnapshot(appId, stateBucket(appId).get());
         } finally {
             transitionLock.unlock();
         }
@@ -126,6 +132,12 @@ public class GenerationLeaseService {
                         ? "GENERATION_CANCELLED" : "GENERATION_NOT_ACTIVE";
                 throw new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(), errorCode, requestId,
                         "生成请求已取消或不再活动，拒绝发布产物", null);
+            }
+            // ACTIVE/COMMITTING 只是状态记录；提交入口还必须有真实应用锁，失锁时失败关闭。
+            // 此检查不是文件系统 fencing，不能保证检查后至发布完成期间锁永不丢失。
+            if (!redissonClient.getLock("ai:generation:app:" + appId).isLocked()) {
+                throw new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(), "GENERATION_LEASE_LOST",
+                        requestId, "生成租约已丢失，拒绝发布产物", null);
             }
             if (active) bucket.set(state(requestId, COMMITTING));
             try {
@@ -183,6 +195,21 @@ public class GenerationLeaseService {
     /** 组合请求 ID 与生命周期状态，防止旧请求操作新请求状态。 */
     private String state(String requestId, String status) {
         return requestId + ":" + status;
+    }
+
+    private GenerationStreamException inProgress(String requestId) {
+        return new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(), "GENERATION_IN_PROGRESS",
+                requestId, "当前应用正在生成，请稍后再试", null);
+    }
+
+    /** 残留状态键不是活动租约证明；只读隐藏失锁状态，不删除记录或推断任务终态。 */
+    private GenerationStateSnapshot liveSnapshot(long appId, String value) {
+        GenerationStateSnapshot current = parseSnapshot(value);
+        if (current.state() != PublicState.IDLE
+                && !redissonClient.getLock("ai:generation:app:" + appId).isLocked()) {
+            return GenerationStateSnapshot.idle();
+        }
+        return current;
     }
 
     private GenerationStateSnapshot parseSnapshot(String value) {

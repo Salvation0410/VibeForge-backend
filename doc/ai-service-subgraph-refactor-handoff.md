@@ -2,7 +2,7 @@
 
 日期：2026-10-27。本文描述本轮已实现内容及下一阶段的边界，设计来源为 `docs/superpowers/specs/2026-10-27-generation-subgraphs-design.md`。
 
-> 后续更新：本文第 1—8 节保留第一阶段交接基线；2026-10-27 已完成 Vue 多节点工具子图（第 9 节）、子图输入与私有状态收敛（第 10 节）、静态模型文本流式（第 11 节）、真实 PostgreSQL 子图恢复与清理验收（第 12 节）以及 Spring 任务账本与查询（第 13 节）。第 6 节优先项一、二及优先项三中的 HTML/MULTI_FILE 流式已完成，生产任务恢复仍未实现；当前能力和验证以第 9—13 节为准。
+> 后续更新：本文第 1—8 节保留第一阶段交接基线；2026-10-27 已完成 Vue 多节点工具子图（第 9 节）、子图输入与私有状态收敛（第 10 节）、静态模型文本流式（第 11 节）、真实 PostgreSQL 子图恢复与清理验收（第 12 节）、Spring 任务账本与查询（第 13 节）以及真实 MySQL/Redis 故障矩阵和租约防护（第 14 节）。第 6 节优先项一、二及优先项三中的 HTML/MULTI_FILE 流式已完成，生产任务恢复仍未实现；当前能力和验证以第 9—14 节为准。
 
 ## 1. 已实现结构
 
@@ -280,3 +280,41 @@ MySQL、Redis 与文件系统没有跨资源事务：取消仲裁至墓碑写入
 ### 下一阶段
 
 先在隔离环境执行真实 MySQL 迁移并完成 Redis/文件存储联调，覆盖插入确认丢失、取消落账失败、发布后终态落账失败、租约丢失和服务重启等矩阵。随后设计持久化执行所有者、心跳与过期判定、取消权威状态和恢复认领协议，并核对 Spring 发布事实，再接续 Python checkpoint。不要仅根据 RUNNING、无租约或 `ainvoke(None)` 自动恢复任务。
+
+## 14. 真实 MySQL/Redis 故障矩阵与租约防护
+
+执行计划：`docs/superpowers/plans/2026-10-27-generation-task-real-integration.md`；业务账本接口与数据边界继续见 `doc/generation-task-ledger.md`。
+
+### 建表执行
+
+2026-10-27 按用户指示执行 `sql/alter_generation_task.sql`。目标经本地配置与安全护栏确认是 `localhost` 的 `yu_ai_code_mother`，服务版本 MySQL 8.0.41；执行前表不存在，执行后检查到 12 列、`request_id` 的 `ascii_bin` 排序规则、PRIMARY/owner/retention 三个索引，以及已启用的 `chk_generation_task_state`。未输出连接凭据。部署配置与迁移脚本一致。
+
+### 故障矩阵
+
+新增默认 opt-in 的 `GenerationTaskResourcesIT`，设置进程环境变量 `AI_TASK_INTEGRATION=true` 才连接 application 配置指定的本机业务库与 Spring Redis database 1；本地 host/database/schema 不符合护栏则拒绝运行。夹具检查业务表已存在，不执行 DDL。每项生成唯一 requestId/appId，结束只删除精确账本行及对应三个 Redis 键，产物写 JUnit 临时目录。不停止服务、不清空共享库或 Redis、不触碰 `projects/`。
+
+- 真实 MySQL Mapper/XML 检查大小写敏感请求唯一性与状态 CHECK，通过两个并发数据库连接确认终态 CAS 只有一个赢家；检查跨用户读隔离。
+- 模拟任务 INSERT 已落库而调用方收到异常：任务保留 RUNNING，新的 Mapper/服务可查询，实时 lease 为 UNKNOWN、发布为 NOT_CONFIRMED，模型/历史均未调用。这说明请求结果不确定时失败关闭会牺牲自动续跑，但不因查询到 RUNNING 就擅自恢复。
+- 模拟 MySQL 取消落账失败：Redis 已仲裁的取消仍继续通知下游并阻止提交，任务账本短时缺少墓碑；随后落终态/补记可恢复可观测性。
+- 使用真实 Redis 提交临时目录发布，再模拟 MySQL 终态写失败并重建 Mapper/服务：查询返回 execution RUNNING、lease UNKNOWN、publication COMMITTED，指针保持不变。证明独立证据可观察不一致，不自动翻转账本或重新发布。
+- 两个真实 Redis 客户端验证旧租约丢失后新请求可获得租约、旧请求提交被拒且旧释放不清除新状态；同客户端/线程第二次获取也必须立即拒绝。测试正常结束后查询结果不残留。
+- 真实资源测试 7 项通过；与租约单测合计 16 项，0 失败/错误。未开启 opt-in 重跑时 7 项默认跳过，数据库/Redis fixture 未初始化。
+
+### 修复与边界
+
+真实 Redis 测试先复现两处问题：仅 Redis 状态 bucket 有 `ACTIVE` 残留时，原 `commit()` 不核对仍有效的应用锁，仍可执行发布；Redisson 在同一客户端同线程可重入，原 `acquire()` 可覆盖成另一个请求。现在 `GenerationLeaseService.acquire()` 用 transition lock 保护租约获取与状态初始化，并显式拒绝已有应用锁；提交前确认应用锁仍持有；状态查询与取消把无锁残留状态呈现为 IDLE 且不自动删除记录。
+
+该检查避免“在进入发布临界区前已失锁”的竞态，但不能防止锁在 `isLocked()` 检查之后、版本文件切换期间过期。当前锁也没有可写入 manifest/publish pointer 的 fencing token；因此租约超时/Redis 分区期间的迟到文件写入仍需后续修复。不能将本次状态检查视为分布式 fencing 或 exactly-once 发布。
+
+### 验证
+
+- 建表前存在数为 0；建表后 schema 检查成功。
+- `mvn test '-Dtest=GenerationLeaseServiceTest,GenerationTaskResourcesIT'` 且 `AI_TASK_INTEGRATION=true`：16 项通过，其中 7 项访问真实 MySQL/Redis。
+- 同一命令不设置开关：9 项通过，7 项 opt-in 测试跳过。
+- `mvn clean -DskipTests compile`：271 个 Java 源文件 BUILD SUCCESS；账本、artifact、SSE、网关、取消相关集合 `mvn test '-Dtest=GenerationTaskMapperTest,GenerationTaskServiceTest,AppGenerationTaskTest,AppServiceGenerationCancellationTest,ArtifactPublicationEvidenceTest,GenerationJsonErrorBoundaryTest,GenerationLeaseServiceTest,AppControllerSseTest,LangGraphAiGenerationGatewayTest,SimpleTextStreamHandlerTest,ArtifactPublicationServiceTest'`：84 项全部通过。
+- 测试中的一次真实租约提交/两次状态转换日志仅包含唯一测试 requestId 与异常类型，不包含连接信息；测试后测试 ID 行与 Redis 状态键清理。
+- 本轮仅 Java/文档变化，Python 与前端源码未改；真实模型、Spring/Python HTTP、完整浏览器 SSE 未执行。前端仓库用户既有客服改动保留。
+
+### 下一阶段
+
+实现持久化执行所有者与租约代际/fencing：发布写入必须携带并校验当前代际；Redis 丢失、锁过期、应用进程暂停恢复后旧代际不得切换 `.current`。同时让取消墓碑在 MySQL/Redis 不可用窗口具有单一权威来源，定义 RUNNING 心跳超时之后如何安全认领，而不是直接把记录认作可恢复。完成真实数据库/Redis/文件并发与进程故障验证后，再设计 Python checkpoint 接续和客户端重连；生产自动恢复在此前保持关闭。
