@@ -138,7 +138,7 @@ START
 
 `subgraphs/schemas.py` 定义各阶段独立的输入、内部状态和输出契约，子图不再继承完整 `WorkflowState`。调用方注册子图时先投影输入，子图再次限制输入与输出，避免原始 `__start__` 检查点携带完整父状态。父图的顶层 `thread_id`、`conversation`、`metadata`、`input_review`、`publish` 不进入子图，Vue 首次生成也不接收旧候选或验证结果；修复才接收 `artifact`、`validation`、`build`、`repair_feedback`。静态生成只回传候选和结束元数据，修复不覆盖请求身份、原验证结果和质量结论。模型原本需要的会话、metadata、图片、当前产物仍保留在 `context` 中，该结构边界不代表嵌套内容脱敏。
 
-子图默认继承父图的 checkpointer，不创建独立 saver，不启用跨调用 Agent 记忆；`thread_id` 继续使用 `{appId}:{requestId}`。LangGraph 内部使用子图命名空间，但 NDJSON 的节点名称、请求级事件序号及 Spring/SSE 协议不变。内存 saver 测试覆盖嵌套命名空间、重建图后从质量反馈恢复、终态清理及模型返回前的节点事件。真实 PostgreSQL 下父子图恢复仍需单独集成验收。
+子图默认继承父图的 checkpointer，不创建独立 saver，不启用跨调用 Agent 记忆；`thread_id` 继续使用 `{appId}:{requestId}`。LangGraph 内部使用子图命名空间，但 NDJSON 的节点名称、请求级事件序号及 Spring/SSE 协议不变。内存 saver 测试覆盖嵌套命名空间、重建图后从质量反馈恢复、终态清理及模型返回前的节点事件。真实 PostgreSQL 专项覆盖 Vue 生成/修复在模型轮次及首个工具完成后关闭连接池、以新 saver 重建父图恢复，以及成功/失败/取消/TTL 清理；模型和 Spring 网关仍使用 Fake，不代表生产恢复业务链路已实现。
 
 Vue 首次生成与修复复用 `orchestration/vue_tool_loop.py` 的多节点实现：`initialize -> model_turn -> validate_turn -> execute_tool -> continue_loop`，完成后从 `finish` 返回。完整模型响应先通过截断、批次、整批参数与总预算校验，再逐个执行工具；私有状态保存文件计划、成功写入文件、ordinal、重试次数、图片检查、待执行工具及游标。父图输出不包含这些私有字段。每次工具完成都形成独立图步骤，内存 saver 测试验证模型返回后及批次中间暂停、重建父图继续，生成与修复均不重复已保存的模型/工具步骤，工具 ID 连续且总预算不重置。内部执行步数上限按工具和修复预算计算，支持合法 40 次工具调用。
 
@@ -580,10 +580,10 @@ mvn "-Dtest=ToolInvocationIdempotencyRedisIT" test
 ```powershell
 $env:AI_SERVICE_POSTGRES_INTEGRATION = "true"
 $env:AI_SERVICE_CHECKPOINT_POSTGRES_URL = "postgresql://<user>:<password>@localhost:5432/yu_ai_checkpoint"
-uv run pytest tests/test_postgres_checkpoint_integration.py
+uv run pytest tests/test_postgres_checkpoint_integration.py tests/test_postgres_subgraph_integration.py -ra
 ```
 
-默认不设置 `AI_SERVICE_POSTGRES_INTEGRATION` 时，该测试跳过且不连接数据库。当前本机 Docker 容器中尚未创建独立 `yu_ai_checkpoint` 数据库，因此本轮不声称真实 PostgreSQL 集成通过；真实 Spring/Python HTTP、真实模型和三类型端到端结果仍需在隔离环境中记录。
+默认不设置 `AI_SERVICE_POSTGRES_INTEGRATION` 时，这两组测试跳过且不连接数据库。测试使用唯一 thread ID，结束后删除对应测试 checkpoint 和状态摘要；连接来源沿用 Settings（包含本地 .env），不要打印凭据。本轮已在配置的真实 PostgreSQL 上验收 10 项；其中子图新增 8 项，验证三张官方表不残留对应 thread 数据、TTL 保留另一活跃 thread。跨连接池恢复仍复用测试模型/网关与事件接收器，不是跨进程业务任务恢复，也不验证 Spring 发布幂等、事件重放、租约或客户端重连。真实 Spring/Python HTTP、真实模型和三类型端到端结果仍需单独记录。
 
 ## 测试与校验
 

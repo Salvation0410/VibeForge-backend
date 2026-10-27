@@ -2,7 +2,7 @@
 
 日期：2026-10-27。本文描述本轮已实现内容及下一阶段的边界，设计来源为 `docs/superpowers/specs/2026-10-27-generation-subgraphs-design.md`。
 
-> 后续更新：本文第 1—8 节保留第一阶段交接基线；2026-10-27 已完成 Vue 多节点工具子图（第 9 节）、子图输入与私有状态收敛（第 10 节）以及静态模型文本流式（第 11 节）。第 6 节优先项一、二及优先项三中的 HTML/MULTI_FILE 流式已完成，生产任务恢复仍未实现；当前能力和验证以第 9—11 节为准。
+> 后续更新：本文第 1—8 节保留第一阶段交接基线；2026-10-27 已完成 Vue 多节点工具子图（第 9 节）、子图输入与私有状态收敛（第 10 节）、静态模型文本流式（第 11 节）以及真实 PostgreSQL 子图恢复与清理验收（第 12 节）。第 6 节优先项一、二及优先项三中的 HTML/MULTI_FILE 流式已完成，生产任务恢复仍未实现；当前能力和验证以第 9—12 节为准。
 
 ## 1. 已实现结构
 
@@ -221,3 +221,31 @@ compileall 和 lock 检查通过；排除 Reranker 后为 643 passed、2 skipped
 ### 下一阶段建议
 
 生产任务恢复仍是独立业务能力：先落实持久化任务状态、请求鉴权和应用归属、租约重获/取消复核、Spring 发布权威结果核对、恢复调度与客户端重连策略，再开放恢复入口。可先补真实 PostgreSQL 父子命名空间恢复/清理集成验收作为基础，但不能直接将 ainvoke(None) 当作生产恢复接口。Vue 工具 JSON 如需文本增量展示，应独立设计只展示安全 content 字段的解析，不得流式执行未完整参数。
+
+## 12. 真实 PostgreSQL 子图恢复与清理验收
+
+本阶段落实第 11 节建议的基础验收，不新增业务恢复 API。实施计划：`docs/superpowers/plans/2026-10-27-postgres-subgraph-verification.md`。
+
+### 实现与边界
+
+- 新增 `tests/test_postgres_subgraph_integration.py` 8 项 opt-in 测试，沿用 `AI_SERVICE_POSTGRES_INTEGRATION=true` 和 Settings 连接配置，不新增环境变量或 schema。
+- 四种断点组合覆盖 Vue 首次生成/修复、模型轮次完成/首个工具完成；关闭旧连接池，以新 PostgresCheckpoint、saver 和父图恢复。验证保存的工具批次、调用 ID、修复/工具预算、token 用量与私有状态边界，已完成工具不重复调用。
+- 成功、失败、取消清理前观测到真实父子命名空间；清理后按 thread 检查 `checkpoints`、`checkpoint_blobs`、`checkpoint_writes` 三张物理表均无残留，连接池仍可用。
+- TTL 测试创建两个唯一 thread，仅令其中一个过期；检查该 thread 的父子记录和状态摘要删除，另一活跃 thread 的嵌套记录和摘要保留。测试收尾只删除本测试 thread，未修改 .env、业务源码或真实项目文件。
+- 跨连接池恢复复用 Fake Model/Fake Spring 网关和事件接收器，不是跨进程崩溃恢复或真实工具 exactly-once 保证；请求生命周期、NDJSON/SSE、租约与取消规则没有变更。修正原内存测试文件头，明确区分内存 saver 与真实 PostgreSQL。
+
+### 本轮验证
+
+测试进程设置 `AI_SERVICE_CUSTOMER_SERVICE_RAG_ENABLED=false`，避免本地 .env 客服开关干扰既有离线测试；真实数据库专项和全量另设置 `AI_SERVICE_POSTGRES_INTEGRATION=true`。未输出连接凭据。
+
+- `uv run pytest tests/test_postgres_subgraph_integration.py tests/test_postgres_checkpoint_integration.py -ra --tb=short`：10 passed（4.99 秒），包含新增 8 项和既有 2 项。
+- 不设置 opt-in 开关运行新增测试：8 skipped，不连接数据库。
+- `uv run pytest -ra --tb=short`：717 passed、6 failed（104.91 秒），真实 PostgreSQL 10 项此次均执行。六项失败仍为第 11 节记录的 Reranker owner 锁用例；报 `CUSTOMER_SERVICE_RERANKER_UNAVAILABLE`，堆栈包含 `_GpuOwnerLock.acquire`。未停止服务、修改锁或绕过保护。
+- `uv run pytest --ignore=tests/test_reranker.py -ra --tb=short`（开启 PostgreSQL）：687 passed（29.07 秒）。
+- `uv run python -m compileall -q src`、`uv lock --check` 通过。
+
+Java、前端没有代码改动，未重跑其测试；前端既有四个客服文件修改保留。未运行真实模型、Spring/Python HTTP、Redis/Selenium 或完整浏览器端到端。
+
+### 下一阶段
+
+真实 PostgreSQL 的底层恢复/清理证据已补齐，下一步应先设计并实现 Spring 所有的持久化生成任务状态与查询边界：定义请求唯一性、应用/用户归属、执行与发布终态、取消墓碑和保留期限，并与 GenerationLeaseService 和 VersionedArtifactStore 的权威状态核对。之后再分阶段增加恢复认领、调度和客户端重连；在这些约束落地前继续保持生产恢复入口关闭。不要将 `ai_workflow_status` 脱敏节点摘要提升为业务任务账本，也不要把本轮测试当作生产自动恢复已完成。

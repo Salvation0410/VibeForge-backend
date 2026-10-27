@@ -1,4 +1,4 @@
-"""真实父子 checkpoint 验证，覆盖批次中间恢复和跨阶段预算。"""
+"""内存 saver 上的父子 checkpoint 验证，覆盖批次中间恢复和跨阶段预算。"""
 
 import pytest
 from ai_service.models.base import ModelTurn, ToolCall
