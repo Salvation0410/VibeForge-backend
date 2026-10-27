@@ -16,6 +16,7 @@ import com.yupi.yuaicodemother.model.entity.SysUser;
 import com.yupi.yuaicodemother.service.ChatHistoryOriginalService;
 import com.yupi.yuaicodemother.service.ChatHistoryService;
 import com.yupi.yuaicodemother.service.SysUserService;
+import com.yupi.yuaicodemother.service.GenerationTaskService;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 import reactor.core.publisher.Flux;
@@ -41,6 +42,7 @@ class AppServiceGenerationCancellationTest {
                 mock(ChatHistoryService.class), mock(ArtifactPathResolver.class), leases,
                 mock(HtmlOutputBudgetGuard.class)));
         VueProjectBuilder builder = mock(VueProjectBuilder.class);
+        ReflectionTestUtils.setField(service, "generationTaskService", mock(GenerationTaskService.class));
         ReflectionTestUtils.setField(service, "vueProjectBuilder", builder);
         doReturn(App.builder().id(42L).userId(7L).build()).when(service).getById(42L);
 
@@ -75,6 +77,7 @@ class AppServiceGenerationCancellationTest {
         AppServiceImpl service = spy(new AppServiceImpl(mock(SysUserService.class), gateway, history,
                 mock(ArtifactPathResolver.class), leases, mock(HtmlOutputBudgetGuard.class)));
         VueProjectBuilder builder = mock(VueProjectBuilder.class);
+        ReflectionTestUtils.setField(service, "generationTaskService", mock(GenerationTaskService.class));
         ReflectionTestUtils.setField(service, "vueProjectBuilder", builder);
         ReflectionTestUtils.setField(service, "streamHandlerExecutor", streamHandler);
         ReflectionTestUtils.setField(service, "chatHistoryOriginalService", originalHistory);
@@ -108,6 +111,7 @@ class AppServiceGenerationCancellationTest {
 
         AppServiceImpl service = spy(new AppServiceImpl(mock(SysUserService.class), gateway, history,
                 mock(ArtifactPathResolver.class), leases, budgetGuard));
+        ReflectionTestUtils.setField(service, "generationTaskService", mock(GenerationTaskService.class));
         ReflectionTestUtils.setField(service, "streamHandlerExecutor", streamHandler);
         ReflectionTestUtils.setField(service, "chatHistoryOriginalService", originalHistory);
         doReturn(App.builder().id(42L).userId(7L).codeGenType("html").build())

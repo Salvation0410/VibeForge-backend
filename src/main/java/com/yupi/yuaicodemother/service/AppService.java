@@ -11,6 +11,7 @@ import com.yupi.yuaicodemother.model.entity.App;
 import com.yupi.yuaicodemother.model.entity.SysUser;
 import com.yupi.yuaicodemother.model.vo.AppVO;
 import com.yupi.yuaicodemother.model.vo.AppGenerationStatusVO;
+import com.yupi.yuaicodemother.model.vo.GenerationTaskVO;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
@@ -60,6 +61,9 @@ public interface AppService extends IService<App> {
     AppGenerationStatusVO cancelGeneration(Long appId, SysUser loginUser);
 
     AppGenerationStatusVO getGenerationStatus(Long appId, SysUser loginUser);
+
+    /** 查询所属任务的持久化结果及独立的租约、发布证据。 */
+    GenerationTaskVO getGenerationTask(Long appId, String requestId, SysUser loginUser);
 
     /**
      *

@@ -35,6 +35,8 @@ import com.yupi.yuaicodemother.service.ChatHistoryOriginalService;
 import com.yupi.yuaicodemother.service.ChatHistoryService;
 import com.yupi.yuaicodemother.service.ScreenshotService;
 import com.yupi.yuaicodemother.service.SysUserService;
+import com.yupi.yuaicodemother.service.GenerationTaskService;
+import com.yupi.yuaicodemother.model.vo.GenerationTaskVO;
 import com.yupi.yuaicodemother.utils.SpringContextUtil;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
@@ -71,6 +73,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     private final HtmlOutputBudgetGuard htmlOutputBudgetGuard;
 
     @Resource
+    private GenerationTaskService generationTaskService;
+
+    @Resource
     private StreamHandlerExecutor streamHandlerExecutor;
 
     @Resource
@@ -99,48 +104,71 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "appId is invalid");
         ThrowUtils.throwIf(StrUtil.isBlank(message), ErrorCode.PARAMS_ERROR, "message must not be blank");
 
-        App app = this.getById(appId);
-        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "App not found");
-        if (!app.getUserId().equals(loginUser.getId())) {
-            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "No permission to access app");
-        }
+        App app = requireOwnedApp(appId, loginUser);
 
         CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(app.getCodeGenType());
         if (codeGenTypeEnum == null) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Unsupported code generation type");
         }
 
-        String requestId = java.util.UUID.randomUUID().toString();
         // 租约覆盖消息入库、模型调用和产物发布，防止同一应用的上下文与版本交叉。
         return Flux.defer(() -> {
-            var lease = generationLeaseService.acquire(appId, requestId);
-            try {
-                // 在写入历史和调用模型前拒绝超预算的 HTML 全量重写，失败时保留当前活动版本。
-                // 对html输出预算检查：避免大页面全量重新被截断
-                htmlOutputBudgetGuard.checkRewriteAllowed(codeGenTypeEnum, appId);
-                chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
-                chatHistoryOriginalService.addOriginalChatMessage(appId, message,
-                        ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
-                // AI网关 根据配置的策略 选择不同的生成模式 主要是为了兼容之前的逻辑 现在工作流已经完全由langGraph执行 工具调用还是在java层
-                Flux<String> contentStream = aiGenerationGateway.generate(message, codeGenTypeEnum, appId,
-                        loginUser.getId(), requestId);
-                //流处理执行器：按类型处理输出和历史
-                Flux<String> execution = streamHandlerExecutor.doExecute(contentStream, chatHistoryService,
-                                chatHistoryOriginalService, appId, loginUser, codeGenTypeEnum)
-                        .doFinally(signal -> generationLeaseService.release(lease));
-                // 零历史缓存让下游取消后生成仍能走到真实终态并释放租约，同时不在内存保留代码块。
-                return execution.cache(0)
-                        .doOnCancel(() -> {
-                            // 取消只有在提交尚未开始时才能胜出；提交胜出后保持成功终态。
-                            if (generationLeaseService.cancel(lease)) {
-                                cancelActiveExecution(appId, loginUser.getId(), requestId);
-                            }
-                        });
-            } catch (Throwable error) {
-                generationLeaseService.release(lease);
-                return Flux.error(error);
+            // 每次实际订阅代表一个新任务，禁止旧 Flux 重订阅复用已执行的请求 ID。
+            String requestId = java.util.UUID.randomUUID().toString();
+            return Flux.defer(() -> executeGeneration(appId, message, loginUser, codeGenTypeEnum, requestId))
+                    .onErrorMap(error -> wrapGenerationError(requestId, error));
+        });
+    }
+
+    private Flux<String> executeGeneration(Long appId, String message, SysUser loginUser,
+                                           CodeGenTypeEnum codeGenTypeEnum, String requestId) {
+        var lease = generationLeaseService.acquire(appId, requestId);
+        boolean taskStarted = false;
+        try {
+            // 账本不可用时拒绝执行，避免产生无归属且无法查询的模型请求。
+            generationTaskService.start(appId, loginUser.getId(), requestId, codeGenTypeEnum);
+            taskStarted = true;
+            // 取消可能发生在租约获得后、任务插入前；补记这段窗口内已获胜的取消。
+            var afterStart = generationLeaseService.getStatus(appId);
+            if (afterStart != null && requestId.equals(afterStart.requestId())
+                    && afterStart.state() == GenerationLeaseService.PublicState.STOPPING) {
+                generationTaskService.recordCancellation(requestId);
+                throw new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(),
+                        "GENERATION_CANCELLED", requestId, "生成请求已取消", null);
             }
-        }).onErrorMap(error -> wrapGenerationError(requestId, error));
+            // 在写入历史和调用模型前拒绝超预算的 HTML 全量重写，失败时保留当前活动版本。
+            htmlOutputBudgetGuard.checkRewriteAllowed(codeGenTypeEnum, appId);
+            chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
+            chatHistoryOriginalService.addOriginalChatMessage(appId, message,
+                    ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
+            // 账本覆盖 Legacy/LangGraph 两条链路，模型与文件边界仍由统一网关负责。
+            Flux<String> contentStream = aiGenerationGateway.generate(message, codeGenTypeEnum, appId,
+                    loginUser.getId(), requestId);
+            Flux<String> execution = streamHandlerExecutor.doExecute(contentStream, chatHistoryService,
+                            chatHistoryOriginalService, appId, loginUser, codeGenTypeEnum)
+                    .doOnComplete(() -> generationTaskService.finish(requestId, "SUCCEEDED", null))
+                    .doOnError(error -> recordGenerationFailure(requestId, error))
+                    .doFinally(signal -> generationLeaseService.release(lease));
+            // 零历史缓存让下游取消后生成仍能走到真实终态并释放租约，同时不在内存保留代码块。
+            return execution.cache(0)
+                    .doOnCancel(() -> {
+                        // 取消只有在提交尚未开始时才能胜出；提交胜出后保持成功终态。
+                        if (generationLeaseService.cancel(lease)) {
+                            generationTaskService.recordCancellation(requestId);
+                            cancelActiveExecution(appId, loginUser.getId(), requestId);
+                        }
+                    });
+        } catch (Throwable error) {
+            if (taskStarted) recordGenerationFailure(requestId, error);
+            generationLeaseService.release(lease);
+            return Flux.error(error);
+        }
+    }
+
+    private void recordGenerationFailure(String requestId, Throwable error) {
+        String code = wrapGenerationError(requestId, error).getErrorCode();
+        boolean cancelled = "GENERATION_CANCELLED".equals(code) || "cancelled".equalsIgnoreCase(code);
+        generationTaskService.finish(requestId, cancelled ? "CANCELLED" : "FAILED", code);
     }
 
     @Override
@@ -148,6 +176,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         App app = requireOwnedApp(appId, loginUser);
         var snapshot = generationLeaseService.cancelActive(appId);
         if (snapshot.cancellationRequested()) {
+            generationTaskService.recordCancellation(snapshot.requestId());
             cancelActiveExecution(appId, app.getUserId(), snapshot.requestId());
         }
         return toGenerationStatus(appId, snapshot);
@@ -157,6 +186,25 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     public AppGenerationStatusVO getGenerationStatus(Long appId, SysUser loginUser) {
         requireOwnedApp(appId, loginUser);
         return toGenerationStatus(appId, generationLeaseService.getStatus(appId));
+    }
+
+    @Override
+    public GenerationTaskVO getGenerationTask(Long appId, String requestId, SysUser loginUser) {
+        requireOwnedApp(appId, loginUser);
+        var task = generationTaskService.findOwned(appId, loginUser.getId(), requestId);
+        GenerationTaskVO result = BeanUtil.copyProperties(task, GenerationTaskVO.class);
+        result.setLeaseState("UNKNOWN");
+        try {
+            var live = generationLeaseService.getStatus(appId);
+            if (task.getRequestId().equals(live.requestId())) result.setLeaseState(live.state().name());
+        } catch (RuntimeException error) {
+            // Redis 不可用不能使已经持久化的执行记录也无法查询，更不能推断任务失败。
+            log.warn("查询任务实时租约失败, appId={}, type={}", appId, error.getClass().getSimpleName());
+        }
+        CodeGenTypeEnum type = CodeGenTypeEnum.getEnumByValue(task.getCodeGenType());
+        result.setPublicationState(type == null ? "UNAVAILABLE"
+                : artifactPathResolver.publicationState(type, appId, task.getRequestId()));
+        return result;
     }
 
     private App requireOwnedApp(Long appId, SysUser loginUser) {

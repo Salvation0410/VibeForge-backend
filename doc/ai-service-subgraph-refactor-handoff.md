@@ -2,7 +2,7 @@
 
 日期：2026-10-27。本文描述本轮已实现内容及下一阶段的边界，设计来源为 `docs/superpowers/specs/2026-10-27-generation-subgraphs-design.md`。
 
-> 后续更新：本文第 1—8 节保留第一阶段交接基线；2026-10-27 已完成 Vue 多节点工具子图（第 9 节）、子图输入与私有状态收敛（第 10 节）、静态模型文本流式（第 11 节）以及真实 PostgreSQL 子图恢复与清理验收（第 12 节）。第 6 节优先项一、二及优先项三中的 HTML/MULTI_FILE 流式已完成，生产任务恢复仍未实现；当前能力和验证以第 9—12 节为准。
+> 后续更新：本文第 1—8 节保留第一阶段交接基线；2026-10-27 已完成 Vue 多节点工具子图（第 9 节）、子图输入与私有状态收敛（第 10 节）、静态模型文本流式（第 11 节）、真实 PostgreSQL 子图恢复与清理验收（第 12 节）以及 Spring 任务账本与查询（第 13 节）。第 6 节优先项一、二及优先项三中的 HTML/MULTI_FILE 流式已完成，生产任务恢复仍未实现；当前能力和验证以第 9—13 节为准。
 
 ## 1. 已实现结构
 
@@ -249,3 +249,34 @@ Java、前端没有代码改动，未重跑其测试；前端既有四个客服�
 ### 下一阶段
 
 真实 PostgreSQL 的底层恢复/清理证据已补齐，下一步应先设计并实现 Spring 所有的持久化生成任务状态与查询边界：定义请求唯一性、应用/用户归属、执行与发布终态、取消墓碑和保留期限，并与 GenerationLeaseService 和 VersionedArtifactStore 的权威状态核对。之后再分阶段增加恢复认领、调度和客户端重连；在这些约束落地前继续保持生产恢复入口关闭。不要将 `ai_workflow_status` 脱敏节点摘要提升为业务任务账本，也不要把本轮测试当作生产自动恢复已完成。
+
+## 13. Spring 持久化生成任务账本与只读查询
+
+本阶段实现第 12 节建议的任务状态基础边界。设计与计划分别见 `docs/superpowers/specs/2026-10-27-generation-task-ledger-design.md`、`docs/superpowers/plans/2026-10-27-generation-task-ledger.md`；字段、API 和部署详情见 `doc/generation-task-ledger.md`。
+
+### 当前实现
+
+- 新增 MySQL `generation_task`、实体、Mapper/XML、GenerationTaskService 和 VO，服务端请求 ID 唯一，保存 appId/userId/生成类型/执行状态/取消观测/稳定代码及时间，不保存提示词、源码或底层异常正文。获取应用租约后、历史和模型调用前插入；插入失败关闭执行并释放租约。重复订阅生成新 UUID，不能以同一 ID 执行第二次。
+- RUNNING 仅能条件更新为 SUCCEEDED、FAILED、CANCELLED，终态不可被迟到回调覆盖。终态默认查询 30 天，RUNNING 不自动过期；当前没有物理清理调度，保留唯一性和取消墓碑。应用删除不级联删除账本，查询仍要求现存应用所有权。
+- 取消仍由 Redis 提交状态门仲裁，获胜后 best-effort 保存首次 `cancelRequestedAt` 再通知引擎。补查租约获得至任务插入之间的取消窗口，已停止则不写历史或调用模型。引擎先到终态时允许随后补首次取消观测，但不改终态或保留期限。记录失败不会影响下游取消通知；提交胜出的取消不创建墓碑。
+- `/api/apps/chat/gen/code/task` 提供按 appId 和可选 requestId 的只读查询；省略请求 ID 返回当前用户最近未过期任务。查询校验登录、现存应用所有权及记录 appId/userId，分别返回 executionState、匹配请求的 leaseState 和 publicationState。Redis 不可用/租约不存在/属于其他请求时为 UNKNOWN，不推断执行失败。
+- 静态 COMMITTED 证据来自 VersionedArtifactStore 的提交标记和墓碑；保留 release 时复核 manifest、序号、文件集和哈希。仅墓碑不证明提交；版本被保留策略删除仍可核对历史提交。损坏/读取异常为 UNAVAILABLE，证据缺失为 NOT_CONFIRMED，Vue 为 NOT_VERSIONED。查询不写回、不修复指针或发布；执行 FAILED 和发布 COMMITTED 可以同时出现。
+- 原活动 status、cancel 和公共 SSE 继续兼容；修复全局异常处理器误将 JSON 查询/取消子资源权限错误写成 SSE 的前缀判断。新增任务 JDBC 写入错误经脱敏稳定码返回，不暴露 SQL/连接信息。
+
+### 部署与一致性限制
+
+**升级 Spring 前在业务库执行 `sql/alter_generation_task.sql`。** 首次初始化 SQL 已同步。没有自动迁移；未建表会在调用 Python 前失败关闭。回滚 Spring 保留新表，无 Python schema/配置、Redis 或前端迁移。本轮未对真实业务 MySQL 执行迁移。
+
+MySQL、Redis 与文件系统没有跨资源事务：取消仲裁至墓碑写入、发布至任务终态写入仍有不确定窗口。插入结果丢失也可能留下未实际调用模型的 RUNNING 行；终态写失败只记录日志，不逆转已发布成功。因此该账本只提供执行记录和独立证据，不能作为生产恢复授权。Python 请求正常终态仍清理 checkpoint，未新增任务心跳/认领/调度/恢复接口或客户端重连。
+
+### 本轮验证
+
+- `mvn clean -DskipTests compile`：BUILD SUCCESS（271 个 Java 源文件），仅报告既有 varargs、弃用和未检查操作提示。
+- `mvn test '-Dtest=GenerationTaskMapperTest,GenerationTaskServiceTest,AppGenerationTaskTest,AppServiceGenerationCancellationTest,ArtifactPublicationEvidenceTest,GenerationJsonErrorBoundaryTest,GenerationLeaseServiceTest,AppControllerSseTest,LangGraphAiGenerationGatewayTest,SimpleTextStreamHandlerTest,ArtifactPublicationServiceTest'`：80 项通过、0 失败/错误/跳过（19.587 秒），其中新增 22 项。
+- SQL 专项使用测试依赖 H2 的 MySQL 模式执行真实 Mapper XML，覆盖唯一请求、双写者终态竞争、取消先后乱序、保留截止与用户/应用范围。H2 仅作为 test 依赖；DDL 测试去除字符集和索引方言，不代表真实 MySQL 迁移验收。
+- 真实文件证据测试只写 JUnit 临时目录，模型、Redis 和业务库使用 mock；未调用真实模型、Spring/Python HTTP、Selenium 或浏览器端到端。
+- `git diff --check` 通过；前端既有四个客服文件修改保留。Python/前端源码未改，本轮未重跑其测试。
+
+### 下一阶段
+
+先在隔离环境执行真实 MySQL 迁移并完成 Redis/文件存储联调，覆盖插入确认丢失、取消落账失败、发布后终态落账失败、租约丢失和服务重启等矩阵。随后设计持久化执行所有者、心跳与过期判定、取消权威状态和恢复认领协议，并核对 Spring 发布事实，再接续 Python checkpoint。不要仅根据 RUNNING、无租约或 `ainvoke(None)` 自动恢复任务。

@@ -54,6 +54,49 @@ public class ArtifactPathResolver {
     }
 
     /**
+     * 只读核对 VersionedArtifactStore 的提交标记与墓碑；绝不修复指针或重新发布。
+     * 墓碑在指针切换前写入，因此单独存在不构成成功证明。版本保留清理后仍可由二者证明历史提交。
+     */
+    public String publicationState(CodeGenTypeEnum type, long appId, String requestId) {
+        if (type == CodeGenTypeEnum.VUE_PROJECT) return "NOT_VERSIONED";
+        if (requestId == null || !requestId.matches("[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}")) return "UNAVAILABLE";
+        Path root = projectRoot(type, appId);
+        Path marker = root.resolve(".committed").resolve(requestId);
+        Path tombstone = root.resolve(".published").resolve(requestId + ".json");
+        try {
+            try {
+                if (!Files.readAttributes(marker, java.nio.file.attribute.BasicFileAttributes.class,
+                        java.nio.file.LinkOption.NOFOLLOW_LINKS).isRegularFile()
+                        || !Files.readAttributes(tombstone, java.nio.file.attribute.BasicFileAttributes.class,
+                        java.nio.file.LinkOption.NOFOLLOW_LINKS).isRegularFile()) return "UNAVAILABLE";
+            } catch (java.nio.file.NoSuchFileException missingEvidence) {
+                return "NOT_CONFIRMED";
+            }
+            if (!requestId.equals(Files.readString(marker, StandardCharsets.UTF_8))) return "UNAVAILABLE";
+            var published = objectMapper.readTree(tombstone.toFile());
+            if (!requestId.equals(published.path("requestId").asText())
+                    || published.path("sequence").asLong() <= 0 || !published.path("hashes").isObject()) return "UNAVAILABLE";
+            Set<String> keys = new java.util.HashSet<>();
+            published.path("hashes").fieldNames().forEachRemaining(keys::add);
+            if (!keys.equals(requiredFiles(root))) return "UNAVAILABLE";
+            for (String key : keys) {
+                if (!published.path("hashes").path(key).asText().matches("[0-9a-f]{64}")) return "UNAVAILABLE";
+            }
+            Path release = root.resolve(".releases").resolve(requestId);
+            if (Files.exists(release)) {
+                if (!isValidRelease(root, release)) return "UNAVAILABLE";
+                ArtifactManifest manifest = objectMapper.readValue(release.resolve("manifest.json").toFile(), ArtifactManifest.class);
+                if (manifest.sequence() != published.path("sequence").asLong()
+                        || !objectMapper.valueToTree(manifest.hashes()).equals(published.path("hashes"))) return "UNAVAILABLE";
+            }
+            return "COMMITTED";
+        } catch (Exception error) {
+            // 不将磁盘损坏、权限不足或 JSON 解析错误解释为“未发布”。
+            return "UNAVAILABLE";
+        }
+    }
+
+    /**
      * 将静态资源目录名解析为当前活动版本，拒绝目录穿越和未知命名。
      *
      * @param directoryName URL 中的应用目录名

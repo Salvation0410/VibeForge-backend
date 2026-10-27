@@ -548,6 +548,8 @@ Python 与 Spring 之间使用 NDJSON；Spring 对前端的内容事件仍为 `d
 
 ## PostgreSQL checkpoint 与故障降级
 
+Spring 已新增独立 MySQL `generation_task` 业务任务账本与只读 `/api/apps/chat/gen/code/task` 查询，保留执行终态并分别展示实时租约、静态版本提交证据；不读取或替代本节 Python 节点摘要，也不开放生产自动恢复。升级 Spring 前需执行业务库 `sql/alter_generation_task.sql`，未建表时生成会在调用 Python 前失败关闭。字段、权限、30 天查询保留和跨资源一致性限制见 [生成任务账本说明](../doc/generation-task-ledger.md)。Python 接口、checkpoint schema、配置和启动方式未改。
+
 LangGraph 使用官方 `AsyncPostgresSaver`，`thread_id` 为 `{appId}:{requestId}`。同一连接池还维护 `ai_workflow_status`，该表只允许保存节点、请求/应用标识、生成类型、质量结果和有限计数，不保存完整源码、`repair_feedback` 或其他审查正文。正常终态调用 `adelete_thread()` 删除官方图 checkpoint；异常退出先由 `expires_at` 找到过期 thread，成功删除图 checkpoint 后才删除状态行，图删除失败时保留状态行供下次重试。
 
 - `AI_SERVICE_CHECKPOINT_REQUIRED=false`：PostgreSQL 不可用时记录脱敏警告，服务继续运行但不具备 checkpoint 恢复能力，ready 返回 503。

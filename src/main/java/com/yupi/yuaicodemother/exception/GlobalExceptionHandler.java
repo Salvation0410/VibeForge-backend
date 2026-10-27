@@ -55,11 +55,13 @@ public class GlobalExceptionHandler {
         }
         HttpServletRequest request = attributes.getRequest();
         HttpServletResponse response = attributes.getResponse();
-        // 判断是否是SSE请求（通过Accept头或URL路径）
+        // 生成流的同路径子资源是 JSON 查询/取消接口，不能因共享前缀而把权限错误写成 SSE。
         String accept = request.getHeader("Accept");
         String uri = request.getRequestURI();
-        if ((accept != null && accept.contains("text/event-stream")) ||
-                uri.contains("/chat/gen/code")) {
+        boolean generationResource = uri.contains("/apps/chat/gen/code");
+        boolean sseRequest = generationResource ? uri.endsWith("/apps/chat/gen/code")
+                : accept != null && accept.contains("text/event-stream");
+        if (sseRequest) {
             try {
                 // 设置SSE响应头
                 response.setContentType("text/event-stream");

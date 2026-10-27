@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.yupi.yuaicodemother.mapper.GenerationTaskMapper">
+    <resultMap id="task" type="com.yupi.yuaicodemother.model.entity.GenerationTask">
+        <id column="request_id" property="requestId"/>
+        <result column="app_id" property="appId"/>
+        <result column="user_id" property="userId"/>
+        <result column="code_gen_type" property="codeGenType"/>
+        <result column="execution_state" property="executionState"/>
+        <result column="error_code" property="errorCode"/>
+        <result column="cancel_requested_at" property="cancelRequestedAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+        <result column="finished_at" property="finishedAt"/>
+        <result column="query_until" property="queryUntil"/>
+    </resultMap>
+    <insert id="createTask">
+        INSERT INTO generation_task (request_id, app_id, user_id, code_gen_type, execution_state, created_at, updated_at)
+        VALUES (#{requestId}, #{appId}, #{userId}, #{codeGenType}, 'RUNNING', #{createdAt}, #{updatedAt})
+    </insert>
+    <update id="finishTask">
+        UPDATE generation_task SET execution_state = #{state}, error_code = #{errorCode},
+            finished_at = #{now}, updated_at = #{now}, query_until = #{queryUntil}
+        WHERE request_id = #{requestId} AND execution_state = 'RUNNING'
+    </update>
+    <update id="recordCancellation">
+        UPDATE generation_task SET cancel_requested_at = #{now}, updated_at = #{now}
+        WHERE request_id = #{requestId} AND cancel_requested_at IS NULL
+    </update>
+    <select id="findOwned" resultMap="task">
+        SELECT * FROM generation_task
+        WHERE app_id = #{appId} AND user_id = #{userId}
+          AND (query_until IS NULL OR query_until &gt; #{now})
+        <if test="requestId != null">AND request_id = #{requestId}</if>
+        ORDER BY created_at DESC, request_id DESC LIMIT 1
+    </select>
+</mapper>

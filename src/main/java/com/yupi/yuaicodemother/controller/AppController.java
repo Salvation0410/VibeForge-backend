@@ -22,6 +22,7 @@ import com.yupi.yuaicodemother.model.entity.App;
 import com.yupi.yuaicodemother.model.entity.SysUser;
 import com.yupi.yuaicodemother.model.vo.AppVO;
 import com.yupi.yuaicodemother.model.vo.AppGenerationStatusVO;
+import com.yupi.yuaicodemother.model.vo.GenerationTaskVO;
 import com.yupi.yuaicodemother.ratelimit.annotation.RateLimit;
 import com.yupi.yuaicodemother.ratelimit.enums.RateLimitType;
 import com.yupi.yuaicodemother.service.AppService;
@@ -378,6 +379,15 @@ public class AppController {
             @RequestParam Long appId, HttpServletRequest request) {
         SysUser loginUser = userService.getLoginUser(request);
         return ResultUtils.success(appService.getGenerationStatus(appId, loginUser));
+    }
+
+    /** 独立于活动租约的任务查询；省略请求 ID 时读取当前用户最近未过期任务。 */
+    @GetMapping("/chat/gen/code/task")
+    public BaseResponse<GenerationTaskVO> getGenerationTask(
+            @RequestParam Long appId, @RequestParam(required = false) String requestId,
+            HttpServletRequest request) {
+        SysUser loginUser = userService.getLoginUser(request);
+        return ResultUtils.success(appService.getGenerationTask(appId, requestId, loginUser));
     }
 
     /**
