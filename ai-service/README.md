@@ -593,6 +593,16 @@ uv lock --check
 
 默认自动化只运行 fake/injected provider。真实 OSS、CloseAI、Docker Milvus、GPU Reranker、浏览器和端到端评估仍为 pending，未执行时不得写为通过。
 
+### 严格引用 E1 历史配对回放
+
+`python -m ai_service.evaluation.citation_replay --help` 提供冻结历史证据的回放工具；默认仅准备输入，不连接检索、Milvus 或 GPU，也不调用模型。传入 `--candidate --baseline --trace --evidence --dataset --annotations --mapping --output`，输入必须匹配工具中冻结的 SHA-256；Git 换行转换也会造成字节指纹不同，应使用原始受控文件，不放宽校验。输出目录必须不存在，不能覆盖历史记录。
+
+只有显式 `--execute` 才调用配置的 OpenAI 兼容回答接口，可用 `--env-file` 选择私有配置。默认诊断为 23 题 × 两提示 × 三轮，共 138 次；`--max-calls 138 --token-budget 2000000 --max-tokens 8192` 限制调用数和保守 token 预留，不自动重试。`--scope full/remaining` 仅显式选择，完整调用分别需要 540/402 的调用上限，不能凭不完整批次声称全量通过。
+
+输出 `inputs.json` 保存来源、实际裁剪正文、提示、模型参数及指纹；`events.jsonl` 保存调用开始与预算事件；`results.jsonl` 逐次保存回答、引用、延迟、usage 和故障；`summary.json` 包含分层与逐题配对、缺失、预算停止原因。缺失 usage 和未知费用保留 null；回答、引用及参考标签仅用于离线评审，目录应保存在 ignored 的 `tmp/`，勿提交原始运行产物。故障不能算作正确拒答，人工验收保持 pending，工具不自动批准上线。
+
+E1 候选 `CUSTOMER_SERVICE_FOCUSED_SYSTEM_PROMPT` 要求聚焦当前问题、保留必要条件与互补引用；生产 `CUSTOMER_SERVICE_SYSTEM_PROMPT` 继续使用 B0。历史快照含已禁用旧手册，回放不能视为当前活动知识库端到端成绩，不重新启用旧手册。实验结果及人工复核要求见 [实施记录](../docs/superpowers/plans/2026-10-27-strict-citation-e1-execution.md)。
+
 ### 客服 RAG 启动、回滚与人工验证
 
 推荐启动顺序：MySQL/Redis/私有 OSS -> Spring -> Docker Milvus -> Python（先保持 RAG 关闭）-> 检查 `/health/ready` -> 配置 CloseAI Embedding、`AI_SERVICE_MODEL_*` 回答模型、GPU/alias -> 开启 RAG 并滚动启动 Python -> 检查认证客服 health -> 由管理员页面上传知识文件并观察 ETL 任务终态 -> 执行 synthetic smoke 和人工问答。
