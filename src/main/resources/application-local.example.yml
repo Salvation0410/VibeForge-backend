@@ -1,0 +1,109 @@
+# 本文件可提交 Git；复制为 application-local.yml 后填写本地配置。
+# Spring 默认启用 local；样例文件自身不会被自动加载。
+# 环境变量仅对 Spring 进程生效，Spring 不会自动读取 ai-service/.env。
+spring:
+  datasource:
+    url: ${MYSQL_URL:jdbc:mysql://localhost:3306/yu_ai_code_mother}
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:replace-with-mysql-password}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:1}
+      ttl: 3600
+  mail:
+    default-encoding: UTF-8
+    protocol: smtp
+    host: ${MAIL_HOST:smtp.example.invalid}
+    port: ${MAIL_PORT:465}
+    username: ${MAIL_USERNAME:replace-with-mail-account}
+    # 部分邮箱使用 SMTP 授权码，此处不是网站登录密码。
+    password: ${MAIL_PASSWORD:replace-with-smtp-authorization-code}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          ssl:
+            enable: true
+  servlet:
+    multipart:
+      # 与现有本地配置一致；客服文档允许 20 MiB 时需同时调整这两个限制。
+      max-file-size: 5MB
+      max-request-size: 5MB
+
+# 即使使用 Python 引擎，Java 仍保留模型 Bean 和相关辅助服务配置。
+# 所有密钥默认值均为占位符，实际调用前必须替换或注入环境变量。
+langchain4j:
+  open-ai:
+    chat-model:
+      base-url: ${MODEL_BASE_URL:https://api.deepseek.com/v1}
+      api-key: ${MODEL_API_KEY:replace-with-provider-key}
+      model-name: ${MODEL_NAME:deepseek-chat}
+      max-tokens: 8192
+      response-format: json_object
+      strict-json-schema: true
+      log-requests: false
+      log-responses: false
+    streaming-chat-model:
+      base-url: ${MODEL_BASE_URL:https://api.deepseek.com/v1}
+      api-key: ${MODEL_API_KEY:replace-with-provider-key}
+      model-name: ${MODEL_NAME:deepseek-chat}
+      max-tokens: 8192
+      log-requests: false
+      log-responses: false
+    reasoning-streaming-chat-model:
+      base-url: ${REASONING_MODEL_BASE_URL:https://api.deepseek.com/v1}
+      api-key: ${REASONING_MODEL_API_KEY:replace-with-provider-key}
+      model-name: ${REASONING_MODEL_NAME:deepseek-reasoner}
+      max-tokens: 32768
+      temperature: 0.1
+      log-requests: false
+      log-responses: false
+    routing-chat-model:
+      base-url: ${MODEL_BASE_URL:https://api.deepseek.com/v1}
+      api-key: ${MODEL_API_KEY:replace-with-provider-key}
+      model-name: ${MODEL_NAME:deepseek-chat}
+      log-requests: false
+      log-responses: false
+
+ai:
+  engine: ${AI_ENGINE:langgraph}
+  service-url: ${AI_SERVICE_URL:http://localhost:8000}
+  # 与 Python 的两个内部令牌保持一致；使用前生成高强度随机值。
+  token: ${AI_SERVICE_INTERNAL_BEARER_TOKEN:}
+  generation-stream-idle-timeout-seconds: ${AI_GENERATION_STREAM_IDLE_TIMEOUT_SECONDS:600}
+  tool-idempotency-ttl-seconds: ${AI_TOOL_IDEMPOTENCY_TTL_SECONDS:86400}
+  tool-idempotency-lock-wait-millis: ${AI_TOOL_IDEMPOTENCY_LOCK_WAIT_MILLIS:30000}
+  gray-whitelist: []
+  gray-percentage: 0
+  html-artifact:
+    enabled: ${AI_HTML_SMOKE_TEST_ENABLED:true}
+    required: ${AI_HTML_SMOKE_TEST_REQUIRED:true}
+    max-rewrite-source-chars: ${AI_HTML_MAX_REWRITE_SOURCE_CHARS:24000}
+  customer-service:
+    # 首次启动保持关闭，避免未配置的 RAG 基础设施参与联调。
+    enabled: ${AI_CUSTOMER_SERVICE_ENABLED:false}
+    service-url: ${AI_CUSTOMER_SERVICE_SERVICE_URL:http://localhost:8000}
+    collection-alias: ${AI_CUSTOMER_SERVICE_COLLECTION_ALIAS:customer_service_knowledge}
+    # 其他超时、批处理和重试参数沿用 application.yml。
+
+oss:
+  bucket-name: ${OSS_BUCKET_NAME:replace-with-bucket-name}
+  access-key-id: ${OSS_ACCESS_KEY_ID:replace-with-access-key-id}
+  access-key-secret: ${OSS_ACCESS_KEY_SECRET:replace-with-access-key-secret}
+  endpoint: ${OSS_ENDPOINT:https://oss-cn-hangzhou.aliyuncs.com}
+  web-site: ${OSS_WEB_SITE:https://example.invalid}
+  avatar-dir: user-avatar
+  max-avatar-size: 5242880
+  knowledge-dir: ${OSS_KNOWLEDGE_DIR:customer-service-knowledge}
+  max-knowledge-document-size: ${OSS_MAX_KNOWLEDGE_DOCUMENT_SIZE:20971520}
+  knowledge-signed-url-ttl-seconds: ${OSS_KNOWLEDGE_SIGNED_URL_TTL_SECONDS:600}
+
+# 历史 Java 图实验工具仍被组件扫描，保留配置入口；不代表当前主链路启用。
+pexels:
+  api-key: ${PEXELS_API_KEY:}
+dashscope:
+  api-key: ${DASHSCOPE_API_KEY:}
+  image-model: ${DASHSCOPE_IMAGE_MODEL:wan2.2-t2i-plus}

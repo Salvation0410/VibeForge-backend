@@ -116,12 +116,15 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             var lease = generationLeaseService.acquire(appId, requestId);
             try {
                 // 在写入历史和调用模型前拒绝超预算的 HTML 全量重写，失败时保留当前活动版本。
+                // 对html输出预算检查：避免大页面全量重新被截断
                 htmlOutputBudgetGuard.checkRewriteAllowed(codeGenTypeEnum, appId);
                 chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
                 chatHistoryOriginalService.addOriginalChatMessage(appId, message,
                         ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
+                // AI网关 根据配置的策略 选择不同的生成模式 主要是为了兼容之前的逻辑 现在工作流已经完全由langGraph执行 工具调用还是在java层
                 Flux<String> contentStream = aiGenerationGateway.generate(message, codeGenTypeEnum, appId,
                         loginUser.getId(), requestId);
+                //流处理执行器：按类型处理输出和历史
                 Flux<String> execution = streamHandlerExecutor.doExecute(contentStream, chatHistoryService,
                                 chatHistoryOriginalService, appId, loginUser, codeGenTypeEnum)
                         .doFinally(signal -> generationLeaseService.release(lease));
