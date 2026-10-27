@@ -9,7 +9,7 @@ from typing import Any, TYPE_CHECKING, TypedDict
 
 from ai_service.models.tool_contract import validate_vue_tool_call
 from ai_service.orchestration.routing import _raise_for_incomplete_model_turn
-from ai_service.orchestration.state import WorkflowState
+from ai_service.orchestration.subgraphs.schemas import RepairState
 
 if TYPE_CHECKING:
     from ai_service.orchestration.workflow import GenerationWorkflow
@@ -37,10 +37,11 @@ class VueLoopProgress(TypedDict):
     started_at: str
 
 
-class VueLoopState(WorkflowState, total=False):
+class VueLoopState(RepairState, total=False):
     """私有字段仅存在于 Vue 子图命名空间，不回传父图。"""
 
     vue_loop: VueLoopProgress
+    vue_tool_results: list[dict[str, Any]]
 
 
 def initial_progress(context: dict[str, Any], prefix: str, started_at: str) -> VueLoopProgress:
@@ -63,7 +64,7 @@ def create_vue_loop_nodes(
         workflow._raise_if_cancelled(thread_id)
         context, loop = state["context"], state["vue_loop"]
         model_context = {
-            **context, "toolResults": list(context["toolResults"]),
+            **context, "toolResults": list(state["vue_tool_results"]),
             "vueGeneration": {
                 "maxToolCallsPerTurn": loop["batch_limit"],
                 "remainingToolCalls": workflow.settings.vue_max_tool_calls - state.get("tool_call_count", 0),
@@ -106,12 +107,12 @@ def create_vue_loop_nodes(
                 raise ValueError("VUE_TOOL_BATCH_LIMIT_EXCEEDED: Vue tool batch is too large")
             loop.update(retry_count=loop["retry_count"] + 1, batch_limit=1, next_step="model_turn", turn={})
             context["batchRetryFeedback"] = "上一轮响应未执行。请每轮只返回一个完整文件工具调用；过大的文件先拆分组件并更新 filePlan。"
-            return {"vue_loop": loop, "context": context}
+            return {"vue_loop": loop, **({"context": context} if context != state["context"] else {})}
         _raise_for_incomplete_model_turn(turn["finish_reason"])
         usage = dict(state.get("token_usage", {}))
         for key, value in turn["token_usage"].items():
             usage[key] = usage.get(key, 0) + value
-        update = {"context": context, "finish_reason": turn["finish_reason"], "token_usage": usage}
+        update = {"finish_reason": turn["finish_reason"], "token_usage": usage}
         if turn["content"]:
             loop["content_parts"] = [*loop["content_parts"], turn["content"]]
             await emitter.emit("content_delta", node, data={"content": turn["content"]})
@@ -148,6 +149,8 @@ def create_vue_loop_nodes(
             loop.update(tool_cursor=0, next_step="execute_tool")
         # 工具已转成校验后的列表，不重复保存同一批大体积文件参数。
         loop["turn"] = {}
+        if context != state["context"]:
+            update["context"] = context
         return {**update, "vue_loop": loop}
 
     async def execute_tool(state: VueLoopState):
@@ -161,10 +164,12 @@ def create_vue_loop_nodes(
             emitter, node, call["name"], {**arguments, "codeGenType": state["code_gen_type"]},
             state["app_id"], state["request_id"], tool_call_id,
         )
-        context = {**state["context"], "toolResults": [
-            *state["context"]["toolResults"],
+        tool_results = [
+            *state["vue_tool_results"],
             {"toolCallId": tool_call_id, "tool": call["name"], "result": result},
-        ]}
+        ]
+        context = state["context"]
+        update = {}
         written_files = set(loop["written_files"])
         if call["name"] in {"file_write", "file_modify"} and result.get("ok", True):
             written_files.add(arguments["relativeFilePath"])
@@ -172,9 +177,11 @@ def create_vue_loop_nodes(
             if any(asset["url"] in arguments.get("content", arguments.get("newContent", ""))
                    for asset in context.get("imageAssets", [])):
                 loop["image_used"] = True
-                context["imageAssetsApplied"] = True
+                if not context.get("imageAssetsApplied"):
+                    update["context"] = {**context, "imageAssetsApplied": True}
         loop.update(ordinal=ordinal, tool_cursor=loop["tool_cursor"] + 1, written_files=sorted(written_files))
-        return {"vue_loop": loop, "context": context, "tool_call_count": state.get("tool_call_count", 0) + 1}
+        return {**update, "vue_loop": loop, "vue_tool_results": tool_results,
+                "tool_call_count": state.get("tool_call_count", 0) + 1}
 
     async def continue_loop(state: VueLoopState):
         workflow._raise_if_cancelled(thread_id)

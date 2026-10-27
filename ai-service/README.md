@@ -134,11 +134,15 @@ START
   -> END
 ```
 
-节点实现按阶段放在 `orchestration/nodes/`，共享状态位于 `state.py`，确定性路由位于 `routing.py`；`subgraphs/generation.py` 创建静态生成子图，`subgraphs/vue.py` 创建 Vue 工具图与修复分派图，`subgraphs/verification_repair.py` 管理校验修复循环。子图通过输出 schema 只回传所属阶段字段，修复次数和工具总预算跨阶段传递。输入准备、发布和唯一成功终态仍由主图负责。
+节点实现按阶段放在 `orchestration/nodes/`，父图请求状态位于 `state.py`，确定性路由位于 `routing.py`；`subgraphs/generation.py` 创建静态生成子图，`subgraphs/vue.py` 创建 Vue 工具图与修复分派图，`subgraphs/verification_repair.py` 管理校验修复循环。子图通过输出 schema 只回传所属阶段字段，修复次数和工具总预算跨阶段传递。输入准备、发布和唯一成功终态仍由主图负责。
+
+`subgraphs/schemas.py` 定义各阶段独立的输入、内部状态和输出契约，子图不再继承完整 `WorkflowState`。调用方注册子图时先投影输入，子图再次限制输入与输出，避免原始 `__start__` 检查点携带完整父状态。父图的顶层 `thread_id`、`conversation`、`metadata`、`input_review`、`publish` 不进入子图，Vue 首次生成也不接收旧候选或验证结果；修复才接收 `artifact`、`validation`、`build`、`repair_feedback`。静态生成只回传候选和结束元数据，修复不覆盖请求身份、原验证结果和质量结论。模型原本需要的会话、metadata、图片、当前产物仍保留在 `context` 中，该结构边界不代表嵌套内容脱敏。
 
 子图默认继承父图的 checkpointer，不创建独立 saver，不启用跨调用 Agent 记忆；`thread_id` 继续使用 `{appId}:{requestId}`。LangGraph 内部使用子图命名空间，但 NDJSON 的节点名称、请求级事件序号及 Spring/SSE 协议不变。内存 saver 测试覆盖嵌套命名空间、重建图后从质量反馈恢复、终态清理及模型返回前的节点事件。真实 PostgreSQL 下父子图恢复仍需单独集成验收。
 
 Vue 首次生成与修复复用 `orchestration/vue_tool_loop.py` 的多节点实现：`initialize -> model_turn -> validate_turn -> execute_tool -> continue_loop`，完成后从 `finish` 返回。完整模型响应先通过截断、批次、整批参数与总预算校验，再逐个执行工具；私有状态保存文件计划、成功写入文件、ordinal、重试次数、图片检查、待执行工具及游标。父图输出不包含这些私有字段。每次工具完成都形成独立图步骤，内存 saver 测试验证模型返回后及批次中间暂停、重建父图继续，生成与修复均不重复已保存的模型/工具步骤，工具 ID 连续且总预算不重置。内部执行步数上限按工具和修复预算计算，支持合法 40 次工具调用。
+
+Vue 子图初始化时将完整 `toolResults` 从 `context` 移到私有 `vue_tool_results` 通道；模型调用时临时组装原有上下文，阶段结束时恢复公共 `context.toolResults`，后续审查和修复仍能读取完整工具历史。模型、校验及继续节点不重复写回历史通道，稳定上下文只在初始化、重试提示变化、首次成功应用图片及出口时更新。出口组装完公共字段后清空私有历史和文本副本，避免末尾 checkpoint 重复保存。没有裁剪历史，也不保证物理存储空间固定比例下降。`tests/test_subgraph_state_boundaries.py` 使用真实内存 saver 检查入口与运行中 checkpoint、实际通道写入、配置/回调继承、递归子图发现、重建恢复与父图字段保留。
 
 已成功工具到 checkpoint 写入之间仍存在不确定窗口，恢复可能携带同一工具 ID 重试，由 Spring 既有幂等状态处理，不能据此保证 exactly-once。调试断点仅用于测试，生产入口仍从初始状态启动并在终态清理检查点；模型仍使用 `ainvoke`，不提供逐 token 输出、生产重启自动续跑或旧版本 checkpoint 兼容。进一步优化入口与验证限制见 [子图重构交接文档](../doc/ai-service-subgraph-refactor-handoff.md)。
 

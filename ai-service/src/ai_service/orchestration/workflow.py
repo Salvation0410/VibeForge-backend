@@ -26,6 +26,7 @@ from ai_service.orchestration.routing import _after_validation, _after_build, _a
 from ai_service.orchestration.subgraphs.generation import build_generation_subgraph
 from ai_service.orchestration.subgraphs.verification_repair import build_verification_repair_subgraph
 from ai_service.orchestration.subgraphs.vue import build_repair_subgraph, build_vue_tool_subgraph, vue_recursion_limit
+from ai_service.orchestration.subgraphs.schemas import GenerationInput, VerificationInput
 from ai_service.orchestration.nodes.common import guarded as guard_node
 from ai_service.orchestration.nodes.input import create_input_nodes
 from ai_service.orchestration.nodes.generation import create_generation_nodes
@@ -205,8 +206,10 @@ class GenerationWorkflow:
         ):
             builder.add_node(parent_name, build_generation_subgraph(
                 child_name, guarded(child_name, generation_nodes[action]),
-            ))
-        builder.add_node("vue_generation", build_vue_tool_subgraph(self, emitter, thread_id, terminal))
+            ), input_schema=GenerationInput)
+        # 父图也先投影输入，避免子图的原始 __start__ 检查点暂存完整父状态。
+        builder.add_node("vue_generation", build_vue_tool_subgraph(self, emitter, thread_id, terminal),
+                         input_schema=GenerationInput)
         repair = build_repair_subgraph(
             guarded("repair", verification_nodes["repair"]),
             build_vue_tool_subgraph(self, emitter, thread_id, terminal, node="repair"),
@@ -215,7 +218,7 @@ class GenerationWorkflow:
             {name: repair if name == "repair" else guarded(name, node) if name != "fail_quality" else node
              for name, node in verification_nodes.items()},
             self.settings.max_repair_attempts,
-        ))
+        ), input_schema=VerificationInput)
         builder.add_node("artifact_publish", publication_nodes["artifact_publish_node"])
         builder.add_node("finalize", publication_nodes["finalize"])
         builder.add_edge(START, "input_guard")

@@ -2,7 +2,7 @@
 
 日期：2026-10-27。本文描述本轮已实现内容及下一阶段的边界，设计来源为 `docs/superpowers/specs/2026-10-27-generation-subgraphs-design.md`。
 
-> 后续更新：本文第 1—8 节保留第一阶段交接基线；2026-10-27 下一步 Vue 多节点工具子图已实现，当前结构和验证见第 9 节。第 6 节优先项一已完成，不再是待实施项。
+> 后续更新：本文第 1—8 节保留第一阶段交接基线；2026-10-27 已完成 Vue 多节点工具子图（第 9 节）以及子图输入与私有状态收敛（第 10 节）。第 6 节优先项一、二均已完成；当前结构和验证以第 9、10 节为准。
 
 ## 1. 已实现结构
 
@@ -158,3 +158,34 @@ compileall 和 lock 检查通过；排除 Reranker 后为 643 passed、2 skipped
 - `uv run pytest --ignore=tests/test_reranker.py -ra`：652 passed、2 skipped。跳过均因未启用真实 PostgreSQL 集成测试。
 
 本阶段没有运行真实模型、Spring/Redis HTTP 工具集成、浏览器或完整 SSE 验收。Java 与前端无代码变更，前端既有客服改动保留。
+
+## 10. 子图输入与私有状态收敛（后续实施）
+
+设计：`docs/superpowers/specs/2026-10-27-subgraph-state-boundaries-design.md`。
+
+### 当前边界
+
+- `subgraphs/schemas.py` 集中定义生成、验证、修复的输入、内部状态和输出；子图不再继承完整 `WorkflowState`。`state.py` 仍是父图请求状态，既有内部导入入口保留。
+- 父图和验证图注册子图时显式指定节点 `input_schema`，先投影再调用；仅限制子图自身输入无法阻止原始 `__start__` 检查点保存完整父状态。节点类型注解也会被 LangGraph 推断成输入 schema，因此 Vue 初始化显式按生成/修复选择契约，避免修复诊断被过滤。
+- 子图不再复制父图顶层 `thread_id`、`conversation`、`metadata`、`input_review`、`publish`；模型需要的 conversation、metadata、图片和当前产物仍留在 context 中。这是结构收敛，不是嵌套内容脱敏。
+- 静态生成只回传 `artifact`、`finish_reason`、`token_usage`；Vue 首次生成额外更新 context 和工具预算。验证从新候选开始，校验/构建/质量结论在阶段内部产生。修复接收 artifact、validation、build、repair_feedback，不接收或回写 quality_passed，不回写请求身份和原 validation。
+- Vue 初始化将 `context.toolResults` 移入私有 `vue_tool_results` 通道；模型调用临时组装历史，出口恢复公共 context 中的完整历史，供后续审查与修复使用。没有裁剪历史、外部落库或新增存储。
+- 模型、校验和继续节点不重写历史通道；稳定 context 只在初始化、提示变化、首次成功应用图片及出口更新。出口恢复公共数据后清空私有历史和文本副本，避免末尾 checkpoint 重复保存。历史 checkpoint、入口和父图阶段出口仍保存必要上下文，不承诺物理空间按固定比例下降。
+
+### 验证范围
+
+新增 `tests/test_subgraph_state_boundaries.py` 八项测试，覆盖三类分支的实际 checkpoint（含原始入口）、阶段输入与输出隔离、父图字段保留、Vue 生成/修复批次中间重建恢复、历史无重复与连续 ID、私有通道的实际写入及出口清空、配置/回调透传和递归子图发现。原有质量反馈恢复、取消、图片校验、修复上限与 40 次工具预算测试继续运行。
+
+仍使用父图原 saver、thread 和 namespace 继承，没有新增运行时依赖或客户端。NDJSON/SSE、Java 与前端没有协议或代码改动。真实模型、Spring/Redis 工具集成、浏览器、完整 SSE 及真实 PostgreSQL 父子图恢复本阶段未验收。子图 state 结构已变化，不承诺在途旧版本 checkpoint 兼容，部署前排空请求。
+
+本阶段实际结果（仅测试进程设置 `AI_SERVICE_CUSTOMER_SERVICE_RAG_ENABLED=false`，未修改 `.env`）：
+
+- 新增边界测试在旧实现上先复现五项失败，运行配置/回调测试原本即通过；新增两个静态分支 checkpoint 测试后，当前八项全部通过。
+- API、子图、Vue 恢复与追踪专项合计 150 passed；最终代码另通过排除 Reranker 的完整回归。
+- `uv run pytest -ra --tb=short`：690 passed、6 failed、2 skipped（115.84 秒）。失败仍为第 7、9 节记录的六个 Reranker 子进程用例，均报 `CUSTOMER_SERVICE_RERANKER_UNAVAILABLE`，失败栈包含 `_GpuOwnerLock.acquire` 无法获取模型 owner 锁。
+- `uv run pytest --ignore=tests/test_reranker.py -ra`：660 passed、2 skipped（44.18 秒）；跳过均为未启用真实 PostgreSQL 集成测试。
+- `uv run python -m compileall -q src`、`uv lock --check`、`git diff --check` 通过。前端既有四个客服文件修改保留，不纳入本次提交。
+
+### 下一阶段
+
+优先项三仍需要独立设计：模型文本流式输出与生产任务恢复各自有业务协议和验收要求，应分别实施。模型流式需区分展示增量和最终候选，并保留完整 Vue JSON 工具参数校验；生产恢复需落实任务状态、鉴权、租约/取消复核、发布核对和重连策略。真实 PostgreSQL 父子图恢复与清理可作为后续集成验收，不应将内存 saver 测试当作生产自动恢复保证。

@@ -5,9 +5,9 @@ from datetime import UTC, datetime
 from langgraph.graph import END, START, StateGraph
 
 from ai_service.orchestration.nodes.common import complete_node, start_node
-from ai_service.orchestration.state import WorkflowState
-from ai_service.orchestration.subgraphs.generation import GenerationOutput
-from ai_service.orchestration.subgraphs.verification_repair import VerificationOutput
+from ai_service.orchestration.subgraphs.schemas import (
+    GenerationInput, GenerationOutput, RepairInput, RepairOutput, RepairState,
+)
 from ai_service.orchestration.vue_tool_loop import VueLoopState, create_vue_loop_nodes, initial_progress
 
 
@@ -19,9 +19,11 @@ def vue_recursion_limit(settings) -> int:
 def build_vue_tool_subgraph(workflow, emitter, thread_id, terminal, *, node="vue_agent",
                             interrupt_after=None, invoke_model=None, call_id_prefix=None, legacy=False):
     """私有轮次状态留在子图命名空间；调试断点不在生产入口开放。"""
-    async def initialize(state: WorkflowState):
+    async def initialize(state: VueLoopState):
         await start_node(workflow, emitter, thread_id, terminal, node, state)
-        context = {**state["context"], "toolResults": list(state["context"].get("toolResults", []))}
+        # 将完整历史移到独立通道，模型轮次和进度节点不再重写稳定上下文。
+        context = {key: value for key, value in state["context"].items() if key != "toolResults"}
+        tool_results = list(state["context"].get("toolResults", []))
         count = state.get("repair_count", 0) + (node == "repair" and not legacy)
         if node == "repair" and not legacy:
             context.update(codeGenType=state["code_gen_type"], repairCount=count,
@@ -32,28 +34,33 @@ def build_vue_tool_subgraph(workflow, emitter, thread_id, terminal, *, node="vue
                                     else f"{state['request_id']}:vue-generate")
         return {
             "context": context, "repair_count": count, "token_usage": {}, "finish_reason": None,
+            "vue_tool_results": tool_results,
             "vue_loop": initial_progress(context, prefix, datetime.now(UTC).isoformat()),
         }
 
     async def finish(state: VueLoopState):
         workflow._raise_if_cancelled(thread_id)
         update = {
-            "context": state["context"], "tool_call_count": state.get("tool_call_count", 0),
+            "context": {**state["context"], "toolResults": list(state["vue_tool_results"])},
+            "tool_call_count": state.get("tool_call_count", 0),
             "finish_reason": state.get("finish_reason"), "token_usage": state.get("token_usage", {}),
         }
         if node == "repair" and not legacy:
-            update.update(context={key: value for key, value in state["context"].items() if key != "qualityReview"},
+            update.update(context={key: value for key, value in update["context"].items() if key != "qualityReview"},
                           build={}, repair_count=state["repair_count"], repair_feedback="")
         else:
             update["artifact"] = "\n".join(state["vue_loop"]["content_parts"])
         await complete_node(workflow, emitter, thread_id, terminal, node, {**state, **update},
                             datetime.fromisoformat(state["vue_loop"]["started_at"]))
-        return update
+        # 出口已将历史和文本组装进公共字段，清空私有副本避免末尾检查点重复保存。
+        return {**update, "vue_tool_results": [],
+                "vue_loop": {**state["vue_loop"], "content_parts": []}}
 
     # 仅阶段输出回传父图；vue_loop、待执行参数和游标均不泄漏。
-    builder = StateGraph(VueLoopState, input_schema=WorkflowState,
-                         output_schema=VerificationOutput if node == "repair" and not legacy else GenerationOutput)
-    builder.add_node("initialize", initialize)
+    is_repair = node == "repair" and not legacy
+    builder = StateGraph(VueLoopState, input_schema=RepairInput if is_repair else GenerationInput,
+                         output_schema=RepairOutput if is_repair else GenerationOutput)
+    builder.add_node("initialize", initialize, input_schema=RepairInput if is_repair else GenerationInput)
     for name, action in create_vue_loop_nodes(workflow, emitter, thread_id, node, invoke_model=invoke_model).items():
         builder.add_node(name, action)
     builder.add_node("finish", finish)
@@ -70,9 +77,9 @@ def build_vue_tool_subgraph(workflow, emitter, thread_id, terminal, *, node="vue
 
 def build_repair_subgraph(static_repair, vue_repair):
     """保留验证图的 repair 调度名，让静态修复和 Vue 工具图各自执行。"""
-    builder = StateGraph(WorkflowState, output_schema=VerificationOutput)
-    builder.add_node("static_repair", static_repair)
-    builder.add_node("vue_repair", vue_repair)
+    builder = StateGraph(RepairState, input_schema=RepairInput, output_schema=RepairOutput)
+    builder.add_node("static_repair", static_repair, input_schema=RepairInput)
+    builder.add_node("vue_repair", vue_repair, input_schema=RepairInput)
     builder.add_conditional_edges(START, lambda state: "vue_repair" if state["code_gen_type"] == "VUE_PROJECT"
                                   else "static_repair")
     builder.add_edge("static_repair", END)
