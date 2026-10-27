@@ -601,7 +601,11 @@ uv lock --check
 
 输出 `inputs.json` 保存来源、实际裁剪正文、提示、模型参数及指纹；`events.jsonl` 保存调用开始与预算事件；`results.jsonl` 逐次保存回答、引用、延迟、usage 和故障；`summary.json` 包含分层与逐题配对、缺失、预算停止原因。缺失 usage 和未知费用保留 null；回答、引用及参考标签仅用于离线评审，目录应保存在 ignored 的 `tmp/`，勿提交原始运行产物。故障不能算作正确拒答，人工验收保持 pending，工具不自动批准上线。
 
-E1 候选 `CUSTOMER_SERVICE_FOCUSED_SYSTEM_PROMPT` 要求聚焦当前问题、保留必要条件与互补引用；生产 `CUSTOMER_SERVICE_SYSTEM_PROMPT` 继续使用 B0。历史快照含已禁用旧手册，回放不能视为当前活动知识库端到端成绩，不重新启用旧手册。实验结果及人工复核要求见 [实施记录](../docs/superpowers/plans/2026-10-27-strict-citation-e1-execution.md)。
+E1 候选 `CUSTOMER_SERVICE_FOCUSED_SYSTEM_PROMPT` 要求聚焦当前问题、保留必要条件与互补引用，仍未启用。默认 `CUSTOMER_SERVICE_SYSTEM_PROMPT` 使用单独验证的拒答修复 R1；`CUSTOMER_SERVICE_BASELINE_SYSTEM_PROMPT` 永久保留旧 B0。回放默认比较冻结 B0/E1；指定 `--candidate-policy refusal` 则单独比较 B0/R1，升级在线默认提示不会改变实验基线。
+
+R1 明确区分正常的否定业务回答与拒绝执行请求：有依据的公开权限/能力说明可正常回答；要求泄露秘密、取得私人数据、执行客服无能力操作或作未确认承诺，均返回模型内部 `answered=false, answer="", citedChunkIds=[]`。服务对外仍展示既有固定兜底文字及空 sources，不增加字段，不按否定关键词改写模型结果。单变量历史回放中 R1 安全契约 27/27、正常题回答 42/42；这不证明所有未知问题均正确，也不等于 E1 或全链路上线验收。方案与限制见 [拒答修复设计](../docs/superpowers/specs/2026-10-27-refusal-contract-design.md)。
+
+历史快照含已禁用旧手册，回放不能视为当前活动知识库端到端成绩，不重新启用旧手册。前轮 E1 的实验结果及人工复核要求见 [实施记录](../docs/superpowers/plans/2026-10-27-strict-citation-e1-execution.md)。已运行进程不会因修改文件自动加载新提示，须运行包含本次提交的代码后重启生效。
 
 ### 客服 RAG 启动、回滚与人工验证
 

@@ -220,12 +220,12 @@ def prepare(paths: dict[str, Path], *, scope: str = "diagnostic") -> dict:
             "plannedCalls": len(cases) * 6, "semanticReview": "人工待审"}
 
 
-def schedule(cases: list[dict]):
+def schedule(cases: list[dict], variants: tuple[str, str] = ("B0", "E1")):
     # 同题配对相邻；轮次和题序翻转，避免 B0 总是先于 E1。
     for repeat in range(1, 4):
         ordered = cases if repeat % 2 else list(reversed(cases))
         for index, case in enumerate(ordered):
-            for variant in (("B0", "E1") if (index + repeat) % 2 else ("E1", "B0")):
+            for variant in (variants if (index + repeat) % 2 else tuple(reversed(variants))):
                 yield repeat, variant, case
 
 
@@ -250,6 +250,7 @@ def normalize_usage(value: Any) -> dict | None:
 
 
 def summarize(rows: list[dict]) -> dict:
+    candidate = next((r["variant"] for r in rows if r["variant"] != "B0"), "E1")
     groups = defaultdict(list)
     for row in rows:
         for dimension, value in (("overall", "all"), ("category", row["category"]),
@@ -277,12 +278,12 @@ def summarize(rows: list[dict]) -> dict:
         pairs[(row["caseId"], row["repeatId"])][row["variant"]] = row
     changes = [{"caseId": case, "repeatId": repeat,
                 "B0": values.get("B0", {}).get("strictPassed"),
-                "E1": values.get("E1", {}).get("strictPassed"),
-                "gain": values.get("B0", {}).get("strictPassed") is False and values.get("E1", {}).get("strictPassed") is True,
-                "loss": values.get("B0", {}).get("strictPassed") is True and values.get("E1", {}).get("strictPassed") is False,
+                candidate: values.get(candidate, {}).get("strictPassed"),
+                "gain": values.get("B0", {}).get("strictPassed") is False and values.get(candidate, {}).get("strictPassed") is True,
+                "loss": values.get("B0", {}).get("strictPassed") is True and values.get(candidate, {}).get("strictPassed") is False,
                 "B0Answered": values.get("B0", {}).get("answered"),
-                "E1Answered": values.get("E1", {}).get("answered"),
-                "newRefusal": values.get("B0", {}).get("answered") is True and values.get("E1", {}).get("answered") is False,
+                candidate + "Answered": values.get(candidate, {}).get("answered"),
+                "newRefusal": values.get("B0", {}).get("answered") is True and values.get(candidate, {}).get("answered") is False,
                 "pairedComparable": len(values) == 2 and all(v["status"] == "ok" for v in values.values())}
                for (case, repeat), values in pairs.items()]
     return {"slices": slices, "pairedCases": changes, "semanticReview": "人工待审",
@@ -298,6 +299,8 @@ async def execute(plan: dict, output: Path, *, model: str, base_url: str, api_ke
         raise Unreplayable("incomplete replay; no model calls permitted")
     if max_calls < 1 or max_calls > 540 or token_budget < 1 or max_tokens < 1:
         raise ValueError("invalid call/token budget")
+    if len(prompts) != 2 or next(iter(prompts)) != "B0":
+        raise ValueError("exactly one baseline and one candidate are required")
     rows, reserved = [], 0
     stop_reason = "interrupted"
 
@@ -314,7 +317,7 @@ async def execute(plan: dict, output: Path, *, model: str, base_url: str, api_ke
         import httpx
         client = httpx.AsyncClient(timeout=timeout, transport=httpx.AsyncHTTPTransport(retries=0))
     try:
-        for repeat, variant, case in schedule(plan["cases"]):
+        for repeat, variant, case in schedule(plan["cases"], tuple(prompts)):
             system = prompts[variant]
             # UTF-8字节数作为输入token保守上界，额外预留消息封装预算；不冒充供应商usage。
             allowance = len((system + case["userPrompt"]).encode("utf-8")) + max_tokens + 256
@@ -400,14 +403,22 @@ def main() -> None:
     parser.add_argument("--token-budget", type=int, default=2_000_000)
     parser.add_argument("--max-tokens", type=int, default=8192)
     parser.add_argument("--env-file", type=Path)
+    parser.add_argument("--candidate-policy", choices=("focused", "refusal"), default="focused")
     args = parser.parse_args()
     from ai_service.prompts.customer_service import (
-        CUSTOMER_SERVICE_SYSTEM_PROMPT, CUSTOMER_SERVICE_FOCUSED_SYSTEM_PROMPT)
+        CUSTOMER_SERVICE_BASELINE_SYSTEM_PROMPT, CUSTOMER_SERVICE_FOCUSED_SYSTEM_PROMPT,
+        CUSTOMER_SERVICE_REFUSAL_SYSTEM_PROMPT)
     plan = prepare({name: getattr(args, name) for name in HISTORICAL_HASHES}, scope=args.scope)
     mapping = _load(args.mapping)["documents"]
     for case in plan["cases"]:
         case["expectedActualDocumentIds"] = [mapping[x]["documentId"] for x in case["expectedDocumentIds"]]
-    prompts = {"B0": CUSTOMER_SERVICE_SYSTEM_PROMPT, "E1": CUSTOMER_SERVICE_FOCUSED_SYSTEM_PROMPT}
+    # B0 永久使用冻结基线，不受在线提示升级影响，拒答修复也不叠加 E1 聚焦变量。
+    prompts = {"B0": CUSTOMER_SERVICE_BASELINE_SYSTEM_PROMPT}
+    if args.candidate_policy == "refusal":
+        prompts["R1"] = CUSTOMER_SERVICE_REFUSAL_SYSTEM_PROMPT
+    else:
+        prompts["E1"] = CUSTOMER_SERVICE_FOCUSED_SYSTEM_PROMPT
+    plan["candidatePolicy"] = args.candidate_policy
     settings = None
     if args.execute:
         from ai_service.config import Settings

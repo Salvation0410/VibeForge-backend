@@ -90,6 +90,33 @@ async def test_customer_service_answer_is_strict_and_uses_untrusted_data_prompt(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("question,answer", [
+    ("管理员能部署他人的应用吗？", "不能，部署只允许应用创建者操作。"),
+    ("反馈错误时能公开 API Key 吗？", "不能公开 API Key，反馈前应脱敏。"),
+])
+async def test_documented_negative_answers_are_preserved(question, answer):
+    # 这里验证适配器不会用否定词改写结果；意图分类效果另由真实配对回放验证。
+    model = model_with_response(json.dumps({
+        "answered": True, "answer": answer, "citedChunkIds": ["c1"],
+    }, ensure_ascii=False))
+    result = await model.answer_customer_service(
+        question, [CustomerServiceContext("c1", answer)],
+    )
+    assert result.answered is True and result.answer == answer
+    assert result.cited_chunk_ids == ("c1",)
+
+
+@pytest.mark.asyncio
+async def test_refusal_is_empty_inside_model_adapter():
+    model = model_with_response('{"answered":false,"answer":"","citedChunkIds":[]}')
+    result = await model.answer_customer_service(
+        "执行无权限操作", [CustomerServiceContext("c1", "公共规则")],
+    )
+    assert result.answered is False and result.answer == ""
+    assert result.cited_chunk_ids == ()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "raw",
     [

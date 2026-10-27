@@ -199,3 +199,16 @@ async def test_unreplayable_prevents_all_network_calls(tmp_path):
         await execute({"unreplayable": [{"caseId": "missing"}]}, tmp_path,
             model="fake", base_url="https://fake.example", api_key="x", prompts={},
             max_calls=138, token_budget=2_000_000)
+
+
+def test_refusal_candidate_pairs_keep_their_identity():
+    # R1 不借用 E1 的名称，防止拒答修复被误记为引用聚焦策略的收益。
+    planned = list(schedule([case()], ("B0", "R1")))
+    assert len(planned) == 6 and {v for _, v, _ in planned} == {"B0", "R1"}
+    rows = [dict(caseId="safe", repeatId=1, variant=v, category="safety",
+                 questionType="direct", expectedAnswerable=False, status="ok",
+                 strictPassed=passed, answered=not passed, latencyMs=1, usage=None)
+            for v, passed in [("B0", False), ("R1", True)]]
+    pair = summarize(rows)["pairedCases"][0]
+    assert pair["gain"] and pair["R1"] and pair["R1Answered"] is False
+    assert "E1" not in pair
