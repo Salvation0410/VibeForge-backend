@@ -22,17 +22,23 @@ import java.util.Set;
 public class ArtifactPathResolver {
     private final Path outputRoot;
     private final ObjectMapper objectMapper;
+    private final GenerationFenceService generationFenceService;
 
     /** 使用生产代码输出根目录创建活动版本解析器。 */
     @Autowired
-    public ArtifactPathResolver(ObjectMapper objectMapper) {
-        this(Path.of(AppConstant.CODE_OUTPUT_ROOT_DIR), objectMapper);
+    public ArtifactPathResolver(ObjectMapper objectMapper, GenerationFenceService generationFenceService) {
+        this(Path.of(AppConstant.CODE_OUTPUT_ROOT_DIR), objectMapper, generationFenceService);
     }
 
     /** 使用指定输出根目录创建解析器，供隔离测试复用。 */
     ArtifactPathResolver(Path outputRoot, ObjectMapper objectMapper) {
+        this(outputRoot, objectMapper, null);
+    }
+
+    ArtifactPathResolver(Path outputRoot, ObjectMapper objectMapper, GenerationFenceService generationFenceService) {
         this.outputRoot = outputRoot.toAbsolutePath().normalize();
         this.objectMapper = objectMapper;
+        this.generationFenceService = generationFenceService;
     }
 
     /**
@@ -46,6 +52,26 @@ public class ArtifactPathResolver {
         Path root = projectRoot(codeGenType, appId);
         // HTML 与多文件都使用不可变 release；没有新版本时仍回退到旧平铺目录。
         if (codeGenType != CodeGenTypeEnum.MULTI_FILE && codeGenType != CodeGenTypeEnum.HTML) return root;
+        if (databasePointerEnabled(root)) {
+            try {
+                var active = generationFenceService.active(appId, codeGenType.getValue());
+                if (active == null) return root;
+                Path release = root.resolve(".releases").resolve(active.requestId()).normalize();
+                if (!release.getParent().equals(root.resolve(".releases")) || !isValidRelease(root, release, false)) {
+                    throw new IllegalStateException("数据库活动产物指针指向无效版本");
+                }
+                if (active.fenceToken() > 0) {
+                    var publication = generationFenceService.publication(appId, codeGenType.getValue(), active.requestId());
+                    if (publication == null || !publication.fenceToken().equals(active.fenceToken())
+                            || !databasePublicationValid(root, publication)) {
+                        throw new IllegalStateException("数据库活动版本与发布事实不一致");
+                    }
+                }
+                return release;
+            } catch (RuntimeException error) {
+                throw new IllegalStateException("读取数据库活动产物指针失败", error);
+            }
+        }
         Path current = resolvePointer(root);
         if (current != null) return current;
         if (!Files.exists(root.resolve(".current"))) return root;
@@ -61,6 +87,14 @@ public class ArtifactPathResolver {
         if (type == CodeGenTypeEnum.VUE_PROJECT) return "NOT_VERSIONED";
         if (requestId == null || !requestId.matches("[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}")) return "UNAVAILABLE";
         Path root = projectRoot(type, appId);
+        if (generationFenceService != null) {
+            try {
+                var publication = generationFenceService.publication(appId, type.getValue(), requestId);
+                if (publication != null) return databasePublicationValid(root, publication) ? "COMMITTED" : "UNAVAILABLE";
+            } catch (Exception error) {
+                return "UNAVAILABLE";
+            }
+        }
         Path marker = root.resolve(".committed").resolve(requestId);
         Path tombstone = root.resolve(".published").resolve(requestId + ".json");
         try {
@@ -118,6 +152,59 @@ public class ArtifactPathResolver {
         return outputRoot.resolve(type.getValue() + "_" + appId).normalize();
     }
 
+    /** 种入升级前活动版本后再启用 DB 指针，避免进程中断时回退到可能过期的文件镜像。 */
+    void prepareDatabasePointer(CodeGenTypeEnum type, long appId, Path root) throws Exception {
+        if (generationFenceService == null) throw new IllegalStateException("生成代际服务未配置");
+        if (Files.isRegularFile(root.resolve(".db-pointer-enabled"))) return;
+        Path current = root.resolve(".current");
+        if (Files.isRegularFile(current)) {
+            String requestId = Files.readString(current, StandardCharsets.UTF_8).trim();
+            if (requestId.matches("[A-Za-z0-9._-]{1,128}")) {
+                Path release = root.resolve(".releases").resolve(requestId);
+                if (isValidRelease(root, release)) {
+                    ArtifactManifest manifest = objectMapper.readValue(release.resolve("manifest.json").toFile(), ArtifactManifest.class);
+                    generationFenceService.seedLegacyActive(appId, type.getValue(), requestId,
+                            manifest.sequence(), manifest.hashes());
+                }
+            }
+        }
+        Files.createDirectories(root);
+        Path marker = root.resolve(".db-pointer-enabled");
+        try {
+            Files.writeString(marker, "1", StandardCharsets.UTF_8, java.nio.file.StandardOpenOption.CREATE_NEW);
+        } catch (java.nio.file.FileAlreadyExistsException concurrentInitialization) {
+            // 多实例同时完成基线种入时，已存在的标记具有同样语义。
+        }
+    }
+
+    private boolean databasePointerEnabled(Path root) {
+        return generationFenceService != null && Files.isRegularFile(root.resolve(".db-pointer-enabled"));
+    }
+
+    private boolean databasePublicationValid(Path root, GenerationFenceService.PublicationRecord publication) {
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, String> recordedHashes = objectMapper.readValue(publication.hashesJson(), Map.class);
+            Path tombstone = root.resolve(".published").resolve(publication.requestId() + ".json");
+            if (Files.isRegularFile(tombstone)) {
+                var published = objectMapper.readTree(tombstone.toFile());
+                if (!publication.requestId().equals(published.path("requestId").asText())
+                        || published.path("sequence").asLong() != publication.publicationSequence()
+                        || !objectMapper.convertValue(published.path("hashes"), Map.class).equals(recordedHashes)) return false;
+            }
+            Path release = root.resolve(".releases").resolve(publication.requestId());
+            if (Files.exists(release)) {
+                if (!isValidRelease(root, release, false)) return false;
+                ArtifactManifest manifest = objectMapper.readValue(release.resolve("manifest.json").toFile(), ArtifactManifest.class);
+                if (manifest.sequence() != publication.publicationSequence()
+                        || !manifest.hashes().equals(recordedHashes)) return false;
+            }
+            return Files.isRegularFile(tombstone) || Files.isDirectory(release);
+        } catch (Exception error) {
+            return false;
+        }
+    }
+
     /** 读取并校验 `.current` 指针，非法或不完整版本返回空。 */
     private Path resolvePointer(Path root) {
         try {
@@ -148,9 +235,13 @@ public class ArtifactPathResolver {
 
     /** 按生成类型校验必要文件集合并重算每个 SHA-256；任何缺失、额外声明或篡改都会拒绝激活。 */
     private boolean isValidRelease(Path root, Path release) {
+        return isValidRelease(root, release, true);
+    }
+
+    private boolean isValidRelease(Path root, Path release, boolean requireCommitMarker) {
         if (!Files.isDirectory(release) || !Files.isRegularFile(release.resolve("manifest.json"))) return false;
         try {
-            if (Files.isRegularFile(root.resolve(".commit-markers-enabled"))
+            if (requireCommitMarker && Files.isRegularFile(root.resolve(".commit-markers-enabled"))
                     && !Files.isRegularFile(root.resolve(".committed").resolve(release.getFileName()))) return false;
             ArtifactManifest manifest = objectMapper.readValue(release.resolve("manifest.json").toFile(), ArtifactManifest.class);
             long expectedAppId = Long.parseLong(root.getFileName().toString().substring(root.getFileName().toString().lastIndexOf('_') + 1));
@@ -191,4 +282,5 @@ public class ArtifactPathResolver {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); }
         catch (Exception e) { throw new IllegalStateException(e); }
     }
+
 }

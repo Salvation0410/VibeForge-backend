@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.yupi.yuaicodemother.mapper.GenerationFenceMapper">
+    <resultMap id="publication" type="com.yupi.yuaicodemother.core.artifact.GenerationFenceService$PublicationRecord">
+        <constructor>
+            <arg column="app_id" javaType="long"/>
+            <arg column="code_gen_type" javaType="java.lang.String"/>
+            <arg column="request_id" javaType="java.lang.String"/>
+            <arg column="fence_token" javaType="long"/>
+            <arg column="publication_sequence" javaType="long"/>
+            <arg column="hashes_json" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+    <resultMap id="active" type="com.yupi.yuaicodemother.core.artifact.GenerationFenceService$ActiveArtifact">
+        <constructor>
+            <arg column="request_id" javaType="java.lang.String"/>
+            <arg column="fence_token" javaType="long"/>
+        </constructor>
+    </resultMap>
+    <insert id="ensureFenceRow">
+        INSERT IGNORE INTO generation_fence (app_id, current_token) VALUES (#{appId}, 0)
+    </insert>
+    <update id="incrementFence">
+        UPDATE generation_fence SET current_token = current_token + 1 WHERE app_id = #{appId}
+    </update>
+    <select id="currentFence" resultType="long">
+        SELECT current_token FROM generation_fence WHERE app_id = #{appId}
+    </select>
+    <select id="lockCurrentFence" resultType="long">
+        SELECT current_token FROM generation_fence WHERE app_id = #{appId} FOR UPDATE
+    </select>
+    <insert id="insertPublication">
+        INSERT INTO generation_publication
+            (request_id, app_id, code_gen_type, fence_token, publication_sequence, hashes_json, published_at)
+        VALUES (#{requestId}, #{appId}, #{codeGenType}, #{fenceToken}, #{sequence}, #{hashesJson}, #{publishedAt})
+    </insert>
+    <select id="findPublication" resultMap="publication">
+        SELECT app_id, code_gen_type, request_id, fence_token, publication_sequence, hashes_json
+        FROM generation_publication
+        WHERE app_id = #{appId} AND code_gen_type = #{codeGenType} AND request_id = #{requestId}
+    </select>
+    <select id="findActive" resultMap="active">
+        SELECT request_id, fence_token FROM generation_active_artifact
+        WHERE app_id = #{appId} AND code_gen_type = #{codeGenType}
+    </select>
+    <insert id="seedActive">
+        INSERT IGNORE INTO generation_active_artifact
+            (app_id, code_gen_type, request_id, fence_token, updated_at)
+        VALUES (#{appId}, #{codeGenType}, #{requestId}, 0, #{publishedAt})
+    </insert>
+    <insert id="updateActive">
+        INSERT INTO generation_active_artifact
+            (app_id, code_gen_type, request_id, fence_token, updated_at)
+        VALUES (#{appId}, #{codeGenType}, #{requestId}, #{fenceToken}, #{updatedAt})
+        ON DUPLICATE KEY UPDATE request_id = VALUES(request_id), fence_token = VALUES(fence_token),
+            updated_at = VALUES(updated_at)
+    </insert>
+</mapper>

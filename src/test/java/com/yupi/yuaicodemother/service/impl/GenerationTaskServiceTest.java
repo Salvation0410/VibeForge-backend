@@ -19,14 +19,15 @@ class GenerationTaskServiceTest {
     void startFailsClosedAndOnlyCapturesIdentityAndType() {
         var mapper = mock(GenerationTaskMapper.class);
         var service = new GenerationTaskServiceImpl(mapper);
-        assertThrows(GenerationStreamException.class, () -> service.start(42, 7, "req", CodeGenTypeEnum.HTML));
+        assertThrows(GenerationStreamException.class, () -> service.start(42, 7, "req", CodeGenTypeEnum.HTML, 11));
         when(mapper.createTask(any())).thenReturn(1);
-        service.start(42, 7, "req", CodeGenTypeEnum.HTML);
+        service.start(42, 7, "req", CodeGenTypeEnum.HTML, 11);
         ArgumentCaptor<GenerationTask> task = ArgumentCaptor.forClass(GenerationTask.class);
         verify(mapper, times(2)).createTask(task.capture());
         assertEquals(42L, task.getValue().getAppId());
         assertEquals(7L, task.getValue().getUserId());
         assertEquals("html", task.getValue().getCodeGenType());
+        assertEquals(11L, task.getValue().getFenceToken());
     }
 
     @Test
@@ -34,11 +35,11 @@ class GenerationTaskServiceTest {
         var mapper = mock(GenerationTaskMapper.class);
         var service = new GenerationTaskServiceImpl(mapper);
         when(mapper.createTask(any())).thenThrow(new IllegalStateException("sensitive SQL connection details"));
-        var unavailable = assertThrows(GenerationStreamException.class, () -> service.start(42, 7, "req", CodeGenTypeEnum.HTML));
+        var unavailable = assertThrows(GenerationStreamException.class, () -> service.start(42, 7, "req", CodeGenTypeEnum.HTML, 11));
         assertEquals("GENERATION_TASK_UNAVAILABLE", unavailable.getErrorCode());
         assertFalse(unavailable.getMessage().contains("sensitive"));
         doThrow(new org.springframework.dao.DuplicateKeyException("duplicate")).when(mapper).createTask(any());
-        var duplicate = assertThrows(GenerationStreamException.class, () -> service.start(42, 7, "req", CodeGenTypeEnum.HTML));
+        var duplicate = assertThrows(GenerationStreamException.class, () -> service.start(42, 7, "req", CodeGenTypeEnum.HTML, 11));
         assertEquals("GENERATION_REQUEST_EXISTS", duplicate.getErrorCode());
     }
 

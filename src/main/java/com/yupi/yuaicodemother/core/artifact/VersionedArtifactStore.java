@@ -8,8 +8,10 @@ import java.nio.file.*;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.*;
+import lombok.extern.slf4j.Slf4j;
 
 /** 负责不可变产物版本的落盘、指针切换、防重放和保留清理。 */
+@Slf4j
 public class VersionedArtifactStore {
     private final ArtifactPathResolver resolver;
     private final ObjectMapper objectMapper;
@@ -26,6 +28,21 @@ public class VersionedArtifactStore {
     public synchronized ArtifactPublishResult publish(CodeGenTypeEnum type, long appId, String requestId,
                                                       Map<String, String> files, String engine,
                                                       String finishReason, StagingVerifier verifier) throws Exception {
+        return publish(type, appId, requestId, files, engine, finishReason, verifier, null, null);
+    }
+
+    /** 以数据库代际提交权威活动指针；文件 `.current` 只在数据库提交后更新为兼容镜像。 */
+    public synchronized ArtifactPublishResult publishFenced(CodeGenTypeEnum type, long appId, String requestId,
+                                                             Map<String, String> files, String engine,
+                                                             String finishReason, StagingVerifier verifier,
+                                                             long fenceToken, GenerationFenceService fenceService) throws Exception {
+        return publish(type, appId, requestId, files, engine, finishReason, verifier, fenceToken, fenceService);
+    }
+
+    private ArtifactPublishResult publish(CodeGenTypeEnum type, long appId, String requestId,
+                                          Map<String, String> files, String engine, String finishReason,
+                                          StagingVerifier verifier, Long fenceToken,
+                                          GenerationFenceService fenceService) throws Exception {
         validateRequestId(requestId);
         Path root = resolver.projectRoot(type, appId);
         Path releases = root.resolve(".releases");
@@ -37,8 +54,12 @@ public class VersionedArtifactStore {
         if (Files.isRegularFile(tombstone) && !Files.exists(release)) {
             throw conflict("该请求已发布但产物版本已被保留策略清理，禁止重建或回滚");
         }
-        if (Files.exists(release)) return existingResult(release, requestId, hashes);
-        long sequence = nextPublicationSequence(root);
+        if (Files.exists(release)) {
+            return fenceService == null ? existingResult(release, requestId, hashes)
+                    : existingFencedResult(type, appId, root, release, requestId, hashes, fenceToken, fenceService);
+        }
+        // 新协议用数据库代际作为序号，避免跨 JVM 并发写共享序号文件。
+        long sequence = fenceToken == null ? nextPublicationSequence(root) : fenceToken;
         Path staging = root.resolve(".staging").resolve(requestId);
         deleteTree(staging);
         Files.createDirectories(staging);
@@ -50,10 +71,55 @@ public class VersionedArtifactStore {
         if (verifier != null) verifier.verify(staging);
         Files.move(staging, release, StandardCopyOption.ATOMIC_MOVE);
         persistTombstone(root, manifest);
-        switchPointer(root, requestId);
-        persistCommitMarker(root, requestId);
-        try { cleanupOldReleases(root, requestId); } catch (Exception ignored) { }
+        if (fenceService == null) {
+            switchPointer(root, requestId);
+            persistCommitMarker(root, requestId);
+        } else {
+            resolver.prepareDatabasePointer(type, appId, root);
+            fenceService.activate(appId, type.getValue(), requestId, fenceToken, sequence, hashes);
+            mirrorCommittedPointer(root, requestId);
+        }
+        // DB 提交后进程可能暂停并被新代际取代；旧执行者不得再依据自身版本清理共享 release。
+        // fencing 版本暂不自动清理，后续需由受数据库保护的独立保留流程处理。
+        if (fenceService == null) {
+            try { cleanupOldReleases(root, requestId); } catch (Exception ignored) { }
+        }
         return new ArtifactPublishResult(true, requestId, hashes);
+    }
+
+    private ArtifactPublishResult existingFencedResult(CodeGenTypeEnum type, long appId, Path root, Path release,
+                                                        String requestId, Map<String, String> hashes,
+                                                        Long fenceToken, GenerationFenceService fenceService) throws Exception {
+        ArtifactManifest manifest;
+        try {
+            manifest = objectMapper.readValue(release.resolve("manifest.json").toFile(), ArtifactManifest.class);
+            if (!requestId.equals(manifest.requestId()) || !hashes.equals(manifest.hashes())
+                    || !hashes.equals(hashesFromRelease(release, manifest.hashes()))) {
+                throw conflict("相同请求 ID 对应不同产物或磁盘版本已被篡改");
+            }
+        } catch (ArtifactValidationException error) {
+            throw error;
+        } catch (Exception error) {
+            throw conflict("相同请求 ID 的已有版本不完整或无法读取");
+        }
+        validateTombstoneIfPresent(root, manifest);
+        persistTombstone(root, manifest);
+        resolver.prepareDatabasePointer(type, appId, root);
+        fenceService.activate(appId, type.getValue(), requestId, fenceToken, manifest.sequence(), hashes);
+        mirrorCommittedPointer(root, requestId);
+        return new ArtifactPublishResult(true, requestId, hashes);
+    }
+
+    /** 数据库活动指针已提交；镜像失败不能反转权威发布结果。 */
+    private void mirrorCommittedPointer(Path root, String requestId) {
+        try {
+            switchPointer(root, requestId);
+            persistCommitMarker(root, requestId);
+        } catch (Exception error) {
+            // 解析器以 MySQL 指针为准；保留此镜像仅为旧版工具和运维读取兼容。
+            log.warn("数据库活动版本已提交但文件指针镜像更新失败, requestId={}, type={}",
+                    requestId, error.getClass().getSimpleName());
+        }
     }
 
     /** 复核已有版本并按序号恢复指针；发现摘要或墓碑不一致时拒绝重放。 */

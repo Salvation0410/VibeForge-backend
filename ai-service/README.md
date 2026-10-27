@@ -220,7 +220,7 @@ Python 工作流先向 `arguments` 注入可信的 `codeGenType`，`SpringToolGa
 
 Spring 在发布前执行 HTML/CSS/JavaScript 确定性扫描和 Selenium 烟测。烟测默认开启且必需（`AI_HTML_SMOKE_TEST_ENABLED=true`、`AI_HTML_SMOKE_TEST_REQUIRED=true`），浏览器不可用或页面在 8 秒内不能加载、3 秒观察期仍有错误/骨架屏时不会发布。仅本地开发可同时关闭两个开关。单文件全量重写超过 `AI_HTML_MAX_REWRITE_SOURCE_CHARS`（默认 24000）时返回 `HTML_OUTPUT_BUDGET_EXCEEDED`，避免大页面再次被截断覆盖。
 
-HTML 和多文件版本均写入 `<类型>_<appId>/.releases/<requestId>`，`.current` 以原子替换指向活动版本；`.published` 墓碑、`.publication-sequence` 和 `.committed` 标记防止旧请求重放。默认保留当前版本及最近两个历史版本，校验、烟测、指针切换或请求失败都保留上一成功版本。
+HTML 和多文件版本均写入 `<类型>_<appId>/.releases/<requestId>`。Spring 在租约取得时签发 MySQL 单调代际，完整 release 落盘后在数据库事务内校验代际并切换权威活动指针；`.current` 为兼容镜像。首次切换前种入旧版本基线并写 `.db-pointer-enabled`；此后预览、部署、下载按数据库指针读取，数据库不可用时失败关闭。旧代际无法替换新代际活动版本。旧文件协议保留当前及最近两个历史版本；新 fencing 协议暂不自动清理 release，防止暂停后恢复的旧执行者误删新版本，磁盘保留调度待后续实现。
 
 前端只在 80ms 批处理窗口更新字符计数和轻量进度，滚动最多每 200ms 一次；生成期间保留旧 iframe，只有收到发布成功的 `done` 才刷新一次。取消、业务失败（`business-error`）或截断不会刷新预览。优化提示按 `HTML`、`MULTI_FILE`、`VUE_PROJECT` 分别约束输出协议和修改范围。
 
@@ -548,9 +548,9 @@ Python 与 Spring 之间使用 NDJSON；Spring 对前端的内容事件仍为 `d
 
 ## PostgreSQL checkpoint 与故障降级
 
-Spring 已新增独立 MySQL `generation_task` 业务任务账本与只读 `/api/apps/chat/gen/code/task` 查询，保留执行终态并分别展示实时租约、静态版本提交证据；不读取或替代本节 Python 节点摘要，也不开放生产自动恢复。升级 Spring 前需执行业务库 `sql/alter_generation_task.sql`，未建表时生成会在调用 Python 前失败关闭。字段、权限、30 天查询保留和跨资源一致性限制见 [生成任务账本说明](../doc/generation-task-ledger.md)。Python 接口、checkpoint schema、配置和启动方式未改。
+Spring 已新增独立 MySQL `generation_task` 业务任务账本与只读 `/api/apps/chat/gen/code/task` 查询，保留执行终态、生成代际并分别展示实时租约、静态版本提交证据；不读取或替代本节 Python 节点摘要，也不开放生产自动恢复。升级 Spring 前需依次执行业务库 `sql/alter_generation_task.sql`、`sql/alter_generation_fencing.sql`，未迁移时生成会在调用 Python 前失败关闭。字段、权限、30 天查询保留和跨资源一致性限制见 [生成任务账本说明](../doc/generation-task-ledger.md)。Python 接口、checkpoint schema、配置和启动方式未改。
 
-Spring 的真实 MySQL/Redis 任务故障矩阵是独立 opt-in Java 测试，详情与租约失效边界见 [重构交接文档第 14 节](../doc/ai-service-subgraph-refactor-handoff.md)。Redis 租约状态检查不能替代带 fencing token 的文件发布；生产自动恢复仍关闭。
+Spring 的真实 MySQL/Redis 任务故障矩阵是独立 opt-in Java 测试，持久化代际、数据库活动指针和迟到发布验证见 [重构交接文档第 15 节](../doc/ai-service-subgraph-refactor-handoff.md)。静态版本使用 MySQL fencing；Vue 工程构建尚无此版本切换协议，生产自动恢复仍关闭。
 
 LangGraph 使用官方 `AsyncPostgresSaver`，`thread_id` 为 `{appId}:{requestId}`。同一连接池还维护 `ai_workflow_status`，该表只允许保存节点、请求/应用标识、生成类型、质量结果和有限计数，不保存完整源码、`repair_feedback` 或其他审查正文。正常终态调用 `adelete_thread()` 删除官方图 checkpoint；异常退出先由 `expires_at` 找到过期 thread，成功删除图 checkpoint 后才删除状态行，图删除失败时保留状态行供下次重试。
 

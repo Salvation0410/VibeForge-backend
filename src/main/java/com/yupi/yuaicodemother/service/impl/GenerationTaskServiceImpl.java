@@ -24,12 +24,13 @@ public class GenerationTaskServiceImpl implements GenerationTaskService {
     private static final Set<String> TERMINAL = Set.of("SUCCEEDED", "FAILED", "CANCELLED");
 
     @Override
-    public void start(long appId, long userId, String requestId, CodeGenTypeEnum type) {
+    public void start(long appId, long userId, String requestId, CodeGenTypeEnum type, long fenceToken) {
         GenerationTask task = new GenerationTask();
         task.setRequestId(requestId);
         task.setAppId(appId);
         task.setUserId(userId);
         task.setCodeGenType(type.getValue());
+        task.setFenceToken(fenceToken);
         task.setCreatedAt(LocalDateTime.now());
         task.setUpdatedAt(task.getCreatedAt());
         try {
@@ -44,6 +45,22 @@ public class GenerationTaskServiceImpl implements GenerationTaskService {
         }
         throw new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(), "GENERATION_TASK_UNAVAILABLE",
                 requestId, "生成任务记录暂不可用，请稍后重试", null);
+    }
+
+    @Override
+    public long findFenceToken(long appId, String requestId) {
+        Long token;
+        try {
+            token = mapper.findFenceToken(appId, requestId);
+        } catch (RuntimeException error) {
+            throw new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(), "GENERATION_FENCE_UNAVAILABLE",
+                    requestId, "生成任务代际暂不可用，请稍后重试", error);
+        }
+        if (token == null || token <= 0) {
+            throw new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(), "GENERATION_FENCE_UNAVAILABLE",
+                    requestId, "生成任务代际暂不可用，请稍后重试", null);
+        }
+        return token;
     }
 
     @Override

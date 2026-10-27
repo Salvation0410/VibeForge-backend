@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.redisson.api.RBucket;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import com.yupi.yuaicodemother.core.artifact.GenerationFenceService;
 
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -24,7 +25,7 @@ class GenerationLeaseServiceTest {
         when(transitionLock.tryLock()).thenReturn(true);
         when(client.<String>getBucket("ai:generation:state:42")).thenReturn(state);
         when(lock.tryLock()).thenReturn(true);
-        var service = new GenerationLeaseService(client);
+        var service = service(client);
 
         GenerationLease lease = service.acquire(42, "req-1");
         service.release(lease);
@@ -44,7 +45,7 @@ class GenerationLeaseServiceTest {
         when(client.getLock("ai:generation:app:42")).thenReturn(lock);
         when(lock.tryLock()).thenReturn(false);
         GenerationStreamException error = assertThrows(GenerationStreamException.class,
-                () -> new GenerationLeaseService(client).acquire(42, "req-2"));
+                () -> service(client).acquire(42, "req-2"));
         assertEquals("GENERATION_IN_PROGRESS", error.getErrorCode());
         assertEquals("req-2", error.getRequestId());
     }
@@ -63,7 +64,7 @@ class GenerationLeaseServiceTest {
         AtomicBoolean held = new AtomicBoolean();
         when(appLock.isLocked()).thenAnswer(call -> held.get());
         when(appLock.tryLock()).thenAnswer(call -> { held.set(true); return true; });
-        var service = new GenerationLeaseService(client);
+        var service = service(client);
 
         GenerationLease cancelled = service.acquire(42, "req-cancel");
         assertTrue(service.cancel(cancelled));
@@ -72,7 +73,7 @@ class GenerationLeaseServiceTest {
 
         value.set("req-commit:ACTIVE");
         assertEquals("published", service.commit(42, "req-commit", () -> "published"));
-        assertFalse(service.cancel(new GenerationLease(42, "req-commit", appLock, 1L)));
+        assertFalse(service.cancel(new GenerationLease(42, "req-commit", 1L, appLock, 1L)));
         assertEquals("req-commit:COMMITTED", value.get());
     }
 
@@ -95,7 +96,7 @@ class GenerationLeaseServiceTest {
             return null;
         }).when(state).set(anyString());
 
-        String result = new GenerationLeaseService(client).commit(42, "req-1", () -> "published");
+        String result = service(client).commit(42, "req-1", () -> "published");
 
         assertEquals("published", result);
         assertEquals("req-1:COMMITTING", value.get());
@@ -112,7 +113,7 @@ class GenerationLeaseServiceTest {
         AtomicReference<String> value = bucketValue(state);
         when(client.getLock("ai:generation:transition:42")).thenReturn(transitionLock);
         when(client.<String>getBucket("ai:generation:state:42")).thenReturn(state);
-        var service = new GenerationLeaseService(client);
+        var service = service(client);
 
         assertEquals(GenerationLeaseService.PublicState.IDLE, service.getStatus(42).state());
 
@@ -144,7 +145,7 @@ class GenerationLeaseServiceTest {
         when(client.<String>getBucket("ai:generation:state:42")).thenReturn(state);
         when(state.get()).thenReturn("req:ACTIVE");
         AtomicBoolean invoked = new AtomicBoolean();
-        var service = new GenerationLeaseService(client);
+        var service = service(client);
         var error = assertThrows(GenerationStreamException.class,
                 () -> service.commit(42, "req", () -> { invoked.set(true); return null; }));
         assertEquals("GENERATION_LEASE_LOST", error.getErrorCode());
@@ -162,10 +163,10 @@ class GenerationLeaseServiceTest {
         when(client.getLock("ai:generation:transition:42")).thenReturn(transition);
         when(client.<String>getBucket("ai:generation:state:42")).thenReturn(state);
         when(state.get()).thenReturn("req:ACTIVE");
-        var service = new GenerationLeaseService(client);
+        var service = service(client);
         assertEquals(GenerationLeaseService.PublicState.IDLE, service.getStatus(42).state());
         assertEquals(GenerationLeaseService.PublicState.IDLE, service.cancelActive(42).state());
-        assertFalse(service.cancel(new GenerationLease(42, "req", appLock, 1)));
+        assertFalse(service.cancel(new GenerationLease(42, "req", 1L, appLock, 1)));
         verify(state, never()).set(anyString());
         verify(state, never()).delete();
     }
@@ -180,7 +181,7 @@ class GenerationLeaseServiceTest {
         when(transition.tryLock()).thenReturn(true);
         when(appLock.isLocked()).thenReturn(true);
         var error = assertThrows(GenerationStreamException.class,
-                () -> new GenerationLeaseService(client).acquire(42, "new-request"));
+                () -> service(client).acquire(42, "new-request"));
         assertEquals("GENERATION_IN_PROGRESS", error.getErrorCode());
         verify(appLock, never()).tryLock();
         verify(client, never()).getBucket(anyString());
@@ -195,7 +196,7 @@ class GenerationLeaseServiceTest {
         when(client.getLock("ai:generation:app:42")).thenReturn(appLock);
         when(client.getLock("ai:generation:transition:42")).thenReturn(transition);
         assertEquals("GENERATION_IN_PROGRESS", assertThrows(GenerationStreamException.class,
-                () -> new GenerationLeaseService(client).acquire(42, "req")).getErrorCode());
+                () -> service(client).acquire(42, "req")).getErrorCode());
         verifyNoInteractions(appLock);
         verify(transition, never()).unlock();
     }
@@ -207,5 +208,11 @@ class GenerationLeaseServiceTest {
         doAnswer(invocation -> { value.set(invocation.getArgument(0)); return null; }).when(bucket).set(anyString());
         doAnswer(invocation -> { value.set(null); return true; }).when(bucket).delete();
         return value;
+    }
+
+    private GenerationLeaseService service(RedissonClient client) {
+        var fence = mock(GenerationFenceService.class);
+        when(fence.issue(anyLong())).thenReturn(1L);
+        return new GenerationLeaseService(client, fence);
     }
 }

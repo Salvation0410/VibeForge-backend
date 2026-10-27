@@ -2,7 +2,9 @@
 
 日期：2026-10-27。本文描述本轮已实现内容及下一阶段的边界，设计来源为 `docs/superpowers/specs/2026-10-27-generation-subgraphs-design.md`。
 
-> 后续更新：本文第 1—8 节保留第一阶段交接基线；2026-10-27 已完成 Vue 多节点工具子图（第 9 节）、子图输入与私有状态收敛（第 10 节）、静态模型文本流式（第 11 节）、真实 PostgreSQL 子图恢复与清理验收（第 12 节）、Spring 任务账本与查询（第 13 节）以及真实 MySQL/Redis 故障矩阵和租约防护（第 14 节）。第 6 节优先项一、二及优先项三中的 HTML/MULTI_FILE 流式已完成，生产任务恢复仍未实现；当前能力和验证以第 9—14 节为准。
+> 后续更新：本文第 1—8 节保留第一阶段交接基线；2026-10-27 已完成 Vue 多节点工具子图（第 9 节）、子图输入与私有状态收敛（第 10 节）、静态模型文本流式（第 11 节）、真实 PostgreSQL 子图恢复与清理验收（第 12 节）、Spring 任务账本与查询（第 13 节）、真实 MySQL/Redis 故障矩阵和租约防护（第 14 节）以及持久化生成代际 fencing（第 15 节）。第 6 节优先项一、二及优先项三中的 HTML/MULTI_FILE 流式已完成，生产任务恢复仍未实现；当前能力和验证以第 9—15 节为准。
+
+> 最新更新：2026-10-27 已完成第 15 节 MySQL 持久化代际 fencing 与活动版本指针。真实资源是否完成本轮迁移/集成测试，以第 15 节的本轮记录为准；生产任务恢复仍未实现。
 
 ## 1. 已实现结构
 
@@ -318,3 +320,37 @@ MySQL、Redis 与文件系统没有跨资源事务：取消仲裁至墓碑写入
 ### 下一阶段
 
 实现持久化执行所有者与租约代际/fencing：发布写入必须携带并校验当前代际；Redis 丢失、锁过期、应用进程暂停恢复后旧代际不得切换 `.current`。同时让取消墓碑在 MySQL/Redis 不可用窗口具有单一权威来源，定义 RUNNING 心跳超时之后如何安全认领，而不是直接把记录认作可恢复。完成真实数据库/Redis/文件并发与进程故障验证后，再设计 Python checkpoint 接续和客户端重连；生产自动恢复在此前保持关闭。
+
+## 15. MySQL 持久化生成代际与静态活动指针
+
+设计与计划：`docs/superpowers/specs/2026-10-27-generation-fencing-design.md`、`docs/superpowers/plans/2026-10-27-generation-fencing.md`。数据库部署详情见 `doc/generation-task-ledger.md`。
+
+### 当前实现
+
+- Redis 应用锁获得后，`GenerationFenceService` 在 MySQL 事务中原子递增 `generation_fence.current_token`；token 放入 `GenerationLease`，并在模型调用前写入 `generation_task.fence_token`。MySQL 分配失败会释放 Redis 锁并停止请求；token 空洞允许存在，不会复用。
+- 新增不可变 `generation_publication` 发布事实与 `(appId, codeGenType)` 的 `generation_active_artifact` 权威指针。release、摘要校验和墓碑先落共享文件系统；数据库事务锁住应用代际行，只有 token 仍是当前代际才能记录发布历史并切换活动指针。
+- DB 指针提交后才更新 `.current` 和提交标记作为兼容镜像；镜像失败记录脱敏异常类型，不逆转已提交结果。管理员人工 HTML 恢复同样先取得新 Redis 租约和 MySQL token。
+- 首次发布前从既有 `.current` 种入 token 0 的活动基线，再创建 `.db-pointer-enabled` 标记。标记存在后，预览/部署/下载/上下文读取走 MySQL 活动指针并复核 release；数据库不可用或目标 release 无效时失败关闭，不使用可能过期的 `.current`。未启用标记的旧项目保留旧解析路径。
+- 发布状态从 MySQL 不可变发布事实核对，release 保留时再核对文件摘要；历史发布事实独立于当前指针与 release 清理。文件系统与数据库仍非跨资源事务，失败可能留下未激活 release/墓碑；不会因此改变活动指针。
+- Vue 工程目录仍没有不可变版本切换，本轮不声称其构建受到该 fencing 保护。没有恢复认领、自动重试、心跳、SSE 重放或 Python checkpoint 恢复入口。
+- fencing manifest 序号直接使用 MySQL token，避免多实例竞争旧共享序号文件。fencing 路径暂不自动清理 release，防止 DB 提交后暂停的旧发布者恢复并误删后继活动版本；需要后续增加受数据库保护的保留调度并预留磁盘空间。升级须所有实例统一切换，不能混跑旧文件指针权威版本；回滚前停生成、停止旧执行者并按 DB 指针重新核对镜像。
+
+### 本轮验证
+
+当前完成：
+
+- `mvn -DskipTests compile`：273 个 Java 源码编译成功。
+- `mvn test '-Dtest=GenerationTaskMapperTest,GenerationTaskServiceTest,GenerationLeaseServiceTest,ArtifactPublicationServiceTest,ArtifactPathResolverTest,AppGenerationTaskTest'`：59 项通过。
+- `mvn test '-Dtest=GenerationTaskMapperTest,ArtifactPathResolverTest,GenerationTaskResourcesIT'`：本地 SQL/解析器 13 项通过；真实资源 8 项因未设置 `AI_TASK_INTEGRATION=true` 而跳过。
+- H2 MySQL 模式测试实际执行新增 fencing Mapper XML，覆盖单调 token、发布历史和活动指针；服务事务测试验证旧 token 在新代际后被拒且不能替换当前指针。临时文件测试验证迟到 `.current` 不改变数据库指针解析结果，数据库查询失败时不回退。
+
+### 迁移与本轮验证
+
+- 目标经配置护栏确认是 `localhost/yu_ai_code_mother`，服务版本 MySQL 8.0.41；首次试跑发现该版本不支持 `ADD COLUMN IF NOT EXISTS`，迁移脚本随即改为 `information_schema` 条件 DDL。首次试跑仅第一条 DDL 失败，没有创建 fencing 列或表；修正后执行成功并核验 `generation_task.fence_token` 及三张 fencing 表。
+- `mvn clean -DskipTests compile`：273 个 Java 源文件 BUILD SUCCESS。
+- 较早一次限定集合：102 项执行，94 项通过、8 项真实资源用例因未设置 opt-in 跳过；最终回归以本节末尾记录为准。
+- `$env:AI_TASK_INTEGRATION='true'; mvn test '-Dtest=GenerationLeaseServiceTest,GenerationTaskResourcesIT'`：17 项通过，其中 8 项访问真实 MySQL 8.0.41、Spring Redis database 1 和 JUnit 临时文件目录。覆盖 fencing token 递增、旧代际迟到拒绝、DB 活动指针胜过迟到 `.current` 镜像，以及账本/租约故障矩阵。测试不触碰 `projects/`，测试后按 appId 清理账本、发布、活动指针、代际行和 Redis 键。
+- 另有 H2 MySQL 模式和 JUnit 临时目录专项：验证事务 fencing、旧版本解析、DB 读取失败关闭。fencing 专项未连接模型或 Python HTTP，不代表完整浏览器 SSE 验收。
+- 后续增补 `publisherPausedInsideFileVerificationCannotActivateAfterSuccessorCommits`：不同 store 实例共用真实 MySQL 与临时文件目录，旧发布在校验中阻塞，后继签新代际并提交，旧发布恢复后返回 `GENERATION_FENCE_REJECTED`。同时新增 H2 并发签发、活动指针写失败回滚发布事实，以及文件镜像写失败不反转 DB 提交测试。`AI_TASK_INTEGRATION=true` 运行 Mapper/解析器/真实资源三类共 24 项全部通过，其中真实资源 9 项。
+- 执行无筛选 `mvn test` 时发现历史 `AiCodeGeneratorServiceTest` 会直接访问真实供应商并写 `tmp/code_output/vue_project_1`，已中断该次运行；无筛选全量不计通过。该调用不构成完整业务端到端验收，后续使用明确限定的回归集合，生成临时产物不提交。
+- 最终验证：`mvn clean -DskipTests compile` 成功；开启 `AI_TASK_INTEGRATION=true` 执行上述限定回归集合并加入 `InternalAiToolsControllerTest,ArtifactRecoveryControllerTest,AiCodeGeneratorFacadeTest`：145 项通过，0 失败/错误/跳过，其中真实 MySQL/Redis 测试 9 项。Python 与前端源码未修改，未重跑其测试。`git diff --check` 通过。

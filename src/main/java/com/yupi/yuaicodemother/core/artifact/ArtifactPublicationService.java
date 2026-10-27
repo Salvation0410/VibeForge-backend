@@ -8,6 +8,7 @@ import com.yupi.yuaicodemother.ai.model.MultiFileCodeResult;
 import com.yupi.yuaicodemother.config.HtmlArtifactProperties;
 import com.yupi.yuaicodemother.core.paser.MultiFileCodeParser;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
+import com.yupi.yuaicodemother.service.GenerationTaskService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.core.env.Environment;
@@ -33,13 +34,17 @@ public class ArtifactPublicationService {
     private final HtmlSmokeTester smokeTester;
     private final HtmlArtifactProperties htmlProperties;
     private final Environment environment;
+    private final GenerationFenceService generationFenceService;
+    private final GenerationTaskService generationTaskService;
 
     /** 组装解析器、确定性校验器、浏览器烟测、共享版本存储和生成提交状态门。 */
     @Autowired
     public ArtifactPublicationService(MultiFileArtifactValidator validator, HtmlArtifactValidator htmlValidator,
                                       ArtifactPathResolver resolver, ObjectMapper objectMapper,
                                       GenerationLeaseService generationLeaseService, HtmlSmokeTester smokeTester,
-                                      HtmlArtifactProperties htmlProperties, Environment environment) {
+                                      HtmlArtifactProperties htmlProperties, Environment environment,
+                                      GenerationFenceService generationFenceService,
+                                      GenerationTaskService generationTaskService) {
         this.multiFileValidator = validator;
         this.htmlValidator = htmlValidator;
         this.store = new VersionedArtifactStore(resolver, objectMapper);
@@ -47,13 +52,23 @@ public class ArtifactPublicationService {
         this.smokeTester = smokeTester;
         this.htmlProperties = htmlProperties;
         this.environment = environment;
+        this.generationFenceService = generationFenceService;
+        this.generationTaskService = generationTaskService;
     }
 
     /** 隔离测试构造器；不启用生成取消状态门。 */
     ArtifactPublicationService(MultiFileArtifactValidator validator, ArtifactPathResolver resolver,
                                ObjectMapper objectMapper) {
         this(validator, new HtmlArtifactValidator(), resolver, objectMapper, null,
-                path -> HtmlSmokeTestResult.success(), new HtmlArtifactProperties(), null);
+                path -> HtmlSmokeTestResult.success(), new HtmlArtifactProperties(), null, null, null);
+    }
+
+    ArtifactPublicationService(MultiFileArtifactValidator validator, HtmlArtifactValidator htmlValidator,
+                               ArtifactPathResolver resolver, ObjectMapper objectMapper,
+                               GenerationLeaseService generationLeaseService, HtmlSmokeTester smokeTester,
+                               HtmlArtifactProperties htmlProperties, Environment environment) {
+        this(validator, htmlValidator, resolver, objectMapper, generationLeaseService, smokeTester,
+                htmlProperties, environment, null, null);
     }
 
     /** 严格解析并发布三文件产物，发布失败不会改变当前指针。 */
@@ -64,7 +79,8 @@ public class ArtifactPublicationService {
         multiFileValidator.validateOrThrow(artifact);
         Map<String, String> files = Map.of("index.html", artifact.getHtmlCode(),
                 "style.css", artifact.getCssCode(), "script.js", artifact.getJsCode());
-        return publish(CodeGenTypeEnum.MULTI_FILE, appId, requestId, files, engine, finishReason);
+        Long fenceToken = taskFenceToken(appId, requestId);
+        return publish(CodeGenTypeEnum.MULTI_FILE, appId, requestId, files, engine, finishReason, null, fenceToken);
     }
 
     /** 严格解析、校验并发布单文件 HTML；仅在完整产物通过校验后写入版本。 */
@@ -77,13 +93,15 @@ public class ArtifactPublicationService {
             var lease = generationLeaseService.acquire(appId, requestId);
             try {
                 return publish(CodeGenTypeEnum.HTML, appId, requestId,
-                        Map.of("index.html", artifact.getHtmlCode()), engine, finishReason, this::verifyHtmlStaging);
+                        Map.of("index.html", artifact.getHtmlCode()), engine, finishReason, this::verifyHtmlStaging,
+                        lease.fenceToken());
             } finally {
                 generationLeaseService.release(lease);
             }
         }
         return publish(CodeGenTypeEnum.HTML, appId, requestId,
-                Map.of("index.html", artifact.getHtmlCode()), engine, finishReason, this::verifyHtmlStaging);
+                Map.of("index.html", artifact.getHtmlCode()), engine, finishReason, this::verifyHtmlStaging,
+                taskFenceToken(appId, requestId));
     }
 
     /**
@@ -118,26 +136,27 @@ public class ArtifactPublicationService {
         }
     }
 
-    /** 在取消与提交的原子状态门内执行共享发布，确保只有一个请求获胜。 */
-    private ArtifactPublishResult publish(CodeGenTypeEnum type, long appId, String requestId,
-                                         Map<String, String> files, String engine, String finishReason) {
-        return publish(type, appId, requestId, files, engine, finishReason, null);
-    }
-
-    /** 仅 HTML 在 staging 哈希核对后执行烟测，失败时不得移动 release 或活动指针。 */
+    /** Redis 仲裁取消，MySQL 代际仲裁活动版本；数据库错误正文不得透传到生成流。 */
     private ArtifactPublishResult publish(CodeGenTypeEnum type, long appId, String requestId,
                                          Map<String, String> files, String engine, String finishReason,
-                                         VersionedArtifactStore.StagingVerifier verifier) {
+                                         VersionedArtifactStore.StagingVerifier verifier, Long fenceToken) {
         try {
-            return generationLeaseService == null
+            java.util.concurrent.Callable<ArtifactPublishResult> action = () -> fenceToken == null
                     ? store.publish(type, appId, requestId, files, engine, finishReason, verifier)
-                    : generationLeaseService.commit(appId, requestId,
-                    () -> store.publish(type, appId, requestId, files, engine, finishReason, verifier));
+                    : store.publishFenced(type, appId, requestId, files, engine, finishReason,
+                    verifier, fenceToken, generationFenceService);
+            return generationLeaseService == null ? action.call()
+                    : generationLeaseService.commit(appId, requestId, action::call);
         } catch (ArtifactValidationException | GenerationStreamException e) {
             throw e;
         } catch (Exception e) {
-            throw new ArtifactValidationException("ARTIFACT_PUBLISH_FAILED", null, "产物发布失败: " + e.getMessage());
+            log.warn("产物发布失败, requestId={}, type={}", requestId, e.getClass().getSimpleName());
+            throw new ArtifactValidationException("ARTIFACT_PUBLISH_FAILED", null, "产物发布失败，请稍后重试");
         }
+    }
+
+    private Long taskFenceToken(long appId, String requestId) {
+        return generationTaskService == null ? null : generationTaskService.findFenceToken(appId, requestId);
     }
 
     /** 生产默认失败关闭；只有显式关闭 enabled 和 required 才允许开发环境跳过。 */

@@ -16,6 +16,7 @@ public class GenerationTask {
     private Long userId;
     private String codeGenType;
     private String executionState;
+    private Long fenceToken = 0L;
     private String errorCode;
     private LocalDateTime cancelRequestedAt;
     private LocalDateTime createdAt;

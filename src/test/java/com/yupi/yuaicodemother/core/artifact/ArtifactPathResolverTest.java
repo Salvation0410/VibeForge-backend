@@ -9,8 +9,10 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 class ArtifactPathResolverTest {
     @TempDir Path root;
@@ -105,6 +107,52 @@ class ArtifactPathResolverTest {
 
         assertEquals(legacyRoot.toAbsolutePath(), resolver.resolveActiveRoot(CodeGenTypeEnum.MULTI_FILE, 42));
         assertFalse(Files.exists(legacyRoot.resolve(".current")));
+    }
+
+    @Test
+    void databasePointerWinsOverLateFileMirrorAndDatabaseFailureFailsClosed() throws Exception {
+        Path output = root.resolve("fenced-output");
+        var json = mapper();
+        var fenceService = mock(GenerationFenceService.class);
+        var fencedResolver = new ArtifactPathResolver(output, json, fenceService);
+        var store = new VersionedArtifactStore(fencedResolver, json);
+        when(fenceService.active(7, "html")).thenReturn(new GenerationFenceService.ActiveArtifact("db-current", 3L));
+        store.publishFenced(CodeGenTypeEnum.HTML, 7, "db-current", Map.of("index.html", "<html>current</html>"),
+                "test", "STOP", null, 3, fenceService);
+        Path appRoot = output.resolve("html_7");
+        var manifest = json.readValue(appRoot.resolve(".releases/db-current/manifest.json").toFile(), ArtifactManifest.class);
+        when(fenceService.publication(7, "html", "db-current")).thenReturn(
+                new GenerationFenceService.PublicationRecord(7L, "html", "db-current", 3L,
+                        manifest.sequence(), json.writeValueAsString(manifest.hashes())));
+        Files.writeString(appRoot.resolve(".current"), "late-old");
+        assertEquals(appRoot.resolve(".releases/db-current").toAbsolutePath(),
+                fencedResolver.resolveActiveRoot(CodeGenTypeEnum.HTML, 7));
+
+        when(fenceService.active(7, "html")).thenThrow(new IllegalStateException("db unavailable"));
+        assertThrows(IllegalStateException.class, () -> fencedResolver.resolveActiveRoot(CodeGenTypeEnum.HTML, 7));
+    }
+
+    @Test
+    void mirrorFailureAfterDatabaseCommitDoesNotReversePublicationOrRemoveOtherReleases() throws Exception {
+        var fence = mock(GenerationFenceService.class);
+        var resolver = new ArtifactPathResolver(root, mapper(), fence);
+        var store = new VersionedArtifactStore(resolver, mapper());
+        Path app = root.resolve("html_7");
+        Files.createDirectories(app.resolve(".current/obstruction"));
+        when(fence.active(7, "html")).thenReturn(new GenerationFenceService.ActiveArtifact("committed", 1L));
+        assertTrue(store.publishFenced(CodeGenTypeEnum.HTML, 7, "committed",
+                Map.of("index.html", "<html>committed</html>"), "test", "STOP", null, 1, fence).published());
+        var manifest = mapper().readValue(app.resolve(".releases/committed/manifest.json").toFile(), ArtifactManifest.class);
+        when(fence.publication(7, "html", "committed")).thenReturn(
+                new GenerationFenceService.PublicationRecord(7L, "html", "committed", 1L,
+                        manifest.sequence(), mapper().writeValueAsString(manifest.hashes())));
+        verify(fence).activate(eq(7L), eq("html"), eq("committed"), eq(1L), eq(1L), anyMap());
+        assertTrue(resolver.resolveActiveRoot(CodeGenTypeEnum.HTML, 7).endsWith("committed"));
+        for (int i = 2; i <= 5; i++) {
+            store.publishFenced(CodeGenTypeEnum.HTML, 7, "later-" + i,
+                    Map.of("index.html", "<html>later</html>"), "test", "STOP", null, i, fence);
+        }
+        assertTrue(Files.isRegularFile(app.resolve(".releases/committed/index.html")));
     }
 
     private ArtifactPathResolver resolver() {

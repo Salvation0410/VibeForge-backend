@@ -43,6 +43,7 @@ class AppGenerationTaskTest {
         ReflectionTestUtils.setField(service, "streamHandlerExecutor", streams);
         doReturn(App.builder().id(42L).userId(7L).codeGenType(type.getValue()).build()).when(service).getById(42L);
         when(leases.acquire(eq(42L), anyString())).thenReturn(lease);
+        when(lease.fenceToken()).thenReturn(99L);
         when(gateway.generate(anyString(), eq(type), eq(42L), eq(7L), anyString())).thenReturn(Flux.just("text"));
         when(streams.doExecute(any(), eq(history), eq(originals), eq(42L), eq(owner), eq(type)))
                 .thenAnswer(call -> call.getArgument(0));
@@ -57,11 +58,11 @@ class AppGenerationTaskTest {
         assertEquals("text", stream.blockLast());
         assertEquals("text", stream.blockLast());
         ArgumentCaptor<String> ids = ArgumentCaptor.forClass(String.class);
-        verify(tasks, times(2)).start(eq(42L), eq(7L), ids.capture(), eq(type));
+        verify(tasks, times(2)).start(eq(42L), eq(7L), ids.capture(), eq(type), eq(99L));
         assertNotEquals(ids.getAllValues().get(0), ids.getAllValues().get(1));
         var order = inOrder(tasks, history, gateway);
         for (String id : ids.getAllValues()) {
-            order.verify(tasks).start(42L, 7L, id, type);
+            order.verify(tasks).start(42L, 7L, id, type, 99L);
             order.verify(history).addChatMessage(eq(42L), eq("build"), anyString(), eq(7L));
             order.verify(gateway).generate("build", type, 42L, 7L, id);
             order.verify(tasks).finish(id, "SUCCEEDED", null);
@@ -72,7 +73,7 @@ class AppGenerationTaskTest {
     @Test
     void ledgerInsertFailureOrDuplicateStopsBeforeHistoryAndModelAndReleasesLease() {
         var service = fixture(CodeGenTypeEnum.HTML);
-        doThrow(new DuplicateKeyException("duplicate")).when(tasks).start(anyLong(), anyLong(), anyString(), any());
+        doThrow(new DuplicateKeyException("duplicate")).when(tasks).start(anyLong(), anyLong(), anyString(), any(), anyLong());
         assertThrows(GenerationStreamException.class, () -> service.chatToGenCode(42L, "build", owner).blockLast());
         verifyNoInteractions(history, originals);
         verify(gateway, never()).generate(anyString(), any(), anyLong(), anyLong(), anyString());
@@ -115,7 +116,7 @@ class AppGenerationTaskTest {
             when(leases.getStatus(42L)).thenReturn(new GenerationLeaseService.GenerationStateSnapshot(
                     call.getArgument(2), GenerationLeaseService.PublicState.STOPPING, false));
             return null;
-        }).when(tasks).start(anyLong(), anyLong(), anyString(), any());
+        }).when(tasks).start(anyLong(), anyLong(), anyString(), any(), anyLong());
         assertThrows(GenerationStreamException.class, () -> service.chatToGenCode(42L, "build", owner).blockLast());
         verify(tasks).recordCancellation(anyString());
         verify(tasks).finish(anyString(), eq("CANCELLED"), eq("GENERATION_CANCELLED"));

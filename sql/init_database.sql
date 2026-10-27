@@ -219,6 +219,7 @@ CREATE TABLE IF NOT EXISTS generation_task (
     user_id BIGINT NOT NULL COMMENT '发起用户 ID',
     code_gen_type VARCHAR(32) NOT NULL COMMENT '生成类型',
     execution_state VARCHAR(16) NOT NULL DEFAULT 'RUNNING' COMMENT '执行状态，不等同发布事实',
+    fence_token BIGINT NOT NULL DEFAULT 0 COMMENT '生成租约单调代际',
     error_code VARCHAR(128) DEFAULT NULL COMMENT '脱敏稳定错误码',
     cancel_requested_at DATETIME(6) DEFAULT NULL COMMENT '取消仲裁获胜时间，不代表取消完成',
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
@@ -230,3 +231,31 @@ CREATE TABLE IF NOT EXISTS generation_task (
     KEY idx_generation_task_retention (query_until),
     CONSTRAINT chk_generation_task_state CHECK (execution_state IN ('RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='生成任务账本；暂不物理删除唯一性和取消墓碑';
+
+CREATE TABLE IF NOT EXISTS generation_fence (
+    app_id BIGINT NOT NULL COMMENT '应用 ID',
+    current_token BIGINT NOT NULL DEFAULT 0 COMMENT '当前单调代际',
+    PRIMARY KEY (app_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='应用生成 fencing 代际';
+
+CREATE TABLE IF NOT EXISTS generation_publication (
+    request_id VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '已提交发布请求 ID',
+    app_id BIGINT NOT NULL COMMENT '应用 ID',
+    code_gen_type VARCHAR(32) NOT NULL COMMENT '生成类型',
+    fence_token BIGINT NOT NULL COMMENT '提交时的生成代际',
+    publication_sequence BIGINT NOT NULL COMMENT '不可变 release 序号',
+    hashes_json JSON NOT NULL COMMENT '已提交文件摘要',
+    published_at DATETIME(6) NOT NULL COMMENT '发布提交时间',
+    PRIMARY KEY (request_id),
+    KEY idx_generation_publication_owner (app_id, code_gen_type, published_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='不可变产物发布事实';
+
+CREATE TABLE IF NOT EXISTS generation_active_artifact (
+    app_id BIGINT NOT NULL COMMENT '应用 ID',
+    code_gen_type VARCHAR(32) NOT NULL COMMENT '生成类型',
+    request_id VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '当前活动发布请求 ID',
+    fence_token BIGINT NOT NULL COMMENT '活动发布代际，0 表示升级前基线',
+    updated_at DATETIME(6) NOT NULL COMMENT '指针更新时间',
+    PRIMARY KEY (app_id, code_gen_type),
+    KEY idx_generation_active_request (request_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='每应用每生成类型的权威活动版本指针';

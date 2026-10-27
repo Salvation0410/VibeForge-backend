@@ -13,10 +13,11 @@
         <result column="updated_at" property="updatedAt"/>
         <result column="finished_at" property="finishedAt"/>
         <result column="query_until" property="queryUntil"/>
+        <result column="fence_token" property="fenceToken"/>
     </resultMap>
     <insert id="createTask">
-        INSERT INTO generation_task (request_id, app_id, user_id, code_gen_type, execution_state, created_at, updated_at)
-        VALUES (#{requestId}, #{appId}, #{userId}, #{codeGenType}, 'RUNNING', #{createdAt}, #{updatedAt})
+        INSERT INTO generation_task (request_id, app_id, user_id, code_gen_type, execution_state, fence_token, created_at, updated_at)
+        VALUES (#{requestId}, #{appId}, #{userId}, #{codeGenType}, 'RUNNING', #{fenceToken}, #{createdAt}, #{updatedAt})
     </insert>
     <update id="finishTask">
         UPDATE generation_task SET execution_state = #{state}, error_code = #{errorCode},
@@ -27,6 +28,9 @@
         UPDATE generation_task SET cancel_requested_at = #{now}, updated_at = #{now}
         WHERE request_id = #{requestId} AND cancel_requested_at IS NULL
     </update>
+    <select id="findFenceToken" resultType="long">
+        SELECT fence_token FROM generation_task WHERE app_id = #{appId} AND request_id = #{requestId}
+    </select>
     <select id="findOwned" resultMap="task">
         SELECT * FROM generation_task
         WHERE app_id = #{appId} AND user_id = #{userId}

@@ -126,7 +126,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         boolean taskStarted = false;
         try {
             // 账本不可用时拒绝执行，避免产生无归属且无法查询的模型请求。
-            generationTaskService.start(appId, loginUser.getId(), requestId, codeGenTypeEnum);
+            generationTaskService.start(appId, loginUser.getId(), requestId, codeGenTypeEnum, lease.fenceToken());
             taskStarted = true;
             // 取消可能发生在租约获得后、任务插入前；补记这段窗口内已获胜的取消。
             var afterStart = generationLeaseService.getStatus(appId);

@@ -13,6 +13,7 @@ public interface GenerationTaskMapper extends BaseMapper<GenerationTask> {
                    @Param("errorCode") String errorCode, @Param("now") LocalDateTime now,
                    @Param("queryUntil") LocalDateTime queryUntil);
     int recordCancellation(@Param("requestId") String requestId, @Param("now") LocalDateTime now);
+    Long findFenceToken(@Param("appId") long appId, @Param("requestId") String requestId);
     GenerationTask findOwned(@Param("appId") long appId, @Param("userId") long userId,
                              @Param("requestId") String requestId, @Param("now") LocalDateTime now);
 }

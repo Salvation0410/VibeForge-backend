@@ -1,6 +1,7 @@
 package com.yupi.yuaicodemother.ai.gateway;
 
 import com.yupi.yuaicodemother.exception.ErrorCode;
+import com.yupi.yuaicodemother.core.artifact.GenerationFenceService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RBucket;
@@ -20,6 +21,7 @@ public class GenerationLeaseService {
     private static final String COMMITTING = "COMMITTING";
     private static final String COMMITTED = "COMMITTED";
     private final RedissonClient redissonClient;
+    private final GenerationFenceService generationFenceService;
 
     public enum PublicState {
         IDLE,
@@ -52,8 +54,9 @@ public class GenerationLeaseService {
             // Redisson 允许同客户端同线程重入，但业务上每个应用只能运行一个请求。
             if (lock.isLocked() || !lock.tryLock()) throw inProgress(requestId);
             try {
+                long fenceToken = generationFenceService.issue(appId);
                 stateBucket(appId).set(state(requestId, ACTIVE));
-                return new GenerationLease(appId, requestId, lock, ownerThreadId);
+                return new GenerationLease(appId, requestId, fenceToken, lock, ownerThreadId);
             } catch (RuntimeException error) {
                 lock.unlockAsync(ownerThreadId);
                 throw error;

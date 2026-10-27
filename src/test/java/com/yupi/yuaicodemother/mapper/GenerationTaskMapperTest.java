@@ -9,8 +9,14 @@ import org.apache.ibatis.session.SqlSessionFactory;
 import org.apache.ibatis.session.SqlSessionFactoryBuilder;
 import org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory;
 import org.h2.jdbcx.JdbcDataSource;
+import org.mybatis.spring.SqlSessionTemplate;
+import org.mybatis.spring.transaction.SpringManagedTransactionFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yupi.yuaicodemother.ai.gateway.GenerationStreamException;
+import com.yupi.yuaicodemother.core.artifact.GenerationFenceService;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,26 +30,44 @@ import static org.junit.jupiter.api.Assertions.*;
 /** 在 H2 MySQL 模式执行真实 XML SQL；不替代真实 MySQL 迁移验收。 */
 class GenerationTaskMapperTest {
     private SqlSessionFactory factory;
+    private GenerationFenceMapper transactionalFenceMapper;
+    private JdbcDataSource dataSource;
     private final LocalDateTime now = LocalDateTime.of(2026, 10, 27, 12, 0);
 
     @BeforeEach
     void setup() throws Exception {
-        JdbcDataSource source = new JdbcDataSource();
-        source.setURL("jdbc:h2:mem:" + UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1");
+        dataSource = new JdbcDataSource();
+        dataSource.setURL("jdbc:h2:mem:" + UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1");
         // 仅去除 H2 不支持的 MySQL 字符集与索引方言，保留字段、约束与全部业务 SQL。
         String ddl = Files.readString(Path.of("sql/alter_generation_task.sql"))
                 .replace("CHARACTER SET ascii COLLATE ascii_bin ", "")
                 .replaceAll("(?m)^    KEY .*\\R", "");
         ddl = ddl.substring(0, ddl.indexOf(") ENGINE=")) + ")";
-        try (var connection = source.getConnection(); var statement = connection.createStatement()) {
+        try (var connection = dataSource.getConnection(); var statement = connection.createStatement()) {
             statement.execute(ddl);
+            statement.execute("ALTER TABLE generation_task ADD fence_token BIGINT NOT NULL DEFAULT 0");
+            statement.execute("CREATE TABLE generation_fence (app_id BIGINT PRIMARY KEY, current_token BIGINT NOT NULL DEFAULT 0)");
+            statement.execute("CREATE TABLE generation_publication (request_id VARCHAR(128) PRIMARY KEY, app_id BIGINT NOT NULL, code_gen_type VARCHAR(32) NOT NULL, fence_token BIGINT NOT NULL, publication_sequence BIGINT NOT NULL, hashes_json JSON NOT NULL, published_at TIMESTAMP NOT NULL)");
+            statement.execute("CREATE TABLE generation_active_artifact (app_id BIGINT NOT NULL, code_gen_type VARCHAR(32) NOT NULL, request_id VARCHAR(128) NOT NULL, fence_token BIGINT NOT NULL, updated_at TIMESTAMP NOT NULL, PRIMARY KEY(app_id, code_gen_type))");
         }
-        Configuration config = new Configuration(new Environment("test", new JdbcTransactionFactory(), source));
+        Configuration config = new Configuration(new Environment("test", new JdbcTransactionFactory(), dataSource));
         String resource = "mapper/GenerationTaskMapper.xml";
         try (var input = getClass().getClassLoader().getResourceAsStream(resource)) {
             new XMLMapperBuilder(input, config, resource, config.getSqlFragments()).parse();
         }
+        String fenceResource = "mapper/GenerationFenceMapper.xml";
+        try (var input = getClass().getClassLoader().getResourceAsStream(fenceResource)) {
+            new XMLMapperBuilder(input, config, fenceResource, config.getSqlFragments()).parse();
+        }
         factory = new SqlSessionFactoryBuilder().build(config);
+        Configuration transactionalConfig = new Configuration(new Environment("tx-test",
+                new SpringManagedTransactionFactory(), dataSource));
+        try (var input = getClass().getClassLoader().getResourceAsStream("mapper/GenerationFenceMapper.xml")) {
+            new XMLMapperBuilder(input, transactionalConfig, fenceResource,
+                    transactionalConfig.getSqlFragments()).parse();
+        }
+        transactionalFenceMapper = new SqlSessionTemplate(new SqlSessionFactoryBuilder().build(transactionalConfig))
+                .getMapper(GenerationFenceMapper.class);
     }
 
     private GenerationTask task(String id, long app, long user, LocalDateTime time) {
@@ -52,6 +76,7 @@ class GenerationTaskMapperTest {
         task.setAppId(app);
         task.setUserId(user);
         task.setCodeGenType("html");
+        task.setFenceToken(0L);
         task.setCreatedAt(time);
         task.setUpdatedAt(time);
         return task;
@@ -113,6 +138,63 @@ class GenerationTaskMapperTest {
         start.countDown();
         assertEquals(1, first.get(5, java.util.concurrent.TimeUnit.SECONDS)
                 + second.get(5, java.util.concurrent.TimeUnit.SECONDS));
+    }
+
+    @Test
+    void fencingMapperKeepsMonotonicGenerationAndAtomicallySwitchesPublicationFacts() {
+        try (SqlSession session = factory.openSession(true)) {
+            var mapper = session.getMapper(GenerationFenceMapper.class);
+            mapper.ensureFenceRow(42);
+            assertEquals(1, mapper.incrementFence(42));
+            assertEquals(1L, mapper.currentFence(42));
+            assertEquals(1, mapper.incrementFence(42));
+            assertEquals(2L, mapper.currentFence(42));
+            assertEquals(1, mapper.insertPublication(42, "html", "fresh", 2, 7,
+                    "{\"index.html\":\"abc\"}", now));
+            mapper.updateActive(42, "html", "fresh", 2, now);
+            assertEquals("fresh", mapper.findActive(42, "html").requestId());
+            assertEquals(2L, mapper.findPublication(42, "html", "fresh").fenceToken());
+        }
+    }
+
+    @Test
+    void serviceRejectsStaleGenerationAndKeepsCommittedPointerAfterLaterClaim() {
+        GenerationFenceService fences = new GenerationFenceService(transactionalFenceMapper, new ObjectMapper(),
+                new DataSourceTransactionManager(dataSource));
+        long oldToken = fences.issue(73);
+        long currentToken = fences.issue(73);
+        assertThrows(GenerationStreamException.class,
+                () -> fences.activate(73, "html", "old", oldToken, 1, java.util.Map.of("index.html", "old")));
+        fences.activate(73, "html", "fresh", currentToken, 2, java.util.Map.of("index.html", "fresh"));
+        assertEquals("fresh", fences.active(73, "html").requestId());
+        assertThrows(GenerationStreamException.class,
+                () -> fences.activate(73, "html", "old", oldToken, 1, java.util.Map.of("index.html", "old")));
+        assertEquals("fresh", fences.active(73, "html").requestId());
+        assertNotNull(fences.publication(73, "html", "fresh"));
+        assertNull(fences.publication(73, "html", "old"));
+    }
+
+    @Test
+    void activationFailureRollsBackPublicationAndConcurrentClaimsRemainUnique() throws Exception {
+        var transactions = new DataSourceTransactionManager(dataSource);
+        var fences = new GenerationFenceService(transactionalFenceMapper, new ObjectMapper(), transactions);
+        var fault = org.mockito.Mockito.mock(GenerationFenceMapper.class,
+                org.mockito.AdditionalAnswers.delegatesTo(transactionalFenceMapper));
+        org.mockito.Mockito.doThrow(new IllegalStateException("模拟指针写入失败")).when(fault)
+                .updateActive(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyLong(),
+                        org.mockito.ArgumentMatchers.any());
+        long token = fences.issue(81);
+        var broken = new GenerationFenceService(fault, new ObjectMapper(), transactions);
+        assertThrows(IllegalStateException.class,
+                () -> broken.activate(81, "html", "rollback", token, token, java.util.Map.of("index.html", "hash")));
+        assertNull(fences.publication(81, "html", "rollback"));
+        assertNull(fences.active(81, "html"));
+        var first = CompletableFuture.supplyAsync(() -> fences.issue(81));
+        var second = CompletableFuture.supplyAsync(() -> fences.issue(81));
+        var tokens = java.util.Set.of(first.get(5, java.util.concurrent.TimeUnit.SECONDS),
+                second.get(5, java.util.concurrent.TimeUnit.SECONDS));
+        assertEquals(java.util.Set.of(token + 1, token + 2), tokens);
     }
 
     private CompletableFuture<Integer> terminalWriter(String state, CountDownLatch ready, CountDownLatch start) {
