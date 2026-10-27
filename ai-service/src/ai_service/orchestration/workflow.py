@@ -25,6 +25,7 @@ from ai_service.orchestration.state import WorkflowState
 from ai_service.orchestration.routing import _after_validation, _after_build, _after_review
 from ai_service.orchestration.subgraphs.generation import build_generation_subgraph
 from ai_service.orchestration.subgraphs.verification_repair import build_verification_repair_subgraph
+from ai_service.orchestration.subgraphs.vue import build_repair_subgraph, build_vue_tool_subgraph, vue_recursion_limit
 from ai_service.orchestration.nodes.common import guarded as guard_node
 from ai_service.orchestration.nodes.input import create_input_nodes
 from ai_service.orchestration.nodes.generation import create_generation_nodes
@@ -197,17 +198,21 @@ class GenerationWorkflow:
 
         for name, node in input_nodes.items():
             builder.add_node(name, guarded(name, node))
-        # 三个实例分别拥有父图分配的命名空间，事件仍沿用旧节点名称。
+        # 各生成实例拥有父图分配的命名空间，事件仍沿用旧节点名称。
         for parent_name, child_name, action in (
             ("html_generation", "generate_html", "generate_branch"),
             ("multi_file_generation", "generate_multi_file", "generate_branch"),
-            ("vue_generation", "vue_agent", "vue_agent"),
         ):
             builder.add_node(parent_name, build_generation_subgraph(
                 child_name, guarded(child_name, generation_nodes[action]),
             ))
+        builder.add_node("vue_generation", build_vue_tool_subgraph(self, emitter, thread_id, terminal))
+        repair = build_repair_subgraph(
+            guarded("repair", verification_nodes["repair"]),
+            build_vue_tool_subgraph(self, emitter, thread_id, terminal, node="repair"),
+        )
         builder.add_node("verification_repair", build_verification_repair_subgraph(
-            {name: guarded(name, node) if name != "fail_quality" else node
+            {name: repair if name == "repair" else guarded(name, node) if name != "fail_quality" else node
              for name, node in verification_nodes.items()},
             self.settings.max_repair_attempts,
         ))
@@ -231,7 +236,10 @@ class GenerationWorkflow:
         builder.add_edge("artifact_publish", "finalize")
         builder.add_edge("finalize", END)
         graph_saver = getattr(self.checkpoint, "get_graph_saver", lambda: None)()
-        return builder.compile(checkpointer=graph_saver)
+        # 在图对象上绑定默认预算，API、Studio 和内部直接调用使用同一上限。
+        return builder.compile(checkpointer=graph_saver).with_config(
+            {"recursion_limit": vue_recursion_limit(self.settings)}
+        )
 
     async def _run_vue_tool_loop(self, **kwargs) -> dict[str, Any]:
         """保留内部调用入口，循环实现集中在独立模块。"""

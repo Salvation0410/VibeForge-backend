@@ -24,18 +24,6 @@ def create_generation_nodes(
             await emitter.emit("content_delta", f"generate_{branch.lower()}", data={"content": turn.content})
         return {"artifact": turn.content, "finish_reason": turn.finish_reason, "token_usage": turn.token_usage}
 
-    async def vue_agent(state: WorkflowState) -> dict[str, Any]:
-        result = await workflow._run_vue_tool_loop(
-            state=state,
-            emitter=emitter,
-            thread_id=thread_id,
-            node="vue_agent",
-            call_id_prefix=f"{state['request_id']}:vue-generate",
-            invoke_model=lambda context: workflow.model.generate("VUE_PROJECT", context),
-        )
-        return {"artifact": result.pop("content"), **result}
-
     return {
         "generate_branch": generate_branch,
-        "vue_agent": vue_agent,
     }

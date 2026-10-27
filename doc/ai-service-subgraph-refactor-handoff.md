@@ -2,6 +2,8 @@
 
 日期：2026-10-27。本文描述本轮已实现内容及下一阶段的边界，设计来源为 `docs/superpowers/specs/2026-10-27-generation-subgraphs-design.md`。
 
+> 后续更新：本文第 1—8 节保留第一阶段交接基线；2026-10-27 下一步 Vue 多节点工具子图已实现，当前结构和验证见第 9 节。第 6 节优先项一已完成，不再是待实施项。
+
 ## 1. 已实现结构
 
 主图位于 `ai-service/src/ai_service/orchestration/workflow.py`，保留请求生命周期、输入准备、路由、发布与终态：
@@ -131,3 +133,28 @@ compileall 和 lock 检查通过；排除 Reranker 后为 643 passed、2 skipped
 修改后至少执行上述 Python 检查及 subgraphs/API 恢复测试。修改公共事件时还需跑 Java 网关和前端流式测试。
 本轮没有 schema、锁文件或环境变量迁移；回滚本次代码提交即可恢复单图组装。
 不要让在途请求跨版本恢复；生产部署应先排空生成请求。新子图 checkpoint 路径与旧单图不同，不能承诺旧 checkpoint 直接续跑。
+
+## 9. Vue 工具循环多节点子图（后续实施）
+
+设计：`docs/superpowers/specs/2026-10-27-vue-tool-subgraph-design.md`。
+
+- `subgraphs/vue.py` 构建 `initialize -> model_turn -> validate_turn -> execute_tool -> continue_loop` 循环和 `finish` 出口。父图 `vue_generation` 直接注册该图；验证图的 `repair` 是分派图，静态修复走原节点，Vue 修复注册同一工具图实现。
+- `vue_tool_loop.py` 提供 `VueLoopState`、`VueLoopProgress` 和四个核心节点。完整响应与待执行工具使用普通可序列化字典；私有字段不回传父图。初始化只在新阶段执行，恢复时 ordinal、文件计划、成功写入文件、重试次数、图片应用状态与工具游标均保留。
+- 校验节点先验证整批参数及预算，再执行单个工具；工具结果、ordinal 和游标一起作为步骤结果保存。截断/超批次整轮重试、文件完整性、图片实际写入和跨阶段预算保持原规则。工具 ID 和 NDJSON node 名称保持原样。
+- `nodes/common.py` 共用阶段开始/完成逻辑；工具图内部调度名不输出为公共节点。`workflow.py` 按工具和修复上限设置内部 recursion_limit，避免合法 40 次调用被默认步数中止。
+- `_run_vue_tool_loop` 仍作为兼容内部入口，实际主链路直接注册编译图，不再在普通节点内执行 while。
+
+`tests/test_vue_subgraph.py` 覆盖生成/修复各两个暂停边界（模型返回、批次第一个工具完成），重建父图后不重复已保存工作，批次第二个 ID 连续、修复计数/反馈和总预算正确、私有状态隔离；另测 40 次调用、截断/无效批次、取消后清理与修复预算耗尽。
+
+恢复仅指测试中使用同一 saver、thread 的图级恢复。外部文件副作用与图 checkpoint 无原子事务，成功写入到 checkpoint 之间崩溃仍可能重试原工具 ID，Spring RUNNING/写回失败不确定性保持不变。未新增生产恢复接口、SSE 重放、租约重获或旧 checkpoint 迁移。
+
+后续建议：继续第 6 节优先项二，缩小子图输入与私有上下文；模型流式和生产恢复仍应独立设计。
+
+本阶段实际验证（测试进程设置 `AI_SERVICE_CUSTOMER_SERVICE_RAG_ENABLED=false`，未修改 `.env`）：
+
+- `uv run python -m compileall -q src`、`uv lock --check`、`git diff --check` 通过。
+- `uv run pytest tests/test_vue_subgraph.py tests/test_subgraphs.py tests/test_api.py tests/test_langsmith_tracing.py -ra`：142 passed，含新增 Vue 专项 9 项。
+- `uv run pytest -ra`：682 passed、6 failed、2 skipped（92.96 秒）；六项失败仍是第一阶段记录的 Reranker 子进程测试，错误 `CUSTOMER_SERVICE_RERANKER_UNAVAILABLE`，失败栈包含 `_GpuOwnerLock.acquire` 无法获取模型 owner 锁。
+- `uv run pytest --ignore=tests/test_reranker.py -ra`：652 passed、2 skipped。跳过均因未启用真实 PostgreSQL 集成测试。
+
+本阶段没有运行真实模型、Spring/Redis HTTP 工具集成、浏览器或完整 SSE 验收。Java 与前端无代码变更，前端既有客服改动保留。

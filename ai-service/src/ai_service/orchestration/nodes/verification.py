@@ -144,29 +144,6 @@ def create_verification_nodes(
             repair_context["qualityReview"] = {
                 "repairFeedback": state["repair_feedback"]
             }
-        if state["code_gen_type"] == "VUE_PROJECT":
-            result = await workflow._run_vue_tool_loop(
-                state={**state, "context": repair_context},
-                emitter=emitter,
-                thread_id=thread_id,
-                node="repair",
-                call_id_prefix=f"{state['request_id']}:vue-repair:{count}",
-                invoke_model=lambda context: workflow.model.repair(state.get("artifact", ""), context),
-            )
-            next_context = {
-                key: value
-                for key, value in result["context"].items()
-                if key != "qualityReview"
-            }
-            return {
-                "context": next_context,
-                "build": {},
-                "tool_call_count": result["tool_call_count"],
-                "repair_count": count,
-                "finish_reason": result["finish_reason"],
-                "token_usage": result["token_usage"],
-                "repair_feedback": "",
-            }
         turn = await workflow.model.repair(
             state.get("artifact", ""),
             repair_context,

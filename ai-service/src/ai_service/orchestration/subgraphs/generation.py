@@ -1,4 +1,4 @@
-"""构建生成分支子图；文件工具循环仍在 Vue 节点内部运行。"""
+"""构建静态生成分支子图；Vue 多节点工具图在 vue.py 中组装。"""
 
 from collections.abc import Callable
 from typing import Any, TypedDict
