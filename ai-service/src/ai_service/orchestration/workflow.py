@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
-from typing import Any, TypedDict
+from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 from langsmith import tracing_context
@@ -13,78 +12,27 @@ from langsmith import tracing_context
 from ai_service.api.schemas import EventError, GenerationEvent, GenerationRequest
 from ai_service.config import Settings
 from ai_service.infrastructure.checkpoint import CheckpointStore
-from ai_service.models.base import GenerationModel, ModelTurn
-from ai_service.models.tool_contract import validate_vue_tool_call
+from ai_service.models.base import GenerationModel
 from ai_service.orchestration.cancellation import CancellationRegistry, GenerationCancelled
 from ai_service.orchestration.active_generations import ActiveGenerationRegistry
 from ai_service.orchestration.events import EventEmitter
-from ai_service.orchestration.image_intent import requests_image_assets
 from ai_service.orchestration.input_review import InputReviewer
 from ai_service.models.input_review import InputReviewError
-from ai_service.orchestration.multi_agent_review import run_multi_agent_review
 from ai_service.infrastructure.langsmith_tracing import LangSmithTracer
 
+from ai_service.orchestration.state import WorkflowState
+# 保留历史内部导入入口；路由实现集中在独立模块。
+from ai_service.orchestration.routing import _after_validation, _after_build, _after_review
+from ai_service.orchestration.subgraphs.generation import build_generation_subgraph
+from ai_service.orchestration.subgraphs.verification_repair import build_verification_repair_subgraph
+from ai_service.orchestration.nodes.common import guarded as guard_node
+from ai_service.orchestration.nodes.input import create_input_nodes
+from ai_service.orchestration.nodes.generation import create_generation_nodes
+from ai_service.orchestration.nodes.verification import create_verification_nodes
+from ai_service.orchestration.nodes.publication import create_publication_nodes
+from ai_service.orchestration.vue_tool_loop import run_vue_tool_loop
+
 logger = logging.getLogger(__name__)
-
-
-# 工作流的一个状态
-class WorkflowState(TypedDict, total=False):
-    app_id: str
-    request_id: str
-    thread_id: str
-    prompt: str
-    code_gen_type: str
-    conversation: list[dict[str, Any]]
-    metadata: dict[str, Any]
-    context: dict[str, Any]
-    artifact: str
-    validation: dict[str, Any]
-    build: dict[str, Any]
-    quality_passed: bool
-    repair_feedback: str
-    repair_count: int
-    tool_call_count: int
-    finish_reason: str | None
-    token_usage: dict[str, int]
-    publish: dict[str, Any]
-    input_review: dict[str, Any]
-
-
-def _raise_for_incomplete_model_turn(finish_reason: str | None) -> None:
-    """在模型因长度或内容策略中止时阻止候选进入校验和发布。"""
-    normalized = (finish_reason or "").upper()
-    if normalized in {"LENGTH", "MAX_TOKENS"}:
-        raise ValueError("MODEL_OUTPUT_TRUNCATED: model output reached its length limit")
-    if normalized in {"CONTENT_FILTER", "CONTENT_FILTERED"}:
-        raise ValueError("MODEL_OUTPUT_BLOCKED: model output was filtered")
-
-
-def _after_validation(state: WorkflowState, max_attempts: int) -> str:
-    """根据硬校验结果选择构建、质量检查、修复或失败节点。"""
-    if not state.get("validation", {}).get("valid", False):
-        return "fail" if state.get("repair_count", 0) >= max_attempts else "repair"
-    return "build" if state["code_gen_type"] == "VUE_PROJECT" else "review"
-
-
-def _after_build(state: WorkflowState, max_attempts: int) -> str:
-    """构建成功后才能质量审查，否则修复并重建，耗尽次数后失败。"""
-    if state.get("build", {}).get("built") is True:
-        return "review"
-    # 目录或入口文件缺失说明模型没有完成文件写入；继续让模型重复生成只会放大
-    # 输出长度并掩盖真实原因，因此直接返回稳定的构建错误。
-    if state.get("build", {}).get("errorCode") in {
-        "VUE_PROJECT_DIR_MISSING",
-        "VUE_PACKAGE_JSON_MISSING",
-    }:
-        return "fail"
-    return "fail" if state.get("repair_count", 0) >= max_attempts else "repair"
-
-
-def _after_review(state: WorkflowState, max_attempts: int) -> str:
-    """质量通过后将 HTML 和多文件交给 Spring 原子发布，Vue 保持原构建终态。"""
-    if state.get("quality_passed", False):
-        return "publish" if state["code_gen_type"] in {"HTML", "MULTI_FILE"} else "finalize"
-    return "fail" if state.get("repair_count", 0) >= max_attempts else "repair"
 
 
 def _stable_error_code(exc: Exception) -> str:
@@ -93,21 +41,6 @@ def _stable_error_code(exc: Exception) -> str:
     if prefix and prefix == prefix.upper() and prefix.replace("_", "").isalnum():
         return prefix
     return "GENERATION_FAILED"
-
-
-def _vue_snapshot_artifact(snapshot: dict[str, Any]) -> str:
-    """将 Vue 源码快照序列化为键顺序稳定、无多余空白的确定性 JSON。"""
-    return json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-
-
-def _vue_snapshot_event_result(snapshot: dict[str, Any]) -> dict[str, Any]:
-    """仅暴露 Vue 快照统计元数据，避免源码进入工作流事件。"""
-    return {
-        "eligibleFileCount": snapshot["eligibleFileCount"],
-        "includedFileCount": snapshot["includedFileCount"],
-        "omittedFileCount": snapshot["omittedFileCount"],
-        "truncated": snapshot["truncated"],
-    }
 
 
 class GenerationWorkflow:
@@ -252,524 +185,57 @@ class GenerationWorkflow:
             self.cancellations.clear(thread_id)
 
     def _build_graph(self, emitter: EventEmitter, thread_id: str, terminal: dict[str, Any]):
-        """构建带 checkpoint、工具循环和最多两次修复回环的状态图。"""
+        """主图仅调度输入、生成子图、验证修复子图、发布和成功终态。"""
         builder = StateGraph(WorkflowState)
+        input_nodes = create_input_nodes(self, emitter, thread_id, terminal)
+        generation_nodes = create_generation_nodes(self, emitter, thread_id, terminal)
+        verification_nodes = create_verification_nodes(self, emitter, thread_id, terminal)
+        publication_nodes = create_publication_nodes(self, emitter, thread_id, terminal)
 
-        def completion_data(state: WorkflowState) -> dict[str, Any]:
-            """构造不含源码的成功摘要，避免 completed 重复传输完整产物。"""
-            data: dict[str, Any] = {
-                "threadId": state["thread_id"],
-                "codeGenType": state["code_gen_type"],
-                "qualityPassed": state.get("quality_passed", False),
-                "repairCount": state.get("repair_count", 0),
-                "toolCallCount": state.get("tool_call_count", 0),
-            }
-            if state["code_gen_type"] in {"HTML", "MULTI_FILE"}:
-                publication = state.get("publish", {})
-                data.update(
-                    published=publication.get("published") is True,
-                    versionId=publication.get("versionId"),
-                    artifactHashes=publication.get("hashes", {}),
-                )
-            else:
-                data["built"] = state.get("build", {}).get("built") is True
-            return data
+        def guarded(name, function):
+            return guard_node(self, emitter, thread_id, terminal, name, function)
 
-        def guarded(name: str, function):
-            # 统一处理取消检查、节点状态事件与业务 checkpoint。
-            async def node(state: WorkflowState) -> dict[str, Any]:
-                started_at = datetime.now(UTC)
-                terminal.update(repair_count=state.get("repair_count", 0), tool_call_count=state.get("tool_call_count", 0))
-                self._raise_if_cancelled(thread_id)
-                await emitter.node_status(name, "started")
-                update = await function(state)
-                merged = {**state, **update}
-                terminal.update(repair_count=merged.get("repair_count", 0), tool_call_count=merged.get("tool_call_count", 0))
-                await self.checkpoint.save(thread_id, self._checkpoint_payload(merged, name))
-                await emitter.node_status(name, "completed")
-                if self.tracer is not None:
-                    await self.tracer.record(
-                        name=name,
-                        metadata={
-                            "request_id": state["request_id"],
-                            "app_id": state["app_id"],
-                            "code_gen_type": state["code_gen_type"],
-                            "repair_count": merged.get("repair_count", 0),
-                            "tool_call_count": merged.get("tool_call_count", 0),
-                        },
-                        status="completed",
-                        started_at=started_at,
-                    )
-                return update
-
-            return node
-
-        async def input_guard(state: WorkflowState) -> dict[str, Any]:
-            result = await self.input_reviewer.review(
-                state["prompt"], request_id=state["request_id"], code_gen_type=state["code_gen_type"],
-                conversation=state.get("conversation", []), metadata=state.get("metadata", {}),
-            )
-            self._raise_if_cancelled(thread_id)
-            if result.decision == "ALLOW_WITH_WARNING":
-                await emitter.emit("node_status", "input_guard", data={
-                    "status": "input_warning", "message": result.message,
-                })
-            return {"input_review": result.model_dump()}
-
-        async def context_prepare(state: WorkflowState) -> dict[str, Any]:
-            current_artifact = await self._invoke_tool(
-                emitter,
-                "context_prepare",
-                "artifact_context",
-                {"codeGenType": state["code_gen_type"]},
-                state["app_id"],
-                state["request_id"],
-                f"{state['request_id']}:artifact_context",
-            )
-            # 首次生成主动配图；既有项目仅对明确配图操作检索，不能把“保留图片”误判为新增。
-            image_assets = []
-            needs_images = state["code_gen_type"] == "VUE_PROJECT" and (
-                not current_artifact.get("exists", False)
-                or requests_image_assets(state["prompt"])
-            )
-            if needs_images:
-                query = state["prompt"].strip()[:160]
-                # 常见中文主题转换成 Pexels 更容易匹配的短查询，其他需求保留原始关键词。
-                for words, english in (("恋爱 情侣 日记 纪念", "couple love"), ("旅游 旅行 风景", "travel landscape"),
-                                       ("美食 餐厅 咖啡", "food cafe"), ("商城 商品 购物", "product lifestyle")):
-                    if any(word in query for word in words.split()):
-                        query = english
-                        break
-                try:
-                    images = await self._invoke_tool(
-                        emitter, "context_prepare", "image_search",
-                        {"codeGenType": state["code_gen_type"], "query": query},
-                        state["app_id"], state["request_id"], f"{state['request_id']}:image_search",
-                    )
-                    image_assets = images.get("images", []) if images.get("ok") else []
-                except Exception:
-                    logger.warning("图片检索降级 request_id=%s", state["request_id"])
-                if not image_assets:
-                    await emitter.emit("node_status", "context_prepare", data={
-                        "status": "progress", "message": "图片搜索暂未返回可用结果，请检查 Pexels 密钥或网络；继续生成页面。",
-                    })
-            return {
-                "context": {
-                    "appId": state["app_id"],
-                    "requestId": state["request_id"],
-                    "prompt": state["prompt"],
-                    "conversation": state.get("conversation", []),
-                    "metadata": state.get("metadata", {}),
-                    "currentArtifact": current_artifact,
-                    "imageAssets": image_assets,
-                }
-            }
-
-        async def generate_branch(state: WorkflowState) -> dict[str, Any]:
-            """生成普通分支候选，并把结束原因传递给后续硬校验节点。"""
-            branch = state["code_gen_type"]
-            turn = await self.model.generate(branch, state["context"])
-            if turn.content:
-                await emitter.emit("content_delta", f"generate_{branch.lower()}", data={"content": turn.content})
-            return {"artifact": turn.content, "finish_reason": turn.finish_reason, "token_usage": turn.token_usage}
-
-        async def vue_agent(state: WorkflowState) -> dict[str, Any]:
-            result = await self._run_vue_tool_loop(
-                state=state,
-                emitter=emitter,
-                thread_id=thread_id,
-                node="vue_agent",
-                call_id_prefix=f"{state['request_id']}:vue-generate",
-                invoke_model=lambda context: self.model.generate("VUE_PROJECT", context),
-            )
-            return {"artifact": result.pop("content"), **result}
-
-        async def artifact_validation(state: WorkflowState) -> dict[str, Any]:
-            """先拒绝截断或被过滤的响应，再调用 Spring 执行产物硬校验。"""
-            _raise_for_incomplete_model_turn(state.get("finish_reason"))
-            call_id = f"{state['request_id']}:artifact_validation:{state.get('repair_count', 0)}"
-            result = await self._invoke_tool(
-                emitter,
-                "artifact_validation",
-                "artifact_validate",
-                {"codeGenType": state["code_gen_type"], "artifact": state.get("artifact", "")},
-                state["app_id"],
-                state["request_id"],
-                call_id,
-            )
-            return {"validation": result}
-
-        async def project_build(state: WorkflowState) -> dict[str, Any]:
-            call_id = f"{state['request_id']}:project_build:{state.get('repair_count', 0)}"
-            result = await self._invoke_tool(
-                emitter,
-                "project_build",
-                "project_build",
-                {"codeGenType": state["code_gen_type"]},
-                state["app_id"],
-                state["request_id"],
-                call_id,
-            )
-            return {"build": result}
-
-        async def quality_review(state: WorkflowState) -> dict[str, Any]:
-            """仅对已通过确定性硬校验的候选执行模型质量检查。"""
-            if not state.get("validation", {}).get("valid", False):
-                return {"quality_passed": False}
-            review_artifact = state.get("artifact", "")
-            repair_count = state.get("repair_count", 0)
-            multi_agent_enabled = (
-                state["code_gen_type"] == "VUE_PROJECT"
-                and self.settings.multi_agent_review_enabled
-            )
-            uses_vue_snapshot = (
-                state["code_gen_type"] == "VUE_PROJECT"
-                and state.get("build", {}).get("built") is True
-                and (multi_agent_enabled or repair_count > 0)
-            )
-            if uses_vue_snapshot:
-                try:
-                    snapshot = await self._invoke_tool(
-                        emitter,
-                        "quality_review",
-                        "vue_source_snapshot",
-                        {"codeGenType": "VUE_PROJECT"},
-                        state["app_id"],
-                        state["request_id"],
-                        f"{state['request_id']}:vue-source-snapshot:{repair_count}",
-                        event_result=_vue_snapshot_event_result,
-                    )
-                except Exception:
-                    if multi_agent_enabled:
-                        raise RuntimeError(
-                            "MULTI_AGENT_REVIEW_SNAPSHOT_ERROR: "
-                            "Vue source snapshot is unavailable"
-                        ) from None
-                    raise
-                review_artifact = _vue_snapshot_artifact(snapshot)
-            if multi_agent_enabled:
-                review_context = {
-                    "prompt": state["prompt"],
-                    "codeGenType": "VUE_PROJECT",
-                    "validation": state.get("validation"),
-                    "build": state.get("build"),
-                }
-                self._raise_if_cancelled(thread_id)
-                result = await run_multi_agent_review(
-                    self.model,
-                    review_artifact,
-                    review_context,
-                    timeout_seconds=self.settings.multi_agent_review_timeout_seconds,
-                )
-                self._raise_if_cancelled(thread_id)
-                return {
-                    "quality_passed": result.passed,
-                    "repair_feedback": result.repair_feedback,
-                }
-            review_context = {
-                **state["context"],
-                "validation": state.get("validation"),
-                "build": state.get("build"),
-            }
-            if uses_vue_snapshot:
-                try:
-                    passed = await self.model.review(review_artifact, review_context)
-                except Exception as exc:
-                    raise RuntimeError("Vue source snapshot review failed") from exc
-            else:
-                passed = await self.model.review(review_artifact, review_context)
-            return {"quality_passed": passed}
-
-        async def repair(state: WorkflowState) -> dict[str, Any]:
-            """生成完整修复候选并更新结束元数据，供下一轮重新校验。"""
-            count = state.get("repair_count", 0) + 1
-            repair_context = {
-                **state["context"],
-                "codeGenType": state["code_gen_type"],
-                "repairCount": count,
-                "validation": state.get("validation"),
-                "build": state.get("build"),
-            }
-            if state.get("repair_feedback"):
-                repair_context["qualityReview"] = {
-                    "repairFeedback": state["repair_feedback"]
-                }
-            if state["code_gen_type"] == "VUE_PROJECT":
-                result = await self._run_vue_tool_loop(
-                    state={**state, "context": repair_context},
-                    emitter=emitter,
-                    thread_id=thread_id,
-                    node="repair",
-                    call_id_prefix=f"{state['request_id']}:vue-repair:{count}",
-                    invoke_model=lambda context: self.model.repair(state.get("artifact", ""), context),
-                )
-                next_context = {
-                    key: value
-                    for key, value in result["context"].items()
-                    if key != "qualityReview"
-                }
-                return {
-                    "context": next_context,
-                    "build": {},
-                    "tool_call_count": result["tool_call_count"],
-                    "repair_count": count,
-                    "finish_reason": result["finish_reason"],
-                    "token_usage": result["token_usage"],
-                    "repair_feedback": "",
-                }
-            turn = await self.model.repair(
-                state.get("artifact", ""),
-                repair_context,
-            )
-            await emitter.emit("content_delta", "repair", data={"content": turn.content, "repairCount": count})
-            return {
-                "artifact": turn.content,
-                "build": {},
-                "repair_count": count,
-                "finish_reason": turn.finish_reason,
-                "token_usage": turn.token_usage,
-            }
-
-        async def artifact_publish(state: WorkflowState) -> dict[str, Any]:
-            """请求 Spring 重新校验并发布 HTML 或多文件候选，拒绝时不得进入完成终态。"""
-            call_id = f"{state['request_id']}:artifact_publish"
-
-            def remember_publication(result: dict[str, Any]) -> None:
-                """在附属事件发送前记录 Spring 权威发布结果，防止成功终态被反转。"""
-                if not result.get("published", False):
-                    raise ValueError("Spring rejected artifact publication")
-                terminal["published"] = True
-                terminal["data"] = {
-                    "threadId": state["thread_id"],
-                    "codeGenType": state["code_gen_type"],
-                    "qualityPassed": state.get("quality_passed", False),
-                    "repairCount": state.get("repair_count", 0),
-                    "toolCallCount": state.get("tool_call_count", 0),
-                    "published": True,
-                    "versionId": result.get("versionId"),
-                    "artifactHashes": result.get("hashes", {}),
-                }
-
-            result = await self._invoke_tool(
-                emitter,
-                "artifact_publish",
-                "artifact_publish",
-                {
-                    "codeGenType": state["code_gen_type"],
-                    "artifact": state.get("artifact", ""),
-                    "engine": "langgraph",
-                    "finishReason": state.get("finish_reason") or "",
-                },
-                state["app_id"],
-                state["request_id"],
-                call_id,
-                on_result=remember_publication,
-            )
-            return {"publish": result}
-
-        async def artifact_publish_node(state: WorkflowState) -> dict[str, Any]:
-            """在发布前完成取消检查和 checkpoint，发布后只发送不可失败的内存事件。"""
-            self._raise_if_cancelled(thread_id)
-            await emitter.node_status("artifact_publish", "started")
-            await self.checkpoint.save(thread_id, self._checkpoint_payload(state, "artifact_publish_pending"))
-            update = await artifact_publish(state)
-            await emitter.node_status("artifact_publish", "completed")
-            return update
-
-        async def fail_quality(state: WorkflowState) -> dict[str, Any]:
-            """在硬校验或质量检查耗尽修复次数后生成明确失败终态。"""
-            build = state.get("build", {})
-            if not build.get("built", True):
-                code = build.get("errorCode") or "VUE_BUILD_FAILED"
-                message = build.get("message") or "Vue project build failed"
-                raise ValueError(f"{code}: {message}")
-            errors = state.get("validation", {}).get("errors", [])
-            raise ValueError(f"Artifact did not pass validation or quality review: {errors}")
-
-        async def finalize(state: WorkflowState) -> dict[str, Any]:
-            """发送成功终态；版本化产物已提交后不再让外部 checkpoint 反转业务结果。"""
-            self._raise_if_cancelled(thread_id)
-            await emitter.node_status("finalize", "started")
-            if state["code_gen_type"] not in {"HTML", "MULTI_FILE"}:
-                await self.checkpoint.save(thread_id, self._checkpoint_payload(state, "finalize"))
-            await emitter.node_status("finalize", "completed")
-            await emitter.emit(
-                "completed",
-                "finalize",
-                data=completion_data(state),
-            )
-            terminal["completed"] = True
-            return {}
-
-        builder.add_node("input_guard", guarded("input_guard", input_guard))
-        builder.add_node("context_prepare", guarded("context_prepare", context_prepare))
-        builder.add_node("generate_html", guarded("generate_html", generate_branch))
-        builder.add_node("generate_multi_file", guarded("generate_multi_file", generate_branch))
-        builder.add_node("vue_agent", guarded("vue_agent", vue_agent))
-        builder.add_node("artifact_validation", guarded("artifact_validation", artifact_validation))
-        builder.add_node("project_build", guarded("project_build", project_build))
-        builder.add_node("quality_review", guarded("quality_review", quality_review))
-        builder.add_node("repair", guarded("repair", repair))
-        builder.add_node("artifact_publish", artifact_publish_node)
-        builder.add_node("fail_quality", fail_quality)
-        builder.add_node("finalize", finalize)
-
+        for name, node in input_nodes.items():
+            builder.add_node(name, guarded(name, node))
+        # 三个实例分别拥有父图分配的命名空间，事件仍沿用旧节点名称。
+        for parent_name, child_name, action in (
+            ("html_generation", "generate_html", "generate_branch"),
+            ("multi_file_generation", "generate_multi_file", "generate_branch"),
+            ("vue_generation", "vue_agent", "vue_agent"),
+        ):
+            builder.add_node(parent_name, build_generation_subgraph(
+                child_name, guarded(child_name, generation_nodes[action]),
+            ))
+        builder.add_node("verification_repair", build_verification_repair_subgraph(
+            {name: guarded(name, node) if name != "fail_quality" else node
+             for name, node in verification_nodes.items()},
+            self.settings.max_repair_attempts,
+        ))
+        builder.add_node("artifact_publish", publication_nodes["artifact_publish_node"])
+        builder.add_node("finalize", publication_nodes["finalize"])
         builder.add_edge(START, "input_guard")
         builder.add_edge("input_guard", "context_prepare")
         builder.add_conditional_edges(
             "context_prepare",
             lambda state: state["code_gen_type"],
-            {"HTML": "generate_html", "MULTI_FILE": "generate_multi_file", "VUE_PROJECT": "vue_agent"},
+            {"HTML": "html_generation", "MULTI_FILE": "multi_file_generation", "VUE_PROJECT": "vue_generation"},
         )
-        for generation_node in ("generate_html", "generate_multi_file", "vue_agent"):
-            builder.add_edge(generation_node, "artifact_validation")
+        for name in ("html_generation", "multi_file_generation", "vue_generation"):
+            builder.add_edge(name, "verification_repair")
+        # 子图只有质量通过才能正常返回；失败沿异常通道交给请求级执行器。
         builder.add_conditional_edges(
-            "artifact_validation",
-            lambda state: _after_validation(state, self.settings.max_repair_attempts),
-            {"repair": "repair", "fail": "fail_quality", "build": "project_build", "review": "quality_review"},
+            "verification_repair",
+            lambda state: "publish" if state["code_gen_type"] in {"HTML", "MULTI_FILE"} else "finalize",
+            {"publish": "artifact_publish", "finalize": "finalize"},
         )
-        builder.add_conditional_edges(
-            "project_build",
-            lambda state: _after_build(state, self.settings.max_repair_attempts),
-            {"repair": "repair", "fail": "fail_quality", "review": "quality_review"},
-        )
-        builder.add_conditional_edges(
-            "quality_review",
-            lambda state: _after_review(state, self.settings.max_repair_attempts),
-            {"repair": "repair", "fail": "fail_quality", "publish": "artifact_publish", "finalize": "finalize"},
-        )
-        builder.add_edge("repair", "artifact_validation")
         builder.add_edge("artifact_publish", "finalize")
         builder.add_edge("finalize", END)
         graph_saver = getattr(self.checkpoint, "get_graph_saver", lambda: None)()
         return builder.compile(checkpointer=graph_saver)
 
-    async def _run_vue_tool_loop(
-        self,
-        *,
-        state: WorkflowState,
-        emitter: EventEmitter,
-        thread_id: str,
-        node: str,
-        call_id_prefix: str,
-        invoke_model: Callable[[dict[str, Any]], Awaitable[ModelTurn]],
-    ) -> dict[str, Any]:
-        """运行生成与修复共享的 Vue 工具循环，并维护跨阶段总预算。"""
-        context = {
-            **state["context"],
-            "toolResults": list(state["context"].get("toolResults", [])),
-        }
-        content_parts: list[str] = []
-        tool_count = state.get("tool_call_count", 0)
-        ordinal = 0
-        finish_reason: str | None = None
-        token_usage: dict[str, int] = {}
-        retry_count = 0
-        batch_limit = 2
-        file_plan: list[str] = []
-        written_files: set[str] = set()
-        planning_turns = 0
-        image_retries = 0
-        image_used = bool(context.get("imageAssetsApplied")) or not bool(context.get("imageAssets"))
-
-        while True:
-            self._raise_if_cancelled(thread_id)
-            model_context = {
-                **context,
-                "toolResults": list(context["toolResults"]),
-                "vueGeneration": {
-                    "maxToolCallsPerTurn": batch_limit,
-                    "remainingToolCalls": self.settings.vue_max_tool_calls - tool_count,
-                    "filePlan": file_plan,
-                    "writtenFiles": sorted(written_files),
-                    "pendingFiles": [path for path in file_plan if path not in written_files],
-                    "retryCount": retry_count,
-                },
-            }
-            await emitter.emit("node_status", node, data={
-                "status": "progress", "message": f"正在生成项目文件，已写入 {len(written_files)} 个文件。",
-            })
-            started = asyncio.get_running_loop().time()
-            turn = await invoke_model(model_context)
-            logger.info(
-                "Vue model turn request_id=%s node=%s finish_reason=%s output_tokens=%s elapsed_ms=%d tools=%d",
-                state["request_id"], node, turn.finish_reason, turn.token_usage.get("output_tokens"),
-                int((asyncio.get_running_loop().time() - started) * 1000), len(turn.tool_calls),
-            )
-            # 截断响应与超批次响应整轮丢弃；重试不占文件工具预算，也不执行部分请求。
-            truncated = (turn.finish_reason or "").upper() in {"LENGTH", "MAX_TOKENS"}
-            oversized = len(turn.tool_calls) > batch_limit
-            if truncated or oversized:
-                if retry_count >= 2:
-                    if truncated:
-                        _raise_for_incomplete_model_turn(turn.finish_reason)
-                    raise ValueError("VUE_TOOL_BATCH_LIMIT_EXCEEDED: Vue tool batch is too large")
-                retry_count += 1
-                batch_limit = 1
-                context["batchRetryFeedback"] = "上一轮响应未执行。请每轮只返回一个完整文件工具调用；过大的文件先拆分组件并更新 filePlan。"
-                continue
-            _raise_for_incomplete_model_turn(turn.finish_reason)
-            finish_reason = turn.finish_reason
-            for key, value in turn.token_usage.items():
-                token_usage[key] = token_usage.get(key, 0) + value
-            if turn.content:
-                content_parts.append(turn.content)
-                await emitter.emit("content_delta", node, data={"content": turn.content})
-            if turn.file_plan:
-                changed_plan = turn.file_plan != file_plan
-                file_plan = turn.file_plan
-                if not turn.tool_calls and changed_plan:
-                    planning_turns += 1
-                    if planning_turns > 3:
-                        raise ValueError("VUE_FILE_PLAN_LIMIT_EXCEEDED: too many planning-only turns")
-                    continue
-            if not turn.tool_calls:
-                if not image_used:
-                    if image_retries >= 2:
-                        raise ValueError("VUE_IMAGE_USAGE_MISSING: searched images were not written into the page")
-                    image_retries += 1
-                    context["imageUsageFeedback"] = "尚未将 imageAssets 中的真实图片 URL 写入页面。请在合适的首屏/卡片中使用图片，完成后再结束。"
-                    continue
-                if any(path not in written_files for path in file_plan):
-                    raise ValueError("VUE_FILE_PLAN_INCOMPLETE: planned Vue files were not written")
-                break
-
-            # 不得静默丢弃本轮未执行的写入请求，否则半成品会进入校验与构建。
-            if tool_count + len(turn.tool_calls) > self.settings.vue_max_tool_calls:
-                raise ValueError("VUE_TOOL_CALL_LIMIT_EXCEEDED: Vue file tool budget exhausted")
-
-            validated_arguments = [validate_vue_tool_call(call.name, call.arguments) for call in turn.tool_calls]
-            for call, arguments in zip(turn.tool_calls, validated_arguments):
-                self._raise_if_cancelled(thread_id)
-                tool_count += 1
-                ordinal += 1
-                tool_call_id = f"{call_id_prefix}:{ordinal}"
-                result = await self._invoke_tool(
-                    emitter,
-                    node,
-                    call.name,
-                    {**arguments, "codeGenType": state["code_gen_type"]},
-                    state["app_id"],
-                    state["request_id"],
-                    tool_call_id,
-                )
-                context["toolResults"].append(
-                    {"toolCallId": tool_call_id, "tool": call.name, "result": result}
-                )
-                if call.name in {"file_write", "file_modify"} and result.get("ok", True):
-                    written_files.add(arguments["relativeFilePath"])
-                    # 只认可成功写入源码的 URL；口头说明、搜索成功均不能代表页面已配图。
-                    if any(asset["url"] in arguments.get("content", arguments.get("newContent", "")) for asset in context.get("imageAssets", [])):
-                        image_used = True
-                        context["imageAssetsApplied"] = True
-
-        return {
-            "content": "\n".join(content_parts),
-            "context": context,
-            "tool_call_count": tool_count,
-            "finish_reason": finish_reason,
-            "token_usage": token_usage,
-        }
+    async def _run_vue_tool_loop(self, **kwargs) -> dict[str, Any]:
+        """保留内部调用入口，循环实现集中在独立模块。"""
+        return await run_vue_tool_loop(self, **kwargs)
 
     async def _complete_committed_publication(
         self, emitter: EventEmitter, terminal: dict[str, Any]

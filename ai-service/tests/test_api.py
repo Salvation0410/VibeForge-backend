@@ -1831,7 +1831,15 @@ async def test_vue_blocking_review_real_graph_checkpoint_keeps_only_bounded_feed
 
 
 @pytest.mark.asyncio
-async def test_vue_blocking_review_resumes_from_feedback_without_repeating_reviewers(settings):
+async def test_vue_blocking_review_resumes_from_feedback_without_repeating_reviewers(settings, monkeypatch):
+    from functools import partial
+    import ai_service.orchestration.workflow as workflow_module
+    from ai_service.orchestration.subgraphs.verification_repair import build_verification_repair_subgraph
+
+    # 断点必须设置在子图内部，父图只看见 verification_repair 调度节点。
+    monkeypatch.setattr(workflow_module, "build_verification_repair_subgraph", partial(
+        build_verification_repair_subgraph, interrupt_after=["quality_review", "repair"],
+    ))
     settings.multi_agent_review_enabled = True
     evidence = "UNIQUE_RESUME_EVIDENCE_1701"
     repair_hint = "UNIQUE_RESUME_REPAIR_HINT_1702"
@@ -1887,20 +1895,30 @@ async def test_vue_blocking_review_resumes_from_feedback_without_repeating_revie
         "tool_call_count": 0,
     }
 
-    await graph.ainvoke(initial, config=config, interrupt_after=["quality_review"])
-    first_checkpoint = await checkpoint.graph_saver.aget_tuple(config)
+    await graph.ainvoke(initial, config=config)
+    paused = await graph.aget_state(config, subgraphs=True)
+    assert paused.next == ("verification_repair",)
+    child_config = paused.tasks[0].state.config
+    assert "verification_repair:" in child_config["configurable"]["checkpoint_ns"]
+    first_checkpoint = await checkpoint.graph_saver.aget_tuple(child_config)
     assert first_checkpoint is not None
     feedback = first_checkpoint.checkpoint["channel_values"]["repair_feedback"]
     assert evidence in feedback
     assert repair_hint in feedback
     assert len([call for call in model.calls if call[0] == "review_role"]) == 3
 
-    await graph.ainvoke(None, config=config, interrupt_after=["repair"])
+    # 重建图对象后仍从父图任务的子图检查点恢复，不依赖原编译实例。
+    graph = workflow._build_graph(
+        emitter, "42:req-1", {"published": False, "completed": False},
+    )
+    await graph.ainvoke(None, config=config)
     assert model.review_count_when_repair_called == 3
     repair_call = next(data for name, data in model.calls if name == "repair")
     assert repair_call["context"]["qualityReview"]["repairFeedback"] == feedback
     assert len([call for call in model.calls if call[0] == "review_role"]) == 3
 
+    # 第二轮质量审查再次停在同一断点，继续后才由父图发送成功终态。
+    await graph.ainvoke(None, config=config)
     final_state = await graph.ainvoke(None, config=config)
     assert final_state["quality_passed"] is True
     assert final_state["repair_count"] == 1

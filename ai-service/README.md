@@ -116,22 +116,29 @@ ai-service/
 - `MULTI_FILE`：生成多文件静态项目。
 - `VUE_PROJECT`：通过 Agent 工具循环生成 Vue 项目。
 
-当前工作流：
+当前工作流（主图调度四个编译后的子图）：
 
 ```text
 START
   -> input_guard
   -> context_prepare
-  -> HTML | MULTI_FILE | VUE_PROJECT
-  -> artifact_validation
-     -> 校验失败：repair（最多 2 次）或 failed
+  -> html_generation | multi_file_generation | vue_generation 子图
+  -> verification_repair 子图
+     -> artifact_validation
      -> VUE_PROJECT：project_build
-  -> quality_review
-     -> 质量失败：repair（最多 2 次）或 failed
-     -> MULTI_FILE：artifact_publish
+     -> quality_review
+     -> 可修复问题：repair -> artifact_validation（默认最多修复 2 次）
+     -> 不可修复或耗尽预算：抛出异常，由请求级执行器发送 failed
+  -> HTML / MULTI_FILE：artifact_publish
   -> finalize
   -> END
 ```
+
+节点实现按阶段放在 `orchestration/nodes/`，共享状态位于 `state.py`，确定性路由位于 `routing.py`；`subgraphs/generation.py` 创建三个独立生成子图实例，`subgraphs/verification_repair.py` 管理校验修复循环。子图通过输出 schema 只回传所属阶段字段，修复次数和工具总预算跨阶段传递。输入准备、发布和唯一成功终态仍由主图负责。
+
+子图默认继承父图的 checkpointer，不创建独立 saver，不启用跨调用 Agent 记忆；`thread_id` 继续使用 `{appId}:{requestId}`。LangGraph 内部使用子图命名空间，但 NDJSON 的节点名称、请求级事件序号及 Spring/SSE 协议不变。内存 saver 测试覆盖嵌套命名空间、重建图后从质量反馈恢复、终态清理及模型返回前的节点事件。真实 PostgreSQL 下父子图恢复仍需单独集成验收。
+
+Vue 工具循环已提取至 `orchestration/vue_tool_loop.py`，仍在一个节点内执行，没有逐轮 checkpoint；模型仍使用 `ainvoke`，本次子图拆分不提供逐 token 输出或生产重启自动续跑。进一步优化入口与验证限制见 [子图重构交接文档](../doc/ai-service-subgraph-refactor-handoff.md)。
 
 Vue 分支允许模型请求 Spring 工具，但工具调用次数受 `AI_SERVICE_VUE_MAX_TOOL_CALLS` 限制，默认 40 次，覆盖生成与修复的总调用次数。若本轮工具请求超过剩余预算，返回 `VUE_TOOL_CALL_LIMIT_EXCEEDED`，不再静默丢弃剩余文件写入请求并构建半成品。源码必须通过 `file_write`/`file_modify` 写入，模型 `content` 只用于简短状态确认，避免重复回传源码触发输出长度上限。每次工具调用都带有确定性的 `toolCallId`，供 Spring 执行幂等控制。若构建发现项目目录或 `package.json` 缺失，工作流直接以稳定构建错误结束，不再要求模型重复生成。
 
