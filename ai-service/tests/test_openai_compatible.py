@@ -49,6 +49,66 @@ def model_with_response(response_content: str) -> OpenAICompatibleModel:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["generate", "repair", "review"])
+async def test_vue_long_tool_history_fits_real_message_budget_without_changing_context(mode):
+    from copy import deepcopy
+
+    model = model_with_response("PASS" if mode == "review" else '{"content":"done","toolCalls":[]}')
+    model._settings = Settings()
+    context = {"prompt": "继续完善页面", "codeGenType": "VUE_PROJECT", "toolResults": [
+        {"toolCallId": str(i), "tool": "file_read", "arguments": {"relativeFilePath": f"src/{i}.vue"},
+         "result": {"content": "中文源码\n\"" * 800}} for i in range(12)
+    ]}
+    original = deepcopy(context)
+    if mode == "repair":
+        await model.repair("previous summary", context)
+    elif mode == "review":
+        await model.review("previous summary", context)
+    else:
+        await model.generate("VUE_PROJECT", context)
+    payload = json.loads(model._client.messages[1].content)
+    assert context == original
+    assert payload["prompt"] == context["prompt"]
+    assert payload["toolResults"][-1] == context["toolResults"][-1]
+    assert payload["toolResults"][0]["result"]["contextOmitted"] is True
+    model._check_budget(model._client.messages)
+
+
+@pytest.mark.asyncio
+async def test_vue_unusable_latest_file_fails_before_provider_call():
+    from ai_service.models.input_review import InputReviewError
+
+    model = model_with_response('{"content":"done","toolCalls":[]}')
+    model._settings = Settings()
+    with pytest.raises(InputReviewError) as error:
+        await model.generate("VUE_PROJECT", {"prompt": "修改", "toolResults": [
+            {"toolCallId": "1", "tool": "file_read", "result": {"content": "中" * 30000}}
+        ]})
+    assert error.value.code == "VUE_CONTEXT_BUDGET_EXCEEDED"
+    assert model._client.messages is None
+
+
+@pytest.mark.asyncio
+async def test_vue_projection_respects_small_window_and_repair_artifact():
+    from ai_service.models.input_review import InputReviewError
+
+    model = model_with_response('{"content":"done","toolCalls":[]}')
+    model._settings = Settings(model_context_window_tokens=18000, model_max_tokens=2000,
+                               model_context_overhead_tokens=1000)
+    context = {"codeGenType": "VUE_PROJECT", "prompt": "保留功能", "toolResults": [
+        {"toolCallId": str(i), "tool": "file_read", "result": {"content": "x" * 1500}}
+        for i in range(12)
+    ]}
+    await model.repair("x" * 1000, context)
+    model._check_budget(model._client.messages)
+    model._client.messages = None
+    with pytest.raises(InputReviewError) as error:
+        await model.repair("x" * 20000, context)
+    assert error.value.code == "VUE_CONTEXT_BUDGET_EXCEEDED"
+    assert model._client.messages is None
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("raw", [
     '继续写入。\n{"content":"write","toolCalls":[]}',
     '[]', '{"content":42,"toolCalls":[]}',

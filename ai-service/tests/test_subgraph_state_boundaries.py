@@ -160,6 +160,8 @@ async def test_private_history_survives_rebuild_without_duplication_or_parent_fi
     history = result["context"]["toolResults"]
     assert len(history) == (4 if repair else 2)
     assert len({item["toolCallId"] for item in history}) == len(history)
+    assert all(set(item["arguments"]) <= {"relativeFilePath", "relativeDirPath", "query"} for item in history)
+    assert any(item["arguments"].get("relativeFilePath") for item in history)
     assert result["metadata"] == payload["metadata"]
     assert result["conversation"] == payload["conversation"]
     assert result["publish"] == payload["publish"]

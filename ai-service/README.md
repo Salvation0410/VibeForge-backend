@@ -142,7 +142,11 @@ START
 
 Vue 首次生成与修复复用 `orchestration/vue_tool_loop.py` 的多节点实现：`initialize -> model_turn -> validate_turn -> execute_tool -> continue_loop`，完成后从 `finish` 返回。完整模型响应先通过截断、批次、整批参数与总预算校验，再逐个执行工具；私有状态保存文件计划、成功写入文件、ordinal、重试次数、图片检查、待执行工具及游标。父图输出不包含这些私有字段。每次工具完成都形成独立图步骤，内存 saver 测试验证模型返回后及批次中间暂停、重建父图继续，生成与修复均不重复已保存的模型/工具步骤，工具 ID 连续且总预算不重置。内部执行步数上限按工具和修复预算计算，支持合法 40 次工具调用。
 
-Vue 子图初始化时将完整 `toolResults` 从 `context` 移到私有 `vue_tool_results` 通道；模型调用时临时组装原有上下文，阶段结束时恢复公共 `context.toolResults`，后续审查和修复仍能读取完整工具历史。模型、校验及继续节点不重复写回历史通道，稳定上下文只在初始化、重试提示变化、首次成功应用图片及出口时更新。出口组装完公共字段后清空私有历史和文本副本，避免末尾 checkpoint 重复保存。没有裁剪历史，也不保证物理存储空间固定比例下降。`tests/test_subgraph_state_boundaries.py` 使用真实内存 saver 检查入口与运行中 checkpoint、实际通道写入、配置/回调继承、递归子图发现、重建恢复与父图字段保留。
+Vue 子图初始化时将完整 `toolResults` 从 `context` 移到私有 `vue_tool_results` 通道；模型调用时临时组装上下文，阶段结束时恢复公共 `context.toolResults`。图状态和阶段输出保留完整工具历史，模型适配器按下文规则投影消息。模型、校验及继续节点不重复写回历史通道，稳定上下文只在初始化、重试提示变化、首次成功应用图片及出口时更新。出口组装完公共字段后清空私有历史和文本副本，避免末尾 checkpoint 重复保存。没有裁剪持久化历史，也不保证物理存储空间固定比例下降。`tests/test_subgraph_state_boundaries.py` 使用真实内存 saver 检查入口与运行中 checkpoint、实际通道写入、配置/回调继承、递归子图发现、重建恢复与父图字段保留。
+
+`models/vue_context.py` 只为 Vue 生成、修复及继承工具历史的单 Reviewer 构造有限消息：工具历史按两层 JSON 转义后的字节上界限制为 24 KiB，并通过适配器的完整消息预算再次检查（含系统提示、需求、修复产物和其他上下文）。优先保留近期完整工具结果；较早结果仅保留工具 ID、名称、路径/查询参数、明确省略标记及已有 ok 状态，不截取残缺源码。旧 file_read 被同路径后续读取或成功写入、修改、删除替代时标为 superseded；失败修改不使原读取失效。工具记录只新增 relativeFilePath、relativeDirPath 或 query，不复制写入源码。模型按需重读省略的文件，省略不表示文件缺失，也不能据此认定实现完整。
+
+最新工具结果无法完整容纳、或连摘要与固定上下文都放不下时，适配器在供应商调用前返回 `VUE_CONTEXT_BUDGET_EXCEEDED`，提示项目工具上下文超限；不误称短需求过长，不无限重复读取大文件。需求入口的 `INPUT_CONTEXT_BUDGET_EXCEEDED` 与完整消息预算保护仍保留。此投影不修改原始 context、图 checkpoint、工具计数、文件计划、审查快照或公共 SSE；历史 checkpoint 缺少路径时不猜测关联，也不提供生产自动续跑。
 
 已成功工具到 checkpoint 写入之间仍存在不确定窗口，恢复可能携带同一工具 ID 重试，由 Spring 既有幂等状态处理，不能据此保证 exactly-once。调试断点仅用于测试，生产入口仍从初始状态启动并在终态清理检查点；Vue 工具 JSON、路由和质量审查继续使用完整 `ainvoke` 响应，静态生成/修复文本流式见下节。不提供生产重启自动续跑或旧版本 checkpoint 兼容。进一步优化入口与验证限制见 [子图重构交接文档](../doc/ai-service-subgraph-refactor-handoff.md)。
 

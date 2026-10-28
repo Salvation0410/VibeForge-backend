@@ -10,7 +10,8 @@ from langsmith import tracing_context
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError
 
 from ai_service.config import Settings
-from ai_service.models.input_review import InputReviewResult, check_context_budget
+from ai_service.models.input_review import InputReviewError, InputReviewResult, check_context_budget
+from ai_service.models.vue_context import project_vue_context
 from ai_service.prompts.input_review import INPUT_REVIEW_SYSTEM_PROMPT
 from ai_service.models.base import (
     CustomerServiceContext,
@@ -87,6 +88,23 @@ class OpenAICompatibleModel:
         with tracing_context(enabled=False):
             return await self._client.ainvoke(messages)
 
+    def _vue_messages(self, instructions: str, context: dict[str, Any]):
+        """以实际消息预算选择工具历史，完整生成/修复状态不随模型窗口裁剪。"""
+        def messages(payload):
+            return [SystemMessage(content=instructions),
+                    HumanMessage(content=json.dumps(payload, ensure_ascii=False))]
+
+        def fits(payload):
+            try:
+                self._check_budget(messages(payload))
+                return True
+            except InputReviewError as exc:
+                if exc.code != "INPUT_CONTEXT_BUDGET_EXCEEDED":
+                    raise
+                return False
+
+        return messages(project_vue_context(context, fits=fits))
+
     async def _stream_static_turn(self, messages, on_delta: TextDeltaCallback) -> ModelTurn:
         """聚合完整响应才返回候选；任务取消、回调异常和供应商失败均关闭响应流。"""
         self._check_budget(messages)
@@ -158,12 +176,11 @@ class OpenAICompatibleModel:
         generation_instructions = generation_system_prompt(branch)
         if branch == "VUE_PROJECT":
             generation_instructions = f"{generation_instructions}\n\n{vue_tool_prompt()}"
-        response = await self._invoke(
-            [
-                SystemMessage(content=generation_instructions),
-                HumanMessage(content=json.dumps(context, ensure_ascii=False)),
-            ]
-        )
+        messages = self._vue_messages(generation_instructions, context) if branch == "VUE_PROJECT" else [
+            SystemMessage(content=generation_instructions),
+            HumanMessage(content=json.dumps(context, ensure_ascii=False)),
+        ]
+        response = await self._invoke(messages)
         raw = str(response.content)
         if branch != "VUE_PROJECT":
             return _model_turn(response, raw)
@@ -171,12 +188,13 @@ class OpenAICompatibleModel:
 
     async def review(self, artifact: str, context: dict[str, Any]) -> bool:
         """让模型以 PASS 或 REPAIR 判断产物是否通过质量检查。"""
-        response = await self._invoke(
-            [
-                SystemMessage(content=QUALITY_REVIEW_SYSTEM_PROMPT),
-                HumanMessage(content=json.dumps({"artifact": artifact, **context}, ensure_ascii=False)),
-            ]
-        )
+        payload = {"artifact": artifact, **context}
+        # 单 Reviewer 会继承 Vue 工具历史，必须同样投影，避免生成结束后才再次超预算。
+        messages = self._vue_messages(QUALITY_REVIEW_SYSTEM_PROMPT, payload) if "toolResults" in context else [
+            SystemMessage(content=QUALITY_REVIEW_SYSTEM_PROMPT),
+            HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
+        ]
+        response = await self._invoke(messages)
         return str(response.content).strip().upper() == "PASS"
 
     async def review_role(
@@ -206,12 +224,12 @@ class OpenAICompatibleModel:
         repair_instructions = REPAIR_SYSTEM_PROMPT
         if context.get("codeGenType") == "VUE_PROJECT":
             repair_instructions = f"{repair_instructions}\n\n{generation_system_prompt('VUE_PROJECT')}\n\n{vue_tool_prompt()}"
-        response = await self._invoke(
-            [
-                SystemMessage(content=repair_instructions),
-                HumanMessage(content=json.dumps({"artifact": artifact, **context}, ensure_ascii=False)),
-            ]
-        )
+        payload = {"artifact": artifact, **context}
+        messages = self._vue_messages(repair_instructions, payload) if context.get("codeGenType") == "VUE_PROJECT" else [
+            SystemMessage(content=repair_instructions),
+            HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
+        ]
+        response = await self._invoke(messages)
         if context.get("codeGenType") == "VUE_PROJECT":
             return _vue_model_turn(response)
         return _model_turn(response, str(response.content))

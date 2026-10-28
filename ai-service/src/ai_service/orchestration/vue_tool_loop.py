@@ -184,7 +184,10 @@ def create_vue_loop_nodes(
         )
         tool_results = [
             *state["vue_tool_results"],
-            {"toolCallId": tool_call_id, "tool": call["name"], "result": result},
+            {"toolCallId": tool_call_id, "tool": call["name"], "result": result,
+             # 路径用于模型关联读取与后续修改，禁止将写入源码复制进历史参数。
+             "arguments": {key: value for key, value in arguments.items()
+                           if key in {"relativeFilePath", "relativeDirPath", "query"}}},
         ]
         context = state["context"]
         update = {}
