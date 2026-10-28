@@ -670,6 +670,8 @@ Spring 在生成入口传入最多六条用户历史（每条最多 1000 个 UTF
 
 `AI_SERVICE_MODEL_CONTEXT_WINDOW_TOKENS=65536` 必须按所用模型的实际窗口设置；`AI_SERVICE_MODEL_CONTEXT_OVERHEAD_TOKENS=4096` 用于预留协议开销。预算检查采用 UTF-8 字节数作为保守 token 上界，并预留输出额度，可能早于供应商实际限制拦截；它不是精确 tokenizer，也不保证输出不会达到上限。实际生成调用前会再次检查增长后的完整消息载荷。
 
+2026-10-28 核实的 DeepSeek 官方 [模型说明](https://api-docs.deepseek.com/quick_start/pricing) 标明 `deepseek-flash` 支持 1M 上下文。本地对已配置的 `deepseek-chat` 做最小生成探测，返回实际模型名为 `deepseek-flash`；但官方 [更新记录](https://api-docs.deepseek.com/updates) 已宣布旧别名退役，不能假定其他账户或后续日期仍可用。当前本地 `.env` 将窗口调为 `AI_SERVICE_MODEL_CONTEXT_WINDOW_TOKENS=131072`，输出额度仍为 8192、协议预留仍为 4096，可用输入字节上界为 118784；这是保守运行配置，不是将供应商窗口描述为 128K。通用默认值与 `.env.example` 保持 65536，其他供应商应独立核实后再覆盖。调整 `.env` 后必须重启 Python AI 服务，且不会自动续跑已失败请求；模型别名迁移应单独验证生成协议与行为。
+
 稳定错误码包括 `INPUT_EMPTY`、`INPUT_INVALID`、`INPUT_TOO_LONG`、`INPUT_CONTEXT_BUDGET_EXCEEDED`、`INPUT_REJECTED`、`INPUT_CLARIFICATION_REQUIRED`、`INPUT_REVIEW_UNAVAILABLE`。路由阶段返回结构化 JSON（审核故障 503，其余审核错误 422），生成阶段通过原有 `failed`/公共 SSE 错误通道返回中文原因。前端在审核失败时恢复原需求（不覆盖用户新输入），需要澄清时显示警告。路由响应含最多一条 `warnings`，当前 Java 路由只消费生成类型；生成入口重新审核并展示警告。
 
 离线审核测试：`uv run pytest tests/test_input_review.py`。真实模型的安全分类和跨服务完整交互需另行验收。
