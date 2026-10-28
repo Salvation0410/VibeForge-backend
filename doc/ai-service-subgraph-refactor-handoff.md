@@ -4,7 +4,7 @@
 
 > 后续更新：本文第 1—8 节保留第一阶段交接基线；2026-10-27 已完成 Vue 多节点工具子图（第 9 节）、子图输入与私有状态收敛（第 10 节）、静态模型文本流式（第 11 节）、真实 PostgreSQL 子图恢复与清理验收（第 12 节）、Spring 任务账本与查询（第 13 节）、真实 MySQL/Redis 故障矩阵和租约防护（第 14 节）以及持久化生成代际 fencing（第 15 节）。第 6 节优先项一、二及优先项三中的 HTML/MULTI_FILE 流式已完成，生产任务恢复仍未实现；当前能力和验证以第 9—15 节为准。
 
-> 最新更新：2026-10-28 已实现第 16 节持久化取消与静态提交资格仲裁。第 15 节是此前真实资源验证记录；新增仲裁表尚未在真实 MySQL 迁移，部署前必须执行第 16 节列出的 SQL。生产任务恢复仍未实现。
+> 最新更新：2026-10-28 已执行第 16 节仲裁表真实迁移与 32 项回归，并实现第 17 节执行所有者/心跳观测。仲裁表及心跳三列已在本机 MySQL 迁移；生产恢复认领与 Python 续跑仍未实现。
 
 ## 1. 已实现结构
 
@@ -382,3 +382,32 @@ Redis 仍负责实时入口、活动请求发现和通知；完全不可用/无�
 - `mvn test '-Dtest=GenerationTaskMapperTest,GenerationTaskServiceTest,AppGenerationTaskTest,AppServiceGenerationCancellationTest,ArtifactPublicationEvidenceTest,GenerationJsonErrorBoundaryTest,GenerationLeaseServiceTest,AppControllerSseTest,LangGraphAiGenerationGatewayTest,SimpleTextStreamHandlerTest,ArtifactPublicationServiceTest,ArtifactPathResolverTest,InternalAiToolsControllerTest,ArtifactRecoveryControllerTest,AiCodeGeneratorFacadeTest,GenerationTaskResourcesIT'`：154 项执行，144 通过，0 失败/错误，10 项真实资源 opt-in 因未启用 `AI_TASK_INTEGRATION` 跳过。
 - H2/Mockito 中实际执行 12 轮取消与提交并发竞争、事务提交后确认丢失及更新后回滚；不代表真实 MySQL/Redis 或跨进程故障验收。
 - Python 与前端源码未改，未重跑其测试；未运行真实模型、Spring/Python HTTP、Selenium 或浏览器 SSE。前端四个既有客服文件修改保留。
+
+## 17. 执行所有者与数据库时钟心跳观测
+
+设计与计划：`docs/superpowers/specs/2026-10-28-generation-execution-heartbeat-design.md`、`docs/superpowers/plans/2026-10-28-generation-execution-heartbeat.md`。用户本轮要求执行新增迁移并继续下一阶段。
+
+### 已执行迁移
+
+- 第 16 节 `sql/alter_generation_arbitration.sql` 已执行：本机 MySQL 8.0.41、yu_ai_code_mother，表原先不存在；核验五列、请求 ascii_bin 主键、代际唯一索引、CHECK 已启用。迁移后仲裁/Mapper/租约 32 项全部通过，其中真实 MySQL/Redis/临时文件 10 项。
+- 本阶段新增 `sql/alter_generation_execution_heartbeat.sql`，增加可空 execution_owner、heartbeat_at、execution_expires_at；三列原先不存在，迁移后核验 varchar(36)/ascii_bin 及两个 datetime(6)，再次执行无错误。没有回填历史行，没有输出凭据，没有重启现有服务。
+
+### 当前实现
+
+- 任务服务以实例随机 UUID 绑定执行所有者，只续写收到 INSERT 成功确认的本实例请求；插入确认丢失不登记，进程重建不接管旧 RUNNING。终态回写需匹配原 owner/token，任务表条件更新仍保护终态不被覆盖。
+- 独立调度器每 15 秒续写；同时保留名为 taskScheduler 的默认调度器，避免未指定 scheduler 的客服 ETL 意外使用心跳线程。续写按 requestId/appId/owner/token、RUNNING、数据库期限及当前应用代际过滤，数据库 CURRENT_TIMESTAMP 设置最后心跳和 90 秒期限。
+- 临时数据库异常可在期限内重试，条件更新失败停止该条续写，不能超时复活；执行登记仍保留到真实终态用于原身份条件落账。终态落账失败也移除续写登记，避免虚假存活。销毁只清理内存，不擅自结束数据库任务。
+- 查询 VO 新增 heartbeatAt、executionExpiresAt、heartbeatState，不暴露执行所有者；同条 SQL 计算 LIVE/EXPIRED/SUPERSEDED/UNKNOWN/TERMINAL。旧行无所有者为 UNKNOWN；超时不自动改为 FAILED，取消与发布证据保持独立。
+
+### 边界与下一阶段
+
+心跳表示 Spring 执行控制器存活，不证明模型进展，也不承担执行授权、Redis 锁或静态发布 fencing。取消直到真实执行结束仍观测；Vue 在途文件副作用边界不变。没有生产恢复扫描、过期认领、自动取消、SSE 重连或 Python checkpoint 接续。
+
+下一阶段应独立设计认领事务：核对任务所有权、期限、取消权威决策和发布事实，原子变更 owner/代际并把原执行身份贯穿 Python 请求、工具调用、激活和终态回写；Vue 共享可变目录需要额外隔离。不得直接从 EXPIRED、RUNNING、COMMITTING 或无 Redis 锁推导可恢复。
+
+### 本轮验证
+
+- `mvn clean -DskipTests compile`：274 个 Java 源文件 BUILD SUCCESS，只有既有 varargs、弃用和 unchecked 提示。
+- 开启 `AI_TASK_INTEGRATION=true` 执行 `mvn test '-Dtest=GenerationTaskMapperTest,GenerationTaskServiceTest,AppGenerationTaskTest,AppServiceGenerationCancellationTest,ArtifactPublicationEvidenceTest,GenerationJsonErrorBoundaryTest,GenerationLeaseServiceTest,AppControllerSseTest,LangGraphAiGenerationGatewayTest,SimpleTextStreamHandlerTest,ArtifactPublicationServiceTest,ArtifactPathResolverTest,InternalAiToolsControllerTest,ArtifactRecoveryControllerTest,AiCodeGeneratorFacadeTest,GenerationTaskResourcesIT,GenerationTaskHeartbeatConfigurationTest'`：163 项通过，0 失败/错误/跳过，其中真实 MySQL/Redis/临时文件测试 12 项。
+- 真实资源覆盖所有者/代际条件、90 秒数据库期限、超时拒绝复活、实例重建无终态资格、后继代际使旧心跳失效；Spring 调度上下文测试验证默认任务阻塞时心跳独立运行。查询序列化测试验证心跳字段可见且 execution_owner 不对外返回。
+- 真实测试仅写唯一测试 appId/requestId 与 JUnit 临时目录，夹具按精确作用域清理。未运行无筛选真实供应商测试、Python HTTP、浏览器或完整 SSE；Python 与前端源码未修改，未重跑其测试。前端四个既有客服改动保留。

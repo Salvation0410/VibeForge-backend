@@ -170,6 +170,10 @@ class AppGenerationTaskTest {
         task.setUserId(7L);
         task.setCodeGenType("html");
         task.setExecutionState("FAILED");
+        task.setExecutionOwner("internal-owner-must-not-be-public");
+        task.setHeartbeatAt(java.time.LocalDateTime.of(2026, 10, 28, 12, 0));
+        task.setExecutionExpiresAt(task.getHeartbeatAt().plusSeconds(90));
+        task.setHeartbeatState("TERMINAL");
         when(tasks.findOwned(42L, 7L, "req-old")).thenReturn(task);
         when(leases.getStatus(42L)).thenReturn(new GenerationLeaseService.GenerationStateSnapshot(
                 "new", GenerationLeaseService.PublicState.RUNNING, false));
@@ -178,6 +182,12 @@ class AppGenerationTaskTest {
         assertEquals("FAILED", result.getExecutionState());
         assertEquals("UNKNOWN", result.getLeaseState());
         assertEquals("COMMITTED", result.getPublicationState());
+        assertEquals("TERMINAL", result.getHeartbeatState());
+        assertEquals(task.getHeartbeatAt(), result.getHeartbeatAt());
+        assertEquals(task.getExecutionExpiresAt(), result.getExecutionExpiresAt());
+        var json = new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules().valueToTree(result);
+        assertFalse(json.has("executionOwner"));
+        assertFalse(json.toString().contains("internal-owner-must-not-be-public"));
         assertThrows(BusinessException.class, () -> service.getGenerationTask(42L, "req-old", SysUser.builder().id(8L).build()));
         assertThrows(BusinessException.class, () -> service.getGenerationTask(42L, "req-old", null));
         verify(tasks, times(1)).findOwned(anyLong(), anyLong(), any());

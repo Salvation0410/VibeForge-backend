@@ -4,17 +4,17 @@ Spring 在 MySQL `generation_task` 表记录从 `/api/apps/chat/gen/code` 发起
 
 ## 部署顺序
 
-1. 在业务 MySQL 数据库先执行 `sql/alter_generation_task.sql`，再执行 `sql/alter_generation_fencing.sql` 与 `sql/alter_generation_arbitration.sql`；首次初始化的 `sql/init_database.sql` 已包含完整 schema。
-2. 升级 Spring。代码不会自动执行迁移；缺少任务账本、fencing 或仲裁表时，租约建立/任务开始失败关闭，不进入模型调用。重复请求唯一键冲突返回 `GENERATION_REQUEST_EXISTS`，不再次调用模型。
+1. 在业务 MySQL 数据库先执行 `sql/alter_generation_task.sql`，再执行 `sql/alter_generation_fencing.sql`、`sql/alter_generation_arbitration.sql` 与 `sql/alter_generation_execution_heartbeat.sql`；首次初始化的 `sql/init_database.sql` 已包含完整 schema。
+2. 升级 Spring。代码不会自动执行迁移；缺少任务账本、fencing、仲裁表或所有者/心跳列时，租约建立或任务开始失败关闭，不进入模型调用。重复请求唯一键冲突返回 `GENERATION_REQUEST_EXISTS`，不再次调用模型。
 3. 所有 Spring 实例必须切换到支持 DB 指针的版本后再开放生成；不能混跑仍以 `.current` 为权威的旧实例。无 Python、Redis、前端配置迁移，也没有新增环境变量。回滚时先停止生成和旧执行者，按数据库活动指针核对并导出文件镜像，再回退旧代码；只保留表不构成安全回滚。
 
 `sql/alter_generation_fencing.sql` 为已执行过任务账本迁移的数据库增加 token 列及 fencing 表；列存在性由 `information_schema` 条件判断，重复执行安全。2026-10-27 已在本地 MySQL 8.0.41 的 `yu_ai_code_mother` 执行并核验 fencing 列和三张表；H2 MySQL 模式测试仍只验证 Mapper SQL 与 CAS 语义。
 
 ## 记录生命周期
 
-应用所有权和类型验证通过后，每次实际订阅分配新的服务端 UUID，并获取既有应用租约。Redis 锁成功后，MySQL 在同一事务为应用递增 fencing token 并向 `generation_arbitration` 插入唯一请求绑定，token 写入租约和任务账本；任务插入成功后才写用户历史、调用模型。账本仅记录请求/应用/用户标识、生成类型、执行状态、token、稳定错误码和时间，不记录提示词、源码、供应商异常正文或令牌。应用删除后记录保留，但查询仍要求现存应用所有权；不提供管理员跨用户读取入口。
+应用所有权和类型验证通过后，每次实际订阅分配新的服务端 UUID，并获取既有应用租约。Redis 锁成功后，MySQL 在同一事务为应用递增 fencing token 并向 `generation_arbitration` 插入唯一请求绑定，token 写入租约和任务账本；任务插入成功后才写用户历史、调用模型。账本仅记录请求/应用/用户标识、生成类型、执行状态、token、随机执行所有者、稳定错误码和时间，不记录提示词、源码、供应商异常正文或令牌。应用删除后记录保留，但查询仍要求现存应用所有权；不提供管理员跨用户读取入口。
 
-执行状态为 `RUNNING`、`SUCCEEDED`、`FAILED`、`CANCELLED`，终态仅允许从 RUNNING 条件更新，迟到回调不能覆盖已有终态。取消与静态提交资格由 MySQL `generation_arbitration` 权威仲裁：两者先锁应用代际行，再以当前请求与 token 检查 ACTIVE 状态。取消先赢时永久保存 CANCELLED 和首次取消时间；提交先赢时永久保存 COMMITTING，随后取消不再胜出。最终静态激活再次核对相同请求绑定、当前代际和取消决策；Redis 状态丢失或回退为 ACTIVE 也不能覆盖已确认取消。
+执行状态为 `RUNNING`、`SUCCEEDED`、`FAILED`、`CANCELLED`，终态仅允许从 RUNNING 条件更新，并匹配本实例的执行所有者及原 fence token；无本实例执行登记的回调不写终态，迟到回调不能覆盖已有终态。取消与静态提交资格由 MySQL `generation_arbitration` 权威仲裁：两者先锁应用代际行，再以当前请求与 token 检查 ACTIVE 状态。取消先赢时永久保存 CANCELLED 和首次取消时间；提交先赢时永久保存 COMMITTING，随后取消不再胜出。最终静态激活再次核对相同请求绑定、当前代际和取消决策；Redis 状态丢失或回退为 ACTIVE 也不能覆盖已确认取消。
 
 COMMITTING 只代表提交资格，不代表产物已发布；发布事实仍查询 `generation_publication`。发布动作失败或提交结果不确定时不自动撤销该占位。数据库无法确认仲裁时返回脱敏稳定错误，不承诺取消成功，也不调用发布动作。Redis 继续提供活动请求发现、入口串行化和实时状态镜像；取消已持久化后镜像写失败仍通知引擎停止。镜像状态可能滞后，任务查询独立补读仲裁表取消时间。任务插入前的已确认取消在插入后再次复核，随后停止进入历史/模型调用。取消时间不代表引擎已经停止；浏览器断开连接后仍等待引擎真实终态再释放租约。
 
@@ -34,6 +34,8 @@ COMMITTING 只代表提交资格，不代表产物已发布；发布事实仍查
 | executionState / errorCode | Spring 观察到的执行终态与脱敏稳定代码 |
 | cancelRequestedAt | 持久化仲裁首次取消时间，旧记录回退任务表观测时间，允许为空 |
 | createdAt / updatedAt / finishedAt / queryUntil | 任务时间与终态查询截止时间 |
+| heartbeatAt / executionExpiresAt | 数据库时钟心跳及 90 秒观测期限，不是恢复授权 |
+| heartbeatState | LIVE、EXPIRED、SUPERSEDED、UNKNOWN、TERMINAL，不自动改变任务终态 |
 | leaseState | 同一 requestId 当前 Redis 状态；不匹配、已释放或 Redis 不可用均为 UNKNOWN |
 | publicationState | COMMITTED、NOT_CONFIRMED、UNAVAILABLE 或 NOT_VERSIONED |
 
@@ -66,6 +68,20 @@ fencing release 使用数据库 token 作为 manifest 序号，不并发读写�
 
 ## 持久化仲裁升级（2026-10-28）
 
-升级前排空旧实例请求，执行 `sql/alter_generation_arbitration.sql`，再统一升级所有 Spring 实例。该表无自动迁移，不为历史请求回填执行授权；人工 HTML 恢复也通过新租约原子绑定请求。新表缺失会使新租约和账本查询失败关闭。本轮未在真实业务 MySQL 执行该 DDL；真实资源测试夹具已增加表预检及精确测试行清理。
+升级前排空旧实例请求，执行 `sql/alter_generation_arbitration.sql`，再统一升级所有 Spring 实例。该表无自动迁移，不为历史请求回填执行授权；人工 HTML 恢复也通过新租约原子绑定请求。新表缺失会使新租约和账本查询失败关闭。2026-10-28 已在本机 MySQL 8.0.41 的 yu_ai_code_mother 执行该 DDL，核验五列、ascii_bin 请求键、代际唯一索引及 CHECK 已启用。随后仲裁/Mapper/租约回归 32 项全部通过，其中真实资源 10 项。真实资源测试夹具已增加表预检及精确测试行清理。
 
 显式取消仍依赖可发现的 Redis 活动请求及现存应用所有权；Redis 完全不可用或无租约时没有新增离线取消/恢复入口。Vue 文件修改不在静态不可变发布事务内，取消仍为协作式，不能保证在途文件副作用立即停止。没有新增 SSE 事件、Python checkpoint 接续、恢复调度或客户端重连。
+
+## 执行所有者与心跳观测（2026-10-28）
+
+新任务由 `GenerationTaskServiceImpl` 以随机 UUID 标识本服务实例，只在任务 INSERT 确认成功后加入内存续写登记，不扫描数据库 RUNNING 行，不因进程重建自动获取旧执行资格。INSERT 确认丢失时可能留下带所有者但没有实际执行的行，期限届满后仅呈现 EXPIRED，不能推断是否调用过模型。execution_owner 不通过任务 VO 返回，也不保存主机名、IP 或凭据。
+
+独立 `generationTaskHeartbeatScheduler` 每 15 秒续写已登记任务。显式保留默认 `taskScheduler` 供客服 ETL 等无限定调度名的任务使用，避免默认任务阻塞心跳。每次续写匹配 requestId/appId/owner/token、RUNNING、尚未过期且仍是当前应用代际。heartbeat_at 与 execution_expires_at 均来自数据库时间，期限为 90 秒；超时不会被随后恢复运行的旧执行者复活。数据库瞬时异常可在期限内重试，条件更新失败则停止该任务续写。完成、失败或取消的真实终态回调无论落账成功与否都会删除续写登记；浏览器断开及发出停止请求不提前停止心跳。
+
+任务查询在原权限与保留期过滤下，用同条 SQL 计算 heartbeatState：非 RUNNING 为 TERMINAL；缺少所有者、心跳或期限为 UNKNOWN；当前应用代际已不同为 SUPERSEDED；期限已到为 EXPIRED；否则 LIVE。历史行不回填所有者/心跳。查询不写回执行状态，不修改取消或发布事实。SUPERSEDED/EXPIRED 仅表示不能再续写心跳；原所有者对同请求、同 token 的真实终态仍可条件落账，不把超时等同执行失败。
+
+该心跳只证明 Spring 执行控制器仍在续写，不保证 Python/模型正在前进，也不替代 Redis 锁与发布 fencing。没有新增恢复认领、心跳超时取消、自动重试、Python checkpoint 续跑或 SSE 重连。未来认领必须同时改变执行所有者与代际，并把身份传到工具调用、发布和终态回写；不能仅据 EXPIRED 或无 Redis 锁认领。
+
+部署前执行 `sql/alter_generation_execution_heartbeat.sql`，历史三列允许为空；迁移使用 information_schema 条件 DDL，兼容 MySQL 8.0.41。2026-10-28 已在本机业务库执行并再次执行验证幂等，三列原先不存在，迁移后确认 execution_owner 为 varchar(36)/ascii_bin、两个时间为 datetime(6)，均允许 NULL。没有自动迁移，升级前应排空旧实例执行并统一切换；本轮未重启现有 Spring/Python 服务。
+
+本阶段最终验证：干净编译成功；开启真实资源 opt-in 的限定账本、租约、发布、工具、网关与心跳回归 163 项全部通过，含真实 MySQL/Redis 12 项。调度上下文证明默认任务阻塞不影响独立心跳；未运行真实模型、Python HTTP 或浏览器端到端。

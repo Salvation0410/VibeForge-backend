@@ -11,7 +11,10 @@ public interface GenerationTaskMapper extends BaseMapper<GenerationTask> {
     int createTask(GenerationTask task);
     int finishTask(@Param("requestId") String requestId, @Param("state") String state,
                    @Param("errorCode") String errorCode, @Param("now") LocalDateTime now,
-                   @Param("queryUntil") LocalDateTime queryUntil);
+                   @Param("queryUntil") LocalDateTime queryUntil,
+                   @Param("owner") String owner, @Param("fenceToken") long fenceToken);
+    int heartbeat(@Param("requestId") String requestId, @Param("appId") long appId,
+                  @Param("owner") String owner, @Param("fenceToken") long fenceToken);
     int recordCancellation(@Param("requestId") String requestId, @Param("now") LocalDateTime now);
     Long findFenceToken(@Param("appId") long appId, @Param("requestId") String requestId);
     GenerationTask findOwned(@Param("appId") long appId, @Param("userId") long userId,

@@ -18,4 +18,8 @@ public class GenerationTaskVO {
     private LocalDateTime queryUntil;
     private String leaseState;
     private String publicationState;
+    private LocalDateTime heartbeatAt;
+    private LocalDateTime executionExpiresAt;
+    /** LIVE/EXPIRED/SUPERSEDED/UNKNOWN/TERMINAL，仅供观测，不授权恢复。 */
+    private String heartbeatState;
 }

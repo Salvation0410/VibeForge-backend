@@ -1,6 +1,7 @@
 package com.yupi.yuaicodemother.model.entity;
 
 import com.mybatisflex.annotation.Id;
+import com.mybatisflex.annotation.Column;
 import com.mybatisflex.annotation.Table;
 import lombok.Data;
 
@@ -17,6 +18,12 @@ public class GenerationTask {
     private String codeGenType;
     private String executionState;
     private Long fenceToken = 0L;
+    private String executionOwner;
+    private LocalDateTime heartbeatAt;
+    private LocalDateTime executionExpiresAt;
+    /** 查询时按数据库时钟计算；不能作为执行授权或恢复凭证。 */
+    @Column(ignore = true)
+    private String heartbeatState;
     private String errorCode;
     private LocalDateTime cancelRequestedAt;
     private LocalDateTime createdAt;

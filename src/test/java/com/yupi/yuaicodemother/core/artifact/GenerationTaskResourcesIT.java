@@ -134,6 +134,7 @@ class GenerationTaskResourcesIT {
             statement.setString(1, id);
             assertThrows(java.sql.SQLException.class, statement::executeUpdate);
         }
+        String owner = tasks.findOwned(appId, USER, id).getExecutionOwner();
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch begin = new CountDownLatch(1);
         try (var workers = Executors.newFixedThreadPool(2)) {
@@ -143,7 +144,7 @@ class GenerationTaskResourcesIT {
                     ready.countDown();
                     if (!begin.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("测试同步超时");
                     var now = LocalDateTime.now();
-                    return resources.mapper.finishTask(id, state, null, now, now.plusDays(30));
+                    return resources.mapper.finishTask(id, state, null, now, now.plusDays(30), owner, 1L);
                 }));
             }
             assertTrue(ready.await(5, TimeUnit.SECONDS));
@@ -228,17 +229,66 @@ class GenerationTaskResourcesIT {
     }
 
     @Test
-    void committedFilesAndRunningLedgerRemainSeparateAfterTerminalWriteFailureAndRebuild() throws Exception {
+    void realExecutionHeartbeatUsesOwnerAndDatabaseDeadlineWithoutResurrectingExpiredWork() throws Exception {
         String id = request();
         var lease = first.acquire(appId, id);
         tasks.start(appId, USER, id, CodeGenTypeEnum.HTML, lease.fenceToken());
+        var initial = tasks.findOwned(appId, USER, id);
+        String owner = initial.getExecutionOwner();
+        assertNotNull(owner);
+        assertEquals("LIVE", initial.getHeartbeatState());
+        assertEquals(90, java.time.Duration.between(initial.getHeartbeatAt(), initial.getExecutionExpiresAt()).toSeconds());
+        assertEquals(0, resources.mapper.heartbeat(id, appId, UUID.randomUUID().toString(), lease.fenceToken()));
+        assertEquals(0, resources.mapper.heartbeat(id, appId, owner, lease.fenceToken() + 1));
+        assertEquals(1, resources.mapper.heartbeat(id, appId, owner, lease.fenceToken()));
+        var rebuilt = new GenerationTaskServiceImpl(resources.newMapper());
+        rebuilt.finish(id, "FAILED", "OLD_OWNER");
+        assertEquals("RUNNING", tasks.findOwned(appId, USER, id).getExecutionState());
+        try (var connection = resources.connection(); var expire = connection.prepareStatement(
+                "UPDATE generation_task SET execution_expires_at = TIMESTAMPADD(SECOND, -1, CURRENT_TIMESTAMP(6)) WHERE app_id = ? AND request_id = ?")) {
+            expire.setLong(1, appId);
+            expire.setString(2, id);
+            assertEquals(1, expire.executeUpdate());
+        }
+        tasks.heartbeatOwnedExecutions();
+        assertEquals(0, resources.mapper.heartbeat(id, appId, owner, lease.fenceToken()));
+        assertEquals("EXPIRED", rebuilt.findOwned(appId, USER, id).getHeartbeatState());
+        assertEquals("RUNNING", rebuilt.findOwned(appId, USER, id).getExecutionState());
+        // 心跳期限不是发布/终态授权；同一真实执行到终态后仍能条件落账，查询不会自动续跑。
+        tasks.finish(id, "CANCELLED", "GENERATION_CANCELLED");
+        assertEquals("TERMINAL", rebuilt.findOwned(appId, USER, id).getHeartbeatState());
+        assertEquals("CANCELLED", rebuilt.findOwned(appId, USER, id).getExecutionState());
+        first.release(lease);
+    }
+
+    @Test
+    void realSuccessorGenerationSupersedesHeartbeatWithoutRewritingOldExecutionOutcome() throws Exception {
+        String id = request();
+        var lease = first.acquire(appId, id);
+        tasks.start(appId, USER, id, CodeGenTypeEnum.HTML, lease.fenceToken());
+        first.release(lease);
+        var successor = second.acquire(appId, request());
+        tasks.heartbeatOwnedExecutions();
+        assertEquals("SUPERSEDED", tasks.findOwned(appId, USER, id).getHeartbeatState());
+        assertEquals("RUNNING", tasks.findOwned(appId, USER, id).getExecutionState());
+        assertThrows(GenerationStreamException.class, () -> fences.activate(appId, "html", id,
+                lease.fenceToken(), lease.fenceToken(), Map.of("index.html", "hash")));
+        second.release(successor);
+    }
+
+    @Test
+    void committedFilesAndRunningLedgerRemainSeparateAfterTerminalWriteFailureAndRebuild() throws Exception {
+        String id = request();
+        var lease = first.acquire(appId, id);
+        var mapper = faultyMapper();
+        var ownerLedger = new GenerationTaskServiceImpl(mapper);
+        ownerLedger.start(appId, USER, id, CodeGenTypeEnum.HTML, lease.fenceToken());
         assertTrue(first.commit(appId, id, () -> store.publishFenced(CodeGenTypeEnum.HTML, appId, id,
                 Map.of("index.html", "<html>测试</html>"), "integration", "STOP", null,
                 lease.fenceToken(), fences)).published());
-        var mapper = faultyMapper();
         doThrow(new TransientDataAccessResourceException("模拟终态落账失败")).when(mapper)
-                .finishTask(eq(id), anyString(), any(), any(), any());
-        assertDoesNotThrow(() -> new GenerationTaskServiceImpl(mapper).finish(id, "SUCCEEDED", null));
+                .finishTask(eq(id), anyString(), any(), any(), any(), anyString(), anyLong());
+        assertDoesNotThrow(() -> ownerLedger.finish(id, "SUCCEEDED", null));
         first.release(lease);
         // 重建 Mapper/任务服务，使用另一 Redis 客户端；不借助旧实例的请求内存。
         var rebuiltLedger = new GenerationTaskServiceImpl(resources.newMapper());

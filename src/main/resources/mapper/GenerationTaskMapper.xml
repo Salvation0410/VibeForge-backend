@@ -14,15 +14,34 @@
         <result column="finished_at" property="finishedAt"/>
         <result column="query_until" property="queryUntil"/>
         <result column="fence_token" property="fenceToken"/>
+        <result column="execution_owner" property="executionOwner"/>
+        <result column="heartbeat_at" property="heartbeatAt"/>
+        <result column="execution_expires_at" property="executionExpiresAt"/>
+        <result column="heartbeat_state" property="heartbeatState"/>
     </resultMap>
     <insert id="createTask">
-        INSERT INTO generation_task (request_id, app_id, user_id, code_gen_type, execution_state, fence_token, created_at, updated_at)
-        VALUES (#{requestId}, #{appId}, #{userId}, #{codeGenType}, 'RUNNING', #{fenceToken}, #{createdAt}, #{updatedAt})
+        INSERT INTO generation_task (request_id, app_id, user_id, code_gen_type, execution_state, fence_token,
+            execution_owner, heartbeat_at, execution_expires_at, created_at, updated_at)
+        VALUES (#{requestId}, #{appId}, #{userId}, #{codeGenType}, 'RUNNING', #{fenceToken}, #{executionOwner},
+            CASE WHEN #{executionOwner} IS NULL THEN NULL ELSE CURRENT_TIMESTAMP(6) END,
+            CASE WHEN #{executionOwner} IS NULL THEN NULL ELSE TIMESTAMPADD(SECOND, 90, CURRENT_TIMESTAMP(6)) END,
+            #{createdAt}, #{updatedAt})
     </insert>
     <update id="finishTask">
         UPDATE generation_task SET execution_state = #{state}, error_code = #{errorCode},
             finished_at = #{now}, updated_at = #{now}, query_until = #{queryUntil}
         WHERE request_id = #{requestId} AND execution_state = 'RUNNING'
+          AND execution_owner = #{owner} AND fence_token = #{fenceToken}
+    </update>
+    <!-- 只使用数据库时间，拒绝旧所有者、旧代际或超时执行者复活心跳。 -->
+    <update id="heartbeat">
+        UPDATE generation_task SET heartbeat_at = CURRENT_TIMESTAMP(6),
+            execution_expires_at = TIMESTAMPADD(SECOND, 90, CURRENT_TIMESTAMP(6))
+        WHERE request_id = #{requestId} AND app_id = #{appId}
+          AND execution_owner = #{owner} AND fence_token = #{fenceToken}
+          AND execution_state = 'RUNNING' AND execution_expires_at &gt; CURRENT_TIMESTAMP(6)
+          AND EXISTS (SELECT 1 FROM generation_fence f
+                      WHERE f.app_id = #{appId} AND f.current_token = #{fenceToken})
     </update>
     <update id="recordCancellation">
         UPDATE generation_task SET cancel_requested_at = #{now}, updated_at = #{now}
@@ -36,7 +55,14 @@
                COALESCE((SELECT a.cancel_requested_at FROM generation_arbitration a
                          WHERE a.request_id = generation_task.request_id AND a.app_id = generation_task.app_id
                            AND a.fence_token = generation_task.fence_token), cancel_requested_at) AS cancel_requested_at,
-               created_at, updated_at, finished_at, query_until, fence_token
+               created_at, updated_at, finished_at, query_until, fence_token,
+               execution_owner, heartbeat_at, execution_expires_at,
+               CASE WHEN execution_state &lt;&gt; 'RUNNING' THEN 'TERMINAL'
+                    WHEN execution_owner IS NULL OR heartbeat_at IS NULL OR execution_expires_at IS NULL THEN 'UNKNOWN'
+                    WHEN NOT EXISTS (SELECT 1 FROM generation_fence f WHERE f.app_id = generation_task.app_id
+                                     AND f.current_token = generation_task.fence_token) THEN 'SUPERSEDED'
+                    WHEN execution_expires_at &lt;= CURRENT_TIMESTAMP(6) THEN 'EXPIRED'
+                    ELSE 'LIVE' END AS heartbeat_state
         FROM generation_task
         WHERE app_id = #{appId} AND user_id = #{userId}
           AND (query_until IS NULL OR query_until &gt; #{now})
