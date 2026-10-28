@@ -670,8 +670,14 @@ Spring 在生成入口传入最多六条用户历史（每条最多 1000 个 UTF
 
 `AI_SERVICE_MODEL_CONTEXT_WINDOW_TOKENS=65536` 必须按所用模型的实际窗口设置；`AI_SERVICE_MODEL_CONTEXT_OVERHEAD_TOKENS=4096` 用于预留协议开销。预算检查采用 UTF-8 字节数作为保守 token 上界，并预留输出额度，可能早于供应商实际限制拦截；它不是精确 tokenizer，也不保证输出不会达到上限。实际生成调用前会再次检查增长后的完整消息载荷。
 
-2026-10-28 核实的 DeepSeek 官方 [模型说明](https://api-docs.deepseek.com/quick_start/pricing) 标明 `deepseek-flash` 支持 1M 上下文。本地对已配置的 `deepseek-chat` 做最小生成探测，返回实际模型名为 `deepseek-flash`；但官方 [更新记录](https://api-docs.deepseek.com/updates) 已宣布旧别名退役，不能假定其他账户或后续日期仍可用。当前本地 `.env` 将窗口调为 `AI_SERVICE_MODEL_CONTEXT_WINDOW_TOKENS=131072`，输出额度仍为 8192、协议预留仍为 4096，可用输入字节上界为 118784；这是保守运行配置，不是将供应商窗口描述为 128K。通用默认值与 `.env.example` 保持 65536，其他供应商应独立核实后再覆盖。调整 `.env` 后必须重启 Python AI 服务，且不会自动续跑已失败请求；模型别名迁移应单独验证生成协议与行为。
+2026-10-28 核实的 DeepSeek 官方 [模型说明](https://api-docs.deepseek.com/quick_start/pricing) 标明 `deepseek-flash` 支持 1M 上下文。本地对已配置的 `deepseek-chat` 做最小生成探测，返回实际模型名为 `deepseek-flash`；但官方 [更新记录](https://api-docs.deepseek.com/updates) 已宣布旧别名退役，不能假定其他账户或后续日期仍可用。当前本地 `.env` 按用户要求将窗口调为 `AI_SERVICE_MODEL_CONTEXT_WINDOW_TOKENS=200000`，输出额度仍为 8192、协议预留仍为 4096，可用输入字节上界为 187712；这是保守运行配置，不是将供应商窗口描述为 128K。通用默认值与 `.env.example` 保持 65536，其他供应商应独立核实后再覆盖。调整 `.env` 后必须重启 Python AI 服务，且不会自动续跑已失败请求；模型别名迁移应单独验证生成协议与行为。
 
 稳定错误码包括 `INPUT_EMPTY`、`INPUT_INVALID`、`INPUT_TOO_LONG`、`INPUT_CONTEXT_BUDGET_EXCEEDED`、`INPUT_REJECTED`、`INPUT_CLARIFICATION_REQUIRED`、`INPUT_REVIEW_UNAVAILABLE`。路由阶段返回结构化 JSON（审核故障 503，其余审核错误 422），生成阶段通过原有 `failed`/公共 SSE 错误通道返回中文原因。前端在审核失败时恢复原需求（不覆盖用户新输入），需要澄清时显示警告。路由响应含最多一条 `warnings`，当前 Java 路由只消费生成类型；生成入口重新审核并展示警告。
 
 离线审核测试：`uv run pytest tests/test_input_review.py`。真实模型的安全分类和跨服务完整交互需另行验收。
+
+### 同一 Vue 项目的多次修改与上下文边界
+
+每次生成使用独立 `{appId}:{requestId}` 图状态，前一次的工具历史不自动传入下一次请求；请求内部的修复阶段继承本次工具历史与总工具预算。Spring 每次只传最近最多六条用户需求（每条最多 1000 个 UTF-16 字符）和最多 2000 字符的初始需求，不传全部 AI 回复或历史源码。Vue 当前产物入口只返回最多 200 条文件路径，源码由模型按需调用 Spring 工具读取；质量审查快照另限最多 24 个文件、每文件 12000 字符、总计 60000 字符，并标记省略或截断。
+
+因此修改次数本身不会使模型上下文线性累积；同一请求内的大文件、重复读取及审查快照仍可能超预算。模型消息的工具历史仍独立限制为 24 KiB，窗口扩容不提高该上限；最新结果无法完整容纳时仍失败。当前没有跨请求项目需求摘要或长期记忆，也没有按完整消息预算对源码快照分批审查，不能保证任意项目规模均可审查或保留六轮之前的全部需求。checkpoint 是本次执行恢复数据，终态 best-effort 清理、TTL 兜底，不能替代跨请求记忆。
