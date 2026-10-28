@@ -3102,6 +3102,17 @@ def test_vue_empty_image_search_has_visible_fallback(app_factory, auth_headers, 
     assert any("Pexels" in e.get("data", {}).get("message", "") for e in events)
 
 
+@pytest.mark.parametrize("prompt", ["制作Vue任务清单，无需图片。", "创建任务板，不需要任何配图。", "Create a Vue todo app without images."])
+def test_first_vue_explicitly_without_images_skips_automatic_search(app_factory, auth_headers, ndjson_parser, prompt):
+    gateway = FakeToolGateway()
+    events = ndjson_parser(TestClient(app_factory(gateway=gateway)).post(
+        "/internal/v1/generations:stream", json={**generation_payload("VUE_PROJECT"), "prompt": prompt},
+        headers=auth_headers,
+    ))
+    assert events[-1]["type"] == "completed"
+    assert not any(call["name"] == "image_search" for call in gateway.calls)
+
+
 def test_vue_missing_image_usage_stops_after_two_reminders(app_factory, auth_headers, ndjson_parser):
     class Images(FakeToolGateway):
         async def invoke(self, name, arguments, **kwargs):

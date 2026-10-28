@@ -66,6 +66,10 @@ def create_vue_loop_nodes(
         model_context = {
             **context, "toolResults": list(state["vue_tool_results"]),
             "vueGeneration": {
+                # 模型调用无隐式对话记忆，必须明确告知已完成规划，避免每轮重新执行“首次规划”。
+                "phase": "write_files" if loop["file_plan"] else (
+                    "modify_files" if context.get("currentArtifact", {}).get("exists") else "plan_files"
+                ),
                 "maxToolCallsPerTurn": loop["batch_limit"],
                 "remainingToolCalls": workflow.settings.vue_max_tool_calls - state.get("tool_call_count", 0),
                 "filePlan": list(loop["file_plan"]), "writtenFiles": list(loop["written_files"]),
@@ -118,13 +122,13 @@ def create_vue_loop_nodes(
             await emitter.emit("content_delta", node, data={"content": turn["content"]})
         planning = False
         if turn["file_plan"]:
-            changed_plan = turn["file_plan"] != loop["file_plan"]
             loop["file_plan"] = list(turn["file_plan"])
-            if not calls and changed_plan:
+            if not calls and any(path not in loop["written_files"] for path in loop["file_plan"]):
                 loop["planning_turns"] += 1
                 if loop["planning_turns"] > 3:
                     raise ValueError("VUE_FILE_PLAN_LIMIT_EXCEEDED: too many planning-only turns")
                 planning = True
+                context["planningFeedback"] = "文件规划已收到。下一轮必须调用 file_write 写入 pendingFiles 中尚未完成的文件，不要再次仅返回文件规划；全部写入后才可结束。"
         if planning:
             loop["next_step"] = "model_turn"
         elif not calls:

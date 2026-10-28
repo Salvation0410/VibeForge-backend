@@ -5,7 +5,7 @@ from ai_service.models.base import ModelTurn, ToolCall
 from ai_service.orchestration.cancellation import CancellationRegistry
 from ai_service.orchestration.events import EventEmitter
 from ai_service.orchestration.workflow import GenerationWorkflow
-from ai_service.orchestration.subgraphs.vue import vue_recursion_limit
+from ai_service.orchestration.subgraphs.vue import build_vue_tool_subgraph, vue_recursion_limit
 from conftest import FakeModel, FakeToolGateway, MemoryCheckpoint
 from test_subgraphs import CleaningGraphCheckpoint, request_for
 
@@ -40,6 +40,45 @@ def initial():
     return {"app_id": "42", "request_id": "subgraph-test", "thread_id": "42:subgraph-test",
             "prompt": "页面", "code_gen_type": "VUE_PROJECT", "context": {},
             "repair_count": 0, "tool_call_count": 0, "conversation": [], "metadata": {}}
+
+
+@pytest.mark.asyncio
+async def test_repeated_file_plan_is_corrected_before_image_completion_check(settings):
+    class PlanningModel(FakeModel):
+        async def generate(self, branch, context):
+            self.calls.append(("generate", context))
+            # 模拟真实模型：收到明确的重复规划反馈后才进入文件写入。
+            if len(self.calls) >= 3 and context.get("planningFeedback") and not context["toolResults"]:
+                return ModelTurn("写入", tool_calls=[ToolCall("file_write", {
+                    "relativeFilePath": "src/App.vue", "content": '<img src="https://example.test/a.jpg">',
+                })])
+            if context["toolResults"]:
+                return ModelTurn("完成")
+            return ModelTurn("已规划", file_plan=["src/App.vue"])
+
+    model = PlanningModel()
+    workflow = make_workflow(settings, model, MemoryCheckpoint())
+    graph = build_vue_tool_subgraph(
+        workflow, EventEmitter("subgraph-test"), "42:subgraph-test", {},
+    )
+    result = await graph.ainvoke({**initial(), "context": {
+        "imageAssets": [{"url": "https://example.test/a.jpg"}],
+    }})
+    assert result["tool_call_count"] == 1
+    assert len(model.calls) == 4
+    assert model.calls[1][1]["vueGeneration"]["phase"] == "write_files"
+
+
+@pytest.mark.asyncio
+async def test_repeated_unchanged_plans_have_bounded_accurate_failure(settings):
+    class PlanningOnly(FakeModel):
+        async def generate(self, branch, context):
+            return ModelTurn("已规划", file_plan=["src/App.vue"])
+
+    workflow = make_workflow(settings, PlanningOnly(), MemoryCheckpoint())
+    events = await workflow.run(request_for("VUE_PROJECT"))
+    assert events[-1].error.code == "VUE_FILE_PLAN_LIMIT_EXCEEDED"
+    assert not any(call["name"] == "file_write" for call in workflow.tool_gateway.calls)
 
 
 async def paused_vue_state(graph, config, repair):

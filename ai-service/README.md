@@ -159,7 +159,7 @@ Spring 的 `LangGraphAiGenerationGateway` 保留完整候选缓存，展示增�
 Vue 分支允许模型请求 Spring 工具，但工具调用次数受 `AI_SERVICE_VUE_MAX_TOOL_CALLS` 限制，默认 40 次，覆盖生成与修复的总调用次数。若本轮工具请求超过剩余预算，返回 `VUE_TOOL_CALL_LIMIT_EXCEEDED`，不再静默丢弃剩余文件写入请求并构建半成品。源码必须通过 `file_write`/`file_modify` 写入，模型 `content` 只用于简短状态确认，避免重复回传源码触发输出长度上限。每次工具调用都带有确定性的 `toolCallId`，供 Spring 执行幂等控制。若构建发现项目目录或 `package.json` 缺失，工作流直接以稳定构建错误结束，不再要求模型重复生成。
 
 
-Vue 文件生成先规划 filePlan，再按每轮最多两个工具调用写入；截断或超批次响应整轮丢弃，最多重试两次，重试后每轮一个工具。模型上下文包含剩余预算、已写入和待生成文件；已声明清单尚未写完时拒绝构建。生成与修复都遵循该约束，单文件过大需拆分组件。阶段进度复用现有 SSE 文本消息；诊断日志只记录请求 ID、阶段、结束原因、输出 token 数和耗时，不记录源码与凭据。PostgreSQL saver 使用事务回退代替显式 pipeline；真实 PostgreSQL 生命周期、图失败及取消后连接复用已通过独立测试；真实模型与完整 SSE 仍需单独验收。
+Vue 文件生成先规划 filePlan，再按每轮最多两个工具调用写入；上下文 vueGeneration.phase 区分首次规划、按清单写入和既有项目修改，避免无隐式对话记忆的模型每轮重新规划。存在未写完文件时，仅返回相同规划也计入最多三轮规划预算，并提示继续写文件；超过上限返回 VUE_FILE_PLAN_LIMIT_EXCEEDED，不误报为图片未使用。截断或超批次响应整轮丢弃，最多重试两次，重试后每轮一个工具。模型上下文包含剩余预算、已写入和待生成文件；已声明清单尚未写完时拒绝构建。生成与修复都遵循该约束，单文件过大需拆分组件。阶段进度复用现有 SSE 文本消息；诊断日志只记录请求 ID、阶段、结束原因、输出 token 数和耗时，不记录源码与凭据。PostgreSQL saver 使用事务回退代替显式 pipeline；真实 PostgreSQL 生命周期、图失败及取消后连接复用已通过独立测试；真实模型与完整 SSE 仍需单独验收。
 
 Vue 的 image_search 通过 Spring 内部网关复用 Pexels 搜图客户端，每次最多返回六张图片的 URL 和说明，计入工具预算。需要实景图片的页面按提示先搜图，再把真实 URL 写入 Vue 模板或背景样式；原有图片保持不变。搜索没有结果或接口不可用时返回 ok=false 与空列表，不编造图片地址。此工具返回外部图片地址，不下载图片二进制文件，运行时需要浏览器能访问 Pexels 图片域名。Spring 需配置现有 pexels.api-key。工具完成事件分别携带安全的路径/关键词参数与执行结果，Java 展示路径和状态，不再将结果当成 Legacy 调用参数，也不重复输出源码。
 
@@ -650,7 +650,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-rea
 - [LangChain + LangGraph 重构方案](../doc/ai-service-langchain-langgraph-refactor-design.md)
 
 
-首次 Vue 生成或明确要求新增、补充、替换、搜索或修复图片时，会在上下文准备阶段主动调用 image_search（既有项目的“保留图片”“不要替换图片”及图片布局美化不触发；按中英文动作与否定分句识别，不是出现图片关键词就触发），结果放入 imageAssets；常见中文主题映射为英文查询。成功写入的 content/newContent 必须包含搜索 URL，否则最多提醒两轮后失败；修复继承已写入标记。主动检索不占模型文件循环预算，模型主动搜图仍占预算。空结果或网关异常显示降级提示并继续；普通既有功能修改不强制插图。该检查只证明 URL 写入源码，实际图片加载仍需浏览器验收。图片与部署配置、IPv4/IPv6 404 排查见 [说明](../doc/image-and-deployment-troubleshooting.md)。
+首次 Vue 生成默认主动配图，但“无需图片”“不需要任何配图”“without images”等明确不配图要求会跳过自动检索；明确要求新增、补充、替换、搜索或修复图片时仍会检索，后句新增指令可覆盖前句否定。此时会在上下文准备阶段主动调用 image_search（既有项目的“保留图片”“不要替换图片”及图片布局美化不触发；按中英文动作与否定分句识别，不是出现图片关键词就触发），结果放入 imageAssets；常见中文主题映射为英文查询。成功写入的 content/newContent 必须包含搜索 URL，否则最多提醒两轮后失败；修复继承已写入标记。主动检索不占模型文件循环预算，模型主动搜图仍占预算。空结果或网关异常显示降级提示并继续；普通既有功能修改不强制插图。该检查只证明 URL 写入源码，实际图片加载仍需浏览器验收。图片与部署配置、IPv4/IPv6 404 排查见 [说明](../doc/image-and-deployment-troubleshooting.md)。
 
 ## 输入校验与语义审核
 

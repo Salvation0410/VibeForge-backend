@@ -5,7 +5,7 @@ from typing import Any, TYPE_CHECKING
 
 from ai_service.orchestration.events import EventEmitter
 from ai_service.orchestration.state import WorkflowState
-from ai_service.orchestration.image_intent import requests_image_assets
+from ai_service.orchestration.image_intent import declines_image_assets, requests_image_assets
 
 if TYPE_CHECKING:
     from ai_service.orchestration.workflow import GenerationWorkflow
@@ -42,10 +42,10 @@ def create_input_nodes(
             state["request_id"],
             f"{state['request_id']}:artifact_context",
         )
-        # 首次生成主动配图；既有项目仅对明确配图操作检索，不能把“保留图片”误判为新增。
+        # 首次生成默认配图，但尊重明确不配图要求；后续明确新增指令仍可覆盖前句否定。
         image_assets = []
         needs_images = state["code_gen_type"] == "VUE_PROJECT" and (
-            not current_artifact.get("exists", False)
+            (not current_artifact.get("exists", False) and not declines_image_assets(state["prompt"]))
             or requests_image_assets(state["prompt"])
         )
         if needs_images:

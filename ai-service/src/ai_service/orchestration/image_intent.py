@@ -9,6 +9,14 @@ _REQUEST = re.compile(rf"{_ACTION}.{{0,32}}?{_IMAGE}", re.IGNORECASE)
 _NEGATION = re.compile(r"不要|不需要|无需|禁止|不得|别|\b(?:do not|don't|without|never|no need to)\b", re.IGNORECASE)
 
 
+def declines_image_assets(prompt: str) -> bool:
+    """识别不配图要求，不把“不要替换原有图片”当作禁止首次配图。"""
+    return bool(re.search(
+        rf"(?:无需|不需要|不要)(?:任何|使用|添加|新增)?\s*{_IMAGE}|\b(?:without|no)\s+{_IMAGE}",
+        prompt, re.IGNORECASE,
+    ))
+
+
 def requests_image_assets(prompt: str) -> bool:
     """仅对明确的新增、替换或修复图片操作自动搜图，普通图片布局优化不触发。"""
     # 按分句识别否定，不能因前句“不要替换”吞掉后句“但请添加”的明确要求。
