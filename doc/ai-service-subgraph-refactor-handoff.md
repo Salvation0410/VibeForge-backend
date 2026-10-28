@@ -4,7 +4,7 @@
 
 > 后续更新：本文第 1—8 节保留第一阶段交接基线；2026-10-27 已完成 Vue 多节点工具子图（第 9 节）、子图输入与私有状态收敛（第 10 节）、静态模型文本流式（第 11 节）、真实 PostgreSQL 子图恢复与清理验收（第 12 节）、Spring 任务账本与查询（第 13 节）、真实 MySQL/Redis 故障矩阵和租约防护（第 14 节）以及持久化生成代际 fencing（第 15 节）。第 6 节优先项一、二及优先项三中的 HTML/MULTI_FILE 流式已完成，生产任务恢复仍未实现；当前能力和验证以第 9—15 节为准。
 
-> 最新更新：2026-10-27 已完成第 15 节 MySQL 持久化代际 fencing 与活动版本指针。真实资源是否完成本轮迁移/集成测试，以第 15 节的本轮记录为准；生产任务恢复仍未实现。
+> 最新更新：2026-10-28 已实现第 16 节持久化取消与静态提交资格仲裁。第 15 节是此前真实资源验证记录；新增仲裁表尚未在真实 MySQL 迁移，部署前必须执行第 16 节列出的 SQL。生产任务恢复仍未实现。
 
 ## 1. 已实现结构
 
@@ -354,3 +354,31 @@ MySQL、Redis 与文件系统没有跨资源事务：取消仲裁至墓碑写入
 - 后续增补 `publisherPausedInsideFileVerificationCannotActivateAfterSuccessorCommits`：不同 store 实例共用真实 MySQL 与临时文件目录，旧发布在校验中阻塞，后继签新代际并提交，旧发布恢复后返回 `GENERATION_FENCE_REJECTED`。同时新增 H2 并发签发、活动指针写失败回滚发布事实，以及文件镜像写失败不反转 DB 提交测试。`AI_TASK_INTEGRATION=true` 运行 Mapper/解析器/真实资源三类共 24 项全部通过，其中真实资源 9 项。
 - 执行无筛选 `mvn test` 时发现历史 `AiCodeGeneratorServiceTest` 会直接访问真实供应商并写 `tmp/code_output/vue_project_1`，已中断该次运行；无筛选全量不计通过。该调用不构成完整业务端到端验收，后续使用明确限定的回归集合，生成临时产物不提交。
 - 最终验证：`mvn clean -DskipTests compile` 成功；开启 `AI_TASK_INTEGRATION=true` 执行上述限定回归集合并加入 `InternalAiToolsControllerTest,ArtifactRecoveryControllerTest,AiCodeGeneratorFacadeTest`：145 项通过，0 失败/错误/跳过，其中真实 MySQL/Redis 测试 9 项。Python 与前端源码未修改，未重跑其测试。`git diff --check` 通过。
+
+## 16. 持久化取消与静态提交资格仲裁
+
+设计与计划：`docs/superpowers/specs/2026-10-28-generation-cancellation-arbitration-design.md`、`docs/superpowers/plans/2026-10-28-generation-cancellation-arbitration.md`。本阶段经用户确认，先解决恢复前置的取消权威状态，再推进执行所有者与心跳。
+
+### 当前实现
+
+- 新增 `generation_arbitration` 请求绑定与不可逆 ACTIVE/CANCELLED/COMMITTING 决策；签发代际和插入绑定在同一 MySQL 事务，取消、提交占位及最终激活均先锁同一应用代际行，再核对请求/appId/token。决策使用锁定读取，避免 MySQL 旧快照绕过取消。
+- 取消确认前先持久化取消时间；Redis 镜像失败仍返回应通知引擎的结果。提交先确认 COMMITTING 后取消不胜出；动作失败或确认丢失不回退占位。COMMITTING 不是发布事实，活动指针仍由原发布事务决定。
+- 最终静态激活拒绝 CANCELLED 和旧代际，即使 Redis 镜像丢失或恢复为 ACTIVE 也不能绕过。任务表取消补记仍是 best-effort，任务查询优先补读同请求/appId/token 的权威取消时间；启动后额外复核覆盖取消先于任务插入且 Redis 镜像写失败的窗口。
+- 新增 H2 真实 XML 并发唯一赢家、两种先后顺序、服务重建、旧代际/跨应用拒绝、事务确认丢失、事务回滚和请求重复绑定测试；Redis mock 覆盖镜像失败继续取消与数据库失败关闭；真实资源 opt-in 夹具增加表预检、清理及镜像丢失场景。
+
+### 部署与边界
+
+升级前排空旧实例任务并执行 `sql/alter_generation_arbitration.sql`，所有 Spring 实例统一升级。初始化 SQL 同步新增表；本轮未执行真实业务库 DDL，不自动回填历史请求、不清理仲裁墓碑。缺表时新租约及任务查询失败关闭。
+
+Redis 仍负责实时入口、活动请求发现和通知；完全不可用/无活动租约时尚无离线取消接口。Vue 在途文件写入不受静态发布事务保护，仍为协作式取消。未改 Python/前端/NDJSON/SSE，未开放自动恢复、所有者认领、心跳或客户端重连。
+
+### 下一阶段
+
+先验收仲裁表真实 MySQL 迁移与 Redis/文件故障矩阵，再设计执行所有者、心跳和过期认领，并将请求身份、代际和取消决策贯穿 Python checkpoint 接续。不能仅凭 RUNNING、无锁或 COMMITTING 恢复任务。
+
+### 本轮验证
+
+- `mvn clean -DskipTests compile`：273 个 Java 源文件 BUILD SUCCESS。
+- `mvn test '-Dtest=GenerationTaskMapperTest,GenerationTaskServiceTest,AppGenerationTaskTest,AppServiceGenerationCancellationTest,ArtifactPublicationEvidenceTest,GenerationJsonErrorBoundaryTest,GenerationLeaseServiceTest,AppControllerSseTest,LangGraphAiGenerationGatewayTest,SimpleTextStreamHandlerTest,ArtifactPublicationServiceTest,ArtifactPathResolverTest,InternalAiToolsControllerTest,ArtifactRecoveryControllerTest,AiCodeGeneratorFacadeTest,GenerationTaskResourcesIT'`：154 项执行，144 通过，0 失败/错误，10 项真实资源 opt-in 因未启用 `AI_TASK_INTEGRATION` 跳过。
+- H2/Mockito 中实际执行 12 轮取消与提交并发竞争、事务提交后确认丢失及更新后回滚；不代表真实 MySQL/Redis 或跨进程故障验收。
+- Python 与前端源码未改，未重跑其测试；未运行真实模型、Spring/Python HTTP、Selenium 或浏览器 SSE。前端四个既有客服文件修改保留。

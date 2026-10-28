@@ -72,6 +72,7 @@ class GenerationTaskResourcesIT {
              var delete = connection.prepareStatement("DELETE FROM generation_task WHERE app_id = ? AND user_id = ?");
              var deletePublications = connection.prepareStatement("DELETE FROM generation_publication WHERE app_id = ?");
              var deleteActive = connection.prepareStatement("DELETE FROM generation_active_artifact WHERE app_id = ?");
+             var deleteArbitration = connection.prepareStatement("DELETE FROM generation_arbitration WHERE app_id = ?");
              var deleteFence = connection.prepareStatement("DELETE FROM generation_fence WHERE app_id = ?")) {
             delete.setLong(1, appId);
             delete.setLong(2, USER);
@@ -82,6 +83,8 @@ class GenerationTaskResourcesIT {
             deleteActive.executeUpdate();
             deleteFence.setLong(1, appId);
             deleteFence.executeUpdate();
+            deleteArbitration.setLong(1, appId);
+            deleteArbitration.executeUpdate();
         } finally {
             resources.first.getLock("ai:generation:app:" + appId).forceUnlock();
             resources.first.getLock("ai:generation:transition:" + appId).forceUnlock();
@@ -177,7 +180,7 @@ class GenerationTaskResourcesIT {
     }
 
     @Test
-    void cancelledRedisAuthorityStillRejectsPublishWhenMysqlCancellationWriteFails() throws Exception {
+    void durableCancellationStillRejectsPublishWhenLedgerCancellationWriteFails() throws Exception {
         String id = request();
         var lease = first.acquire(appId, id);
         tasks.start(appId, USER, id, CodeGenTypeEnum.HTML, lease.fenceToken());
@@ -187,7 +190,7 @@ class GenerationTaskResourcesIT {
         var service = application(new GenerationTaskServiceImpl(mapper), second, gateway, mock(ChatHistoryService.class));
         assertEquals("STOPPING", service.cancelGeneration(appId, SysUser.builder().id(USER).build()).getState());
         verify(gateway).cancel(appId, USER, id);
-        assertNull(tasks.findOwned(appId, USER, id).getCancelRequestedAt());
+        assertNotNull(tasks.findOwned(appId, USER, id).getCancelRequestedAt());
         AtomicBoolean published = new AtomicBoolean();
         assertEquals("GENERATION_CANCELLED", assertThrows(GenerationStreamException.class,
                 () -> first.commit(appId, id, () -> { published.set(true); return null; })).getErrorCode());
@@ -200,6 +203,28 @@ class GenerationTaskResourcesIT {
         assertEquals("CANCELLED", status.getExecutionState());
         assertEquals("UNKNOWN", status.getLeaseState());
         assertEquals("NOT_CONFIRMED", status.getPublicationState());
+    }
+
+    @Test
+    void durableCancellationRejectsActivationAfterRedisMirrorIsLost() throws Exception {
+        String id = request();
+        var lease = first.acquire(appId, id);
+        tasks.start(appId, USER, id, CodeGenTypeEnum.HTML, lease.fenceToken());
+        assertTrue(second.cancelActive(appId).cancellationRequested());
+        resources.first.getBucket("ai:generation:state:" + appId).set(id + ":ACTIVE");
+        var restarted = new GenerationFenceService(resources.newFenceMapper(), new ObjectMapper(),
+                new DataSourceTransactionManager(resources.dataSource()));
+        assertEquals("GENERATION_CANCELLED", assertThrows(GenerationStreamException.class,
+                () -> restarted.activate(appId, "html", id, lease.fenceToken(), lease.fenceToken(),
+                        Map.of("index.html", "hash"))).getErrorCode());
+        AtomicBoolean invoked = new AtomicBoolean();
+        assertEquals("GENERATION_CANCELLED", assertThrows(GenerationStreamException.class,
+                () -> first.commit(appId, id, () -> { invoked.set(true); return null; })).getErrorCode());
+        assertFalse(invoked.get());
+        assertNull(fences.active(appId, "html"));
+        assertNull(fences.publication(appId, "html", id));
+        assertNotNull(tasks.findOwned(appId, USER, id).getCancelRequestedAt());
+        first.release(lease);
     }
 
     @Test

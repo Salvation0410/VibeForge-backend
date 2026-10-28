@@ -30,13 +30,14 @@ public class GenerationFenceService {
     }
 
     /** 在事务中递增应用代际；事务提交后该 token 永不复用。 */
-    public long issue(long appId) {
+    public long issue(long appId, String requestId) {
         try {
             Long value = transactions.execute(status -> {
                 mapper.ensureFenceRow(appId);
                 if (mapper.incrementFence(appId) != 1) throw unavailable();
                 Long current = mapper.currentFence(appId);
                 if (current == null || current <= 0) throw unavailable();
+                if (mapper.bindRequest(appId, requestId, current) != 1) throw unavailable();
                 return current;
             });
             if (value == null) throw unavailable();
@@ -45,6 +46,59 @@ public class GenerationFenceService {
             throw error;
         } catch (RuntimeException error) {
             throw unavailable(error);
+        }
+    }
+
+    /** 取消和提交资格共用代际行锁；确认丢失时不猜测结果，不反向改写决策。 */
+    public boolean cancel(long appId, String requestId) {
+        return arbitrate(appId, requestId, "CANCELLED");
+    }
+
+    public void beginCommit(long appId, String requestId) {
+        if (!arbitrate(appId, requestId, "COMMITTING")) {
+            throw new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(), "GENERATION_CANCELLED",
+                    requestId, "生成请求已取消，拒绝发布产物", null);
+        }
+    }
+
+    private boolean arbitrate(long appId, String requestId, String target) {
+        try {
+            Boolean won = transactions.execute(status -> {
+                Long current = mapper.lockCurrentFence(appId);
+                Arbitration decision = mapper.findArbitration(requestId);
+                requireCurrent(appId, requestId, current, decision);
+                if ("ACTIVE".equals(decision.decision())) {
+                    if (mapper.decide(requestId, target,
+                            "CANCELLED".equals(target) ? LocalDateTime.now() : null) != 1) throw unavailable();
+                    return true;
+                }
+                return target.equals(decision.decision());
+            });
+            return Boolean.TRUE.equals(won);
+        } catch (GenerationStreamException error) {
+            throw error;
+        } catch (RuntimeException error) {
+            throw unavailable(error);
+        }
+    }
+
+    /** 只读启动复核；任务插入前已确认的取消同样不能进入模型调用。 */
+    public boolean isCancelled(long appId, String requestId) {
+        try {
+            Arbitration value = mapper.findArbitration(requestId);
+            if (value == null || value.appId() != appId) throw unavailable();
+            return "CANCELLED".equals(value.decision());
+        } catch (GenerationStreamException error) {
+            throw error;
+        } catch (RuntimeException error) {
+            throw unavailable(error);
+        }
+    }
+
+    private void requireCurrent(long appId, String requestId, Long current, Arbitration decision) {
+        if (decision == null || decision.appId() != appId || current == null || !current.equals(decision.fenceToken())) {
+            throw new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(),
+                    "GENERATION_FENCE_REJECTED", requestId, "生成租约代际已失效，拒绝执行", null);
         }
     }
 
@@ -67,6 +121,15 @@ public class GenerationFenceService {
                 throw new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(),
                         "GENERATION_FENCE_REJECTED", requestId, "生成租约代际已失效，拒绝激活产物", null);
             }
+            Arbitration decision = mapper.findArbitration(requestId);
+            requireCurrent(appId, requestId, current, decision);
+            if ("CANCELLED".equals(decision.decision())) {
+                throw new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(), "GENERATION_CANCELLED",
+                        requestId, "生成请求已取消，拒绝激活产物", null);
+            }
+            // 独立调用最终激活也必须先取得提交资格，不能绕开持久化取消。
+            if ("ACTIVE".equals(decision.decision())
+                    && mapper.decide(requestId, "COMMITTING", null) != 1) throw unavailable();
             PublicationRecord existing = mapper.findPublication(appId, codeGenType, requestId);
             String hashesJson = json(hashes);
             if (existing == null) {
@@ -112,6 +175,7 @@ public class GenerationFenceService {
     }
 
     public record ActiveArtifact(String requestId, Long fenceToken) { }
+    public record Arbitration(Long appId, Long fenceToken, String decision, LocalDateTime cancelRequestedAt) { }
     public record PublicationRecord(Long appId, String codeGenType, String requestId, Long fenceToken,
                                     Long publicationSequence, String hashesJson) { }
 }

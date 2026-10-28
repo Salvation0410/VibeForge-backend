@@ -32,7 +32,12 @@
         SELECT fence_token FROM generation_task WHERE app_id = #{appId} AND request_id = #{requestId}
     </select>
     <select id="findOwned" resultMap="task">
-        SELECT * FROM generation_task
+        SELECT generation_task.request_id, app_id, user_id, code_gen_type, execution_state, error_code,
+               COALESCE((SELECT a.cancel_requested_at FROM generation_arbitration a
+                         WHERE a.request_id = generation_task.request_id AND a.app_id = generation_task.app_id
+                           AND a.fence_token = generation_task.fence_token), cancel_requested_at) AS cancel_requested_at,
+               created_at, updated_at, finished_at, query_until, fence_token
+        FROM generation_task
         WHERE app_id = #{appId} AND user_id = #{userId}
           AND (query_until IS NULL OR query_until &gt; #{now})
         <if test="requestId != null">AND request_id = #{requestId}</if>

@@ -212,7 +212,53 @@ class GenerationLeaseServiceTest {
 
     private GenerationLeaseService service(RedissonClient client) {
         var fence = mock(GenerationFenceService.class);
-        when(fence.issue(anyLong())).thenReturn(1L);
+        when(fence.issue(anyLong(), anyString())).thenReturn(1L);
+        when(fence.cancel(anyLong(), anyString())).thenReturn(true);
         return new GenerationLeaseService(client, fence);
+    }
+
+    @Test
+    void durableCancellationStillRequestsEngineNotificationWhenRedisMirrorFails() {
+        var client = mock(RedissonClient.class);
+        var lock = mock(RLock.class);
+        var transition = mock(RLock.class);
+        RBucket<String> bucket = mock(RBucket.class);
+        var fences = mock(GenerationFenceService.class);
+        when(client.getLock("ai:generation:app:42")).thenReturn(lock);
+        when(client.getLock("ai:generation:transition:42")).thenReturn(transition);
+        when(client.<String>getBucket("ai:generation:state:42")).thenReturn(bucket);
+        when(lock.isLocked()).thenReturn(true);
+        when(bucket.get()).thenReturn("req:ACTIVE");
+        when(fences.cancel(42, "req")).thenReturn(true);
+        doThrow(new IllegalStateException("模拟镜像不可用")).when(bucket).set("req:CANCELLED");
+        var service = new GenerationLeaseService(client, fences);
+        assertTrue(service.cancelActive(42).cancellationRequested());
+        assertTrue(service.cancel(new GenerationLease(42, "req", 1L, lock, 1L)));
+        verify(fences, times(2)).cancel(42, "req");
+    }
+
+    @Test
+    void databaseFailureDoesNotAcknowledgeCancellationOrRunPublication() {
+        var client = mock(RedissonClient.class);
+        var lock = mock(RLock.class);
+        var transition = mock(RLock.class);
+        RBucket<String> bucket = mock(RBucket.class);
+        var fences = mock(GenerationFenceService.class);
+        when(client.getLock("ai:generation:app:42")).thenReturn(lock);
+        when(client.getLock("ai:generation:transition:42")).thenReturn(transition);
+        when(client.<String>getBucket("ai:generation:state:42")).thenReturn(bucket);
+        when(lock.isLocked()).thenReturn(true);
+        when(bucket.get()).thenReturn("req:ACTIVE");
+        when(fences.cancel(42, "req")).thenThrow(new IllegalStateException("模拟数据库不可用"));
+        doThrow(new IllegalStateException("模拟数据库不可用")).when(fences).beginCommit(42, "req");
+        var service = new GenerationLeaseService(client, fences);
+        assertThrows(IllegalStateException.class, () -> service.cancelActive(42));
+        var invoked = new AtomicBoolean();
+        assertThrows(IllegalStateException.class, () -> service.commit(42, "req", () -> {
+            invoked.set(true);
+            return "published";
+        }));
+        assertFalse(invoked.get());
+        verify(bucket, never()).set(anyString());
     }
 }

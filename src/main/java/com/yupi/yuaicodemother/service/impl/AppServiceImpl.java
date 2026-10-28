@@ -130,8 +130,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             taskStarted = true;
             // 取消可能发生在租约获得后、任务插入前；补记这段窗口内已获胜的取消。
             var afterStart = generationLeaseService.getStatus(appId);
-            if (afterStart != null && requestId.equals(afterStart.requestId())
-                    && afterStart.state() == GenerationLeaseService.PublicState.STOPPING) {
+            if (generationLeaseService.isCancellationConfirmed(appId, requestId)
+                    || (afterStart != null && requestId.equals(afterStart.requestId())
+                    && afterStart.state() == GenerationLeaseService.PublicState.STOPPING)) {
                 generationTaskService.recordCancellation(requestId);
                 throw new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(),
                         "GENERATION_CANCELLED", requestId, "生成请求已取消", null);

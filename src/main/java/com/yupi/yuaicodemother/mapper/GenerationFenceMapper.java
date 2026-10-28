@@ -11,6 +11,11 @@ public interface GenerationFenceMapper {
     int incrementFence(@Param("appId") long appId);
     Long currentFence(@Param("appId") long appId);
     Long lockCurrentFence(@Param("appId") long appId);
+    int bindRequest(@Param("appId") long appId, @Param("requestId") String requestId,
+                    @Param("fenceToken") long fenceToken);
+    GenerationFenceService.Arbitration findArbitration(@Param("requestId") String requestId);
+    int decide(@Param("requestId") String requestId, @Param("decision") String decision,
+               @Param("cancelledAt") LocalDateTime cancelledAt);
     int insertPublication(@Param("appId") long appId, @Param("codeGenType") String codeGenType,
                           @Param("requestId") String requestId, @Param("fenceToken") long fenceToken,
                           @Param("sequence") long sequence, @Param("hashesJson") String hashesJson,

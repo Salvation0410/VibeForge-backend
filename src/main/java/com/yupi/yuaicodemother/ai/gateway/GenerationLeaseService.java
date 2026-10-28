@@ -54,7 +54,7 @@ public class GenerationLeaseService {
             // Redisson 允许同客户端同线程重入，但业务上每个应用只能运行一个请求。
             if (lock.isLocked() || !lock.tryLock()) throw inProgress(requestId);
             try {
-                long fenceToken = generationFenceService.issue(appId);
+                long fenceToken = generationFenceService.issue(appId, requestId);
                 stateBucket(appId).set(state(requestId, ACTIVE));
                 return new GenerationLease(appId, requestId, fenceToken, lock, ownerThreadId);
             } catch (RuntimeException error) {
@@ -79,7 +79,8 @@ public class GenerationLeaseService {
             RBucket<String> bucket = stateBucket(lease.appId());
             if (!Objects.equals(bucket.get(), state(lease.requestId(), ACTIVE))) return false;
             if (!lease.lock().isLocked()) return false;
-            bucket.set(state(lease.requestId(), CANCELLED));
+            if (!generationFenceService.cancel(lease.appId(), lease.requestId())) return false;
+            mirrorCancellation(bucket, lease.appId(), lease.requestId());
             return true;
         } finally {
             transitionLock.unlock();
@@ -96,13 +97,30 @@ public class GenerationLeaseService {
             RBucket<String> bucket = stateBucket(appId);
             GenerationStateSnapshot current = liveSnapshot(appId, bucket.get());
             if (current.state() == PublicState.RUNNING) {
-                bucket.set(state(current.requestId(), CANCELLED));
+                if (!generationFenceService.cancel(appId, current.requestId())) {
+                    return new GenerationStateSnapshot(current.requestId(), PublicState.COMMITTING, false);
+                }
+                mirrorCancellation(bucket, appId, current.requestId());
                 return new GenerationStateSnapshot(current.requestId(), PublicState.STOPPING, true);
             }
             return current;
         } finally {
             transitionLock.unlock();
         }
+    }
+
+    /** 数据库取消已提交后，Redis 镜像失败不能阻止调用方通知引擎停止。 */
+    private void mirrorCancellation(RBucket<String> bucket, long appId, String requestId) {
+        try {
+            bucket.set(state(requestId, CANCELLED));
+        } catch (RuntimeException error) {
+            log.warn("取消已持久化但实时镜像更新失败, appId={}, requestId={}, type={}",
+                    appId, requestId, error.getClass().getSimpleName());
+        }
+    }
+
+    public boolean isCancellationConfirmed(long appId, String requestId) {
+        return generationFenceService.isCancelled(appId, requestId);
     }
 
     /** 返回应用当前对外生命周期状态，不暴露 Redis 内部状态名。 */
@@ -117,7 +135,7 @@ public class GenerationLeaseService {
     }
 
     /**
-     * 在与取消互斥的临界区提交产物；先转为 COMMITTING 使提交胜出，完成标记失败不反向否定已发布版本。
+     * 先在 MySQL 持久化提交资格，再执行产物操作；Redis 只保存实时镜像。
      *
      * @throws GenerationStreamException 请求已取消或不再是当前活动请求时抛出
      */
@@ -142,25 +160,17 @@ public class GenerationLeaseService {
                 throw new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(), "GENERATION_LEASE_LOST",
                         requestId, "生成租约已丢失，拒绝发布产物", null);
             }
+            generationFenceService.beginCommit(appId, requestId);
             if (active) bucket.set(state(requestId, COMMITTING));
+            // 提交资格一旦持久化不回退；动作失败或确认丢失不证明发布没有发生。
+            T result = action.execute();
             try {
-                T result = action.execute();
-                try {
-                    bucket.set(state(requestId, COMMITTED));
-                } catch (RuntimeException stateError) {
-                    // 产物已提交后状态标记失败只能降级记录，不能向上游报告失败并造成终态矛盾。
-                    log.warn("记录生成提交完成状态失败, appId={}, requestId={}", appId, requestId, stateError);
-                }
-                return result;
-            } catch (Exception | Error publishError) {
-                if (active) {
-                    try { bucket.set(state(requestId, ACTIVE)); }
-                    catch (RuntimeException stateError) {
-                        publishError.addSuppressed(stateError);
-                    }
-                }
-                throw publishError;
+                bucket.set(state(requestId, COMMITTED));
+            } catch (RuntimeException stateError) {
+                // 产物已提交后状态标记失败只能降级记录，不能向上游报告失败并造成终态矛盾。
+                log.warn("记录生成提交完成状态失败, appId={}, requestId={}", appId, requestId, stateError);
             }
+            return result;
         } finally {
             transitionLock.unlock();
         }

@@ -136,7 +136,7 @@ public class ArtifactPublicationService {
         }
     }
 
-    /** Redis 仲裁取消，MySQL 代际仲裁活动版本；数据库错误正文不得透传到生成流。 */
+    /** MySQL 仲裁取消、提交资格与活动版本，Redis 保存实时镜像；数据库错误正文不得透传到生成流。 */
     private ArtifactPublishResult publish(CodeGenTypeEnum type, long appId, String requestId,
                                          Map<String, String> files, String engine, String finishReason,
                                          VersionedArtifactStore.StagingVerifier verifier, Long fenceToken) {

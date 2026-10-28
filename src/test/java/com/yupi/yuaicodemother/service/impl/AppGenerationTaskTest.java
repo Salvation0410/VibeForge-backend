@@ -82,6 +82,22 @@ class AppGenerationTaskTest {
     }
 
     @Test
+    void durableCancellationBeforeTaskInsertStopsModelEvenWhenRedisMirrorShowsRunning() {
+        var service = fixture(CodeGenTypeEnum.HTML);
+        when(leases.isCancellationConfirmed(eq(42L), anyString())).thenReturn(true);
+        when(leases.getStatus(42L)).thenAnswer(call ->
+                new GenerationLeaseService.GenerationStateSnapshot("stale-mirror",
+                        GenerationLeaseService.PublicState.RUNNING, false));
+        var error = assertThrows(GenerationStreamException.class,
+                () -> service.chatToGenCode(42L, "build", owner).blockLast());
+        assertEquals("GENERATION_CANCELLED", error.getErrorCode());
+        verifyNoInteractions(history, originals);
+        verify(gateway, never()).generate(anyString(), any(), anyLong(), anyLong(), anyString());
+        verify(tasks).finish(error.getRequestId(), "CANCELLED", "GENERATION_CANCELLED");
+        verify(leases).release(lease);
+    }
+
+    @Test
     void modelErrorPersistsStableFailureAndCannotReportSuccess() {
         var service = fixture(CodeGenTypeEnum.MULTI_FILE);
         when(gateway.generate(anyString(), any(), anyLong(), anyLong(), anyString()))

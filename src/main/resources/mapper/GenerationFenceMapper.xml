@@ -34,6 +34,26 @@
             (request_id, app_id, code_gen_type, fence_token, publication_sequence, hashes_json, published_at)
         VALUES (#{requestId}, #{appId}, #{codeGenType}, #{fenceToken}, #{sequence}, #{hashesJson}, #{publishedAt})
     </insert>
+    <insert id="bindRequest">
+        INSERT INTO generation_arbitration (request_id, app_id, fence_token, decision)
+        VALUES (#{requestId}, #{appId}, #{fenceToken}, 'ACTIVE')
+    </insert>
+    <resultMap id="arbitration" type="com.yupi.yuaicodemother.core.artifact.GenerationFenceService$Arbitration">
+        <constructor>
+            <arg column="app_id" javaType="long"/>
+            <arg column="fence_token" javaType="long"/>
+            <arg column="decision" javaType="java.lang.String"/>
+            <arg column="cancel_requested_at" javaType="java.time.LocalDateTime"/>
+        </constructor>
+    </resultMap>
+    <select id="findArbitration" resultMap="arbitration">
+        SELECT app_id, fence_token, decision, cancel_requested_at
+        FROM generation_arbitration WHERE request_id = #{requestId} FOR UPDATE
+    </select>
+    <update id="decide">
+        UPDATE generation_arbitration SET decision = #{decision}, cancel_requested_at = #{cancelledAt}
+        WHERE request_id = #{requestId} AND decision = 'ACTIVE'
+    </update>
     <select id="findPublication" resultMap="publication">
         SELECT app_id, code_gen_type, request_id, fence_token, publication_sequence, hashes_json
         FROM generation_publication

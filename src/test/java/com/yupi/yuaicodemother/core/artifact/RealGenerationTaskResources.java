@@ -55,6 +55,7 @@ final class RealGenerationTaskResources implements AutoCloseable {
             // 预检已迁移的表；失败应保留为真实依赖错误，不能自动跳过或建表掩盖。
             statement.executeQuery("SELECT request_id, execution_state, query_until FROM generation_task LIMIT 0").close();
             statement.executeQuery("SELECT app_id, current_token FROM generation_fence LIMIT 0").close();
+            statement.executeQuery("SELECT request_id, app_id, fence_token, decision, cancel_requested_at FROM generation_arbitration LIMIT 0").close();
             statement.executeQuery("SELECT request_id, fence_token FROM generation_publication LIMIT 0").close();
             statement.executeQuery("SELECT app_id, code_gen_type, request_id FROM generation_active_artifact LIMIT 0").close();
         }
