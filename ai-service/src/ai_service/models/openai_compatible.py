@@ -270,21 +270,32 @@ def _model_turn(response: Any, content: str, tool_calls: list[ToolCall] | None =
 
 
 def _vue_model_turn(response: Any) -> ModelTurn:
-    """解析 Vue 模型的 JSON 文本与工具调用，格式异常时保留原始响应。"""
+    """仅解析完整 JSON 对象；格式异常返回标记，不展示或执行原始源码。"""
     raw = str(response.content)
     try:
         payload = json.loads(_strip_json_fence(raw))
+        if not isinstance(payload, dict) or not isinstance(payload.get("content", ""), str):
+            raise TypeError("invalid Vue response object")
+        items = payload.get("toolCalls", [])
+        plan = payload.get("filePlan", [])
+        if not isinstance(items, list) or not isinstance(plan, list):
+            raise TypeError("invalid Vue response lists")
+        if len(plan) > 40 or not all(isinstance(path, str) and 0 < len(path) <= 256 for path in plan):
+            raise TypeError("invalid Vue file plan")
+        if any(not isinstance(item, dict) or not isinstance(item.get("name"), str)
+               or not item["name"] or not isinstance(item.get("arguments", {}), dict) for item in items):
+            raise TypeError("invalid Vue tool structure")
         calls = [
             ToolCall(name=item["name"], arguments=item.get("arguments", {}))
-            for item in payload.get("toolCalls", [])
+            for item in items
         ]
         turn = _model_turn(response, payload.get("content", ""), calls)
-        plan = payload.get("filePlan", [])
-        if isinstance(plan, list) and len(plan) <= 40 and all(isinstance(path, str) and 0 < len(path) <= 256 for path in plan):
-            turn.file_plan = list(dict.fromkeys(plan))
+        turn.file_plan = list(dict.fromkeys(plan))
         return turn
     except (json.JSONDecodeError, AttributeError, KeyError, TypeError):
-        return _model_turn(response, raw)
+        turn = _model_turn(response, "")
+        turn.vue_output_invalid = True
+        return turn
 
 
 def _strip_json_fence(value: str) -> str:

@@ -23,6 +23,7 @@ class VueLoopProgress(TypedDict):
     content_parts: list[str]
     ordinal: int
     retry_count: int
+    format_retries: int
     batch_limit: int
     file_plan: list[str]
     written_files: list[str]
@@ -46,7 +47,7 @@ class VueLoopState(RepairState, total=False):
 
 def initial_progress(context: dict[str, Any], prefix: str, started_at: str) -> VueLoopProgress:
     return {
-        "content_parts": [], "ordinal": 0, "retry_count": 0, "batch_limit": 2,
+        "content_parts": [], "ordinal": 0, "retry_count": 0, "format_retries": 0, "batch_limit": 2,
         "file_plan": [], "written_files": [], "planning_turns": 0,
         "image_retries": 0,
         "image_used": bool(context.get("imageAssetsApplied")) or not bool(context.get("imageAssets")),
@@ -113,6 +114,19 @@ def create_vue_loop_nodes(
             context["batchRetryFeedback"] = "上一轮响应未执行。请每轮只返回一个完整文件工具调用；过大的文件先拆分组件并更新 filePlan。"
             return {"vue_loop": loop, **({"context": context} if context != state["context"] else {})}
         _raise_for_incomplete_model_turn(turn["finish_reason"])
+        if turn.get("vue_output_invalid"):
+            # 无效响应整轮丢弃；计数跨成功轮次保留，避免不消耗工具的格式重试无限循环。
+            retries = loop.get("format_retries", 0)
+            if retries >= 2:
+                raise ValueError("VUE_MODEL_INVALID_OUTPUT: Vue 工具响应格式错误，请重新生成")
+            loop.update(format_retries=retries + 1, next_step="model_turn", turn={})
+            context["vueFormatFeedback"] = (
+                "上一轮格式错误，未执行任何工具。只返回一个完整 JSON 对象，禁止在 JSON 前后添加说明或输出多段 JSON。"
+                "使用 content、filePlan、toolCalls 字段；按 pendingFiles 继续写入，每轮遵守 maxToolCallsPerTurn。"
+            )
+            logger.warning("Vue invalid model output request_id=%s node=%s retry=%d",
+                           state["request_id"], node, retries + 1)
+            return {"vue_loop": loop, "context": context}
         usage = dict(state.get("token_usage", {}))
         for key, value in turn["token_usage"].items():
             usage[key] = usage.get(key, 0) + value

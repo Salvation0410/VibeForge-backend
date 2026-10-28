@@ -48,6 +48,42 @@ def model_with_response(response_content: str) -> OpenAICompatibleModel:
     return model
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw", [
+    '继续写入。\n{"content":"write","toolCalls":[]}',
+    '[]', '{"content":42,"toolCalls":[]}',
+    '{"content":"write","toolCalls":{}}',
+    '{"content":"write","toolCalls":[{"name":42}]}',
+    '{"content":"write","toolCalls":[{"name":"file_write","arguments":[]}]}',
+    '{"content":"plan","filePlan":"src/App.vue"}',
+])
+async def test_vue_invalid_output_is_marked_without_displaying_source(raw):
+    turn = await model_with_response(raw).generate("VUE_PROJECT", {})
+    assert turn.vue_output_invalid is True
+    assert turn.content == ""
+    assert turn.tool_calls == []
+    assert turn.file_plan == []
+
+
+@pytest.mark.asyncio
+async def test_vue_repair_invalid_output_preserves_finish_metadata():
+    model = model_with_response("说明文字 {broken json}")
+
+    class TruncatedClient(CapturingClient):
+        async def ainvoke(self, messages):
+            response = await super().ainvoke(messages)
+            response.response_metadata = {"finish_reason": "length"}
+            response.usage_metadata = {"output_tokens": 123}
+            return response
+
+    model._client = TruncatedClient("说明文字 {broken json}")
+    turn = await model.repair("old", {"codeGenType": "VUE_PROJECT"})
+    assert turn.vue_output_invalid is True
+    assert turn.content == ""
+    assert turn.finish_reason == "LENGTH"
+    assert turn.token_usage == {"output_tokens": 123}
+
+
 def test_model_client_receives_configured_max_tokens(monkeypatch):
     captured = {}
 
@@ -166,12 +202,13 @@ async def test_vue_generation_uses_the_versioned_tool_prompt():
 
 
 @pytest.mark.asyncio
-async def test_vue_generation_falls_back_when_json_top_level_is_not_an_object():
+async def test_vue_generation_marks_invalid_json_top_level():
     model = model_with_response("[]")
 
     result = await model.generate("VUE_PROJECT", {"prompt": "build it"})
 
-    assert result.content == "[]"
+    assert result.content == ""
+    assert result.vue_output_invalid is True
     assert result.tool_calls == []
 
 

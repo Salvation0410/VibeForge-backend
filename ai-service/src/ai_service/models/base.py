@@ -25,6 +25,8 @@ class ModelTurn:
     finish_reason: str | None = None
     token_usage: dict[str, int] = field(default_factory=dict)
     file_plan: list[str] = field(default_factory=list)
+    # Vue 协议异常由工具循环有限重试，不能伪装成无工具的正常结束。
+    vue_output_invalid: bool = False
 
 
 TextDeltaCallback = Callable[[str], Awaitable[None]]

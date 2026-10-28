@@ -2991,6 +2991,51 @@ def test_vue_file_plan_cannot_complete_with_missing_view(app_factory, auth_heade
     assert not any(call["name"] == "project_build" for call in gateway.calls)
 
 
+@pytest.mark.parametrize("recover", [True, False])
+def test_vue_mixed_text_json_retries_before_completion(app_factory, auth_headers, ndjson_parser, recover):
+    from types import SimpleNamespace
+    from ai_service.models.openai_compatible import _vue_model_turn
+
+    class MixedResponseModel(FakeModel):
+        turns = 0
+
+        async def generate(self, branch, context):
+            self.turns += 1
+            if self.turns == 1:
+                return ModelTurn(content="plan", file_plan=["src/App.vue"])
+            if self.turns == 2 or not recover:
+                # 真实故障形态：说明文字让整段 JSON 无法解析，不能静默结束或提取执行。
+                return _vue_model_turn(SimpleNamespace(
+                    content='继续写入 PRIVATE_SOURCE\n' + json.dumps({"content": "write", "toolCalls": [
+                        {"name": "file_write", "arguments": {"relativeFilePath": "src/App.vue", "content": "PRIVATE_SOURCE"}}
+                    ]}), response_metadata={"finish_reason": "stop"}, usage_metadata={},
+                ))
+            assert "vueFormatFeedback" in context
+            assert context["vueGeneration"]["pendingFiles"] == (["src/App.vue"] if self.turns == 3 else [])
+            if self.turns == 3:
+                return ModelTurn(content="write", tool_calls=[ToolCall("file_write", {
+                    "relativeFilePath": "src/App.vue", "content": "<template>ok</template>"
+                })])
+            return ModelTurn(content="done")
+
+    model, gateway = MixedResponseModel(), FakeToolGateway()
+    events = ndjson_parser(TestClient(app_factory(model=model, gateway=gateway)).post(
+        "/internal/v1/generations:stream", json=generation_payload("VUE_PROJECT"), headers=auth_headers,
+    ))
+    writes = [call for call in gateway.calls if call["name"] == "file_write"]
+    assert "PRIVATE_SOURCE" not in json.dumps(events)
+    if recover:
+        assert events[-1]["type"] == "completed"
+        assert len(writes) == 1
+        assert writes[0]["arguments"]["content"] == "<template>ok</template>"
+        assert model.turns == 4
+    else:
+        assert events[-1]["error"]["code"] == "VUE_MODEL_INVALID_OUTPUT"
+        assert model.turns == 4
+        assert writes == []
+        assert not any(call["name"] == "project_build" for call in gateway.calls)
+
+
 def test_vue_repeated_truncation_has_exactly_two_retries(app_factory, auth_headers, ndjson_parser):
     class TruncatedModel(FakeModel):
         async def generate(self, branch, context):
