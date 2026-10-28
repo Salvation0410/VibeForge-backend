@@ -411,3 +411,9 @@ Redis 仍负责实时入口、活动请求发现和通知；完全不可用/无�
 - 开启 `AI_TASK_INTEGRATION=true` 执行 `mvn test '-Dtest=GenerationTaskMapperTest,GenerationTaskServiceTest,AppGenerationTaskTest,AppServiceGenerationCancellationTest,ArtifactPublicationEvidenceTest,GenerationJsonErrorBoundaryTest,GenerationLeaseServiceTest,AppControllerSseTest,LangGraphAiGenerationGatewayTest,SimpleTextStreamHandlerTest,ArtifactPublicationServiceTest,ArtifactPathResolverTest,InternalAiToolsControllerTest,ArtifactRecoveryControllerTest,AiCodeGeneratorFacadeTest,GenerationTaskResourcesIT,GenerationTaskHeartbeatConfigurationTest'`：163 项通过，0 失败/错误/跳过，其中真实 MySQL/Redis/临时文件测试 12 项。
 - 真实资源覆盖所有者/代际条件、90 秒数据库期限、超时拒绝复活、实例重建无终态资格、后继代际使旧心跳失效；Spring 调度上下文测试验证默认任务阻塞时心跳独立运行。查询序列化测试验证心跳字段可见且 execution_owner 不对外返回。
 - 真实测试仅写唯一测试 appId/requestId 与 JUnit 临时目录，夹具按精确作用域清理。未运行无筛选真实供应商测试、Python HTTP、浏览器或完整 SSE；Python 与前端源码未修改，未重跑其测试。前端四个既有客服改动保留。
+
+## 18. 用户范围收敛与端到端验收
+
+用户明确决定不做自动恢复，当前只做端到端验收。第 17 节中的恢复认领建议不代表继续实施授权，不应自动推进。
+
+2026-10-28 使用独立测试应用完成真实浏览器与跨服务验收，记录见 `doc/ai-service-e2e-acceptance-2026-10-28.md`：HTML、多文件首次生成、二次修改、交互、单次预览刷新、停止保留旧版本、并发拒绝、部署访问、ZIP 内容与历史回源通过；Vue 首次及接受配图后的重试均返回 `VUE_IMAGE_USAGE_MISSING`，没有成功页面，整体验收未通过。后续如继续修复，应先定位 Vue 失败并复验，不能把本轮结果描述为全部三类通过。本轮仅更新文档，没有修改业务代码或开放恢复。
