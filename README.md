@@ -4,6 +4,8 @@ AI 应用生成平台的后端仓库，包含 Spring Boot 业务服务和 `ai-se
 
 本文以当前源码和配置为准，面向本地启动、服务联调和 Git 仓库交付。
 
+最近一次源码核对：2026-10-29。运行能力以源码为准，历史验收记录不代表当前环境已重新验收。
+
 ## 已实现功能
 
 - 用户注册、登录、验证码、资料管理与权限控制。
@@ -12,8 +14,11 @@ AI 应用生成平台的后端仓库，包含 Spring Boot 业务服务和 `ai-se
 - 社区帖子、评论、点赞、标签与管理后台。
 - 客服问答和知识文档管理；启用 RAG 需要单独配置模型、OSS、Milvus 和重排器。
 - AI 引擎切换：Legacy LangChain4j、Python LangGraph，以及按白名单或比例灰度。
+- 生成任务持久化查询、执行心跳观测，以及 HTML / MULTI_FILE 的数据库代际防护和取消/提交资格仲裁。
 
 HTML 和多文件产物经过校验及不可变版本发布后才成为活动版本；HTML 默认还需通过浏览器烟测。失败或取消不应覆盖上一活动版本。
+
+Vue 通过工具直接修改工程目录并构建，尚未接入上述不可变版本切换，失败或取消不能保证回滚已经写入的文件。当前没有生产自动恢复、任务重新认领或 SSE 断线续传入口。
 
 ## 架构与技术栈
 
@@ -37,7 +42,7 @@ Vue 前端（独立仓库）
 
 Spring 是业务数据库和项目文件的唯一所有者。Python 不连接业务 MySQL，不直接操作生成项目目录，文件与构建操作通过 Spring 内部工具网关完成。服务间流使用 NDJSON，对前端仍提供 SSE。
 
-`src/main/java/com/yupi/yuaicodemother/langraph4j/` 是历史 Java 图实验代码，不是当前 Python LangGraph 主链路。PostgreSQL checkpoint 用于短期工作流状态，不是跨请求长期记忆库。
+`src/main/java/com/yupi/yuaicodemother/langraph4j/` 中的 Java 图工作流是历史实验，不是当前 Python LangGraph 主链路；其中图片搜索等工具仍被内部网关复用。PostgreSQL checkpoint 用于短期工作流状态，不是跨请求长期记忆库。
 
 ## 仓库目录
 
@@ -48,6 +53,7 @@ src/main/java/com/yupi/yuaicodemother/
   mapper/            MyBatis-Flex 数据访问
   model/             Entity、DTO、VO
   ai/gateway/        AI 引擎统一边界与路由
+  core/artifact/     不可变产物、数据库代际与活动指针
   core/              解析、保存、构建、产物发布、流处理
   config/            Spring 配置
 src/main/resources/
@@ -97,6 +103,17 @@ SOURCE sql/alter_customer_service_knowledge_task7.sql;
 `SOURCE` 路径相对于 MySQL 客户端工作目录，也可在数据库工具中依次打开执行。以上面向新建数据库；现有数据库应先备份，再核对表结构和 SQL 内容后选择增量脚本。初始化脚本不是所有语句都可重复执行，不能直接对已有数据库反复运行。不要使用带有真实业务数据的个人数据库导出代替初始化脚本。
 
 `sql/alter_customer_service_knowledge_pending_time.sql` 是旧版本首次待处理任务的时间修复脚本，新建空库不需要执行；已有库按脚本中的查询结果判断是否需要修复。
+
+已有生成服务升级时，先排空旧实例请求，并按顺序核对、执行以下增量迁移；`init_database.sql` 已包含新建库所需的生成任务结构，无须在新库重复添加：
+
+```sql
+SOURCE sql/alter_generation_task.sql;
+SOURCE sql/alter_generation_fencing.sql;
+SOURCE sql/alter_generation_arbitration.sql;
+SOURCE sql/alter_generation_execution_heartbeat.sql;
+```
+
+Spring 不自动执行这些迁移。缺表或缺列会在模型调用前阻止生成，切换到 Legacy 也不能绕过这项依赖。所有 Spring 实例应统一升级，不能混跑仍以文件 `.current` 为权威的旧版本。回退旧代码前需停止生成，并依据数据库活动指针核对文件镜像，详见 [生成任务账本与升级边界](doc/generation-task-ledger.md)。
 
 ### 2. 准备 Spring 私有配置
 
@@ -183,6 +200,8 @@ Spring OpenAPI 可访问仅说明 HTTP 文档入口可用，不代表所有业�
 | `/api/apps` | 应用管理 |
 | `GET /api/apps/chat/gen/code` | 代码生成 SSE |
 | `POST /api/apps/chat/gen/code/cancel` | 停止生成 |
+| `GET /api/apps/chat/gen/code/status?appId=...` | 当前活动请求状态，空闲时返回 IDLE |
+| `GET /api/apps/chat/gen/code/task?appId=...&requestId=...` | 当前用户自有应用的任务记录；省略 requestId 查询最近未过期任务 |
 | `/api/chatHistory` | 聊天记录查询和导出 |
 | `POST /api/apps/deploy` | 应用部署 |
 | `GET /api/apps/download/{appId}` | 源码下载 |
@@ -197,6 +216,30 @@ Spring OpenAPI 可访问仅说明 HTTP 文档入口可用，不代表所有业�
 生成目录位于启动工作目录下的 `tmp/code_output/`，部署目录位于 `tmp/code_deploy/`。请从固定工作目录启动服务，并为运行数据设置持久存储。部署地址还需与资源控制器、端口和反向代理保持一致，不能仅替换一个展示域名就认为部署完成。
 
 客服首次启动建议保持关闭。启用时按 [AI 服务说明](ai-service/README.md) 配置 RAG；Spring 与 Python 的开关都需检查。样例上传限制为 5 MB，而知识文档业务上限默认 20 MiB，需要大文档时同时调整 `spring.servlet.multipart` 和反向代理的上传限制。
+
+## 生成链路与运行边界
+
+Python 主图负责输入审核、上下文准备、生成分支调度及最终发布；HTML、MULTI_FILE、Vue 生成与验证修复拆为编译子图。默认最多修复两次，Vue 默认共用 40 次模型工具调用预算。子图继承请求级 checkpoint，线程标识为 `{appId}:{requestId}`；检查点恢复测试不等于生产重启续跑功能。
+
+HTML / MULTI_FILE 的模型文本使用流式调用，展示分片与完整候选分离；正常结束后才交完整候选校验和发布。Vue 工具决策使用完整 JSON 响应，默认每轮最多两个工具；非法格式每阶段最多额外重试两次，失败轮不执行工具。前端保持最近 2000 字符展示窗口、80ms 刷新上限，成功后回源聊天记录并刷新一次预览。
+
+### 任务、取消与发布
+
+- `generation_task` 覆盖两种引擎、三类生成的执行记录，终态查询保留 30 天；当前没有物理清理调度。
+- Redis 应用租约负责入口串行化与实时发现；MySQL `generation_arbitration` 决定取消或静态提交资格谁先获胜。`COMMITTING` 仅表示取得提交资格，不能作为发布成功证据。
+- 静态产物先写不可变 release，再由 MySQL 校验当前代际并写入 `generation_publication` 与 `generation_active_artifact`。启用数据库指针的项目以数据库为权威，`.current` 仅为兼容镜像；数据库不可用时不回退到该镜像。
+- Spring 独立调度器每 15 秒续写已登记执行的心跳，数据库观测期限为 90 秒。`LIVE` 不证明模型有进展，`EXPIRED` 不自动改成失败或授权恢复。
+- 任务查询分别展示执行状态、心跳、实时租约和发布证据，并非原子快照；`FAILED` 和 `COMMITTED` 可以同时出现，`COMMITTED` 也不表示该版本仍是当前活动版本。Vue 发布证据为 `NOT_VERSIONED`。
+
+文件系统、MySQL 和 Redis 之间没有跨资源事务；任务终态写入是尽力而为，不能只凭 RUNNING 或无锁判断是否应重试。新数据库指针协议暂未自动清理 release，应为产物预留磁盘空间。不得手动重置代际、仲裁记录或删除 `.db-pointer-enabled` 标记。
+
+### 多轮修改与模型上下文
+
+每次 LangGraph 请求仅携带最近最多六条用户需求（每条最多 1000 个 UTF-16 字符）和最多 2000 字符的初始需求，不自动传入全部历史回复及源码。Vue 当前工程先提供最多 200 条路径，再按需读取文件；本请求内修复继承工具历史，下一请求重新建立状态。
+
+Vue 模型消息中的工具历史另限 24 KiB，优先保留近期完整结果、对旧结果提供省略摘要，原始图状态和工具记录不因此裁剪。最新结果或固定上下文无法完整容纳时返回 `VUE_CONTEXT_BUDGET_EXCEEDED`。通用上下文窗口默认 65536、输出额度 8192、协议预留 4096；按供应商实际能力覆盖 `AI_SERVICE_MODEL_CONTEXT_WINDOW_TOKENS`，不能把本地覆盖值当作仓库默认值。预算以 UTF-8 字节数作保守上界，扩容不会同步提高 24 KiB 工具历史上限。
+
+输入语义审核默认开启，仅对 LangGraph 路由和生成生效；关闭语义审核仍保留规则检查。Vue 多 Reviewer 审查默认关闭，开启后读取有界真实源码快照；快照最多 24 文件、单文件 12000 字符、合计 60000 字符，不能保证任意规模项目都被完整审查。详细开关、错误码和限制见 [AI 服务说明](ai-service/README.md)。
 
 ## 构建与验证
 
@@ -234,7 +277,7 @@ git ls-files src/main/resources/application-local.yml ai-service/.env
 
 最后一条正常应无输出。`.gitignore` 不会移除已经追踪的文件，历史提交中的秘密也不会因当前忽略规则而消失；如曾泄露，应轮换凭据并单独处理 Git 历史。不要上传 `.env`、本地私有配置、日志、`target/`、`.venv/`、`tmp/`、`projects/` 或数据库业务数据导出。
 
-仓库可能存在与本次文档无关的修改或删除，上传前逐项检查，避免直接使用 `git add .` 混入无关内容。Git 提交与远程推送由维护者手动执行。
+仓库可能存在与本次任务无关的修改或删除，提交前逐项检查，避免直接使用 `git add .` 混入无关内容。提交使用 `type(scope): 中文说明`；Agent 涉及代码改动时按 [协作规范](AGENTS.md) 完成验证并提交，远程推送按维护者授权执行。
 
 ## 相关文档
 
@@ -242,5 +285,7 @@ git ls-files src/main/resources/application-local.yml ai-service/.env
 - [AI 服务启动与联调](doc/ai-service-startup.md)
 - [LangChain / LangGraph 重构设计](doc/ai-service-langchain-langgraph-refactor-design.md)
 - [第一阶段交接](doc/ai-service-phase-one-handoff.md)
+- [生成任务账本、数据库迁移与心跳说明](doc/generation-task-ledger.md)
+- [子图重构与验收边界](doc/ai-service-subgraph-refactor-handoff.md)
 - [产品知识库说明](doc/knowledge/product/README.md)
 - [协作规范](AGENTS.md)

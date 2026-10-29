@@ -218,7 +218,7 @@ Python 工作流先向 `arguments` 注入可信的 `codeGenType`，`SpringToolGa
 
 仅当 `artifact_publish` 遇到连接中断、超时、Spring 5xx 或无法解析响应时，Python 才会使用相同 `toolCallId` 最多重试一次。Spring 明确返回的业务失败包括 HTTP 4xx，以及 HTTP 200 但 `BaseResponse.code != 0`；这两类结果都不会重试。Spring 的 Redis 工具幂等作用域是 `appId + requestId + toolCallId`；同一作用域只有 canonical 工具名和参数指纹都一致时才能回放成功结果，不一致会拒绝为冲突。
 
-同一应用的生成流程由 Spring 应用级租约串行化，租约覆盖用户消息入库、模型调用、校验和发布。取消和提交通过 Redis 状态锁进行原子状态转换：取消先发生则禁止发布，提交先发生则保持成功终态；下游断开不会提前释放租约。不同应用仍可并发生成。
+同一应用的生成流程由 Spring 应用级 Redis 租约串行化，租约覆盖用户消息入库、模型调用、校验和发布。取消和静态提交资格由 MySQL `generation_arbitration` 持久化仲裁：取消先获胜则禁止发布，提交先获胜则拒绝后续取消。`COMMITTING` 只代表提交资格，发布事实仍以 `generation_publication` 为准；最终激活还需核对当前代际并更新数据库活动指针。Redis 继续承担实时请求发现与状态镜像，下游断开不会提前释放租约。不同应用仍可并发生成；Vue 直接修改工程目录，不具有静态版本切换的回滚保证。
 
 ### HTML 安全发布与前端体验契约
 
@@ -554,7 +554,9 @@ Python 与 Spring 之间使用 NDJSON；Spring 对前端的内容事件仍为 `d
 
 ## PostgreSQL checkpoint 与故障降级
 
-Spring 已新增独立 MySQL `generation_task` 业务任务账本与只读 `/api/apps/chat/gen/code/task` 查询，保留执行终态、生成代际并分别展示实时租约、静态版本提交证据；不读取或替代本节 Python 节点摘要，也不开放生产自动恢复。升级 Spring 前需依次执行业务库 `sql/alter_generation_task.sql`、`sql/alter_generation_fencing.sql`，未迁移时生成会在调用 Python 前失败关闭。字段、权限、30 天查询保留和跨资源一致性限制见 [生成任务账本说明](../doc/generation-task-ledger.md)。Python 接口、checkpoint schema、配置和启动方式未改。
+Spring 已新增独立 MySQL `generation_task` 业务任务账本与只读 `/api/apps/chat/gen/code/task` 查询，保留执行终态、生成代际并分别展示实时租约、静态版本提交证据和执行心跳；不读取或替代本节 Python 节点摘要，也不开放生产自动恢复。已有库升级 Spring 前需依次执行 `sql/alter_generation_task.sql`、`sql/alter_generation_fencing.sql`、`sql/alter_generation_arbitration.sql`、`sql/alter_generation_execution_heartbeat.sql`；新建库的 `sql/init_database.sql` 已包含这些结构。代码不自动迁移，未迁移时生成会在调用 Python 前失败关闭。升级前排空旧实例请求并统一切换，避免混跑旧活动指针协议。字段、权限、30 天查询保留和跨资源一致性限制见 [生成任务账本说明](../doc/generation-task-ledger.md)。这些 Spring 变动未增加 Python 接口、checkpoint schema 或配置要求。
+
+Spring 独立调度器每 15 秒续写已登记任务的随机执行所有者心跳，数据库观测期限为 90 秒；`LIVE` 不保证 Python/模型有进展，`EXPIRED` 不自动标记失败或认领恢复。静态项目启用数据库指针后，MySQL 是活动版本权威，`.current` 只是兼容镜像，数据库不可用时不回退镜像。新协议暂未自动清理 release，应预留磁盘空间。Vue 的 `publicationState` 为 `NOT_VERSIONED`，不能推断其文件修改已被回滚。
 
 Spring 的真实 MySQL/Redis 任务故障矩阵是独立 opt-in Java 测试，持久化代际、数据库活动指针和迟到发布验证见 [重构交接文档第 15 节](../doc/ai-service-subgraph-refactor-handoff.md)。静态版本使用 MySQL fencing；Vue 工程构建尚无此版本切换协议，生产自动恢复仍关闭。
 
