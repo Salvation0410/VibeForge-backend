@@ -1,611 +1,361 @@
 # Yu AI Service
 
-LangGraph Studio 本地调试步骤见 [LangGraph Studio 调试说明](../doc/langgraph-studio-debug.md)。
+`yu-ai-service` 是 `yu-ai-code-mother` 的 Python AI 服务，使用 Python 3.12、FastAPI、LangChain 和 LangGraph，提供代码生成类型路由、流式生成、工具编排、质量审查及有限修复，也提供可选的客服知识库 ETL 与 RAG 问答。
 
-在 `ai-service` 目录启动本地 Studio Agent Server：
+本文按当前源码组织，配置定义见 [config.py](src/ai_service/config.py)，配置样例见 [.env.example](.env.example)。
 
-```powershell
-uv run --with "langgraph-cli[inmem]" python -m ai_service.studio_server
-```
-
-请从 `ai-service` 目录通过上述 `uv run` 命令启动，不要直接运行全局 Conda 的 `langgraph dev`。Windows 默认代码页可能是 GBK，而 LangGraph CLI 子进程会按默认编码读取 UTF-8 文件；启动器会在创建子进程前启用 Python UTF-8 模式。
-
-Studio 的 **Configure connection** 填写 Base URL `http://127.0.0.1:2024`，
-自定义 Header 留空，连接后选择 `yu_ai_generation`。启动器从 `.env` 读取凭据；
-仅有 `LANGGRAPH_API_KEY` 时自动映射为官方要求的 `LANGSMITH_API_KEY`，已有后者优先。
-Studio 进程关闭自动云追踪，业务 `.env` 的脱敏旁路追踪开关保持原值。
-
-图输入使用 snake_case 字段，例如：
-
-```json
-{
-  "app_id": "专用测试应用ID",
-  "request_id": "studio-每次新的唯一ID",
-  "prompt": "制作一个简单的待办页面",
-  "code_gen_type": "HTML",
-  "conversation": [],
-  "metadata": {},
-  "repair_count": 0,
-  "tool_call_count": 0
-}
-```
-
-支持 `HTML`、`MULTI_FILE`、`VUE_PROJECT`。执行时调用真实模型和 Spring 工具，
-可能写入、构建和发布应用，因此使用专用测试应用，并避免前端同时对同一应用生成。
-该入口绕过 Spring 对外入口的应用租约；Studio 连通不能代替完整 SSE、聊天记录和取消验收。
-Agent Server 管理本地调试 checkpoint，项目 PostgreSQL checkpoint 在该入口关闭；
-本地 `.langgraph_api/` 可能含 prompt 和源码，已加入忽略规则。
-
-在 PyCharm 中启动与查看知识库处理日志，见 [知识库 PyCharm 调试说明](../doc/knowledge-pycharm-debug.md)。项目提供 `.run/AI Service.run.xml`，运行模块为 `ai_service.server`。
-
-`yu-ai-service` 是 `yu-ai-code-mother` 的独立 AI 编排服务，使用 Python 3.12、FastAPI、LangChain 和 LangGraph 实现代码生成、工具调用、质量检查和有限次数修复。
-
-该服务只负责 AI 能力，不直接访问 MySQL 或项目目录。用户鉴权、应用与聊天记录、文件安全、Vue 构建、部署、下载以及面向前端的 SSE 均由 Spring Boot 后端负责。
-
-## 架构与职责边界
+## 架构与职责
 
 ```text
-前端 EventSource
-    -> Spring Boot 对外 SSE
-        -> Python AI Service 内部 NDJSON
-            -> LangGraph 工作流
-                -> LangChain 模型适配器
-                -> Spring 工具网关
-                -> PostgreSQL checkpoint
+Vue 前端（独立仓库）
+  -> Spring Boot：业务权限、聊天记录、对外 SSE、项目文件与发布
+     -> Python FastAPI：内部 JSON / NDJSON 接口
+        -> LangGraph：输入审核、生成、验证与修复
+           -> OpenAI 兼容模型
+           -> Spring 工具网关：文件、图片搜索、构建与静态产物发布
+           -> PostgreSQL：请求级 checkpoint
+        -> 客服 RAG（可选）：Embedding、Milvus、Reranker、回答模型
 ```
 
-| 组件 | 主要职责 |
-| --- | --- |
-| Spring Boot | 用户鉴权、应用权限、聊天记录、文件操作、项目构建、部署、下载和对外 SSE |
-| Python AI 服务 | 模型调用、生成类型路由、LangGraph 编排、质量检查、修复和工具调用决策 |
-| PostgreSQL | 独立数据库 `yu_ai_checkpoint` 保存官方 LangGraph checkpoint 和短期脱敏状态，默认 TTL 为 24 小时 |
-| DeepSeek/OpenAI 兼容服务 | 提供路由、代码生成、质量检查和修复模型能力 |
+Spring 是业务 MySQL 和生成项目文件的唯一所有者。Python 不连接业务 MySQL，不直接读写生成项目目录；文件、构建及发布操作通过带 Bearer 鉴权的 Spring 网关完成。知识文档由 Spring 管理，Python 通过授权下载和变更租约完成索引。
 
-Python 只能通过带 Bearer 令牌的 Spring 工具网关读写项目文件或执行构建，不能绕过 Spring 直接操作项目目录。
+## 项目结构
 
-## 源码目录
+以下列出当前源码模块；省略 `__init__.py`、缓存与本地运行产物。
 
 ```text
 ai-service/
 ├── src/ai_service/
-│   ├── app.py                  # FastAPI 应用工厂和依赖组装入口
-│   ├── config.py               # 环境变量与服务配置
+│   ├── app.py                         # FastAPI 工厂、依赖组装与资源生命周期
+│   ├── config.py                      # Settings、环境变量与配置校验
+│   ├── server.py                      # HTTP 服务启动入口
+│   ├── studio_graph.py                # LangGraph Studio 图适配器
+│   ├── studio_server.py               # Studio Agent Server 启动器
 │   ├── api/
-│   │   ├── dependencies.py     # 内部 Bearer 鉴权依赖
-│   │   ├── routes.py           # 健康检查、路由、生成和取消接口
-│   │   └── schemas.py          # HTTP 请求、响应和 NDJSON 事件模型
+│   │   ├── dependencies.py            # 内部 Bearer 鉴权
+│   │   ├── routes.py                  # 健康、路由、生成、取消与客服接口
+│   │   └── schemas.py                 # 请求、响应、租约及事件模型
+│   ├── contracts/
+│   │   └── internal-ai-tools-v1.json   # Spring/Python 工具 JSON Schema
 │   ├── orchestration/
-│   │   ├── workflow.py         # LangGraph 状态图和节点路由
-│   │   ├── customer_service_rag.py # 客服检索、重排和回答
-│   │   ├── document_etl.py     # 知识文档下载、解析、切分和索引
-│   │   ├── events.py           # 递增序号事件生成器
-│   │   └── cancellation.py     # 协作式取消状态
+│   │   ├── workflow.py                # 生成主图与请求生命周期
+│   │   ├── state.py                   # 父图状态
+│   │   ├── routing.py                 # 验证、构建与质量审查后的条件路由
+│   │   ├── events.py                  # 请求级事件序号与输出队列
+│   │   ├── cancellation.py            # 协作式取消标记
+│   │   ├── active_generations.py      # 在途生成任务登记与主动取消
+│   │   ├── input_review.py            # 输入规则检查与语义审核
+│   │   ├── image_intent.py            # 图片需求与保留意图识别
+│   │   ├── static_generation.py       # 静态文本流与完整候选分离
+│   │   ├── vue_tool_loop.py           # Vue 模型轮次、工具执行及预算控制
+│   │   ├── multi_agent_review.py      # Vue 三角色并行质量审查
+│   │   ├── nodes/
+│   │   │   ├── common.py              # 节点事件、取消及状态摘要公共逻辑
+│   │   │   ├── input.py               # 输入审核、产物上下文与主动配图
+│   │   │   ├── generation.py          # 各类型生成节点
+│   │   │   ├── verification.py        # 硬校验、构建、质量审查与静态修复
+│   │   │   └── publication.py         # 静态发布与成功终态
+│   │   ├── subgraphs/
+│   │   │   ├── schemas.py             # 子图输入、内部状态与输出契约
+│   │   │   ├── generation.py          # HTML / MULTI_FILE 生成子图
+│   │   │   ├── vue.py                 # Vue 工具子图与修复分派图
+│   │   │   └── verification_repair.py # 验证、构建、审查与有限修复子图
+│   │   ├── document_etl.py            # 知识文档解析、切分与向量索引
+│   │   ├── customer_service_rag.py    # 检索、重排、回答与来源校验
+│   │   ├── customer_service_health.py # 客服依赖健康摘要
+│   │   ├── customer_service_evaluation.py # 注入式离线评估与指标计算
+│   │   └── product_knowledge_evaluation.py # 产品语料校验与显式真实评估
 │   ├── models/
-│   │   ├── base.py             # 模型协议和公共返回类型
-│   │   ├── embeddings.py       # CloseAI/OpenAI 兼容 Embedding
-│   │   ├── quality_review.py   # 质量审查模型协议
-│   │   ├── reranker.py         # 本地/远程/禁用重排器
-│   │   └── openai_compatible.py # DeepSeek/OpenAI 兼容适配器
+│   │   ├── base.py                    # 生成模型协议与返回类型
+│   │   ├── openai_compatible.py       # OpenAI 兼容聊天模型适配器
+│   │   ├── input_review.py            # 输入审核结果与异常类型
+│   │   ├── quality_review.py          # Reviewer、问题等级与审查结果
+│   │   ├── tool_contract.py           # 工具契约加载与请求/响应校验
+│   │   ├── vue_context.py             # Vue 模型工具历史的有界投影
+│   │   ├── embeddings.py              # CloseAI/OpenAI 兼容向量模型
+│   │   └── reranker.py                # 重排器协议、本地 GPU 与禁用实现
+│   ├── prompts/
+│   │   ├── routing.py                 # 生成类型路由提示词
+│   │   ├── generation.py              # 三种生成类型与修复提示词
+│   │   ├── input_review.py            # 输入语义审核提示词
+│   │   ├── review.py                  # 单 Reviewer 与三角色审查提示词
+│   │   └── customer_service.py        # 基于知识来源回答的提示词
 │   └── infrastructure/
-│       ├── checkpoint.py       # checkpoint 协议与禁用实现
-│       ├── postgres_checkpoint.py # PostgreSQL saver、状态摘要和 TTL 清理
-│       ├── checkpoint_setup.py # 独立 schema 初始化命令
-│       ├── milvus_knowledge.py # Milvus collection、alias 和版本清理
-│       ├── knowledge_download.py # Spring 签名 URL 下载器
-│       ├── spring_knowledge_lease.py # 知识库变更租约校验
-│       └── spring_tools.py     # Spring 文件与构建工具网关
-├── src/ai_service/server.py    # Windows/生产启动入口（SelectorEventLoop）
-├── src/ai_service/studio_graph.py # LangGraph Studio 图适配器
-├── src/ai_service/studio_server.py # 本地 Studio Agent Server 启动器
-├── tests/                      # 不访问真实模型的单元与契约测试
-├── .env.example                # 环境变量示例
+│       ├── checkpoint.py              # checkpoint 协议与禁用实现
+│       ├── postgres_checkpoint.py     # PostgreSQL saver、状态摘要与过期清理
+│       ├── checkpoint_setup.py        # 独立初始化 checkpoint 表
+│       ├── spring_tools.py            # Spring 内部工具 HTTP 客户端
+│       ├── spring_knowledge_lease.py   # Spring 知识库变更租约校验
+│       ├── knowledge_download.py      # 授权知识文档下载与完整性检查
+│       ├── milvus_knowledge.py        # 文档向量、collection、alias 与版本管理
+│       └── langsmith_tracing.py       # 脱敏元数据旁路追踪
+├── tests/                             # 单元、契约与显式启用的集成测试
+│   └── fixtures/                      # 合成评估数据和知识文档样例
+├── .run/AI Service.run.xml             # PyCharm 启动配置
+├── .env.example                       # 可提交的环境变量样例
+├── .gitignore
 ├── Dockerfile
-├── pyproject.toml
-└── uv.lock
+├── langgraph.json                     # Studio 图注册
+├── pyproject.toml                     # Python 版本、依赖与测试配置
+├── uv.lock                            # 锁定依赖
+└── README.md
 ```
 
-应用工厂是 `ai_service.app:create_app`；本地和 Windows 启动推荐使用
-`python -m ai_service.server`，该入口会在 Windows 显式选择兼容 psycopg 的
-`SelectorEventLoop`。LangGraph Studio 使用 `python -m ai_service.studio_server`。
+## 本地启动
 
-## LangGraph 工作流
+### 环境要求
 
-服务支持三种生成类型：
+- Python `>=3.12,<3.13` 和 [uv](https://docs.astral.sh/uv/)。
+- 可访问的 OpenAI 兼容模型服务和 Spring Boot 后端。
+- 启用 checkpoint 时需要独立 PostgreSQL 数据库，建议 PostgreSQL 15+。
+- 客服 RAG 另需配置 Embedding、Milvus、OSS 授权下载及可选 GPU 重排器。
 
-- `HTML`：生成单页 HTML 产物。
-- `MULTI_FILE`：生成多文件静态项目。
-- `VUE_PROJECT`：通过 Agent 工具循环生成 Vue 项目。
+以下命令在 `ai-service` 目录执行。
 
-当前工作流（主图调度四个编译后的子图）：
-
-```text
-START
-  -> input_guard
-  -> context_prepare
-  -> html_generation | multi_file_generation | vue_generation 子图
-  -> verification_repair 子图
-     -> artifact_validation
-     -> VUE_PROJECT：project_build
-     -> quality_review
-     -> 可修复问题：repair -> artifact_validation（默认最多修复 2 次）
-     -> 不可修复或耗尽预算：抛出异常，由请求级执行器发送 failed
-  -> HTML / MULTI_FILE：artifact_publish
-  -> finalize
-  -> END
-```
-
-节点实现按阶段放在 `orchestration/nodes/`，父图请求状态位于 `state.py`，确定性路由位于 `routing.py`；`subgraphs/generation.py` 创建静态生成子图，`subgraphs/vue.py` 创建 Vue 工具图与修复分派图，`subgraphs/verification_repair.py` 管理校验修复循环。子图通过输出 schema 只回传所属阶段字段，修复次数和工具总预算跨阶段传递。输入准备、发布和唯一成功终态仍由主图负责。
-
-`subgraphs/schemas.py` 定义各阶段独立的输入、内部状态和输出契约，子图不再继承完整 `WorkflowState`。调用方注册子图时先投影输入，子图再次限制输入与输出，避免原始 `__start__` 检查点携带完整父状态。父图的顶层 `thread_id`、`conversation`、`metadata`、`input_review`、`publish` 不进入子图，Vue 首次生成也不接收旧候选或验证结果；修复才接收 `artifact`、`validation`、`build`、`repair_feedback`。静态生成只回传候选和结束元数据，修复不覆盖请求身份、原验证结果和质量结论。模型原本需要的会话、metadata、图片、当前产物仍保留在 `context` 中，该结构边界不代表嵌套内容脱敏。
-
-子图默认继承父图的 checkpointer，不创建独立 saver，不启用跨调用 Agent 记忆；`thread_id` 继续使用 `{appId}:{requestId}`。LangGraph 内部使用子图命名空间，但 NDJSON 的节点名称、请求级事件序号及 Spring/SSE 协议不变。内存 saver 测试覆盖嵌套命名空间、重建图后从质量反馈恢复、终态清理及模型返回前的节点事件。真实 PostgreSQL 专项覆盖 Vue 生成/修复在模型轮次及首个工具完成后关闭连接池、以新 saver 重建父图恢复，以及成功/失败/取消/TTL 清理；模型和 Spring 网关仍使用 Fake，不代表生产恢复业务链路已实现。
-
-Vue 首次生成与修复复用 `orchestration/vue_tool_loop.py` 的多节点实现：`initialize -> model_turn -> validate_turn -> execute_tool -> continue_loop`，完成后从 `finish` 返回。完整模型响应先通过截断、批次、整批参数与总预算校验，再逐个执行工具；私有状态保存文件计划、成功写入文件、ordinal、重试次数、图片检查、待执行工具及游标。父图输出不包含这些私有字段。每次工具完成都形成独立图步骤，内存 saver 测试验证模型返回后及批次中间暂停、重建父图继续，生成与修复均不重复已保存的模型/工具步骤，工具 ID 连续且总预算不重置。内部执行步数上限按工具和修复预算计算，支持合法 40 次工具调用。
-
-Vue 子图初始化时将完整 `toolResults` 从 `context` 移到私有 `vue_tool_results` 通道；模型调用时临时组装上下文，阶段结束时恢复公共 `context.toolResults`。图状态和阶段输出保留完整工具历史，模型适配器按下文规则投影消息。模型、校验及继续节点不重复写回历史通道，稳定上下文只在初始化、重试提示变化、首次成功应用图片及出口时更新。出口组装完公共字段后清空私有历史和文本副本，避免末尾 checkpoint 重复保存。没有裁剪持久化历史，也不保证物理存储空间固定比例下降。`tests/test_subgraph_state_boundaries.py` 使用真实内存 saver 检查入口与运行中 checkpoint、实际通道写入、配置/回调继承、递归子图发现、重建恢复与父图字段保留。
-
-`models/vue_context.py` 只为 Vue 生成、修复及继承工具历史的单 Reviewer 构造有限消息：工具历史按两层 JSON 转义后的字节上界限制为 24 KiB，并通过适配器的完整消息预算再次检查（含系统提示、需求、修复产物和其他上下文）。优先保留近期完整工具结果；较早结果仅保留工具 ID、名称、路径/查询参数、明确省略标记及已有 ok 状态，不截取残缺源码。旧 file_read 被同路径后续读取或成功写入、修改、删除替代时标为 superseded；失败修改不使原读取失效。工具记录只新增 relativeFilePath、relativeDirPath 或 query，不复制写入源码。模型按需重读省略的文件，省略不表示文件缺失，也不能据此认定实现完整。
-
-最新工具结果无法完整容纳、或连摘要与固定上下文都放不下时，适配器在供应商调用前返回 `VUE_CONTEXT_BUDGET_EXCEEDED`，提示项目工具上下文超限；不误称短需求过长，不无限重复读取大文件。需求入口的 `INPUT_CONTEXT_BUDGET_EXCEEDED` 与完整消息预算保护仍保留。此投影不修改原始 context、图 checkpoint、工具计数、文件计划、审查快照或公共 SSE；历史 checkpoint 缺少路径时不猜测关联，也不提供生产自动续跑。
-
-已成功工具到 checkpoint 写入之间仍存在不确定窗口，恢复可能携带同一工具 ID 重试，由 Spring 既有幂等状态处理，不能据此保证 exactly-once。调试断点仅用于测试，生产入口仍从初始状态启动并在终态清理检查点；Vue 工具 JSON、路由和质量审查继续使用完整 `ainvoke` 响应，静态生成/修复文本流式见下节。不提供生产重启自动续跑或旧版本 checkpoint 兼容。进一步优化入口与验证限制见 [子图重构交接文档](../doc/ai-service-subgraph-refactor-handoff.md)。
-
-### HTML/MULTI_FILE 模型文本流式
-
-`OpenAICompatibleModel` 提供可选的 `generate_stream`/`repair_stream` 能力，静态生成与修复通过 `ChatOpenAI.astream(..., stream_usage=True)` 实时展示文本；适配器聚合完整块并返回候选、结束原因和 token 用量。未实现这两个可选方法的模型继续走原 generate/repair；已开始的流发生异常时不回退或重新调用非流式接口。Vue 的 JSON 工具参数仍完整解析、整批校验后执行，不做增量工具调用。
-
-`orchestration/static_generation.py` 将静态 NDJSON `content_delta.data.contentMode` 分为 `display_delta`（仅展示）与 `candidate`（本轮完整候选）。流正常结束且 finish_reason 为 STOP/END_TURN 后才发送 candidate；LENGTH/MAX_TOKENS、过滤、缺少正常结束标记、空流或供应商异常均不能进入发布。展示回调及任务取消会检查请求取消状态，关闭供应商流；上下文预算检查与自动 LangSmith 追踪关闭保持一致。展示分片不进入图状态，模型节点结束才保存完整候选，不能依靠 checkpoint 续接供应商 token 流。
-
-Spring 的 `LangGraphAiGenerationGateway` 保留完整候选缓存，展示增量使用只在 Java 内部识别的帧交给 `SimpleTextStreamHandler`，处理器解包后输出原有 SSE 文本。completed 后只有最终完整候选写入聊天历史，不重复向页面发送整段源码；旧草稿与被淘汰候选不混入最终历史。新一轮增量开始时清除旧候选，避免用上一轮候选填补未完成修复；未知内容模式或流式 completed 缺失候选会失败。旧未标记 contentMode 的事件继续按完整候选处理，Legacy 文本累加语义保留。
-
-公共 SSE 协议和前端无代码变更，仍使用 2000 字符窗口、80ms 刷新上限、成功终态回源与单次预览刷新。修复过程中可能展示多个草稿轮次，最终历史以成功候选为准。部署时先升级 Java 网关/处理器，再升级 Python；只有两侧都升级后才有实时展示。供应商需支持 OpenAI 兼容流和 usage 块；真实供应商以及 Spring/Python/浏览器完整链路需要独立验收，离线模拟测试不代表已完成端到端验收。
-
-Vue 分支允许模型请求 Spring 工具，但工具调用次数受 `AI_SERVICE_VUE_MAX_TOOL_CALLS` 限制，默认 40 次，覆盖生成与修复的总调用次数。若本轮工具请求超过剩余预算，返回 `VUE_TOOL_CALL_LIMIT_EXCEEDED`，不再静默丢弃剩余文件写入请求并构建半成品。源码必须通过 `file_write`/`file_modify` 写入，模型 `content` 只用于简短状态确认，避免重复回传源码触发输出长度上限。每次工具调用都带有确定性的 `toolCallId`，供 Spring 执行幂等控制。若构建发现项目目录或 `package.json` 缺失，工作流直接以稳定构建错误结束，不再要求模型重复生成。
-
-
-Vue 文件生成先规划 filePlan，再按每轮最多两个工具调用写入；上下文 vueGeneration.phase 区分首次规划、按清单写入和既有项目修改，避免无隐式对话记忆的模型每轮重新规划。存在未写完文件时，仅返回相同规划也计入最多三轮规划预算，并提示继续写文件；超过上限返回 VUE_FILE_PLAN_LIMIT_EXCEEDED，不误报为图片未使用。截断或超批次响应整轮丢弃，最多重试两次，重试后每轮一个工具。模型上下文包含剩余预算、已写入和待生成文件；已声明清单尚未写完时拒绝构建。生成与修复都遵循该约束，单文件过大需拆分组件。阶段进度复用现有 SSE 文本消息；诊断日志只记录请求 ID、阶段、结束原因、输出 token 数和耗时，不记录源码与凭据。PostgreSQL saver 使用事务回退代替显式 pipeline；真实 PostgreSQL 生命周期、图失败及取消后连接复用已通过独立测试；真实模型与完整 SSE 仍需单独验收。
-
-Vue 工具响应必须是单个完整 JSON 对象（兼容外层 Markdown 代码围栏），不能在 JSON 外夹带说明或输出多个对象。适配器校验 content、toolCalls、filePlan 及工具对象的基本类型；格式异常不再回退为普通文本，而是丢弃该轮内容、提示重新返回合法 JSON，生成与修复阶段各最多重试两次，计数不会因中间成功写入而重置。第三次格式异常返回 VUE_MODEL_INVALID_OUTPUT，不构建、不执行该轮工具，也不将混合响应中的源码发送到展示事件。工具名、参数权限与整批语义校验仍由既有工具契约负责；截断和过滤响应优先遵循原结束原因处理规则。
-
-Vue 的 image_search 通过 Spring 内部网关复用 Pexels 搜图客户端，每次最多返回六张图片的 URL 和说明，计入工具预算。需要实景图片的页面按提示先搜图，再把真实 URL 写入 Vue 模板或背景样式；原有图片保持不变。搜索没有结果或接口不可用时返回 ok=false 与空列表，不编造图片地址。此工具返回外部图片地址，不下载图片二进制文件，运行时需要浏览器能访问 Pexels 图片域名。Spring 需配置现有 pexels.api-key。工具完成事件分别携带安全的路径/关键词参数与执行结果，Java 展示路径和状态，不再将结果当成 Legacy 调用参数，也不重复输出源码。
-
-Vue 多 Agent 质量审查开启时，首次生成和每次修复重新通过硬校验、重新构建成功后，都会调用 Spring 工作流专用且模型不可调用的 `vue_source_snapshot`，以当前项目真实源码而不是旧 artifact 作为三个 Reviewer 的审查输入。开关关闭时保持原有兼容行为，仅至少完成一次修复的 Vue 在单 Reviewer 质量检查前读取快照。HTML、MULTI_FILE 分支均不调用该工具。快照最多返回 24 个文件，单文件内容最多 12000 个字符，总内容最多 60000 个字符；Spring 遍历的项目总访问条目（根目录之外的目录、文件和访问失败条目）最多 20000 个，其中合格源码候选最多 10000 个，并只读取按 `package.json`、入口文件、`src/App.vue`、其余路径稳定排序后的最佳 24 个候选，每个源文件最大 1 MiB。
-
-快照排除依赖和构建产物目录、隐藏目录、符号链接、锁文件及非文本扩展名，依赖/构建目录和锁文件的大小写变体同样排除；入选文件执行严格 UTF-8 与 NUL 检查。完整快照只在本次质量检查调用栈内传给当前 Reviewer，不写入 Spring 工具幂等 Redis、业务 checkpoint、LangGraph state/checkpoint 或 NDJSON 事件；快照读取或 Reviewer 系统异常产生的 pending checkpoint 只包含稳定的外层异常，不包含源码，阻断性审查结果则仅按下文规则保存有界 `repair_feedback`。`tool_finished` 事件只公开 `eligibleFileCount`、`includedFileCount`、`omittedFileCount` 和 `truncated` 四个统计字段。快照读取失败使用稳定的脱敏消息，错误响应不包含绝对项目路径；快照读取或 Reviewer 调用失败时不回退到旧 artifact，而是进入失败终态。
-
-### Vue 多 Agent 质量审查
-
-`AI_SERVICE_MULTI_AGENT_REVIEW_ENABLED` 默认是 `false`，只对 `VUE_PROJECT` 生效；关闭时 HTML、MULTI_FILE 和现有 Vue 质量检查行为保持兼容。开启后，Python 并发执行三个只读角色：
-
-- `requirement`：检查用户目标、明确要求和内容完整性。
-- `function`：检查主要交互、页面流程和功能可用性。
-- `technical`：检查工程结构、运行风险、明显安全问题和可维护性阻塞。
-
-三个角色收到的 `artifact` 都是 Spring 返回的有界真实源码 snapshot；Reviewer `context` 只允许 `prompt`、`codeGenType`、`validation`、`build` 四个字段，并为每个角色创建独立深拷贝。Reviewer 不接收 `conversation`、`metadata`、`currentArtifact`、`toolResults`、`appId`、`requestId` 或其他生成期状态，避免无界内容和内部标识扩散。该白名单只约束审查输入，不改变 repair：Vue repair 工具循环仍保留并继续使用 `toolResults`。
-
-Reviewer 提示词要求模型只返回没有 Markdown 围栏的纯 JSON。为兼容部分 OpenAI 兼容供应商，适配器可防御性剥离单一完整 JSON 围栏，随后仍使用严格 Pydantic schema 校验字段、长度、枚举、额外字段和 Reviewer 身份；这不表示允许围栏外解释、前后缀文字或任意自然语言输出。
-
-三个 Reviewer 共享 `AI_SERVICE_MULTI_AGENT_REVIEW_TIMEOUT_SECONDS` 指定的整体超时，不是每个角色各自拥有一份超时预算。聚合由确定性代码完成：`critical` 和 `major` 属于阻断问题，会生成最多 4000 字符的 `repair_feedback` 并进入现有 repair 回环；`minor` 只作为本次调用内的审查详情，不触发 repair，也不消耗修复次数。修复仍受 `AI_SERVICE_MAX_REPAIR_ATTEMPTS` 限制，默认最多两次；每次修复后重新执行校验、构建、真实源码快照和三角色审查。
-
-`repair_feedback` 的每个阻断问题固定为单独一行，字段顺序是 `severity`、`code`、`issue`、`evidence`、`repair`。字段值先折叠换行、制表符等空白，再把值内部的 `;`、`=` 规范化为全角分隔符，防止内容伪造结构字段；反馈不添加总标题，也不包含 Reviewer 身份或 category。
-
-### LangSmith 旁路追踪
-
-Python 工作流支持可选 LangSmith 旁路追踪。开关和配置直接来自 `ai-service/.env`：
-
-```dotenv
-LANGSMITH_TRACING=false
-LANGSMITH_ENDPOINT=https://api.smith.langchain.com
-LANGSMITH_API_KEY=replace-with-langsmith-key
-LANGSMITH_PROJECT=Yuki
-```
-
-默认关闭；设置 `LANGSMITH_TRACING=true` 且提供完整凭据后才创建客户端。追踪只发送请求标识、应用标识、生成类型、节点、状态、错误码和有限计数。Prompt、对话、源码、工具参数和结果、模型原始响应及凭据由代码层过滤，LangSmith 不可用时生成流程继续按原有终态运行。关闭开关后无需改动 Spring、Vue 或 checkpoint。
-
-任一 Reviewer 超时、普通模型调用失败、返回非法结构，或源码快照失败，都按 F1 直接发送 `failed`，不回退到单 Reviewer、不盲目修复、也不把候选版本当作成功。稳定错误码包括 `MULTI_AGENT_REVIEW_TIMEOUT`、`MULTI_AGENT_REVIEW_MODEL_ERROR`、`MULTI_AGENT_REVIEW_INVALID_OUTPUT` 和 `MULTI_AGENT_REVIEW_SNAPSHOT_ERROR`。用户取消会继续沿用现有协作式取消语义，并取消仍在运行的 Reviewer 任务。Reviewer 边界直接收到 `SystemExit` 或 `KeyboardInterrupt` 时会先脱敏，再等待兄弟任务取消和清理完成后重新抛出；非整数 `SystemExit.code` 统一归一为 `1`，不会泄露原始异常内容。
-
-该能力不新增公开 SSE 事件，不改变 Spring 对业务数据、项目文件、构建、发布和对外 SSE 的所有权。完整源码快照、Reviewer summary、`reviewer_results`、`quality_issues` 和 minor 详情都不持久化；`ai_workflow_status` 仍只保存脱敏状态摘要。LangGraph 图 checkpoint 仅在阻断问题需要恢复到 repair 时保存最多 4000 字符的 `repair_feedback`，恢复后直接进入 repair，不重复调用已经完成的 Reviewer。终态仍执行 best-effort thread 清理，TTL 继续作为异常退出兜底。本轮不启用长期记忆，也不创建或注入 `PostgresStore`。
-
-内部工具统一契约为 `src/ai_service/contracts/internal-ai-tools-v1.json`。该文件使用 JSON Schema Draft 2020-12，同时约束工具标准名称和历史别名、模型调用权限、请求参数以及成功响应。模型只能调用 `dir_read`、`file_read`、`file_write`、`file_modify` 和 `file_delete`；`artifact_context`、`artifact_validate`、`artifact_publish`、`project_build` 和 `vue_source_snapshot` 只允许工作流调用。Spring 继续兼容已存在的 camelCase 和旧 snake_case 别名，但模型提示只使用标准名称。
-
-Python 工作流先向 `arguments` 注入可信的 `codeGenType`，`SpringToolGateway` 再按对应 `requestSchema` 严格校验完整 `arguments`，并把可信的 `appId` 放入外层 HTTP envelope；未知工具、未知参数和额外字段都会在本地被拒绝，不会到达 Spring。`requestSchema` 只校验 `arguments`，不校验 envelope 中的 `appId`、`requestId`、`toolCallId` 和 `toolName`。Spring 成功响应中的 `data` 按对应 `responseSchema` 校验后才交给工作流。请求 Schema 使用 `additionalProperties: false` 防止协议漂移；响应 Schema 允许新增字段，以支持 Spring/Python 滚动升级。Schema 校验错误只暴露稳定的脱敏错误，不包含源码、文件路径、参数值或响应正文。Spring 生产代码仍负责应用范围、路径安全、字段语义、权限和其他业务校验，JSON Schema 不替代这些检查。
-
-### 多文件安全发布约束
-
-`MULTI_FILE` 模型响应必须严格包含且只包含 `index.html`、`style.css` 和 `script.js` 三个 Markdown 代码区块，顺序固定，正文不得为空，围栏外不得出现说明文本。Spring 的 `artifact_validate` 会再次解析该协议，并检查 HTML 外链、内联脚本/样式、Markdown 残留及 CSS/JavaScript 基础结构。
-
-模型返回 `LENGTH`、`MAX_TOKENS`、`CONTENT_FILTER` 或 `CONTENT_FILTERED` 时，候选产物不会进入发布阶段。通过硬校验和质量检查后，Python 调用 Spring 的 `artifact_publish`；Spring 将文件写入不可变的 `.releases/<requestId>`，校验摘要后原子替换 `.current` 指针，并保留当前版本及最近两个成功版本。每次成功发布还会记录单调提交序号和 requestId 墓碑，实体版本被保留策略清理后也不能通过旧请求重放回滚。校验、写入或指针切换失败时，上一成功版本保持可预览、部署和下载。
-
-仅当 `artifact_publish` 遇到连接中断、超时、Spring 5xx 或无法解析响应时，Python 才会使用相同 `toolCallId` 最多重试一次。Spring 明确返回的业务失败包括 HTTP 4xx，以及 HTTP 200 但 `BaseResponse.code != 0`；这两类结果都不会重试。Spring 的 Redis 工具幂等作用域是 `appId + requestId + toolCallId`；同一作用域只有 canonical 工具名和参数指纹都一致时才能回放成功结果，不一致会拒绝为冲突。
-
-同一应用的生成流程由 Spring 应用级 Redis 租约串行化，租约覆盖用户消息入库、模型调用、校验和发布。取消和静态提交资格由 MySQL `generation_arbitration` 持久化仲裁：取消先获胜则禁止发布，提交先获胜则拒绝后续取消。`COMMITTING` 只代表提交资格，发布事实仍以 `generation_publication` 为准；最终激活还需核对当前代际并更新数据库活动指针。Redis 继续承担实时请求发现与状态镜像，下游断开不会提前释放租约。不同应用仍可并发生成；Vue 直接修改工程目录，不具有静态版本切换的回滚保证。
-
-### HTML 安全发布与前端体验契约
-
-`HTML` 只接受两种输入：唯一且闭合的 ` ```html ... ``` ` 代码块，或首个非空 token 为 `<!doctype html>`/`<html` 且以 `</html>` 结束的纯文档。代码块外说明、重复代码块、空响应和截断响应均拒绝；典型错误码为 `HTML_FORMAT_INVALID`、`HTML_VALIDATION_FAILED`、`HTML_DOCUMENT_INCOMPLETE`、`HTML_STYLE_INCOMPLETE`、`HTML_SCRIPT_INCOMPLETE`、`HTML_SCRIPT_TRAILING_FRAGMENT`。
-
-Spring 在发布前执行 HTML/CSS/JavaScript 确定性扫描和 Selenium 烟测。烟测默认开启且必需（`AI_HTML_SMOKE_TEST_ENABLED=true`、`AI_HTML_SMOKE_TEST_REQUIRED=true`），浏览器不可用或页面在 8 秒内不能加载、3 秒观察期仍有错误/骨架屏时不会发布。仅本地开发可同时关闭两个开关。单文件全量重写超过 `AI_HTML_MAX_REWRITE_SOURCE_CHARS`（默认 24000）时返回 `HTML_OUTPUT_BUDGET_EXCEEDED`，避免大页面再次被截断覆盖。
-
-HTML 和多文件版本均写入 `<类型>_<appId>/.releases/<requestId>`。Spring 在租约取得时签发 MySQL 单调代际，完整 release 落盘后在数据库事务内校验代际并切换权威活动指针；`.current` 为兼容镜像。首次切换前种入旧版本基线并写 `.db-pointer-enabled`；此后预览、部署、下载按数据库指针读取，数据库不可用时失败关闭。旧代际无法替换新代际活动版本。旧文件协议保留当前及最近两个历史版本；新 fencing 协议暂不自动清理 release，防止暂停后恢复的旧执行者误删新版本，磁盘保留调度待后续实现。
-
-前端只在 80ms 批处理窗口更新字符计数和轻量进度，滚动最多每 200ms 一次；生成期间保留旧 iframe，只有收到发布成功的 `done` 才刷新一次。取消、业务失败（`business-error`）或截断不会刷新预览。优化提示按 `HTML`、`MULTI_FILE`、`VUE_PROJECT` 分别约束输出协议和修改范围。
-
-## 环境要求
-
-- Python `3.12`，项目不支持 Python 3.13
-- [`uv`](https://docs.astral.sh/uv/) 包和虚拟环境管理器
-- PostgreSQL 15 或更高版本（启用 checkpoint 或需要恢复能力时）；Python checkpoint 使用独立数据库 `yu_ai_checkpoint`
-- DeepSeek 或其他 OpenAI 兼容模型服务的 API Key
-- 可访问的 Spring Boot 后端
-- Docker，可选，仅在容器运行时需要
-
-## 配置说明
-
-先从示例创建本地配置：
+### 1. 安装依赖与准备配置
 
 ```powershell
-Copy-Item .env.example .env
+uv sync --frozen --python 3.12
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
-`.env` 已被忽略，不要将真实密钥提交到 Git。
-
-| 环境变量 | 作用 | 示例或默认值 |
-| --- | --- | --- |
-| `AI_SERVICE_INTERNAL_BEARER_TOKEN` | Spring 调用 Python 内部接口使用的令牌 | 必须配置 |
-| `AI_SERVICE_SPRING_GATEWAY_BASE_URL` | Spring 工具网关基础地址 | 容器内可使用 `http://host.docker.internal:8123/api/internal/ai-tools` |
-| `AI_SERVICE_SPRING_GATEWAY_BEARER_TOKEN` | Python 调用 Spring 工具网关使用的令牌 | 必须配置，并与 Spring `ai.token` 一致 |
-| `AI_SERVICE_MODEL_API_KEY` | 模型服务 API Key | 必须在真实模型调用前配置 |
-| `AI_SERVICE_MODEL_BASE_URL` | OpenAI 兼容接口地址 | `https://api.deepseek.com/v1` |
-| `AI_SERVICE_MODEL_NAME` | 默认聊天模型 | `deepseek-chat` |
-| `AI_SERVICE_MODEL_TEMPERATURE` | 模型温度 | `0.1` |
-| `AI_SERVICE_CHECKPOINT_ENABLED` | 是否启用 PostgreSQL checkpoint | `true` |
-| `AI_SERVICE_CHECKPOINT_REQUIRED` | PostgreSQL 不可用时是否阻止启动或中止写入 | `false` |
-| `AI_SERVICE_CHECKPOINT_POSTGRES_URL` | 独立 checkpoint 数据库连接地址 | `postgresql://<user>:<password>@localhost:5432/yu_ai_checkpoint` |
-| `AI_SERVICE_CHECKPOINT_AUTO_SETUP` | 启动时是否自动初始化表；生产推荐关闭 | `true` |
-| `AI_SERVICE_CHECKPOINT_TTL_SECONDS` | checkpoint 过期时间，秒 | `86400` |
-| `AI_SERVICE_CHECKPOINT_POOL_MIN_SIZE` | PostgreSQL 连接池最小连接数 | `1` |
-| `AI_SERVICE_CHECKPOINT_POOL_MAX_SIZE` | PostgreSQL 连接池最大连接数 | `5` |
-| `AI_SERVICE_VUE_MAX_TOOL_CALLS` | 单次 Vue 工作流最大工具调用次数 | `40` |
-| `AI_SERVICE_MAX_REPAIR_ATTEMPTS` | 质量检查失败后的最大修复次数 | `2` |
-| `AI_SERVICE_MULTI_AGENT_REVIEW_ENABLED` | 是否仅为 Vue 开启三角色质量审查 | `false` |
-| `AI_SERVICE_MULTI_AGENT_REVIEW_TIMEOUT_SECONDS` | 三个 Reviewer 共享的整体超时秒数 | `60` |
-
-客服 RAG 使用 `local_cross_encoder` 时，Reranker 在独立子进程中独占指定的模型与 GPU。模型子进程通过 OS 级 ownership lock 强制同一 `model + device` 同时只有一个 owner；同机启动多个 Web worker 不会重复占用同一 GPU，而是让后启动实例以稳定 unavailable 失败。需要多 Web worker 时，应部署独立 Reranker 服务，或为每个实例分配不同 GPU，不要依赖进程内并发配置共享单卡。
-
-`AI_SERVICE_RAG_MIN_RERANK_SCORE` 默认不设置，此时只对空检索结果执行拒答门。该阈值不得凭经验填写，必须在真实客服评估集上确定后再配置。启用阈值后，如果 Reranker 不可用，服务不会用量纲不同的 Milvus 分数替代阈值判断，而是保守返回无答案。`AI_SERVICE_RAG_RERANKER_PROVIDER=disabled` 是明确的运维模式，按 Milvus 原始顺序取前三且不标记运行时降级；disabled 模式禁止同时配置 rerank score 阈值。
-
-客服问答由 `AI_SERVICE_RAG_ANSWER_TIMEOUT_SECONDS` 限制完整 embedding、检索、重排和回答链路，客户端断开时同步取消在途任务。`AI_SERVICE_RAG_PROMPT_MAX_BYTES` 按最终 JSON 的 UTF-8 字节数限制模型输入，而不是按 Python 字符数估算。
-
-### 客服 RAG 运维配置
-
-客服 RAG 默认关闭。关闭时应用不会导入或初始化 Milvus、CloseAI Embedding、文档 ETL、Grounded RAG 或本地 GPU Reranker；代码生成及 `/health/ready` 不依赖这些组件。启用前至少核对以下配置，真实值只通过环境变量或密钥管理服务注入：
-
-| 环境变量 | 作用 | 运维约束 |
-| --- | --- | --- |
-| `AI_SERVICE_CUSTOMER_SERVICE_RAG_ENABLED` | 客服 RAG 总开关 | 默认 `false`；先完成依赖验证再开启 |
-| `AI_SERVICE_CLOSEAI_API_KEY` / `AI_SERVICE_CLOSEAI_BASE_URL` | CloseAI Embedding 供应商 | 仅用于向量化，不写入仓库、日志或健康响应 |
-| `AI_SERVICE_MODEL_API_KEY` / `AI_SERVICE_MODEL_BASE_URL` / `AI_SERVICE_MODEL_NAME` | 客服回答及既有生成共用的 OpenAI 兼容模型 | 由 `OpenAICompatibleModel` 复用，不假定为 CloseAI |
-| `AI_SERVICE_MILVUS_URI` / `AI_SERVICE_MILVUS_TOKEN` / `AI_SERVICE_MILVUS_DATABASE` | Milvus 连接 | 本地可使用 Docker Milvus；生产使用受控网络和密钥注入 |
-| `AI_SERVICE_MILVUS_COLLECTION_ALIAS` | 稳定逻辑别名 | 默认 `customer_service_knowledge`；查询只读 alias 当前物理版本 |
-| `AI_SERVICE_RAG_COLLECTION_RETENTION_GENERATIONS` | 物理 collection 保留代数 | 默认 `2`，保留当前和一个可回滚版本 |
-| `AI_SERVICE_RAG_RERANKER_PROVIDER` | `local_cross_encoder` / `disabled` | 本地 GPU 模式要求单一 model+device owner；多 worker 使用独立服务或不同 GPU |
-| `AI_SERVICE_RAG_RERANKER_MODEL` / `AI_SERVICE_RAG_RERANKER_DEVICE` | 模型与设备 | 默认 BGE + `cuda`；模型下载、显存和驱动需人工验证 |
-| `AI_SERVICE_RAG_OSS_ALLOWED_HOSTS` | 签名下载主机白名单 | 只填受控 OSS HTTPS 主机，不填完整签名 URL |
-
-当前 Spring -> Python 与 Python -> Spring 仍共用部署约定的内部 Bearer token；示例只能使用占位值。长期记忆和 `PostgresStore` 仍关闭，客服问答不读取、不写入 LangGraph checkpoint，也不保存跨请求会话。
-
-Milvus rebuild 默认通过 `AI_SERVICE_RAG_COLLECTION_RETENTION_GENERATIONS=2` 保留当前版本和一个回滚版本。alias 切换后，旧物理 collection 的退役时间写入对应 mutation control collection；只有 `retiredAt` 超过 `AI_SERVICE_RAG_COLLECTION_CLEANUP_GRACE_SECONDS` 才会 best-effort 删除。退役 marker 是持久化清理 backlog，按 marker 主键游标分轮消费，因此模型或向量维度迁移后仍能清理旧命名空间。没有 marker 的历史 collection 首次发现时只补记当前退役时间，不能按创建时间立即删除。新建 collection 元数据与 marker 都带有稳定 `aliasHash` 作为自动删除的所有权证明；升级前缺少 `aliasHash` 的历史 collection 会保留，必须由运维人员核验归属后人工清理。grace 必须大于客服总请求 timeout 与 Milvus RPC timeout 之和并留出安全余量。清理受 `AI_SERVICE_RAG_COLLECTION_CLEANUP_TIMEOUT_SECONDS=5` 总时限和 `AI_SERVICE_RAG_COLLECTION_CLEANUP_SCAN_LIMIT=100` 单轮处理上限约束，超过上限时通过持久化扫描游标分轮推进，不创建后台任务。该策略依赖所有查询都受总 deadline 约束来覆盖跨实例读者，无法从 Milvus 直接证明当前没有读者。control、list、describe 或 alias readback 任一不确定都会保留 collection，并在后续 rebuild 再尝试清理。
-
-本机直接启动时，通常需要将 `.env` 中的 Spring 和 PostgreSQL 地址改为：
+编辑 `.env`，填写模型密钥与内部令牌。本机直接运行时，至少核对：
 
 ```dotenv
+AI_SERVICE_INTERNAL_BEARER_TOKEN=replace-with-shared-internal-token
 AI_SERVICE_SPRING_GATEWAY_BASE_URL=http://localhost:8123/api/internal/ai-tools
-AI_SERVICE_CHECKPOINT_POSTGRES_URL=postgresql://yu_ai_checkpoint:<set-outside-git>@localhost:5432/yu_ai_checkpoint
-AI_SERVICE_MULTI_AGENT_REVIEW_ENABLED=false
-AI_SERVICE_MULTI_AGENT_REVIEW_TIMEOUT_SECONDS=60
+AI_SERVICE_SPRING_GATEWAY_BEARER_TOKEN=replace-with-shared-internal-token
+AI_SERVICE_MODEL_API_KEY=replace-with-provider-key
+AI_SERVICE_MODEL_BASE_URL=https://api.deepseek.com/v1
+AI_SERVICE_MODEL_NAME=deepseek-chat
+AI_SERVICE_CHECKPOINT_POSTGRES_URL=postgresql://yu_ai_checkpoint:replace-with-password@localhost:5432/yu_ai_checkpoint
 ```
 
-仓库不创建或管理本机已有的 PostgreSQL Docker 容器。由数据库管理员在容器中执行以下 SQL，真实密码不得写入仓库：
+模型名按供应商实际支持的型号填写。以上令牌、密码和 API Key 均为占位值；样例中的 Spring/PostgreSQL `host.docker.internal` 地址适用于容器访问宿主机，本机运行应改为 `localhost`。
 
-```sql
-CREATE ROLE yu_ai_checkpoint LOGIN PASSWORD '<set-outside-git>';
-CREATE DATABASE yu_ai_checkpoint OWNER yu_ai_checkpoint;
+当前双向调用共用 Spring 的 `ai.token`，以下三处必须一致：
+
+```text
+Python AI_SERVICE_INTERNAL_BEARER_TOKEN
+= Python AI_SERVICE_SPRING_GATEWAY_BEARER_TOKEN
+= Spring AI_SERVICE_INTERNAL_BEARER_TOKEN
 ```
 
-角色和数据库准备后，运行独立初始化命令：
+### 2. 准备 checkpoint 数据库
+
+由数据库管理员创建独立角色与数据库，设置 `AI_SERVICE_CHECKPOINT_POSTGRES_URL`。默认 `AI_SERVICE_CHECKPOINT_AUTO_SETUP=true`，服务启动时初始化表；也可提前运行：
 
 ```powershell
 uv run python -m ai_service.infrastructure.checkpoint_setup
 ```
 
-本地可保留 `AI_SERVICE_CHECKPOINT_AUTO_SETUP=true`。生产环境推荐先执行初始化命令，再以 `false` 启动并移除运行账号的 DDL 权限。
+生产环境建议独立初始化后设置 `AI_SERVICE_CHECKPOINT_AUTO_SETUP=false`。仅本地联调且接受无持久化时，可设置 `AI_SERVICE_CHECKPOINT_ENABLED=false`。
 
-## 本地启动
-
-以下命令均在 `ai-service` 目录执行。
-
-### 推荐方案：使用固定的本地 Python 运行时
-
-Windows 上如果 uv 默认管理目录中的 Python 链接损坏，可能出现依赖检查成功但 Uvicorn 无法启动的问题。推荐首次启动时将 CPython 3.12.14 安装到当前用户的 `%LOCALAPPDATA%`，避开 uv 默认的 minor-version Junction 和 trampoline。
-
-首次初始化或重建环境前，先在运行 Uvicorn 的终端按 `Ctrl+C` 停止 AI 服务，并关闭 PyCharm/VS Code 中使用该 `.venv` 的终端。Windows 会锁定正在使用的 `.venv` 文件；服务或 IDE 未停止时执行清理会报“拒绝访问”。下面的脚本遇到失败会立即停止，不会拿不完整环境继续同步：
+### 3. 启动服务与连接 Spring
 
 ```powershell
-$runtimeDir = "$env:LOCALAPPDATA/yu-ai-code-mother/python"
-uv python install 3.12.14 --install-dir "$runtimeDir" --no-bin --force
-if ($LASTEXITCODE -ne 0) { throw "Python 3.12 installation failed" }
-
-$python = (Get-ChildItem "$runtimeDir/cpython-3.12.14-windows*/python.exe" | Select-Object -First 1).FullName
-if (-not $python) { throw "Python 3.12 executable not found" }
-
-if (Test-Path .venv) {
-  Remove-Item -Recurse -Force -ErrorAction Stop .venv
-}
-uv venv --python "$python" .venv
-if ($LASTEXITCODE -ne 0) { throw "Virtual environment creation failed" }
-
-uv sync --frozen --python "$python" --link-mode copy
-if ($LASTEXITCODE -ne 0) { throw "Dependency synchronization failed" }
-```
-
-初始化完成后，日常启动执行：
-
-> 下面的命令只复制代码块内容，不要复制 PowerShell 提示符（例如 `PS D:\VibeForge\...>`）或之前输出的日志。
-
-```powershell
-$runtimeDir = "$env:LOCALAPPDATA/yu-ai-code-mother/python"
-$python = (Get-ChildItem "$runtimeDir/cpython-3.12.14-windows*/python.exe" | Select-Object -First 1).FullName
-if (-not $python) { throw "Python 3.12 executable not found; run the initialization steps first" }
-
-$env:PYTHONPATH = "$(Resolve-Path './.venv/Lib/site-packages');$(Resolve-Path './src')"
-& "$python" -c "import click, uvicorn; print('依赖检查通过')"
-& "$python" -m ai_service.server
-```
-
-如果启动时出现 `ModuleNotFoundError: No module named 'dotenv'`、`No module named 'click'` 或类似依赖导入错误，说明当前 `.venv` 不完整（常见原因是清理时文件被锁定，随后又继续执行了 `uv sync`）。先停止服务并关闭占用 `.venv` 的 IDE 终端，在 `ai-service` 目录执行以下修复命令，然后重新执行上面的日常启动步骤：
-
-```powershell
-$runtimeDir = "$env:LOCALAPPDATA/yu-ai-code-mother/python"
-$python = (Get-ChildItem "$runtimeDir/cpython-3.12.14-windows*/python.exe" | Select-Object -First 1).FullName
-if (-not $python) { throw "Python 3.12 executable not found; run the initialization steps first" }
-
-if (Test-Path .venv) {
-  Remove-Item -Recurse -Force -ErrorAction Stop .venv
-}
-uv venv --python "$python" .venv
-if ($LASTEXITCODE -ne 0) { throw "Virtual environment creation failed" }
-uv sync --frozen --python "$python" --link-mode copy
-if ($LASTEXITCODE -ne 0) { throw "Dependency synchronization failed" }
-
-$env:PYTHONPATH = "$(Resolve-Path './.venv/Lib/site-packages');$(Resolve-Path './src')"
-& "$python" -c "import click, uvicorn; print('click and uvicorn are ready')"
-```
-
-`click` 由 `uvicorn[standard]` 间接提供，已记录在 `uv.lock` 中，不需要单独执行 `pip install click`。如果同步后仍然缺少依赖，删除并重建虚拟环境，再重新执行“推荐方案”的初始化命令；不要混用其他 Python 解释器的 `site-packages`。
-
-### 简化方案
-
-如果 uv 管理的 Python 链接工作正常，可继续使用：
-
-```powershell
-uv sync --frozen --python 3.12
 uv run python -m ai_service.server
 ```
 
-如果出现 `No Python at ...`，路径前带有异常引号，或 uv 报告 `Missing expected target directory for Python minor version link`，不要重复执行简化方案，改用上面的推荐方案重新初始化。Windows 启动模块必须写成 `ai_service.server`，不要在下划线前添加反斜杠。
+默认监听 `0.0.0.0:8000`。Windows 使用此入口选择兼容 psycopg 的 `SelectorEventLoop`。修改 `.env` 后需重启服务。
 
-Windows 启动必须使用 `ai_service.server`。该入口显式使用 `SelectorEventLoop`，兼容 psycopg 的异步 PostgreSQL checkpoint；直接执行 `uvicorn ai_service.app:create_app` 会让 Uvicorn 选择 `ProactorEventLoop`，从而出现 `Psycopg cannot use the 'ProactorEventLoop'`。
+Spring 公共配置默认使用 `langgraph`；在启动 Spring 的终端中核对：
 
-服务默认监听 `http://localhost:8000`。
+```powershell
+$env:AI_ENGINE = "langgraph"
+$env:AI_SERVICE_URL = "http://localhost:8000"
+# AI_SERVICE_INTERNAL_BEARER_TOKEN 从私有配置或运行环境注入。
+```
 
-启动后可在新 PowerShell 窗口执行健康检查：
+Spring 不自动加载 Python 的 `.env`。MySQL、Redis、业务表初始化和 Spring 启动步骤见 [项目 README](../README.md)。
+
+### 4. 检查健康状态
 
 ```powershell
 Invoke-RestMethod http://localhost:8000/health/live
 Invoke-RestMethod http://localhost:8000/health/ready
 ```
 
-`/health/live` 只确认进程存活；`/health/ready` 只检查 checkpoint 存储是否可用。若 readiness 失败，先查看启动窗口中的脱敏错误，再核对 `.env`、PostgreSQL 和 checkpoint 配置；模型或 Spring 工具网关可用性在实际请求和客服独立健康接口中检查。
+`live` 只检查进程存活；`ready` 检查 checkpoint，不能证明真实模型、Spring 工具或客服依赖可用。关闭 checkpoint 时 `ready` 可正常返回 200。
 
-Spring Boot 侧至少配置：
+## 配置
 
-```powershell
-$env:AI_ENGINE = "langgraph"
-$env:AI_SERVICE_URL = "http://localhost:8000"
-$env:AI_SERVICE_INTERNAL_BEARER_TOKEN = "与Python服务一致的内部令牌"
-# Spring 内部工具幂等记录的保留时间，单位为秒
-$env:AI_TOOL_IDEMPOTENCY_TTL_SECONDS = "86400"
-# Spring 等待同一工具调用分布式锁的最长时间，单位为毫秒
-$env:AI_TOOL_IDEMPOTENCY_LOCK_WAIT_MILLIS = "30000"
-```
+配置由 `Settings` 从当前工作目录的 `.env` 和进程环境变量读取，进程环境变量优先。除 LangSmith 的 `LANGSMITH_*` 外，主要配置使用 `AI_SERVICE_` 前缀。下表是代码默认值，私有 `.env` 可以覆盖；完整配置项见 [.env.example](.env.example) 和 [config.py](src/ai_service/config.py)。
 
-后两项是启动 Spring 时注入的可选运行时环境变量，不属于 `ai-service/.env` 的必需配置。
-
-随后在仓库根目录启动 Spring Boot：
-
-```powershell
-.\mvnw.cmd spring-boot:run
-```
-
-## Docker 启动
-
-### 本地 Milvus 与 checkpoint 容器
-
-本地客服 RAG 使用 Milvus `v3.0.2` 与独立 etcd `v3.5.33`。项目连接 `milvus-standalone`（宿主机端口 19530），该容器依赖 `milvus-etcd`；两者必须同时运行。Python checkpoint 使用独立的 `langgraph-postgres`（宿主机端口 5432）。Spring 的 MySQL、Redis 仍须另行启动。
-
-| 容器 | 作用 | 启动要求 |
+| 环境变量 | 默认值或要求 | 用途 |
 | --- | --- | --- |
-| `milvus-etcd` | Milvus 元数据 | 先启动并确认 endpoint health |
-| `milvus-standalone` | 向量索引与检索 | etcd 就绪后启动；确认 healthz 和真实查询 |
-| `langgraph-postgres` | Python checkpoint | Python AI 服务启动前就绪 |
+| `AI_SERVICE_INTERNAL_BEARER_TOKEN` | 必填 | Spring 调用 Python 的内部鉴权 |
+| `AI_SERVICE_SPRING_GATEWAY_BASE_URL` | 必填 | Spring 内部工具基础地址 |
+| `AI_SERVICE_SPRING_GATEWAY_BEARER_TOKEN` | 必填 | Python 调用 Spring 的内部鉴权 |
+| `AI_SERVICE_MODEL_API_KEY` | 真实调用前填写 | 模型 API Key |
+| `AI_SERVICE_MODEL_BASE_URL` | `https://api.deepseek.com/v1` | OpenAI 兼容服务地址 |
+| `AI_SERVICE_MODEL_NAME` | `deepseek-chat` | 聊天模型 |
+| `AI_SERVICE_MODEL_TEMPERATURE` | `0.1` | 生成温度 |
+| `AI_SERVICE_MODEL_MAX_TOKENS` | `8192` | 输出额度 |
+| `AI_SERVICE_MODEL_CONTEXT_WINDOW_TOKENS` | `65536` | 模型上下文窗口 |
+| `AI_SERVICE_MODEL_CONTEXT_OVERHEAD_TOKENS` | `4096` | 协议开销预留 |
+| `AI_SERVICE_INPUT_REVIEW_ENABLED` | `true` | 输入语义审核 |
+| `AI_SERVICE_INPUT_REVIEW_TIMEOUT_SECONDS` | `15` | 单次审核超时，秒 |
+| `AI_SERVICE_INPUT_REVIEW_MAX_RETRIES` | `1` | 审核失败额外重试次数 |
+| `AI_SERVICE_INPUT_PROMPT_MAX_CHARS` | `20000` | 输入字符上限 |
+| `AI_SERVICE_VUE_MAX_TOOL_CALLS` | `40` | Vue 生成与修复共用的模型工具总预算 |
+| `AI_SERVICE_MAX_REPAIR_ATTEMPTS` | `2` | 验证或质量不通过后的最大修复次数 |
+| `AI_SERVICE_MULTI_AGENT_REVIEW_ENABLED` | `false` | Vue 三角色质量审查 |
+| `AI_SERVICE_MULTI_AGENT_REVIEW_TIMEOUT_SECONDS` | `60` | 三角色共享的整体超时，秒 |
+| `AI_SERVICE_CHECKPOINT_ENABLED` | `true` | PostgreSQL checkpoint 开关 |
+| `AI_SERVICE_CHECKPOINT_REQUIRED` | `false` | checkpoint 不可用时是否阻止继续执行 |
+| `AI_SERVICE_CHECKPOINT_POSTGRES_URL` | 配置独立数据库连接 | checkpoint PostgreSQL 地址 |
+| `AI_SERVICE_CHECKPOINT_AUTO_SETUP` | `true` | 启动时初始化表 |
+| `AI_SERVICE_CHECKPOINT_TTL_SECONDS` | `86400` | 异常退出后 checkpoint 保留期限，秒 |
+| `AI_SERVICE_CHECKPOINT_POOL_MIN_SIZE` / `AI_SERVICE_CHECKPOINT_POOL_MAX_SIZE` | `1` / `5` | PostgreSQL 连接池范围 |
 
-已有本地部署请进入保存 `standalone_embed.bat`、`user.yaml` 和 `volumes/` 的 Milvus 安装目录执行；这个运维脚本位于本机安装目录，不由本仓库分发，也不是新安装初始化入口：
+上下文窗口应按供应商能力设置，必须大于输出额度与协议预留之和。预算以 UTF-8 字节数作为保守 token 上界，不是精确 tokenizer；实际模型调用前还会检查完整消息载荷。
 
-```powershell
-# 先进入现有 Milvus 安装目录，再统一管理两个依赖容器。
-.\standalone_embed.bat start
-# 正常停机与重新启动使用脚本，保持 Milvus 与 etcd 的顺序。
-.\standalone_embed.bat stop
-.\standalone_embed.bat restart
-docker start langgraph-postgres
+## 代码生成工作流
+
+```text
+input_guard -> context_prepare
+  -> html_generation / multi_file_generation / vue_generation
+  -> verification_repair
+       artifact_validation -> project_build（Vue）-> quality_review
+         ^                                           |
+         +--------------- repair（有限次数）<--------+
+  -> artifact_publish（HTML / MULTI_FILE）
+  -> finalize
 ```
 
-手动启动已有容器时：
+主图调度三个生成子图和验证修复子图，负责输入、发布与唯一成功终态。各子图使用独立输入、内部状态和输出 schema，并继承父图 checkpointer；Vue 修复也通过工具子图执行。
 
-```powershell
-docker start milvus-etcd
-docker exec milvus-etcd etcdctl --endpoints=http://127.0.0.1:2379 endpoint health
-# 上一步确认健康后再启动 Milvus。
-docker start milvus-standalone
-docker inspect milvus-standalone --format '{{.State.Health.Status}}'
-Invoke-RestMethod http://localhost:9091/healthz
+### 输入校验与语义审核
+
+输入规则检查与语义审核由类型路由和生成入口共用。审核结果包括放行、带提示放行、需要澄清和拒绝；审核故障不静默放行。关闭语义审核仍保留非空、控制字符、长度和预算检查。Legacy 链路不接入此审核。
+
+Spring 向 LangGraph 传入最近最多六条用户需求（每条最多 1000 个 UTF-16 字符）及最多 2000 字符的初始需求。每次请求独立建立状态，不自动传递完整历史回复、源码或上一请求的工具历史。Vue 当前产物上下文先提供最多 200 条文件路径，再由模型按需读取。
+
+Vue 模型消息的工具历史独立限制为 24 KiB，优先保留近期完整结果，对较早结果提供明确省略摘要；这不裁剪图状态和完整工具记录。最新结果或固定上下文无法完整容纳时停止本轮，增加模型窗口不会自动提高该工具历史上限。
+
+### 三类生成与工具调用
+
+| 类型 | 生成方式 | 完成条件 |
+| --- | --- | --- |
+| `HTML` | 单个完整 HTML 文档，模型文本流式输出 | Spring 严格解析、确定性校验、默认浏览器烟测和静态发布 |
+| `MULTI_FILE` | 按固定顺序输出 `index.html`、`style.css`、`script.js` 三个代码区块 | Spring 协议校验、产物校验和静态发布 |
+| `VUE_PROJECT` | 文件规划与完整 JSON 工具决策，分批读写工程 | 产物校验、Vue 构建和质量审查 |
+
+静态文本流将展示增量与完整候选分开；只有模型正常结束后才发送完整候选用于校验。截断或被过滤的响应不能发布。Vue 默认每轮最多两个工具，格式不合法的轮次不执行工具，每阶段最多额外重试两次。
+
+工具契约位于 [internal-ai-tools-v1.json](src/ai_service/contracts/internal-ai-tools-v1.json)。模型可调用 `dir_read`、`file_read`、`file_write`、`file_modify`、`file_delete` 和 `image_search`；产物上下文、校验、发布、构建及源码快照仅由工作流调用。Python 校验工具请求和响应，Spring 负责应用范围、相对路径和文件权限约束。
+
+首次 Vue 生成默认搜索配图，明确不配图时跳过；后续修改只有明确新增、替换或搜索图片时触发主动检索。普通保留图片或布局调整不强制搜图。检索无结果可降级继续；检索成功时会检查图片 URL 是否写入源码，实际加载效果仍需浏览器验证。
+
+### 质量审查与发布
+
+默认使用单 Reviewer；开启 Vue 三角色审查后，并行检查需求、功能和技术质量。审查在硬校验及构建成功后执行，使用 Spring 返回的真实源码快照。快照最多 24 个文件、单文件 12000 字符、合计 60000 字符；存在截断时不代表已完整审查所有源码。单 Reviewer 模式下，完成过修复的 Vue 也会读取快照。
+
+HTML / MULTI_FILE 由 Spring 写入不可变 release，使用 MySQL 代际和持久化取消/提交资格仲裁切换权威活动指针；Redis 提供应用级串行化和实时状态。`.current` 是新协议的兼容镜像，数据库不可用时不回退该镜像。新协议暂未自动清理 release。
+
+Vue 通过工具直接修改工程目录，尚无相同的不可变版本切换与失败回滚保证。任务账本、心跳、迁移顺序和发布证据详见 [生成任务说明](../doc/generation-task-ledger.md)。
+
+## HTTP 接口与事件
+
+内部业务接口均要求：
+
+```http
+Authorization: Bearer <AI_SERVICE_INTERNAL_BEARER_TOKEN>
 ```
 
-etcd 镜像不含 `/bin/sh`，当前部署使用直接执行 `etcdctl` 验证健康；Docker Desktop 中显示 running 而没有 healthy 标签属正常现象。Milvus 的 healthy/healthz 仅是基础检查，还须核对认证客服 health 与实际问答。宿主机 Python 默认连接 `http://localhost:19530`；Python 容器访问宿主机 Milvus 时应设置 `AI_SERVICE_MILVUS_URI=http://host.docker.internal:19530`，不能使用容器自己的 localhost。
+| 方法与路径 | 用途 | 鉴权 |
+| --- | --- | --- |
+| `GET /health/live` | 进程存活 | 无 |
+| `GET /health/ready` | checkpoint 就绪 | 无 |
+| `POST /internal/v1/route` | 路由到三种生成类型 | Bearer |
+| `POST /internal/v1/generations:stream` | 生成工作流，返回 NDJSON | Bearer |
+| `POST /internal/v1/generations/{request_id}:cancel` | 取消指定 appId 的请求 | Bearer |
+| `POST /internal/v1/customer-service/answers` | 客服问答及最多三条来源 | Bearer |
+| `POST /internal/v1/customer-service/knowledge:etl` | 文档索引 ETL | Bearer + 变更租约 |
+| `POST /internal/v1/customer-service/knowledge:delete` | 删除指定文档版本的向量数据 | Bearer + 变更租约 |
+| `POST /internal/v1/customer-service/knowledge:rebuild` | 重建 collection 并切换 alias | Bearer + 变更租约 |
+| `GET /internal/v1/customer-service/health` | 客服独立健康摘要 | Bearer |
 
-`milvus-clone-v302`、`milvus-etcd-diagnostic`、`milvus-migration-diagnostic` 和 `milvus-standalone-v302-failed` 是排障或隔离验证容器，项目不依赖它们。`milvus-standalone-v300-rollback` 是停止的旧版本回滚容器，不应与生产容器同时启动。清理诊断容器前保留所需现场；不要随容器删除数据卷、安装目录内的 `volumes/` 或快照备份。回滚旧镜像必须先恢复对应的旧数据备份，不能让旧容器直接读取升级后的生产卷。
+健康接口另兼容 `/internal/v1/health/live` 和 `/internal/v1/health/ready`。请求响应定义见 [schemas.py](src/ai_service/api/schemas.py)，JSON 字段统一使用 camelCase，Python 内部接口不使用 Spring `BaseResponse`。
 
-### Python AI 容器
+生成接口返回 `application/x-ndjson`，每行一条事件，包含 `type`、`requestId`、递增 `sequence`、`node`、`data` 和可选 `error`。事件类型为 `content_delta`、`tool_started`、`tool_finished`、`node_status`、`completed`、`failed`。
 
-确保 Docker daemon 已运行，在 `ai-service` 目录执行：
+静态内容的 `data.contentMode=display_delta` 仅用于展示，`candidate` 表示本轮完整候选；`completed` 返回计数与发布/构建摘要，不重复返回完整源码。Spring 适配为前端 SSE：内容使用 `{"d":"..."}`，成功发送 `done`，业务失败发送 `business-error`，失败不再发送 `done`。
+
+取消会登记协作式标记并取消当前实例在途任务。取消响应不代表 Spring 工具已经发生的文件副作用被撤销；取消与静态提交资格以 Spring 持久化仲裁为准。
+
+## Checkpoint 与恢复边界
+
+工作流使用官方 `AsyncPostgresSaver`，线程标识为 `{appId}:{requestId}`，子图使用继承的命名空间。同一数据库中的 `ai_workflow_status` 仅保存脱敏节点摘要；执行期图 checkpoint 可能包含候选源码和有限修复反馈，应限制数据库访问。
+
+成功、失败或取消进入终态后尽力清理对应 thread，TTL 用于异常退出兜底。清理失败不反转已确定的生成结果。`CHECKPOINT_REQUIRED=false` 时可在存储不可用后降级执行，但 `ready` 返回 503；设置为 `true` 时存储启动或写入失败会显式失败。
+
+当前未启用 `PostgresStore` 长期记忆，也没有生产重启自动续跑、任务重新认领或客户端事件重放。恢复测试用于验证底层 checkpoint 与子图状态，不能替代生产恢复入口。
+
+## 客服知识库与 RAG
+
+客服默认关闭，设置 `AI_SERVICE_CUSTOMER_SERVICE_RAG_ENABLED=true` 后才初始化相关运行组件。客服依赖初始化失败会降级客服能力，不改变代码生成 readiness。
+
+```text
+知识入库：Spring 上传私有 OSS -> ETL 任务与变更租约
+  -> Python 授权下载 -> PDF/DOCX/MD/TXT 解析 -> 切分 -> Embedding -> Milvus
+
+客服问答：问题 -> Embedding -> Milvus 检索 -> Reranker
+  -> 回答模型 -> 引用校验 -> 答案与来源
+```
+
+| 配置组 | 主要环境变量 | 默认或要求 |
+| --- | --- | --- |
+| 总开关 | `AI_SERVICE_CUSTOMER_SERVICE_RAG_ENABLED` | `false` |
+| 向量服务 | `AI_SERVICE_CLOSEAI_API_KEY`、`AI_SERVICE_CLOSEAI_BASE_URL` | 启用时必填，支持旧的无前缀名称 |
+| 向量模型 | `AI_SERVICE_RAG_EMBEDDING_MODEL`、`AI_SERVICE_RAG_EMBEDDING_DIMENSION` | `openai:text-embedding-3-large`、`3072` |
+| Milvus | `AI_SERVICE_MILVUS_URI`、`AI_SERVICE_MILVUS_TOKEN`、`AI_SERVICE_MILVUS_DATABASE` | URI 默认 `http://localhost:19530` |
+| 知识别名 | `AI_SERVICE_MILVUS_COLLECTION_ALIAS` | `customer_service_knowledge`，与 Spring 配置一致 |
+| 切分 | `AI_SERVICE_RAG_CHUNK_SIZE`、`AI_SERVICE_RAG_CHUNK_OVERLAP` | `1000`、`150` |
+| 检索 | `AI_SERVICE_RAG_RETRIEVAL_TOP_K`、`AI_SERVICE_RAG_FINAL_TOP_K` | `8`、`3` |
+| 重排器 | `AI_SERVICE_RAG_RERANKER_PROVIDER` | 默认 `local_cross_encoder`；可设 `disabled` |
+| 重排模型与设备 | `AI_SERVICE_RAG_RERANKER_MODEL`、`AI_SERVICE_RAG_RERANKER_DEVICE` | `BAAI/bge-reranker-v2-m3`、`cuda` |
+| 下载限制 | `AI_SERVICE_RAG_OSS_ALLOWED_HOSTS`、`AI_SERVICE_RAG_DOWNLOAD_MAX_BYTES` | 受控 OSS HTTPS 主机白名单；上限 20 MiB |
+| 问答预算 | `AI_SERVICE_RAG_ANSWER_TIMEOUT_SECONDS`、`AI_SERVICE_RAG_PROMPT_MAX_BYTES` | `60` 秒、`16384` 字节 |
+| 索引保留 | `AI_SERVICE_RAG_COLLECTION_RETENTION_GENERATIONS` | 默认保留两代 |
+
+客服回答复用 `AI_SERVICE_MODEL_*` 聊天模型，Embedding 使用独立配置。知识变更必须由 Spring 签发未过期 mutation lease，Python 不自行创建或延长授权。全量重建先写新 collection，校验后切换 alias；旧版本按保留代数、退役宽限和所有权证明进行有界清理。
+
+本地重排器要求 CUDA，同一模型与设备只允许一个进程 owner；多实例需分配不同 GPU 或另行集成独立重排服务。当前默认应用组装支持本地与禁用实现，不能仅设置 `remote_api` 就认为已有远程服务接入。`AI_SERVICE_RAG_MIN_RERANK_SCORE` 默认不设置，阈值需经评估确定，禁用重排时不能同时设置该阈值。
+
+客服健康接口检查组件生命周期以及 Milvus、Spring 租约校验依赖，不发送真实聊天或 Embedding 请求。RAG 关闭时返回 disabled，依赖不可用时返回降级摘要；这些状态不等于真实问答效果验收。客服不使用生成 checkpoint，也不保存跨请求会话。
+
+## Docker 与调试
+
+### Docker 启动
+
+在本目录构建并启动 Python 服务：
 
 ```powershell
 docker build -t yu-ai-service:local .
 docker run --rm --name yu-ai-service -p 8000:8000 --env-file .env yu-ai-service:local
 ```
 
-容器访问宿主机 Spring 和 PostgreSQL 时可使用：
+Dockerfile 使用 Python 3.12 和锁定依赖，不自动创建 Spring、PostgreSQL 或 Milvus。Docker Desktop 下访问宿主机服务使用 `host.docker.internal`；容器中的 `localhost` 指向容器自身。Linux 可使用同一 Docker network 的服务名或配置宿主机可达地址。镜像不包含 GPU 运行配置，启用本地 GPU 重排需另行配置运行环境。
 
-```dotenv
-AI_SERVICE_SPRING_GATEWAY_BASE_URL=http://host.docker.internal:8123/api/internal/ai-tools
-AI_SERVICE_CHECKPOINT_POSTGRES_URL=postgresql://yu_ai_checkpoint:replace-with-password@host.docker.internal:5432/yu_ai_checkpoint
-```
-
-Linux 环境如果无法解析 `host.docker.internal`，需要改为宿主机可达地址或将服务放入同一个 Docker network。
-
-## 健康检查
-
-健康检查无需 Bearer 令牌：
+### LangGraph Studio 与 PyCharm
 
 ```powershell
-Invoke-RestMethod http://localhost:8000/health/live
-Invoke-RestMethod http://localhost:8000/health/ready
+uv run --with "langgraph-cli[inmem]" python -m ai_service.studio_server
 ```
 
-- `live` 只表示 Python 进程存活。
-- `ready` 会检查 checkpoint 存储状态；依赖不可用时返回 HTTP 503。
-- 同时兼容 `/internal/v1/health/live` 和 `/internal/v1/health/ready`。
+Studio 连接 `http://127.0.0.1:2024`，选择 `yu_ai_generation`；图注册在 [langgraph.json](langgraph.json)。图输入使用 `app_id`、`request_id`、`prompt`、`code_gen_type` 等 snake_case 字段，初始 `repair_count` 和 `tool_call_count` 为 0。
 
-客服健康检查使用内部 Bearer 鉴权，且与代码生成 readiness 隔离：
+Studio 是直接图调试入口，不经过 Spring 生成入口的任务与租约建立；它会调用真实模型和工具，应使用隔离测试应用，不能代替完整生成链路或发布验收。Agent Server 管理调试 checkpoint，项目 PostgreSQL saver 在该入口关闭；本地 `.langgraph_api/` 可能包含提示词与源码，不提交。
 
-```powershell
-$headers = @{ Authorization = "Bearer $env:AI_SERVICE_INTERNAL_BEARER_TOKEN" }
-Invoke-RestMethod http://localhost:8000/internal/v1/customer-service/health -Headers $headers
-```
+PyCharm 可使用 [.run/AI Service.run.xml](<.run/AI Service.run.xml>) 启动 `ai_service.server`。调试细节见 [Studio 说明](../doc/langgraph-studio-debug.md) 和 [PyCharm 说明](../doc/knowledge-pycharm-debug.md)。
 
-- 开关关闭时返回 HTTP 200、`status=disabled`、`reason=CUSTOMER_SERVICE_RAG_DISABLED`、`ready=false`，且不探测外部依赖。
-- 只有 `answerService/answerModel/embedding/etl/leaseValidator/milvus/reranker` 七项全部为 true 才返回 `status=healthy`、`reason=CUSTOMER_SERVICE_READY`。answer service 缺失、模型适配器/Embedding/Reranker 本地生命周期不可用、Milvus/lease 探测失败都会返回 HTTP 503、`status=degraded`。
-- degraded 使用稳定脱敏 reason：依赖失败为 `CUSTOMER_SERVICE_DEPENDENCY_UNAVAILABLE`，整体探针超时、已有不兼容同步探针占用共享 fallback worker、异常分别为 `CUSTOMER_SERVICE_HEALTH_PROBE_TIMEOUT`、`CUSTOMER_SERVICE_HEALTH_PROBE_BUSY`、`CUSTOMER_SERVICE_HEALTH_PROBE_FAILED`。模型、Embedding 和 Reranker 只检查本地对象/进程生命周期，不发送真实供应商请求；Milvus 与 lease validator 沿用现有轻量健康调用。
-- 依赖摘要只接受并输出上述固定七键；缺键、非严格布尔 true 值都按 false，provider 的额外诊断键会被忽略且不影响 healthy。同步自定义探针使用单个 daemon single-flight worker，不占用 asyncio 默认 executor；超时后重复轮询只等待同一个在途探针，不会继续创建线程或排队，完成后下一次轮询可读取结果并恢复。
-- Milvus 健康检查使用 `health_ready_sync()` 直接调用同步 client，由上述 daemon single-flight 执行；它不复用业务 `ping()` 的 cancellation-draining `_thread_call`，不占用 asyncio 默认 executor，也不会在 ASGI loop 留下等待 RPC 的 Task。请求超时后最多一个 daemon 线程继续，完成结果由下一轮消费，随后才允许重探，lifespan 退出不等待该同步 RPC。其他 async provider/dependency 仍按 provider/checker 实例及 dependency key 共享后台 Task；dispose 会先分离 runner 缓存再做有界 cancel/drain，因此旧 loop 停止后新 loop 不会永久 BUSY。自定义 async provider 应响应取消；若主动吞掉取消，所有者仍需在关闭旧 loop 前释放它，以免底层框架产生 pending-task 警告。
-- 响应只包含 `enabled/status/reason/ready/degraded` 和依赖布尔值，不包含 URI、令牌、异常正文或供应商响应。
-- 客服降级不会把 `/health/ready` 变为 503；该端点仍只反映 checkpoint/代码生成 readiness。
+### LangSmith
 
-## 内部接口
-
-除健康检查外，接口都要求：
-
-```http
-Authorization: Bearer <AI_SERVICE_INTERNAL_BEARER_TOKEN>
-```
-
-| 方法与路径 | 用途 |
-| --- | --- |
-| `POST /internal/v1/route` | 将提示词分类为 `HTML`、`MULTI_FILE` 或 `VUE_PROJECT` |
-| `POST /internal/v1/generations:stream` | 启动工作流并返回 `application/x-ndjson` 事件流 |
-| `POST /internal/v1/generations/{requestId}:cancel` | 协作式取消指定请求 |
-| `POST /internal/v1/customer-service/answers` | 基于当前知识库回答客服问题并返回最多 3 条来源 |
-| `POST /internal/v1/customer-service/knowledge:etl` | 对单个 PDF、DOCX、MD 或 TXT 文档执行索引 ETL |
-| `POST /internal/v1/customer-service/knowledge:delete` | 删除指定文档版本的向量数据 |
-| `POST /internal/v1/customer-service/knowledge:rebuild` | 按文档清单重建临时 collection 并切换 alias |
-| `GET /health/live` | 进程存活检查 |
-| `GET /health/ready` | PostgreSQL checkpoint 就绪检查 |
-| `GET /internal/v1/customer-service/health` | 认证的客服 RAG 独立健康摘要 |
-
-客服问答、知识库变更和客服健康接口都需要内部 Bearer 令牌。知识库 `etl`、`delete`
-和 `rebuild` 请求必须携带 Spring 签发的未过期 mutation lease；Python 只校验租约形状、
-作用域和操作类型，不自行生成或延长租约。知识库接口返回稳定错误码，禁用客服 RAG 时返回
-`CUSTOMER_SERVICE_RAG_DISABLED`。
-
-生成事件包含 `requestId`、递增的 `sequence`、`node`、`data` 和可选的 `error`。事件类型包括：
-
-- `content_delta`
-- `tool_started`
-- `tool_finished`
-- `node_status`
-- `completed`
-- `failed`
-
-Python 与 Spring 之间使用 NDJSON；Spring 对前端的内容事件仍为 `data: {"d":"..."}`。只有产物成功发布后才发送命名 `done` 事件；模型截断、校验失败或发布失败会发送一个命名 `error` 事件，其中包含数字 `code`、稳定的 `errorCode`、`message` 和 `requestId`，且不会再发送 `done`。
-
-`completed.data` 只携带生成类型、质量、修复/工具计数以及发布或构建摘要，不重复携带完整源码。HTML/MULTI_FILE 的最终候选来自最后一个 `content_delta` 的完整候选模式（新流式事件 `contentMode=candidate`，旧事件无模式）；`display_delta` 仅供展示。只有 Spring 发布成功并收到 completed 后 Java 才向历史处理器提交最终完整候选。
-
-业务 checkpoint 不保存完整源码或审查正文，`ai_workflow_status` 只保留 `node`、`requestId`、`appId`、`codeGenType`、`qualityPassed`、`repairCount` 和 `toolCallCount` 等状态与审计摘要。执行期节点恢复由 LangGraph 自动 checkpoint 承担，该 checkpoint 在请求执行期间仍可能包含完整产物；Vue 多 Agent 审查只额外保留最多 4000 字符的阻断性 `repair_feedback`，不保存 minor 详情、Reviewer summary、`reviewer_results` 或 `quality_issues`。从已完成的 `quality_review` 恢复时直接进入 repair，不重复执行 Reviewer。请求在成功、失败或取消进入终态后会立即 best-effort 清理对应 thread，TTL 仅作为异常退出时的兜底。若终态清理失败，只会使 checkpoint 就绪状态降级，不会反转已经确定的生成结果。
-
-## PostgreSQL checkpoint 与故障降级
-
-Spring 已新增独立 MySQL `generation_task` 业务任务账本与只读 `/api/apps/chat/gen/code/task` 查询，保留执行终态、生成代际并分别展示实时租约、静态版本提交证据和执行心跳；不读取或替代本节 Python 节点摘要，也不开放生产自动恢复。已有库升级 Spring 前需依次执行 `sql/alter_generation_task.sql`、`sql/alter_generation_fencing.sql`、`sql/alter_generation_arbitration.sql`、`sql/alter_generation_execution_heartbeat.sql`；新建库的 `sql/init_database.sql` 已包含这些结构。代码不自动迁移，未迁移时生成会在调用 Python 前失败关闭。升级前排空旧实例请求并统一切换，避免混跑旧活动指针协议。字段、权限、30 天查询保留和跨资源一致性限制见 [生成任务账本说明](../doc/generation-task-ledger.md)。这些 Spring 变动未增加 Python 接口、checkpoint schema 或配置要求。
-
-Spring 独立调度器每 15 秒续写已登记任务的随机执行所有者心跳，数据库观测期限为 90 秒；`LIVE` 不保证 Python/模型有进展，`EXPIRED` 不自动标记失败或认领恢复。静态项目启用数据库指针后，MySQL 是活动版本权威，`.current` 只是兼容镜像，数据库不可用时不回退镜像。新协议暂未自动清理 release，应预留磁盘空间。Vue 的 `publicationState` 为 `NOT_VERSIONED`，不能推断其文件修改已被回滚。
-
-Spring 的真实 MySQL/Redis 任务故障矩阵是独立 opt-in Java 测试，持久化代际、数据库活动指针和迟到发布验证见 [重构交接文档第 15 节](../doc/ai-service-subgraph-refactor-handoff.md)。静态版本使用 MySQL fencing；Vue 工程构建尚无此版本切换协议，生产自动恢复仍关闭。
-
-LangGraph 使用官方 `AsyncPostgresSaver`，`thread_id` 为 `{appId}:{requestId}`。同一连接池还维护 `ai_workflow_status`，该表只允许保存节点、请求/应用标识、生成类型、质量结果和有限计数，不保存完整源码、`repair_feedback` 或其他审查正文。正常终态调用 `adelete_thread()` 删除官方图 checkpoint；异常退出先由 `expires_at` 找到过期 thread，成功删除图 checkpoint 后才删除状态行，图删除失败时保留状态行供下次重试。
-
-- `AI_SERVICE_CHECKPOINT_REQUIRED=false`：PostgreSQL 不可用时记录脱敏警告，服务继续运行但不具备 checkpoint 恢复能力，ready 返回 503。
-- `AI_SERVICE_CHECKPOINT_REQUIRED=true`：启动探测或 checkpoint 写入失败时显式失败。
-- `AI_SERVICE_CHECKPOINT_ENABLED=false`：完全关闭 checkpoint，仅建议用于测试或明确接受无恢复能力的本地环境。
-- `AI_SERVICE_CHECKPOINT_AUTO_SETUP=true`：启动时幂等初始化官方表和 `ai_workflow_status`，适合本地；生产推荐独立初始化后关闭。
-
-序列化保持 pickle fallback 关闭，并通过 `allowed_json_modules=()` 不额外允许自定义 JSON constructor 模块。锁定依赖版本不存在 `LANGGRAPH_STRICT_MSGPACK` 配置开关，因此数据库必须只允许可信 AI 服务写入，不能把无效环境变量当作安全边界。
-
-本轮不启用 `PostgresStore` 长期记忆。Spring 聊天历史仍是跨请求对话上下文；只有出现明确的跨应用偏好或跨 requestId 结构化决策，并定义查看、修改、删除和过期规则后才重新评估。
-
-Spring 内部工具幂等使用现有 Spring Redis 配置（本地默认 database 1），因此幂等状态和成功结果可跨 Spring 实例共享。作用域为 `appId + requestId + toolCallId`；同一作用域复用不同 canonical 工具名或参数指纹会被拒绝。已存在（包括陈旧）的 `RUNNING` 记录表示执行结果不确定，不会自动重放；action 已成功但完成状态写回 Redis 失败时同样返回 indeterminate。该机制不承诺文件系统与 Redis 之间的严格 exactly-once。
-
-工具调用 Redis 幂等与 `VersionedArtifactStore` 的不可变版本发布幂等是两套独立机制，不能相互替代。本轮单元和契约验证不包含真实 Redis 多 Spring 实例场景，该场景仍需集成测试验证。
-
-## 稳定灰度与真实验收入口
-
-Spring 灰度路由使用 `graySalt` 和稳定主体（`userId` -> `appId` -> `requestId`）计算 SHA-256 桶，`route`、`generate`、`cancel` 会选择同一引擎。仓库提供 `scripts/compare-ai-generation-engines.ps1`、`scripts/test-ai-service.ps1` 和 `scripts/test-ai-phase-two-e2e.ps1`，脚本默认只显示检查清单，必须显式使用 `-Execute` 和隔离测试应用 ID 才会发送请求。
-
-真实 Redis 多实例测试通过以下命令 opt-in：
-
-```powershell
-$env:AI_REDIS_INTEGRATION = "true"
-$env:AI_REDIS_URL = "redis://127.0.0.1:6379/1"
-mvn "-Dtest=ToolInvocationIdempotencyRedisIT" test
-```
-
-真实 PostgreSQL checkpoint 测试通过以下命令 opt-in，连接 URL 只放在当前进程环境中，不得打印或提交：
-
-```powershell
-$env:AI_SERVICE_POSTGRES_INTEGRATION = "true"
-$env:AI_SERVICE_CHECKPOINT_POSTGRES_URL = "postgresql://<user>:<password>@localhost:5432/yu_ai_checkpoint"
-uv run pytest tests/test_postgres_checkpoint_integration.py tests/test_postgres_subgraph_integration.py -ra
-```
-
-默认不设置 `AI_SERVICE_POSTGRES_INTEGRATION` 时，这两组测试跳过且不连接数据库。测试使用唯一 thread ID，结束后删除对应测试 checkpoint 和状态摘要；连接来源沿用 Settings（包含本地 .env），不要打印凭据。本轮已在配置的真实 PostgreSQL 上验收 10 项；其中子图新增 8 项，验证三张官方表不残留对应 thread 数据、TTL 保留另一活跃 thread。跨连接池恢复仍复用测试模型/网关与事件接收器，不是跨进程业务任务恢复，也不验证 Spring 发布幂等、事件重放、租约或客户端重连。真实 Spring/Python HTTP、真实模型和三类型端到端结果仍需单独记录。
+设置 `LANGSMITH_TRACING=true`、`LANGSMITH_ENDPOINT`、`LANGSMITH_API_KEY` 和 `LANGSMITH_PROJECT` 可启用脱敏旁路追踪，默认关闭。仅发送请求/应用标识、节点、状态与有限计数，不发送提示词、对话、源码或工具正文；追踪故障不改变生成终态。Studio 启动器独立关闭自动云追踪。
 
 ## 测试与校验
-
-测试使用 Fake Model 和内存工具网关，不调用真实模型：
-
-```powershell
-uv run pytest
-```
-
-提交前建议运行完整校验：
 
 ```powershell
 uv run python -m compileall -q src
@@ -613,73 +363,32 @@ uv run pytest
 uv lock --check
 ```
 
-### 离线客服评估
+常规测试使用 Fake/注入式模型与基础设施，覆盖 API、输入审核、三类生成、文本流、子图状态、Vue 工具与上下文、取消、checkpoint、工具契约、客服 ETL/RAG、健康检查和评估。它们不代表真实模型、GPU、Spring 构建或浏览器端到端验收。
 
-`tests/fixtures/customer_service_eval.json` 使用 `customer-service-rag-eval/v1` schema 和独立 `datasetVersion`，内容全部是 synthetic/non-sensitive 样例，覆盖中文同义改写、错别字、稳定错误码、无答案和 prompt injection。无答案与恶意指令条目显式设置 `expectedAnswerable=false`。
-
-`ai_service.orchestration.customer_service_evaluation` 只接受注入 runner 的 recorded/fake 结果，不会默认创建应用或连接 CloseAI、Milvus、OSS、GPU。指标定义如下：
-
-- `Recall@8`：answerable 样例中，前 8 个去重检索文档覆盖 expected document IDs 的比例均值。
-- `MRR@3`：answerable 样例第一个 relevant 文档在前 3 名中的 reciprocal rank 均值。
-- `NDCG@3`：answerable 样例按二元相关性计算并以理想 DCG 归一化。
-- `no-answer accuracy`：`expectedAnswerable=false` 样例中正确拒答的比例。
-- `citation validity`：answerable 结果必须回答、至少一个引用、无重复且所有引用属于 expected IDs；no-answer 结果必须拒答且无引用。未知或重复 citation 计为无效。
-- latency 输出 `count/min/p50/p95/max/mean` 毫秒摘要；只接受有限、非负的数字（不接受字符串或 bool）。不可转换、NaN、Inf 或负数会 fail-closed 抛出只包含 entry id 的稳定 `ValueError`，不得静默改为 0 后计入；空数据集所有比率和延迟均为 0，不发生除零。
-
-默认自动化只运行 fake/injected provider。真实 OSS、CloseAI、Docker Milvus、GPU Reranker、浏览器和端到端评估仍为 pending，未执行时不得写为通过。
-
-### 客服 RAG 启动、回滚与人工验证
-
-推荐启动顺序：MySQL/Redis/私有 OSS -> Spring -> Docker Milvus -> Python（先保持 RAG 关闭）-> 检查 `/health/ready` -> 配置 CloseAI Embedding、`AI_SERVICE_MODEL_*` 回答模型、GPU/alias -> 开启 RAG 并滚动启动 Python -> 检查认证客服 health -> 由管理员页面上传知识文件并观察 ETL 任务终态 -> 执行 synthetic smoke 和人工问答。
-
-上传只能走 Spring 管理接口/页面，Spring 保存私有 OSS 对象并通过 outbox 驱动 Python ETL。任务状态为 `PENDING -> RUNNING -> SUCCEEDED`，可重试失败回到 `PENDING`，耗尽重试进入 `FAILED`。运维人员应记录 `documentId/documentVersion/etlVersion/status/errorCode`，只按稳定错误码排查；常见类别包括 `KNOWLEDGE_DOWNLOAD_*`、`KNOWLEDGE_DOCUMENT_*`、`KNOWLEDGE_EMBEDDING_*`、`KNOWLEDGE_MUTATION_LEASE_*`、`KNOWLEDGE_VECTOR_*` 和 `KNOWLEDGE_REBUILD_*`。不要复制签名 URL、lease proof 或供应商正文。全量 rebuild 先写新的物理 collection，完成校验后原子切换 alias；保留代数和 grace window 内的旧版本用于回滚，禁止手工删除 current/protected/ownership 不明的 collection。
-
-回滚按最小影响顺序执行：先设置 `AI_SERVICE_CUSTOMER_SERVICE_RAG_ENABLED=false` 并滚动重启 Python；确认代码生成 `/health/ready` 正常；必要时将 alias 指回经核验的上一物理版本；最后再调查供应商、Milvus 或 GPU。关闭客服不需要清理 checkpoint，因为客服不使用 checkpoint；不要同时切换 `AI_ENGINE`，除非代码生成链路本身也故障。
-
-仓库根目录的统一门禁会执行上述 Python 检查；只有独立 checkpoint 数据库准备完毕时才追加 `-IncludePostgres`：
+PostgreSQL 生命周期和子图跨连接恢复测试默认跳过。准备独立测试数据库后显式启用：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1 -Execute
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-langgraph-real-gate.ps1 -Execute -IncludePostgres
+$env:AI_SERVICE_POSTGRES_INTEGRATION = "true"
+# 连接通过私有 .env 或 AI_SERVICE_CHECKPOINT_POSTGRES_URL 注入。
+uv run pytest tests/test_postgres_checkpoint_integration.py tests/test_postgres_subgraph_integration.py -ra
 ```
 
-## 安全要求
+上述测试连接真实 PostgreSQL，模型和 Spring 工具仍使用 Fake。Redis 工具幂等、MySQL 任务及发布的集成测试属于 Spring，入口见 [AGENTS.md](../AGENTS.md)。
 
-- 不得提交 `.env`、API Key、Bearer 令牌或生产服务地址。
-- 生产环境应通过密钥管理系统或运行时环境变量注入凭据。
-- Python 服务应部署在受控内网，不直接暴露给浏览器或公网客户端。
-- Python 不挂载或直接操作项目目录，文件和构建操作必须经过 Spring 工具网关。
-- 日志默认不记录完整提示词、生成源码、工具参数和密钥。
-- 仓库历史中曾暴露的凭据必须轮换，不能仅从当前配置文件删除。
+客服离线指标由 `customer_service_evaluation.py` 计算，合成夹具位于 `tests/fixtures/customer_service_eval.json`。产品语料可运行无外部连接的结构校验：
 
-## 相关文档
+```powershell
+uv run python -m ai_service.orchestration.product_knowledge_evaluation
+```
 
-- [AI 服务详细启动说明](../doc/ai-service-startup.md)
-- [LangChain + LangGraph 重构方案](../doc/ai-service-langchain-langgraph-refactor-design.md)
+真实 RAG 评估必须显式使用 `--live` 并提供文档版本映射和报告输出，具体步骤见 [产品知识库说明](../doc/knowledge/product/README.md)。
 
+## 部署约定与相关文档
 
-首次 Vue 生成默认主动配图，但“无需图片”“不需要任何配图”“without images”等明确不配图要求会跳过自动检索；明确要求新增、补充、替换、搜索或修复图片时仍会检索，后句新增指令可覆盖前句否定。此时会在上下文准备阶段主动调用 image_search（既有项目的“保留图片”“不要替换图片”及图片布局美化不触发；按中英文动作与否定分句识别，不是出现图片关键词就触发），结果放入 imageAssets；常见中文主题映射为英文查询。成功写入的 content/newContent 必须包含搜索 URL，否则最多提醒两轮后失败；修复继承已写入标记。主动检索不占模型文件循环预算，模型主动搜图仍占预算。空结果或网关异常显示降级提示并继续；普通既有功能修改不强制插图。该检查只证明 URL 写入源码，实际图片加载仍需浏览器验收。图片与部署配置、IPv4/IPv6 404 排查见 [说明](../doc/image-and-deployment-troubleshooting.md)。
+内部接口部署在受控网络，令牌与密钥通过私有配置或运行环境注入；不提交 `.env`、checkpoint 数据、调试缓存或日志。Python 不挂载生成项目目录。Spring 业务库迁移、代际及发布恢复操作由业务后端管理。
 
-## 输入校验与语义审核
-
-LangGraph 的 `input_guard` 和新建应用的 `/internal/v1/route` 共享输入审核服务，默认开启。规则检查先验证非空、异常控制字符、字符上限和上下文预算，再使用当前配置的聊天模型进行独立审核。审核只有四种严格结构化结果：正常放行、带提示放行、需要澄清、拒绝。
-
-审核覆盖内容安全、应用任务范围、关键冲突或缺失以及生成规模/能力边界。普通模糊需求采用合理默认值；已有应用的“优化一下”结合原始需求和近期用户需求理解。真实支付、登录、数据库等要求缺少接口契约或明确演示授权时要求澄清，不能擅自改成模拟功能。模型审核不保证识别所有风险，也不能替代 Spring 的权限、文件沙箱和发布校验。Legacy 引擎不接入本审核；灰度模式仅被选中走 LangGraph 的请求生效。
-
-Spring 在生成入口传入最多六条用户历史（每条最多 1000 个 UTF-16 字符）及最多 2000 字符的原始需求，并标记截断。Python 审核只使用有界用户需求；当前输入保持原文，不自动改写、裁剪或删减功能。被拒绝、待澄清或审核故障的请求在项目工具调用前结束；用户补充答案后发起下一轮审核，不是暂停后自动恢复同一请求。带提示放行的提示通过独立 `node_status` 展示，不写入最终静态产物。
-
-配置见 `.env.example`：`AI_SERVICE_INPUT_REVIEW_ENABLED=true`，单次审核超时 `AI_SERVICE_INPUT_REVIEW_TIMEOUT_SECONDS=15` 秒，失败最多额外重试 `AI_SERVICE_INPUT_REVIEW_MAX_RETRIES=1` 次；关闭语义审核仍保留规则检查。输入字符上限 `AI_SERVICE_INPUT_PROMPT_MAX_CHARS=20000`，API 另有 100000 字符硬上限。审核请求至多调用两次模型，每次包含 SDK 内部重试在内受该超时约束。审核输出最多 1024 tokens，拒绝截断、工具调用、额外字段和不合法 JSON；故障不会静默放行。
-
-`AI_SERVICE_MODEL_CONTEXT_WINDOW_TOKENS=65536` 必须按所用模型的实际窗口设置；`AI_SERVICE_MODEL_CONTEXT_OVERHEAD_TOKENS=4096` 用于预留协议开销。预算检查采用 UTF-8 字节数作为保守 token 上界，并预留输出额度，可能早于供应商实际限制拦截；它不是精确 tokenizer，也不保证输出不会达到上限。实际生成调用前会再次检查增长后的完整消息载荷。
-
-2026-10-28 核实的 DeepSeek 官方 [模型说明](https://api-docs.deepseek.com/quick_start/pricing) 标明 `deepseek-flash` 支持 1M 上下文。本地对已配置的 `deepseek-chat` 做最小生成探测，返回实际模型名为 `deepseek-flash`；但官方 [更新记录](https://api-docs.deepseek.com/updates) 已宣布旧别名退役，不能假定其他账户或后续日期仍可用。当前本地 `.env` 按用户要求将窗口调为 `AI_SERVICE_MODEL_CONTEXT_WINDOW_TOKENS=200000`，输出额度仍为 8192、协议预留仍为 4096，可用输入字节上界为 187712；这是保守运行配置，不是将供应商窗口描述为 128K。通用默认值与 `.env.example` 保持 65536，其他供应商应独立核实后再覆盖。调整 `.env` 后必须重启 Python AI 服务，且不会自动续跑已失败请求；模型别名迁移应单独验证生成协议与行为。
-
-稳定错误码包括 `INPUT_EMPTY`、`INPUT_INVALID`、`INPUT_TOO_LONG`、`INPUT_CONTEXT_BUDGET_EXCEEDED`、`INPUT_REJECTED`、`INPUT_CLARIFICATION_REQUIRED`、`INPUT_REVIEW_UNAVAILABLE`。路由阶段返回结构化 JSON（审核故障 503，其余审核错误 422），生成阶段通过原有 `failed`/公共 SSE 错误通道返回中文原因。前端在审核失败时恢复原需求（不覆盖用户新输入），需要澄清时显示警告。路由响应含最多一条 `warnings`，当前 Java 路由只消费生成类型；生成入口重新审核并展示警告。
-
-离线审核测试：`uv run pytest tests/test_input_review.py`。真实模型的安全分类和跨服务完整交互需另行验收。
-
-### 同一 Vue 项目的多次修改与上下文边界
-
-每次生成使用独立 `{appId}:{requestId}` 图状态，前一次的工具历史不自动传入下一次请求；请求内部的修复阶段继承本次工具历史与总工具预算。Spring 每次只传最近最多六条用户需求（每条最多 1000 个 UTF-16 字符）和最多 2000 字符的初始需求，不传全部 AI 回复或历史源码。Vue 当前产物入口只返回最多 200 条文件路径，源码由模型按需调用 Spring 工具读取；质量审查快照另限最多 24 个文件、每文件 12000 字符、总计 60000 字符，并标记省略或截断。
-
-因此修改次数本身不会使模型上下文线性累积；同一请求内的大文件、重复读取及审查快照仍可能超预算。模型消息的工具历史仍独立限制为 24 KiB，窗口扩容不提高该上限；最新结果无法完整容纳时仍失败。当前没有跨请求项目需求摘要或长期记忆，也没有按完整消息预算对源码快照分批审查，不能保证任意项目规模均可审查或保留六轮之前的全部需求。checkpoint 是本次执行恢复数据，终态 best-effort 清理、TTL 兜底，不能替代跨请求记忆。
+- [项目启动与构建](../README.md)
+- [开发协作规范](../AGENTS.md)
+- [生成任务、迁移与发布边界](../doc/generation-task-ledger.md)
+- [子图架构与交接说明](../doc/ai-service-subgraph-refactor-handoff.md)
+- [产品知识库与评估](../doc/knowledge/product/README.md)
