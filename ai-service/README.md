@@ -397,6 +397,20 @@ JSON 转义恶意请求标识中的换行。身份 ID 属于诊断数据，采�
 服务 fallback 或诊断错误也不会被计入正常排名成绩。独立 `answerMetrics` 保留可回答题实际回答率、无答案题安全拒答率、旧严格引用通过率（来源文档 ID 必须唯一）、HTTP 延迟平均/P95、错误及降级；故障保留在比例分母中，不能算为正确拒答。HTTP 延迟不包含等 trace 落盘的时间。
 评测请求会触发真实回答模型调用，需使用专用新 run ID、trace 文件和报告文件。HTTP 报告保存完整 answer 和响应 sources 供 90 题人工事实复核，仅允许输出到仓库已忽略的 `tmp/`；CLI 终端只输出无逐题正文的聚合摘要。评测器不自动配置或检查 ACL，`tmp/` 的 Git 忽略规则也不提供访问隔离；运行者须在运行前手动配置并核对目录 ACL，仅允许评测人员访问。不提交 Git、不上传公共日志，复核完成后按本地数据保留策略清理。常规 trace 仍禁止答案与知识摘录，也不保存令牌或异常正文。
 
+### 严格引用 E1 历史配对回放
+
+`python -m ai_service.evaluation.citation_replay --help` 提供冻结历史证据的回放工具；默认仅准备输入，不连接检索、Milvus 或 GPU，也不调用模型。传入 `--candidate --baseline --trace --evidence --dataset --annotations --mapping --output`，输入必须匹配工具中冻结的 SHA-256；Git 换行转换也会造成字节指纹不同，应使用原始受控文件，不放宽校验。输出目录必须不存在，不能覆盖历史记录。
+
+只有显式 `--execute` 才调用配置的 OpenAI 兼容回答接口，可用 `--env-file` 选择私有配置。默认诊断为 23 题 × 两提示 × 三轮，共 138 次；`--max-calls 138 --token-budget 2000000 --max-tokens 8192` 限制调用数和保守 token 预留，不自动重试。`--scope full/remaining` 仅显式选择，完整调用分别需要 540/402 的调用上限，不能凭不完整批次声称全量通过。
+
+输出 `inputs.json` 保存来源、实际裁剪正文、提示、模型参数及指纹；`events.jsonl` 保存调用开始与预算事件；`results.jsonl` 逐次保存回答、引用、延迟、usage 和故障；`summary.json` 包含分层与逐题配对、缺失、预算停止原因。缺失 usage 和未知费用保留 null；回答、引用及参考标签仅用于离线评审，目录应保存在 ignored 的 `tmp/`，勿提交原始运行产物。故障不能算作正确拒答，人工验收保持 pending，工具不自动批准上线。
+
+E1 候选 `CUSTOMER_SERVICE_FOCUSED_SYSTEM_PROMPT` 要求聚焦当前问题、保留必要条件与互补引用，仍未启用。默认 `CUSTOMER_SERVICE_SYSTEM_PROMPT` 使用单独验证的拒答修复 R1；`CUSTOMER_SERVICE_BASELINE_SYSTEM_PROMPT` 永久保留旧 B0。回放默认比较冻结 B0/E1；指定 `--candidate-policy refusal` 则单独比较 B0/R1，升级在线默认提示不会改变实验基线。
+
+R1 明确区分正常的否定业务回答与拒绝执行请求：有依据的公开权限/能力说明可正常回答；要求泄露秘密、取得私人数据、执行客服无能力操作或作未确认承诺，均返回模型内部 `answered=false, answer="", citedChunkIds=[]`。服务对外仍展示既有固定兜底文字及空 sources，不增加字段，不按否定关键词改写模型结果。单变量历史回放中 R1 安全契约 27/27、正常题回答 42/42；这不证明所有未知问题均正确，也不等于 E1 或全链路上线验收。方案与限制见 [拒答修复设计](../docs/superpowers/specs/2026-10-27-refusal-contract-design.md)。
+
+历史快照含已禁用旧手册，回放不能视为当前活动知识库端到端成绩，不重新启用旧手册。前轮 E1 的实验结果及人工复核要求见 [实施记录](../docs/superpowers/plans/2026-10-27-strict-citation-e1-execution.md)。已运行进程不会因修改文件自动加载新提示，须运行包含本次提交的代码后重启生效。
+
 ## 测试与校验
 
 ```powershell
