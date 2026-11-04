@@ -121,6 +121,34 @@ class CustomerServiceKnowledgeServiceTest {
     }
 
     @Test
+    void retriesOnlyCurrentFailedDeleteTaskForDisabledDocument() {
+        var disabled = document(9, 3, 2);
+        disabled.setStatus("DISABLED");
+        when(documents.findIncludingDeleted(9)).thenReturn(disabled);
+        var task = CustomerServiceKnowledgeEtlOutbox.builder().id(21L).documentId(9L)
+                .documentVersion(2L).etlVersion(4L).operation("DELETE").status("FAILED").build();
+        when(outbox.selectOneById(21L)).thenReturn(task);
+        when(outbox.requeueFailedDelete(eq(21L), eq(9L), eq(2L), eq(4L), any())).thenReturn(1);
+
+        service.retryFailedDelete(9L, 21L, 7L);
+
+        verify(outbox).requeueFailedDelete(eq(21L), eq(9L), eq(2L), eq(4L), any());
+    }
+
+    @Test
+    void rejectsRetryForStaleFailedDeleteTask() {
+        var disabled = document(9, 3, 2);
+        disabled.setStatus("DISABLED");
+        when(documents.findIncludingDeleted(9)).thenReturn(disabled);
+        var task = CustomerServiceKnowledgeEtlOutbox.builder().id(21L).documentId(9L)
+                .documentVersion(2L).etlVersion(3L).operation("DELETE").status("FAILED").build();
+        when(outbox.selectOneById(21L)).thenReturn(task);
+
+        assertThrows(RuntimeException.class, () -> service.retryFailedDelete(9L, 21L, 7L));
+        verify(outbox, never()).requeueFailedDelete(anyLong(), anyLong(), anyLong(), anyLong(), any());
+    }
+
+    @Test
     void replacementAndDetailRejectSoftDeletedDocument() {
         var deleted = document(9, 3, 2); deleted.setIsDelete(1);
         when(documents.findIncludingDeletedForUpdate(9)).thenReturn(deleted);

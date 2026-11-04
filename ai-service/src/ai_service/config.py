@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     langsmith_project: str = Field(default="Yuki", validation_alias=AliasChoices("LANGSMITH_PROJECT", "langsmith_project"))
 
     customer_service_rag_enabled: bool = False
+    # 必须同时开启诊断并匹配非空前缀，普通生产请求不创建 trace。
+    rag_diagnostics_enabled: bool = False
+    rag_diagnostics_request_prefix: str = Field(default="", max_length=128)
     closeai_api_key: str = Field(
         default="",
         validation_alias=AliasChoices("AI_SERVICE_CLOSEAI_API_KEY", "CLOSEAI_API_KEY"),

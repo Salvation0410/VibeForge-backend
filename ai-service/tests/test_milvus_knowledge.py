@@ -2174,9 +2174,11 @@ async def test_delete_before_manifest_writes_deterministic_tombstone(settings):
         "document:doc-1", 7, operation="DELETE"
     ))
     control = client.collections[knowledge._control_collection_name()]
+    assert client.dimensions[knowledge._control_collection_name()] == 2
     assert len(control) == 1
     assert control[0]["id"] == knowledge._tombstone_id("doc-1", 1)
     assert control[0]["mutationFence"] == 7
+    assert control[0]["embedding"] == [0.0, 0.0]
     with pytest.raises(MilvusKnowledgeError, match="^KNOWLEDGE_DOCUMENT_DISABLED$"):
         await index_document(knowledge, document(), mutation_lease=lease("document:doc-1", 8))
     assert len(client.collections[knowledge._control_collection_name()]) == 1

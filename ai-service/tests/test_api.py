@@ -36,6 +36,90 @@ from ai_service.api.routes import _run_customer_service_answer
 from conftest import FakeModel, FakeToolGateway, MemoryCheckpoint
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('kind,reason', [
+    ('timeout', 'TIMEOUT'), ('disconnect', 'CLIENT_DISCONNECTED'), ('cancel', 'CANCELLED'),
+])
+async def test_rag_diagnostic_cancellation_emits_only_after_task_drained(kind, reason):
+    from test_customer_service_rag import settings
+    from ai_service.orchestration.customer_service_trace import CustomerServiceRagTrace
+
+    drained = asyncio.Event()
+    entered = asyncio.Event()
+    emitted = []
+    class Service:
+        async def answer(self, question, *, trace=None):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                await asyncio.sleep(0)
+                drained.set()
+    class Request:
+        async def receive(self):
+            if kind == 'disconnect':
+                await entered.wait()
+                return {'type': 'http.disconnect'}
+            await asyncio.Event().wait()
+    trace = CustomerServiceRagTrace('eval-cancel', settings())
+    def emit():
+        assert drained.is_set()
+        emitted.append(trace.snapshot())
+    trace.emit = emit
+    task = asyncio.create_task(_run_customer_service_answer(
+        Request(), Service(), 'private question', timeout_seconds=0.02, trace=trace,
+    ))
+    if kind == 'cancel':
+        await entered.wait()
+        task.cancel()
+    with pytest.raises(CustomerServiceRagError if kind == 'timeout' else asyncio.CancelledError):
+        await task
+    assert len(emitted) == 1
+    assert emitted[0]['terminal']['reasonCode'] == reason
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('kind,reason', [('timeout', 'TIMEOUT'), ('disconnect', 'CLIENT_DISCONNECTED'), ('cancel', 'CANCELLED')])
+async def test_real_rag_diagnostic_preserves_timeout_and_degradation_after_drain(kind, reason):
+    from test_customer_service_rag import settings, service, chunk, FakeReranker
+    from ai_service.orchestration.customer_service_trace import CustomerServiceRagTrace
+    entered = asyncio.Event()
+    drained = asyncio.Event()
+    emitted = []
+    class BlockingModel:
+        async def answer_customer_service(self, question, contexts):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                await asyncio.sleep(0)
+                drained.set()
+    class Request:
+        async def receive(self):
+            if kind == 'disconnect':
+                await entered.wait()
+                return {'type': 'http.disconnect'}
+            await asyncio.Event().wait()
+    trace = CustomerServiceRagTrace('eval-real', settings())
+    def emit():
+        assert drained.is_set()
+        emitted.append(trace.snapshot())
+    trace.emit = emit
+    pipeline = service(chunks=[chunk('c1', 'doc1')], model=BlockingModel(),
+                       reranker=FakeReranker(error=RuntimeError('private')))
+    task = asyncio.create_task(_run_customer_service_answer(
+        Request(), pipeline, 'q', timeout_seconds=0.03, trace=trace,
+    ))
+    if kind == 'cancel':
+        await entered.wait()
+        task.cancel()
+    with pytest.raises(CustomerServiceRagError if kind == 'timeout' else asyncio.CancelledError):
+        await task
+    assert len(emitted) == 1
+    assert emitted[0]['terminal'] == {'outcome': 'cancelled', 'reasonCode': reason, 'degraded': True}
+    assert emitted[0]['model'] == {'called': True, 'answered': None}
+
+
 def generation_payload(code_gen_type: str) -> dict:
     return {
         "requestId": "req-1",

@@ -326,6 +326,10 @@ Authorization: Bearer <AI_SERVICE_INTERNAL_BEARER_TOKEN>
 
 客服健康接口检查组件生命周期以及 Milvus、Spring 租约校验依赖，不发送真实聊天或 Embedding 请求。RAG 关闭时返回 disabled，依赖不可用时返回降级摘要；这些状态不等于真实问答效果验收。客服不使用生成 checkpoint，也不保存跨请求会话。
 
+客服候选先校验活动版本和元数据，仅按 chunk ID 去重，按原检索顺序最多保留 100 块；同文档多个块全部参与重排。重排请求覆盖全部候选，返回结果校验身份、重复 ID 和有限分数，并始终使用原始候选正文与来源；按分数降序排列，并列保持原检索顺序。阈值仅用于真实重排分数，随后每个文档保留最高分块，重复文档不占名额，最多选择三个不同文档（受 final top-k 配置限制）。禁用或故障降级按原检索顺序执行同样的文档选择。诊断 `selected` 阶段分别标记 `duplicate_document` 和 `top_k`。单块上下文最多 1200 字符、合计最多 3000 字符，最终 JSON 还受 `AI_SERVICE_RAG_PROMPT_MAX_BYTES` 的 UTF-8 字节预算约束。
+
+mutation control collection 的占位向量维度固定为 2，以兼容 Milvus 3.x 对最小向量维度的限制。客服知识健康探测验证服务依赖可用性，但不会证明每个禁用文档的异步 Milvus 删除任务均已完成；请同时检查文档 ETL 任务状态。失败的删除任务可由管理员通过 `POST /api/admin/customer-service/knowledge/{id}/tasks/{taskId}:retry` 重新排队，接口只接受与当前禁用/删除文档版本匹配的失败 DELETE 任务。
+
 ## Docker 与调试
 
 ### Docker 启动
@@ -355,6 +359,44 @@ PyCharm 可使用 [.run/AI Service.run.xml](<.run/AI Service.run.xml>) 启动 `a
 
 设置 `LANGSMITH_TRACING=true`、`LANGSMITH_ENDPOINT`、`LANGSMITH_API_KEY` 和 `LANGSMITH_PROJECT` 可启用脱敏旁路追踪，默认关闭。仅发送请求/应用标识、节点、状态与有限计数，不发送提示词、对话、源码或工具正文；追踪故障不改变生成终态。Studio 启动器独立关闭自动云追踪。
 
+### 同请求客服 RAG 诊断
+
+`AI_SERVICE_RAG_DIAGNOSTICS_ENABLED=false` 和 `AI_SERVICE_RAG_DIAGNOSTICS_REQUEST_PREFIX=`
+是默认值。只有显式开启诊断且请求 `requestId` 匹配非空前缀时，才创建请求局部 trace；
+关闭时保留原回答调用形式，候选筛选、预算与回答策略不变。不维护全局请求缓存。
+
+专用 Python logger `customer_service.rag.trace` 默认级别为 INFO、`propagate=False`，
+不写入通用日志。运维可通过标准 `logging.config.dictConfig` 配置该 logger 的
+`FileHandler` 和 `%(message)s` formatter，收集每行一个 JSON；无需额外生产路径配置。
+handler 写入失败不会改变回答。HTTP 超时、断连和外部取消会取消并排空子任务后输出一次日志，
+分别标记 `TIMEOUT`、`CLIENT_DISCONNECTED`、`CANCELLED`；取消异常继续向上传递。
+
+结构版本为 `schemaVersion=customer-service-rag-trace/v1`，包含最长 128 字符的 `requestId`、
+UUID `traceId`、非敏感配置指纹、阶段耗时以及检索、过滤、重排、阈值、选择和两层预算元数据。
+每阶段最多 100 项，仅保存文档/分块身份、版本、排名、有限分数、删除原因和长度；
+预算阶段记录裁剪前后长度，模型与引用校验保留未执行的 null 状态。
+缺失阶段耗时表示该阶段未执行。终态记录 answered/refused/service_error/cancelled、
+稳定原因码和 degraded。日志不会保存问题、答案、正文、向量、异常详情或令牌，
+JSON 转义恶意请求标识中的换行。身份 ID 属于诊断数据，采集文件仍应使用运维访问控制。
+
+### 同请求 HTTP 评测
+
+产品知识评测器 `ai_service.orchestration.product_knowledge_evaluation` 默认只校验本地语料。
+`--live` 使用本机 FastAPI lifespan 初始化模型、Embedding、Milvus 和重排器；`--http-base-url`
+模式则只用现有 `AI_SERVICE_INTERNAL_BEARER_TOKEN` 调用已运行的客服回答 HTTP 接口，不创建应用、
+不加载本机 GPU owner，也不额外发送检索请求。HTTP 模式需同时提供 `--run-id`、`--document-map`、
+`--trace-file` 和新的 `--output` 路径；输出已存在时拒绝运行。`--case-ids` 可选择条目子集，
+此类报告标记 `diagnosticExperiment=true`，不能当作 90 题基线。
+
+每题 requestId 固定为 `<run-id>:<case-id>`，最多 128 字符；评测期间服务会向 JSONL trace 追加记录，评测器按 requestId 关联本轮新增的唯一记录。运行前需在服务进程设置 `AI_SERVICE_RAG_DIAGNOSTICS_ENABLED=true`、`AI_SERVICE_RAG_DIAGNOSTICS_REQUEST_PREFIX=<run-id>:`，并用 `customer_service.rag.trace` logger 的 `FileHandler` 按前文配置收集 JSONL。
+报告检查 trace schema、配置指纹一致性、阶段完整性和映射文档版本。每个阶段的 rank 必须严格递增，允许过滤后有排名空缺；过滤、阈值、选择和预算阶段的 kept 必须为布尔值，预算留存状态必须与非负裁剪长度一致。缺失、重复或不匹配时，
+相关聚合指标留空并以稳定诊断码列出。成功响应和超时后均最多等待 0.5 秒收集 trace，不重试 HTTP；JSONL 未写完的尾行留待下次读取。模型、引用必需字段、非负有限阶段耗时和唯一排名也必须符合 trace 契约。
+`stageMetrics` 分开报告原始检索、真实重排、阈值后、文档选择后和最终上下文文档排名。原始检索报告 `Recall@8`、`MRR@3`、`NDCG@3`；重排及后续候选阶段报告 `MRR@3`、
+`NDCG@3` 和 `Coverage@3`（answerable 问题中前三名至少命中一个目标文档的比例），不把最多 3 项的
+重排结果称为 `Recall@8`。reranker disabled 或回答降级时不产生真实重排和阈值指标；HTTP 错误、
+服务 fallback 或诊断错误也不会被计入正常排名成绩。独立 `answerMetrics` 保留可回答题实际回答率、无答案题安全拒答率、旧严格引用通过率（来源文档 ID 必须唯一）、HTTP 延迟平均/P95、错误及降级；故障保留在比例分母中，不能算为正确拒答。HTTP 延迟不包含等 trace 落盘的时间。
+评测请求会触发真实回答模型调用，需使用专用新 run ID、trace 文件和报告文件。HTTP 报告保存完整 answer 和响应 sources 供 90 题人工事实复核，仅允许输出到仓库已忽略的 `tmp/`；CLI 终端只输出无逐题正文的聚合摘要。评测器不自动配置或检查 ACL，`tmp/` 的 Git 忽略规则也不提供访问隔离；运行者须在运行前手动配置并核对目录 ACL，仅允许评测人员访问。不提交 Git、不上传公共日志，复核完成后按本地数据保留策略清理。常规 trace 仍禁止答案与知识摘录，也不保存令牌或异常正文。
+
 ## 测试与校验
 
 ```powershell
@@ -381,7 +423,7 @@ uv run pytest tests/test_postgres_checkpoint_integration.py tests/test_postgres_
 uv run python -m ai_service.orchestration.product_knowledge_evaluation
 ```
 
-真实 RAG 评估必须显式使用 `--live` 并提供文档版本映射和报告输出，具体步骤见 [产品知识库说明](../doc/knowledge/product/README.md)。
+真实 RAG 评估需显式使用 `--live` 或前述 `--http-base-url` 模式，并提供各模式要求的文档版本映射和报告输出，具体步骤见 [产品知识库说明](../doc/knowledge/product/README.md)。
 
 ## 部署约定与相关文档
 

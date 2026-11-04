@@ -32,6 +32,7 @@ from ai_service.models.base import GenerationModel
 from ai_service.models.input_review import InputReviewError
 from ai_service.orchestration.cancellation import CancellationRegistry
 from ai_service.orchestration.active_generations import ActiveGenerationRegistry
+from ai_service.orchestration.customer_service_trace import CustomerServiceRagTrace, create_trace
 
 logger = logging.getLogger(__name__)
 from ai_service.orchestration.workflow import GenerationWorkflow
@@ -105,10 +106,14 @@ def _lease(value) -> Any:
 
 async def _run_customer_service_answer(
     request: Request, service: Any, question: str, *, timeout_seconds: float,
+    trace: CustomerServiceRagTrace | None = None,
 ) -> Any:
-    """Bound the whole RAG request and cancel it when the caller disconnects."""
+    """限制整个 RAG 请求时长，断连或取消后排空子任务再输出一次诊断。"""
 
-    answer_task = asyncio.create_task(service.answer(question))
+    # 关闭诊断时保留旧单参数 fake 和第三方服务的调用兼容性。
+    answer_task = asyncio.create_task(service.answer(question, trace=trace) if trace else service.answer(question))
+    cancellation_reason = 'CANCELLED'
+    terminal_cancellation: str | None = None
 
     async def wait_for_disconnect() -> None:
         while True:
@@ -141,6 +146,7 @@ async def _run_customer_service_answer(
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if disconnect_task in done:
+                cancellation_reason = 'CLIENT_DISCONNECTED'
                 answer_task.cancel()
                 await asyncio.gather(answer_task, return_exceptions=True)
                 raise asyncio.CancelledError
@@ -148,9 +154,33 @@ async def _run_customer_service_answer(
     except TimeoutError:
         from ai_service.orchestration.customer_service_rag import CustomerServiceRagError
 
+        terminal_cancellation = 'TIMEOUT'
+        if trace:
+            trace.finish('cancelled', 'TIMEOUT')
         raise CustomerServiceRagError("CUSTOMER_SERVICE_TIMEOUT") from None
+    except asyncio.CancelledError:
+        terminal_cancellation = cancellation_reason
+        if trace:
+            trace.finish('cancelled', cancellation_reason)
+        raise
+    except Exception as error:
+        if trace:
+            trace.finish('service_error', _exception_code(error, 'CUSTOMER_SERVICE_UNAVAILABLE'))
+        raise
     finally:
-        await cancel_and_drain()
+        try:
+            await cancel_and_drain()
+        except asyncio.CancelledError:
+            terminal_cancellation = 'CANCELLED'
+            if trace:
+                trace.finish('cancelled', 'CANCELLED')
+            raise
+        finally:
+            if trace:
+                # 子服务排空时会记录一般取消；HTTP 边界在此补充准确触发原因。
+                if terminal_cancellation:
+                    trace.finish('cancelled', terminal_cancellation)
+                trace.emit()
 
 
 def register_routes(
@@ -318,6 +348,7 @@ def register_routes(
             result = await _run_customer_service_answer(
                 request, service, body.question,
                 timeout_seconds=request.app.state.settings.rag_answer_timeout_seconds,
+                trace=create_trace(body.request_id, request.app.state.settings),
             )
             return CustomerServiceAnswerResponse(
                 request_id=body.request_id,

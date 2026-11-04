@@ -45,20 +45,24 @@ public class CustomerServiceAnswerServiceImpl implements CustomerServiceAnswerSe
             log.warn("customer service requestId={} code={}", requestId, error.code());
             throw mapped(error, requestId);
         }
-        if (!response.requestId().equals(requestId)) reject(requestId);
-        if (response.answer() == null || response.answer().length() > MAX_ANSWER_CHARS) reject(requestId);
+        if (!response.requestId().equals(requestId)) reject(requestId, "response_request_id_mismatch");
+        if (response.answer() == null || response.answer().length() > MAX_ANSWER_CHARS)
+            reject(requestId, "response_answer_invalid");
         List<CustomerServiceAnswerVO.Source> sources = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         for (CustomerServiceAiClient.AnswerSource source : response.sources()) {
             CustomerServiceKnowledgeDocument document = findReady(source.documentId());
-            if (document == null || document.getDocumentVersion() == null
+            if (document == null) reject(requestId, "source_document_missing");
+            if (document.getDocumentVersion() == null
                     || document.getDocumentVersion() != source.documentVersion()
                     || document.getIndexedVersion() == null || document.getIndexedVersion() != source.documentVersion()
-                    || document.getName() == null || !document.getName().equals(source.documentName())
-                    || !validChunk(source, document)) reject(requestId);
+                    || document.getName() == null || !document.getName().equals(source.documentName()))
+                reject(requestId, "source_document_state_mismatch");
+            if (!validChunk(source, document)) reject(requestId, "source_chunk_not_current");
             if (source.excerpt() == null || source.excerpt().length() > 400
-                    || source.documentName().length() > 255 || source.locator().length() > 500) reject(requestId);
-            if (!seen.add(source.chunkId())) reject(requestId);
+                    || source.documentName().length() > 255 || source.locator().length() > 500)
+                reject(requestId, "source_metadata_invalid");
+            if (!seen.add(source.chunkId())) reject(requestId, "duplicate_source_chunk");
             if (sources.size() == 3) continue;
             sources.add(new CustomerServiceAnswerVO.Source(source.documentId(), source.documentName(),
                     source.documentVersion(), source.chunkId(), source.locator(), source.excerpt()));
@@ -87,7 +91,10 @@ public class CustomerServiceAnswerServiceImpl implements CustomerServiceAnswerSe
     }
 
     private CustomerServiceKnowledgeDocument findReady(String id, boolean ignored) { return findReady(id); }
-    private static void reject(String requestId) { throw new BusinessException(ErrorCode.SYSTEM_ERROR, "客服服务暂不可用"); }
+    private void reject(String requestId, String reason) {
+        log.warn("customer service request rejected requestId={} reason={}", requestId, reason);
+        throw new BusinessException(ErrorCode.SYSTEM_ERROR, "客服服务暂不可用");
+    }
     private BusinessException mapped(CustomerServiceAiClient.CallException error, String requestId) {
         if ("CUSTOMER_SERVICE_NO_ANSWER".equals(error.code())) return new BusinessException(ErrorCode.SYSTEM_ERROR, "暂未找到相关知识");
         return new BusinessException(ErrorCode.SYSTEM_ERROR, "客服服务暂不可用");

@@ -30,6 +30,11 @@ public interface CustomerServiceKnowledgeEtlOutboxMapper extends BaseMapper<Cust
               @Param("retryCount") int retryCount, @Param("nextRetry") LocalDateTime nextRetry,
               @Param("code") String code);
 
+    @Update("UPDATE customer_service_knowledge_etl_outbox SET status='PENDING',retryCount=0,nextRetryTime=#{now},lastErrorCode=NULL,processingOwner=NULL,processingDeadline=NULL,updateTime=#{now} WHERE id=#{id} AND documentId=#{documentId} AND documentVersion=#{documentVersion} AND etlVersion=#{etlVersion} AND operation='DELETE' AND status='FAILED'")
+    int requeueFailedDelete(@Param("id") long id, @Param("documentId") long documentId,
+                            @Param("documentVersion") long documentVersion,
+                            @Param("etlVersion") long etlVersion, @Param("now") LocalDateTime now);
+
     @Select("SELECT * FROM customer_service_knowledge_etl_outbox WHERE documentId=#{documentId} ORDER BY createTime DESC,id DESC LIMIT #{limit}")
     List<CustomerServiceKnowledgeEtlOutbox> history(@Param("documentId") long documentId, @Param("limit") int limit);
 }

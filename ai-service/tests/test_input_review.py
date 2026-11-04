@@ -39,6 +39,10 @@ async def test_rules_stop_before_model(settings, prompt, code):
 @pytest.mark.asyncio
 async def test_budget_includes_full_history_even_when_review_is_disabled(settings):
     settings.input_review_enabled = False
+    # 固定本用例的预算，避免本机 .env 扩容后改变超预算断言的前提。
+    settings.model_context_window_tokens = 65_536
+    settings.model_max_tokens = 8192
+    settings.model_context_overhead_tokens = 4096
     model = ReviewModel()
     with pytest.raises(InputReviewError) as error:
         await InputReviewer(model, settings).review("优化一下", request_id="budget", conversation=[{"role": "user", "content": "中" * 30000}])

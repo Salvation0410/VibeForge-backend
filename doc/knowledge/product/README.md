@@ -72,15 +72,20 @@ uv run python -m ai_service.orchestration.product_knowledge_evaluation --output 
 
 ## 真实 RAG 评测
 
-准备现有 `.env` 中的真实 RAG 依赖、可用索引和实际映射。在 `ai-service` 执行：
+默认校验命令只读取本地文档、数据集和标注，不连接真实依赖。`--live` 会启动本机 FastAPI lifespan，
+初始化模型、Embedding、Milvus 和重排器；如需评估已运行的 Python 服务，使用 HTTP 模式：
 
 ```powershell
-uv run python -m ai_service.orchestration.product_knowledge_evaluation --live --document-map ../tmp/product-document-map.json --output ../tmp/product-rag-report.json
+uv run python -m ai_service.orchestration.product_knowledge_evaluation --http-base-url http://localhost:8000 --run-id $ragRunId --document-map ../tmp/product-document-map.json --trace-file ../tmp/customer-service-rag.jsonl --output ../tmp/product-rag-report.json
 ```
 
-该入口使用现有 FastAPI 生命周期初始化依赖，直接执行同一 RAG 问答服务，不改对外 API、不调用 Spring 用户操作或写 Milvus。运行会调用真实供应商并产生使用费用，需已有可用配置。每题默认 60 秒超时，可用 `--timeout` 调整；报告记录实际问答的原始检索排序、重排排序、答案、引用、降级和端到端延迟，不额外发起诊断检索。
+HTTP 模式只读取现有 `.env` 中的 `AI_SERVICE_INTERNAL_BEARER_TOKEN`，向客服回答接口发送问题；不会初始化本机 RAG lifespan、GPU owner 或第二次检索。它要求完整实际文档映射、唯一运行 ID、服务正在写入的 trace JSONL 和一个尚不存在的输出路径。启动服务前设置 `AI_SERVICE_RAG_DIAGNOSTICS_ENABLED=true` 和 `AI_SERVICE_RAG_DIAGNOSTICS_REQUEST_PREFIX=<runId>:`，并为 `customer_service.rag.trace` logger 配置 `FileHandler`。requestId 使用 `<runId>:<caseId>` 且不得超过 128 字符；评测器仅关联本次 HTTP 请求期间追加的唯一 trace。运行会调用真实回答模型并产生使用费用，每题默认 60 秒超时，可用 `--timeout` 调整。
 
-有任一服务失败/超时则退出码为 1，聚合指标保持空，不能将故障算成正确拒答。无故障报告分别给出 `retrievalMetrics` 与 `rerankedMetrics`；两者基于文档去重排名，不是 chunk 级指标。重排报告记录阈值过滤之前的排序。基线没有无错误真实运行时保持待测。人工复核 `expectedFacts` 的正确率需另行统计，代码不使用模型自动评分替代产品判断。
+HTTP 报告把原始检索、真实重排、阈值后、文档选择后和最终上下文的文档排名分开列在 `stageMetrics`，并保存数据集、文档版本和服务配置指纹。原始检索报告 `Recall@8`、`MRR@3`、`NDCG@3`；重排及后续候选阶段报告 `MRR@3`、`NDCG@3` 和 `Coverage@3`，其中 Coverage 表示 answerable 问题中文档去重后的前三名至少命中一个目标文档的比例，不把最多 3 项的重排结果称为 `Recall@8`。重排排名来自同请求 trace 的阈值前真实分数；disabled 或降级不作为真实 rerank 成绩。trace 缺失、重复、结构不完整、配置指纹变化或文档版本不符均产生诊断错误，对应阶段指标留空；成功响应和超时后最多等待 0.5 秒收集 trace，不重试 HTTP，未写完的 JSONL 尾行不会被跳过。
+
+独立 `answerMetrics` 统计可回答题实际回答、安全拒答、旧严格引用（来源文档 ID 唯一）、HTTP 延迟平均/P95、错误和降级。故障题保持在比例分母中，HTTP 故障、超时和服务 fallback 不算正确拒答；等待 trace 的时间不计入 HTTP 延迟。报告保存完整 answer 和响应 sources，供全部 90 题人工核对 `expectedFacts`。HTTP 输出必须位于仓库已忽略的 `tmp/`，终端仅显示无逐题正文的摘要。评测器不自动配置或检查 ACL，Git 忽略也不提供访问隔离；运行者须在运行前手动配置并核对目录 ACL，仅允许评测人员访问。不提交 Git、不上传公共日志，复核后按本地保留策略清理。常规 trace 仍不记录答案、来源摘录、令牌或异常正文。
+
+可用 `--case-ids ID ...` 做小样本采集诊断，报告会标记 `diagnosticExperiment=true`，不得作为 90 题基线；默认完整数据集为 90 题。人工复核正确率需另行统计，代码不使用模型自动评分替代产品判断。
 
 目标参考：Recall@8 ≥ 0.85、MRR@3 ≥ 0.75、NDCG@3 ≥ 0.75、无答案准确率 ≥ 0.90、引用有效性 ≥ 0.98、人工抽检正确率 ≥ 0.85。15 条边界安全并非都为无答案，真正拒答只有 9 条，因此比例较粗，应连同错误条目数一起判断。
 

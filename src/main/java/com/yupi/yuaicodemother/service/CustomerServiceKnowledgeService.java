@@ -16,5 +16,6 @@ public interface CustomerServiceKnowledgeService {
     CustomerServiceKnowledgeDocumentVO enable(long id, long userId);
     boolean delete(long id, long userId);
     List<CustomerServiceKnowledgeTaskVO> taskHistory(long id, int limit);
+    void retryFailedDelete(long documentId, long taskId, long userId);
     int rebuild(long userId);
 }
