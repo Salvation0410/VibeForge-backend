@@ -1,0 +1,175 @@
+{
+  "schemaVersion": "rewrite-policy-eval/v1",
+  "datasetVersion": "2026-11-10.holdout.2",
+  "split": "holdout",
+  "cases": [
+    {
+      "id": "itinerary-heading-alignment",
+      "branch": "HTML",
+      "prompt": "旅行介绍页‘每日行程’这一小节的标题改为左对齐，不要改行程内容。",
+      "exists": true,
+      "expectedSkip": true
+    },
+    {
+      "id": "episode-synopsis-line-height",
+      "branch": "HTML",
+      "prompt": "The episode synopsis on the podcast page should have a line height of 1.7.",
+      "exists": true,
+      "expectedSkip": true
+    },
+    {
+      "id": "store-status-wording",
+      "branch": "HTML",
+      "prompt": "店铺介绍页的营业状态说明，把“午间暂停营业”换成“午间照常营业”。只替换这句文字。",
+      "exists": true,
+      "expectedSkip": true
+    },
+    {
+      "id": "fresh-tribute-page",
+      "branch": "HTML",
+      "prompt": "Start a new tribute page for a retired orchestra conductor, using centered text.",
+      "exists": false,
+      "expectedSkip": false
+    },
+    {
+      "id": "unavailable-version-reference",
+      "branch": "HTML",
+      "prompt": "把第二版里那个分隔线样式用回来，其他地方别动。",
+      "exists": true,
+      "expectedSkip": false
+    },
+    {
+      "id": "faq-style-and-toggle",
+      "branch": "HTML",
+      "prompt": "Underline the FAQ heading and make each question expand its answer when clicked.",
+      "exists": true,
+      "expectedSkip": false
+    },
+    {
+      "id": "pagewide-motion-removal",
+      "branch": "HTML",
+      "prompt": "去掉全页所有动画和过渡效果，但不要影响任何点击操作。",
+      "exists": true,
+      "expectedSkip": false
+    },
+    {
+      "id": "indefinite-poster-balance",
+      "branch": "HTML",
+      "prompt": "The festival poster section feels unbalanced; adjust it until it looks right.",
+      "exists": true,
+      "expectedSkip": false
+    },
+    {
+      "id": "article-letter-spacing",
+      "branch": "MULTI_FILE",
+      "prompt": "知识文章详情页的正文段落，字间距设成 0.02em。",
+      "exists": true,
+      "expectedSkip": true
+    },
+    {
+      "id": "recipe-divider-style",
+      "branch": "MULTI_FILE",
+      "prompt": "Use a dashed border for the horizontal divider immediately below the ingredients list on the recipe page.",
+      "exists": true,
+      "expectedSkip": true
+    },
+    {
+      "id": "donation-receipt-width",
+      "branch": "MULTI_FILE",
+      "prompt": "Limit the donation receipt panel to a maximum width of 680px. Keep its contents unchanged.",
+      "exists": true,
+      "expectedSkip": true
+    },
+    {
+      "id": "new-language-school-site",
+      "branch": "MULTI_FILE",
+      "prompt": "新建一个语言学校网站，课程介绍和师资介绍各有单独页面，配色用米白色。",
+      "exists": false,
+      "expectedSkip": false
+    },
+    {
+      "id": "relative-typeface-reference",
+      "branch": "MULTI_FILE",
+      "prompt": "Give the speaker bio the same typeface as that other section, without changing the words.",
+      "exists": true,
+      "expectedSkip": false
+    },
+    {
+      "id": "confirmation-copy-and-email",
+      "branch": "MULTI_FILE",
+      "prompt": "把报名结果里的“已收到申请”改为“报名成功”，并在报名成功后自动发送确认邮件。",
+      "exists": true,
+      "expectedSkip": false
+    },
+    {
+      "id": "sitewide-print-layout",
+      "branch": "MULTI_FILE",
+      "prompt": "Make every page use a print-friendly layout with no navigation when printed.",
+      "exists": true,
+      "expectedSkip": false
+    },
+    {
+      "id": "unspecified-map-emphasis",
+      "branch": "MULTI_FILE",
+      "prompt": "交通指南页里的路线示意图不够醒目，帮我强化一下，但不要新增内容。",
+      "exists": true,
+      "expectedSkip": false
+    },
+    {
+      "id": "basket-total-weight",
+      "branch": "VUE_PROJECT",
+      "prompt": "Give the total amount label in the shopping basket a font weight of 600. Leave the price calculation alone.",
+      "exists": true,
+      "expectedSkip": true
+    },
+    {
+      "id": "player-cover-opacity",
+      "branch": "VUE_PROJECT",
+      "prompt": "音乐播放器详情页的专辑封面，不透明度调整为 85%。",
+      "exists": true,
+      "expectedSkip": true
+    },
+    {
+      "id": "rental-empty-state-copy",
+      "branch": "VUE_PROJECT",
+      "prompt": "租赁列表为空时显示的“没有相关房源”，改成“暂时没有符合条件的房源”，不要改变筛选逻辑。",
+      "exists": true,
+      "expectedSkip": true
+    },
+    {
+      "id": "new-volunteer-app",
+      "branch": "VUE_PROJECT",
+      "prompt": "Create a volunteer scheduling app with shift cards and a navy sidebar.",
+      "exists": false,
+      "expectedSkip": false
+    },
+    {
+      "id": "login-decoration-and-auth",
+      "branch": "VUE_PROJECT",
+      "prompt": "登录框加一条虚线边框，另外不要再验证密码，输入账号就直接登录。",
+      "exists": true,
+      "expectedSkip": false
+    },
+    {
+      "id": "unprovided-picture-reference",
+      "branch": "VUE_PROJECT",
+      "prompt": "Make the notification badge the size shown in the picture, without changing its count.",
+      "exists": true,
+      "expectedSkip": false
+    },
+    {
+      "id": "inventory-workflow-request",
+      "branch": "VUE_PROJECT",
+      "prompt": "库存管理增加批量入库、低库存提醒和操作撤销，撤销时连库存数量一起恢复。",
+      "exists": true,
+      "expectedSkip": false
+    },
+    {
+      "id": "vague-reporting-simplification",
+      "branch": "VUE_PROJECT",
+      "prompt": "Simplify the reporting screen so that new staff can understand it immediately.",
+      "exists": true,
+      "expectedSkip": false
+    }
+  ]
+}

@@ -228,6 +228,7 @@ Python AI_SERVICE_INTERNAL_BEARER_TOKEN
 - 需求整理不得覆盖原始 `prompt`、生成类型、图片意图或技术协议；模型摘要不能提升为系统指令。本地规则必须有版本及来源，生成与修复共用相同准备结果；不得把原文引用校验写成语义忠实性证明。准备状态使用展示帧，只有真正的模型草稿分片才能使旧候选失效。
 - 准备诊断默认开启，只在父状态、固定字段日志和可选旁路 trace 中保存状态/原因/耗时/调用标志/大小/可信规则 ID；不得传给模型、子图或公共事件。关闭配置只停止新诊断，不删除旧 checkpoint。异常/取消不因观测而吞掉；完整 checkpoint 仍含业务上下文，不等于脱敏日志。
 - `ai_service.orchestration.preparation_evaluation` 默认离线；真实模式必须显式 `--real-model`，每次运行最多 6 次重写，失败也占额度。固定样本位于 `ai-service/evaluation/generation-preparation-v1.json`。评估不生成/发布应用，不把规则匹配或原文摘录覆盖写成页面视觉质量；重复真实运行仍须符合用户授权总量。
+- `AI_SERVICE_PROMPT_REWRITE_POLICY` 默认 `always`；可选 `conservative` 为完整识别的已有页面单项修改省去辅助摘要，标记 `skipped/SIMPLE_EDIT`、brief 为 null，不能计为重写成功。原文、输入审核、生成预算、规则和工具边界不变。`rewrite_policy_evaluation` 仅做离线分类和预计调用比较，不调用真实模型；开发/诊断集不得重新称为未见过的独立集，默认策略需有真实产物证据再决定推广。
 - “优化提示”必须使用普通用户能理解的简短文案，并按 HTML、MULTI_FILE、VUE_PROJECT 区分完整产物要求；三类提示都必须保留原有功能、文字、图片和操作方式，禁止残缺结果和额外解释。
 - 固定尺寸加载图位于 Flex 容器时必须禁止收缩并保持 1:1 比例，避免长提示文字将圆形挤成椭圆。
 - 不大面积重写历史乱码注释，不进行无关重构。
@@ -351,6 +352,7 @@ npm run build-only
 - `doc/generation-preparation-phase-one-handoff.md`：后台需求整理、前端辅助规则与第一期改造交接。
 - `doc/knowledge/product/README.md`：产品知识库与评估说明。
 - `doc/generation-preparation-evaluation-handoff.md`：需求准备诊断、对照工具、选择规则优化与真实小样本结果。
+- `doc/generation-rewrite-policy-handoff.md`：可选保守重写策略、独立样本结果、启用与回退边界。
 - `docs/superpowers/specs/2026-09-21-bounded-streaming-simple-prompts-design.md`：有限流式窗口与简短优化提示设计。
 - `docs/superpowers/specs/2026-09-21-circular-preview-spinner-design.md`：预览加载图正圆修复设计。
 

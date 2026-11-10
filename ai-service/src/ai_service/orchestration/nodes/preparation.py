@@ -8,6 +8,7 @@ from time import monotonic
 
 from ai_service.models.generation_brief import rewrite_context, validate_brief
 from ai_service.models.input_review import InputReviewError
+from ai_service.models.rewrite_policy import should_skip_rewrite
 from ai_service.models.preparation_diagnostics import (
     PreparationFailure, preparation_trace_metadata, safe_preparation_diagnostics, trusted_skill_ids,
 )
@@ -50,9 +51,10 @@ def create_preparation_node(workflow, emitter, thread_id):
                     # 老检查点没有诊断时，只根据既有准备结果重建安全状态，不重复重写。
                     prepared = context["generationPreparation"]
                     status = prepared.get("rewriteStatus") if isinstance(prepared, dict) else None
-                    if status in {"ready", "fallback", "disabled"}:
+                    if status in {"ready", "fallback", "disabled", "skipped"}:
                         diagnostic.update(rewriteStatus=status, reason={
-                            "ready": "NONE", "fallback": "PROVIDER_ERROR", "disabled": "DISABLED"}[status],
+                            "ready": "NONE", "fallback": "PROVIDER_ERROR", "disabled": "DISABLED",
+                            "skipped": "SIMPLE_EDIT"}[status],
                             skillIds=trusted_skill_ids(prepared.get("skills")))
             return {"context": context}
         settings = workflow.settings
@@ -66,10 +68,18 @@ def create_preparation_node(workflow, emitter, thread_id):
         if diagnostic is not None:
             diagnostic["skillIds"] = trusted_skill_ids(prepared["skills"])
         source["selectedSkills"] = prepared["skills"]
+        skip_rewrite = (settings.prompt_rewrite_enabled
+                        and getattr(settings, "prompt_rewrite_policy", "always") == "conservative"
+                        and should_skip_rewrite(context))
+        if skip_rewrite:
+            # 跳过仅省去辅助摘要，不删除原文、保留规则，也不跳过后续生成和校验。
+            prepared["rewriteStatus"] = "skipped"
+            if diagnostic is not None:
+                diagnostic.update(rewriteStatus="skipped", reason="SIMPLE_EDIT")
         await emitter.emit("node_status", "generation_prepare", data={
-            "status": "progress", "message": "正在整理需求与页面设计要点。" if settings.prompt_rewrite_enabled
+            "status": "progress", "message": "正在整理需求与页面设计要点。" if settings.prompt_rewrite_enabled and not skip_rewrite
             else "正在准备页面设计与实现要点。"})
-        if settings.prompt_rewrite_enabled:
+        if settings.prompt_rewrite_enabled and not skip_rewrite:
             workflow._raise_if_cancelled(thread_id)
             try:
                 if diagnostic is not None:

@@ -1,0 +1,175 @@
+{
+  "schemaVersion": "rewrite-policy-eval/v1",
+  "datasetVersion": "2026-11-10.holdout.1",
+  "split": "holdout",
+  "cases": [
+    {
+      "id": "newsletter-corner-radius",
+      "branch": "HTML",
+      "prompt": "请将邮件订阅区里‘订阅周报’按钮的圆角设为 10px。",
+      "exists": true,
+      "expectedSkip": true
+    },
+    {
+      "id": "hero-heading-ink",
+      "branch": "HTML",
+      "prompt": "Set the text color of the homepage hero heading to #253b52.",
+      "exists": true,
+      "expectedSkip": true
+    },
+    {
+      "id": "museum-title-copy",
+      "branch": "HTML",
+      "prompt": "把页面主标题的文字从“城市记忆馆”替换为“河畔记忆馆”。",
+      "exists": true,
+      "expectedSkip": true
+    },
+    {
+      "id": "new-cafe-page",
+      "branch": "HTML",
+      "prompt": "Create a cafe homepage with a brown heading and a menu section.",
+      "exists": false,
+      "expectedSkip": false
+    },
+    {
+      "id": "unclear-color-reference",
+      "branch": "HTML",
+      "prompt": "把它的背景色改成 #faf3df。",
+      "exists": true,
+      "expectedSkip": false
+    },
+    {
+      "id": "button-with-validation-change",
+      "branch": "HTML",
+      "prompt": "Make the reservation submit button green, and allow the form to submit without a phone number.",
+      "exists": true,
+      "expectedSkip": false
+    },
+    {
+      "id": "sitewide-type-change",
+      "branch": "HTML",
+      "prompt": "将整个页面所有文字的字体统一改为宋体。",
+      "exists": true,
+      "expectedSkip": false
+    },
+    {
+      "id": "vague-header-spacing",
+      "branch": "HTML",
+      "prompt": "Give the header a more comfortable amount of breathing room.",
+      "exists": true,
+      "expectedSkip": false
+    },
+    {
+      "id": "navigation-logo-width",
+      "branch": "MULTI_FILE",
+      "prompt": "把首页导航栏左侧品牌标志的宽度改为 144px。",
+      "exists": true,
+      "expectedSkip": true
+    },
+    {
+      "id": "footer-hours-copy",
+      "branch": "MULTI_FILE",
+      "prompt": "In the contact page footer, replace the text \"Open daily\" with \"Open Tuesday to Sunday\".",
+      "exists": true,
+      "expectedSkip": true
+    },
+    {
+      "id": "featured-card-border",
+      "branch": "MULTI_FILE",
+      "prompt": "Change the border color of the featured workshop card on the events page to #d4a373.",
+      "exists": true,
+      "expectedSkip": true
+    },
+    {
+      "id": "new-portfolio-site",
+      "branch": "MULTI_FILE",
+      "prompt": "做一个摄影作品集网站，首页标题用 36px。",
+      "exists": false,
+      "expectedSkip": false
+    },
+    {
+      "id": "earlier-design-reference",
+      "branch": "MULTI_FILE",
+      "prompt": "Use the same shadow on the pricing card as the example I mentioned earlier.",
+      "exists": true,
+      "expectedSkip": false
+    },
+    {
+      "id": "logo-and-search-feature",
+      "branch": "MULTI_FILE",
+      "prompt": "首页标志宽度改为 144px，再增加能按作品名称搜索的输入框。",
+      "exists": true,
+      "expectedSkip": false
+    },
+    {
+      "id": "all-pages-link-color",
+      "branch": "MULTI_FILE",
+      "prompt": "Change every link across all pages to purple.",
+      "exists": true,
+      "expectedSkip": false
+    },
+    {
+      "id": "unspecified-card-tone",
+      "branch": "MULTI_FILE",
+      "prompt": "活动页精选课程卡片的背景颜色调得更有质感一些。",
+      "exists": true,
+      "expectedSkip": false
+    },
+    {
+      "id": "account-heading-size",
+      "branch": "VUE_PROJECT",
+      "prompt": "Set the font size of the account settings page heading to 28px.",
+      "exists": true,
+      "expectedSkip": true
+    },
+    {
+      "id": "profile-save-copy",
+      "branch": "VUE_PROJECT",
+      "prompt": "个人资料页提交按钮上的“保存资料”改成“保存修改”。",
+      "exists": true,
+      "expectedSkip": true
+    },
+    {
+      "id": "invoice-summary-margin",
+      "branch": "VUE_PROJECT",
+      "prompt": "发票详情页金额汇总卡片的上外边距设置为 24px。",
+      "exists": true,
+      "expectedSkip": true
+    },
+    {
+      "id": "new-expense-dashboard",
+      "branch": "VUE_PROJECT",
+      "prompt": "Build an expense dashboard with a monthly total and an orange export button.",
+      "exists": false,
+      "expectedSkip": false
+    },
+    {
+      "id": "export-style-and-permission",
+      "branch": "VUE_PROJECT",
+      "prompt": "把订单导出按钮背景改成 #f97316，同时去掉管理员限制，让所有访客都能导出订单。",
+      "exists": true,
+      "expectedSkip": false
+    },
+    {
+      "id": "implicit-button-target",
+      "branch": "VUE_PROJECT",
+      "prompt": "Change that button label to \"Continue\".",
+      "exists": true,
+      "expectedSkip": false
+    },
+    {
+      "id": "booking-workflow-expansion",
+      "branch": "VUE_PROJECT",
+      "prompt": "预约页增加按日期筛选、剩余名额提示和取消预约功能，取消后自动恢复名额。",
+      "exists": true,
+      "expectedSkip": false
+    },
+    {
+      "id": "unclear-mobile-improvement",
+      "branch": "VUE_PROJECT",
+      "prompt": "Make the billing page look better on small screens.",
+      "exists": true,
+      "expectedSkip": false
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "rewrite-policy-eval/v1",
+  "datasetVersion": "2026-11-10.development.1",
+  "split": "development",
+  "cases": [
+    {"id":"color-cn","branch":"HTML","prompt":"只把预约按钮改成绿色，保留文字、图片和其他操作。","exists":true,"expectedSkip":true},
+    {"id":"size-cn","branch":"MULTI_FILE","prompt":"请将主标题的字号设置为24px。","exists":true,"expectedSkip":true},
+    {"id":"label-cn","branch":"VUE_PROJECT","prompt":"把登录按钮的文字从“登录”改为“立即登录”，其余不变。","exists":true,"expectedSkip":true},
+    {"id":"color-en","branch":"HTML","prompt":"Only change the submit button color to #123abc, keep everything else unchanged.","exists":true,"expectedSkip":true},
+    {"id":"padding-en","branch":"MULTI_FILE","prompt":"Set the footer padding to 16px.","exists":true,"expectedSkip":true},
+    {"id":"label-en","branch":"VUE_PROJECT","prompt":"Change the login button text from \"Login\" to \"Sign in\".","exists":true,"expectedSkip":true},
+    {"id":"create","branch":"HTML","prompt":"只把预约按钮改成绿色。","exists":false,"expectedSkip":false},
+    {"id":"compound","branch":"MULTI_FILE","prompt":"把提交按钮改成绿色，并新增付款功能。","exists":true,"expectedSkip":false},
+    {"id":"global","branch":"VUE_PROJECT","prompt":"请把整站改为深色主题，保留功能。","exists":true,"expectedSkip":false},
+    {"id":"reference","branch":"HTML","prompt":"按上次说的改成绿色。","exists":true,"expectedSkip":false},
+    {"id":"unknown-target","branch":"MULTI_FILE","prompt":"把那个改成绿色。","exists":true,"expectedSkip":false},
+    {"id":"two-values","branch":"VUE_PROJECT","prompt":"把主标题改成红色，再将副标题改成蓝色。","exists":true,"expectedSkip":false},
+    {"id":"mixed-en","branch":"HTML","prompt":"Change the submit button color to green and disable authentication.","exists":true,"expectedSkip":false},
+    {"id":"negated","branch":"MULTI_FILE","prompt":"不要把主标题改成红色。","exists":true,"expectedSkip":false},
+    {"id":"no-value","branch":"VUE_PROJECT","prompt":"优化主标题样式。","exists":true,"expectedSkip":false},
+    {"id":"new-page","branch":"VUE_PROJECT","prompt":"新增登录页面。","exists":false,"expectedSkip":false}
+  ]
+}

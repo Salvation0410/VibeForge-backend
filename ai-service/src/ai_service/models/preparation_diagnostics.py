@@ -3,11 +3,11 @@
 import math
 from typing import Any
 
-PREPARATION_STATUSES = frozenset({"ready", "fallback", "disabled", "failed", "cancelled"})
+PREPARATION_STATUSES = frozenset({"ready", "fallback", "disabled", "failed", "cancelled", "skipped"})
 PREPARATION_REASONS = frozenset({
     "NONE", "DISABLED", "TIMEOUT", "PROVIDER_ERROR", "INVALID_JSON", "INVALID_SCHEMA",
     "INCOMPLETE_RESPONSE", "INVALID_EVIDENCE", "BRIEF_TOO_LARGE", "BUDGET_EXCEEDED",
-    "CANCELLED", "INPUT_ERROR",
+    "CANCELLED", "INPUT_ERROR", "SIMPLE_EDIT",
 })
 _MESSAGES = {
     "INVALID_JSON": "需求摘要 JSON 无效",

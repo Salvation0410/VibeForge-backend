@@ -282,6 +282,25 @@ uv run python -m ai_service.orchestration.preparation_evaluation --dataset evalu
 
 文件以独占创建方式预先占位，防止覆盖并在调用前发现路径问题；中断或不可恢复错误可能留下空/不完整报告，下次必须指定新文件名，不自动补跑。离线测试和准备评估均不能证明页面质量、构建成功率或完整 SSE 可用性。本轮实测与后续建议见 [评估与诊断交接](../doc/generation-preparation-evaluation-handoff.md)。
 
+### 简单修改的可选重写策略
+
+未加引号的目标通过常见中文元素词组或英文位置/元素词表识别；任意目标描述不因包含“按钮”等字样就获准跳过。当前独立集未观察到预计调用减少，默认策略不推广。
+
+`AI_SERVICE_PROMPT_REWRITE_POLICY` 可选 `always`（默认）和 `conservative`。重写总开关优先；关闭重写仍为 `disabled`。启用 conservative 后，仅对已有应用、完整匹配的单项样式/引号文字修改省去辅助模型调用，例如“只把预约按钮改成绿色，保留文字、图片和其他操作”。策略版本位于 `models/rewrite_policy.py`，目前为 `2`。
+
+策略会核对具体元素、显式属性/值或原文/新文案，限制长度和字符，拒绝识别到的否定、指代、全局范围、多元素及附加动作；未完整识别的请求继续原有重写。命中时准备结果和诊断为 `skipped/SIMPLE_EDIT`，`brief=null`、`modelAttempted=false`。它不属于重写成功或故障降级；用户原文、历史与保留规则保持不变，不跳过前置输入审核、后续生成预算、构建或审查。缓存重入沿用准备结果，切换配置不使旧请求重新整理。
+
+当前只是有限语法启发式，无法保证理解任意语言，也没有验证真实生成产物质量；因此默认仍为 always，不能把离线“没有误跳过”理解为生产安全保证。需要试用时将 policy 改为 conservative 并重启 Python；恢复 always 即回退策略，无需数据库迁移。
+
+纯离线策略评估独立于前述三组真实重写工具，不读取 `.env`、不调用模型。前述三组工具继续固定按 always 比较，不受此配置影响。开发集与保留集分开，报告包含正确跳过、误跳过、漏识别、精确率/召回率及预计调用数，不记录需求正文，不提供虚构的耗时或成本节省：
+
+```powershell
+uv run python -m ai_service.orchestration.rewrite_policy_evaluation --dataset evaluation/rewrite-policy-development-v1.json --output ../tmp/policy-development-new.json
+uv run python -m ai_service.orchestration.rewrite_policy_evaluation --dataset evaluation/rewrite-policy-holdout-v2.json --output ../tmp/policy-holdout-new.json
+```
+
+输出父目录须存在、文件须尚不存在。`actualModelCalls` 恒为 0；`predictedAvoidedCalls` 包含误跳过，必须与 `falseSkip` 一起阅读。无分母的精确率/召回率为 null。首批 holdout-v1 已用于诊断，不再作为第二版独立证据；当前独立结果及限制见 [保守重写策略交接](../doc/generation-rewrite-policy-handoff.md)。
+
 ### 三类生成与工具调用
 
 | 类型 | 生成方式 | 完成条件 |

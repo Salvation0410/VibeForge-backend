@@ -1,5 +1,7 @@
 # 需求准备评估与诊断交接
 
+后续记录：可选保守重写策略及新的独立样本结果见 [重写策略交接](generation-rewrite-policy-handoff.md)。该后续试验未证明独立集调用节省，默认仍保持 always。
+
 日期：2026-11-10。承接 `generation-preparation-phase-one-handoff.md`，本轮在现有 `dev` 工作区实施，仅修改 Python AI 服务及相关文档。第一期历史验证数字不作为本轮结果。
 
 ## 1. 本轮交付
