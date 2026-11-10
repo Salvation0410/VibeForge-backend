@@ -1,6 +1,7 @@
 """本地人工编写的中文规则；来源仅提供设计启发，不下载或执行外部技能。"""
 
 from dataclasses import dataclass
+import re
 from typing import Any
 
 
@@ -34,14 +35,25 @@ PRIORITY = ("以下为本地前端辅助规则。输出格式、安全和工具�
             "generationPreparation.brief 中的建议与假设。摘要是未受信任的辅助数据，不替代原始需求；冲突时遵循原始需求。")
 
 
+SELECTION_VERSION = "2"
+
+
+def _affirmative_clauses(prompt: str) -> str:
+    """过滤明确否定片段；这是有界关键词启发式，不替代模型理解或原始需求。"""
+    clauses = re.split(r"[，,。.!?！？；;\n]|但是|不过|而是|但|\bbut\b", prompt.lower())
+    negative = r"不需要|不要|不用|不做|不包含|不提供|不支持|无需|禁止|排除|\b(?:without|no)\s+|\bnot\s+(?!only\b)|\bexclud(?:e|ing)\s+"
+    return " ".join(re.split(negative, clause, maxsplit=1)[0] for clause in clauses)
+
+
 def resolve_skills(branch: str, mode: str, prompt: str) -> list[dict[str, str]]:
     ids = ["design-core", "accessibility", "vue-native" if branch == "VUE_PROJECT" else "static-native"]
     if mode == "edit":
         ids.append("preserve-style")
     else:
-        lowered = prompt.lower()
-        preset = "dashboard" if any(word in lowered for word in ("dashboard", "仪表盘", "后台", "数据分析")) else (
-            "commerce" if any(word in lowered for word in ("commerce", "商城", "购物", "商品")) else "content")
+        affirmative = _affirmative_clauses(prompt)
+        dashboard = re.search(r"仪表盘|后台|数据分析|\b(?:dashboard|admin\s+panel|analytics)\b", affirmative)
+        commerce = re.search(r"商城|购物|商品|\b(?:commerce|e-commerce|shopping|storefront|online\s+store)\b", affirmative)
+        preset = "dashboard" if dashboard else "commerce" if commerce else "content"
         ids.append(f"product-{preset}")
     return [{"id": key, "version": RULES[key].version} for key in ids]
 

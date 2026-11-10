@@ -10,6 +10,7 @@ from time import monotonic
 from typing import Any
 
 from ai_service.config import Settings
+from ai_service.models.preparation_diagnostics import PREPARATION_REASONS, PREPARATION_STATUSES, bounded_skill_labels
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,12 @@ _ALLOWED_METADATA = {
     "error_code",
     "repair_count",
     "tool_call_count",
+    "preparation_status",
+    "preparation_reason",
+    "preparation_duration_ms",
+    "preparation_attempted",
+    "preparation_brief_bytes",
+    "preparation_skill_ids",
 }
 _MAX_VALUE_LENGTH = 128
 
@@ -54,6 +61,21 @@ def _safe_metadata(values: dict[str, Any]) -> dict[str, str | int | float | bool
     for key, value in values.items():
         if key not in _ALLOWED_METADATA or value is None:
             continue
+        # 新增观测字段必须验证值域，不能仅以字符串截断代替脱敏。
+        if key == "preparation_status" and (not isinstance(value, str) or value not in PREPARATION_STATUSES):
+            continue
+        if key == "preparation_reason" and (not isinstance(value, str) or value not in PREPARATION_REASONS):
+            continue
+        if key == "preparation_duration_ms" and (type(value) not in (int, float) or value < 0):
+            continue
+        if key == "preparation_attempted" and type(value) is not bool:
+            continue
+        if key == "preparation_brief_bytes" and (type(value) is not int or value < 0):
+            continue
+        if key == "preparation_skill_ids":
+            if not isinstance(value, str):
+                continue
+            value = bounded_skill_labels(value.split(","))
         if isinstance(value, (str, int, float, bool)):
             if isinstance(value, float) and not math.isfinite(value):
                 continue

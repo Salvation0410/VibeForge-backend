@@ -23,3 +23,5 @@ class WorkflowState(TypedDict, total=False):
     token_usage: dict[str, int]
     publish: dict[str, Any]
     input_review: dict[str, Any]
+    # 仅供 checkpoint 与脱敏观测，不通过 context 传递给模型或子图。
+    preparation_diagnostics: dict[str, Any]

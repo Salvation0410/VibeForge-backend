@@ -7,12 +7,14 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langsmith import tracing_context
+from openai import APITimeoutError
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError
 
 from ai_service.config import Settings
 from ai_service.models.input_review import InputReviewError, InputReviewResult, check_context_budget
 from ai_service.models.vue_context import project_vue_context
 from ai_service.models.generation_brief import GenerationBrief
+from ai_service.models.preparation_diagnostics import PreparationFailure
 from ai_service.prompts.preparation import REWRITE_SYSTEM_PROMPT
 from ai_service.prompts.frontend_skills import frontend_instructions
 from ai_service.prompts.input_review import INPUT_REVIEW_SYSTEM_PROMPT
@@ -181,15 +183,26 @@ class OpenAICompatibleModel:
             "root_async_client": root, "async_client": root.chat.completions, "max_retries": 0,
         })
         with tracing_context(enabled=False):
-            response = await client.bind(max_tokens=self._settings.prompt_rewrite_max_tokens,
-                                         temperature=0).ainvoke(messages)
+            try:
+                response = await client.bind(max_tokens=self._settings.prompt_rewrite_max_tokens,
+                                             temperature=0).ainvoke(messages)
+            except APITimeoutError:
+                # SDK 将 HTTP 超时封装为独立异常类型，需显式归类且不保留请求或异常正文。
+                raise PreparationFailure("TIMEOUT") from None
         metadata = getattr(response, "response_metadata", {}) or {}
         reason = str(metadata.get("finish_reason") or metadata.get("stop_reason") or "").upper()
         if reason not in {"STOP", "END_TURN"} or getattr(response, "tool_calls", None) or getattr(response, "invalid_tool_calls", None):
-            raise ValueError("需求摘要响应不完整")
-        if not isinstance(response.content, str) or len(response.content.encode("utf-8")) > self._settings.prompt_rewrite_max_bytes:
-            raise ValueError("需求摘要超出字节上限")
-        return GenerationBrief.model_validate_json(response.content)
+            raise PreparationFailure("INCOMPLETE_RESPONSE")
+        if not isinstance(response.content, str):
+            raise PreparationFailure("INVALID_SCHEMA")
+        if len(response.content.encode("utf-8")) > self._settings.prompt_rewrite_max_bytes:
+            raise PreparationFailure("BRIEF_TOO_LARGE")
+        try:
+            return GenerationBrief.model_validate_json(response.content)
+        except ValidationError as exc:
+            # 只读取错误类型，不保留包含供应商输出的异常正文或字段值。
+            reason = "INVALID_JSON" if any(item["type"] == "json_invalid" for item in exc.errors()) else "INVALID_SCHEMA"
+            raise PreparationFailure(reason) from None
 
     async def route(self, prompt: str) -> str:
         """要求模型返回唯一的生成类型标识。"""

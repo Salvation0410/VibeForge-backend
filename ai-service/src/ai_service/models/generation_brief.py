@@ -2,7 +2,9 @@
 
 from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from ai_service.models.preparation_diagnostics import PreparationFailure
 
 ShortText = Annotated[str, Field(min_length=1, max_length=400)]
 
@@ -42,12 +44,15 @@ def rewrite_context(context: dict[str, Any], branch: str) -> dict[str, Any]:
 
 def validate_brief(brief: GenerationBrief, context: dict[str, Any], max_bytes: int) -> GenerationBrief:
     """核对引用来源和总字节上限，不声称能判断所有遗漏或冲突。"""
-    brief = GenerationBrief.model_validate(brief.model_dump())
+    try:
+        brief = GenerationBrief.model_validate(brief.model_dump() if isinstance(brief, GenerationBrief) else brief)
+    except ValidationError:
+        raise PreparationFailure("INVALID_SCHEMA") from None
     sources = [context["prompt"], context.get("initialPrompt", ""), *context["userHistory"]]
     evidence = [*brief.requirements, *brief.preserve_constraints,
                 *(item.evidence for item in [*brief.interactions, *brief.acceptance])]
     if any(not value.strip() or not any(value in source for source in sources) for value in evidence):
-        raise ValueError("需求摘要引用无效")
+        raise PreparationFailure("INVALID_EVIDENCE")
     if len(brief.model_dump_json().encode("utf-8")) > max_bytes:
-        raise ValueError("需求摘要超出字节上限")
+        raise PreparationFailure("BRIEF_TOO_LARGE")
     return brief

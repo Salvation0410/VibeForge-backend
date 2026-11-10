@@ -1,5 +1,7 @@
 # 生成前需求整理与前端辅助规则：第一期交接
 
+后续进展：本文件保留第一期交付记录；2026-11-10 增加的诊断、评估与真实六次重写结果见 [评估与诊断交接](generation-preparation-evaluation-handoff.md)。
+
 日期：2026-11-10。范围：LangGraph 生成链路的 HTML、MULTI_FILE、VUE_PROJECT，以及 Spring 阶段展示适配。用户已选择后台自动整理后生成，不增加确认流程。
 
 ## 1. 行为与范围

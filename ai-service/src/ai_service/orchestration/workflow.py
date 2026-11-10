@@ -18,6 +18,7 @@ from ai_service.orchestration.active_generations import ActiveGenerationRegistry
 from ai_service.orchestration.events import EventEmitter
 from ai_service.orchestration.input_review import InputReviewer
 from ai_service.models.input_review import InputReviewError
+from ai_service.models.preparation_diagnostics import safe_preparation_diagnostics
 from ai_service.infrastructure.langsmith_tracing import LangSmithTracer
 
 from ai_service.orchestration.state import WorkflowState
@@ -307,7 +308,7 @@ class GenerationWorkflow:
     @staticmethod
     def _checkpoint_payload(state: WorkflowState, node: str) -> dict[str, Any]:
         """提取可观测的精简状态，避免将完整上下文写入业务 checkpoint。"""
-        return {
+        payload = {
             "node": node,
             "requestId": state.get("request_id"),
             "appId": state.get("app_id"),
@@ -316,3 +317,7 @@ class GenerationWorkflow:
             "repairCount": state.get("repair_count", 0),
             "toolCallCount": state.get("tool_call_count", 0),
         }
+        diagnostic = safe_preparation_diagnostics(state.get("preparation_diagnostics"))
+        if diagnostic is not None:
+            payload["preparation_diagnostics"] = diagnostic
+        return payload

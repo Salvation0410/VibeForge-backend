@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "generation-preparation-eval/v1",
+  "datasetVersion": "2026-11-10.1",
+  "cases": [
+    {"id":"coffee-no-admin","branch":"HTML","prompt":"为咖啡店制作官网，不需要后台或购物功能。展示菜单、地址和预约入口。","exists":false,"expectedSkill":"product-content","requiredQuotes":["不需要后台或购物功能","菜单、地址和预约入口"]},
+    {"id":"shopping-english","branch":"MULTI_FILE","prompt":"Build a shopping website with product photos, prices and cart feedback. Do not pretend payment succeeded.","exists":false,"expectedSkill":"product-commerce","requiredQuotes":["product photos, prices and cart feedback","Do not pretend payment succeeded"]},
+    {"id":"admin-english","branch":"VUE_PROJECT","prompt":"Create an admin panel for sales analytics with readable tables and filter controls.","exists":false,"expectedSkill":"product-dashboard","requiredQuotes":["readable tables","filter controls"]},
+    {"id":"html-local-edit","branch":"HTML","prompt":"只把预约按钮改成绿色，保留文字、图片和其他操作。","exists":true,"expectedSkill":"preserve-style","requiredQuotes":["只把预约按钮改成绿色","保留文字、图片和其他操作"]},
+    {"id":"multi-global-restyle","branch":"MULTI_FILE","prompt":"请把整站改为深色风格，保留现有功能、图片、文字和操作方式，不增加页面。","exists":true,"expectedSkill":"preserve-style","requiredQuotes":["整站改为深色风格","保留现有功能、图片、文字和操作方式","不增加页面"]},
+    {"id":"vue-dashboard","branch":"VUE_PROJECT","prompt":"制作销售数据仪表盘，包含指标、筛选和表格，示例数据必须明确标识。","exists":false,"expectedSkill":"product-dashboard","requiredQuotes":["指标、筛选和表格","示例数据必须明确标识"]},
+    {"id":"portfolio-exclusions","branch":"HTML","prompt":"Create a portfolio website without a dashboard or commerce features. Show projects and contact details.","exists":false,"expectedSkill":"product-content","requiredQuotes":["without a dashboard or commerce features","projects and contact details"]},
+    {"id":"commerce-chinese","branch":"MULTI_FILE","prompt":"创建商品商城，显示图片、价格和规格选择，购物操作需要明确反馈。","exists":false,"expectedSkill":"product-commerce","requiredQuotes":["图片、价格和规格选择","购物操作需要明确反馈"]},
+    {"id":"blog-content","branch":"HTML","prompt":"制作旅行博客，突出文章标题和阅读顺序，不添加无关功能。","exists":false,"expectedSkill":"product-content","requiredQuotes":["文章标题和阅读顺序","不添加无关功能"]},
+    {"id":"vue-preserve-images","branch":"VUE_PROJECT","prompt":"优化商品列表的间距，保留原有图片，不要搜索新图片，也不要改变操作方式。","exists":true,"expectedSkill":"preserve-style","requiredQuotes":["保留原有图片","不要搜索新图片","不要改变操作方式"]},
+    {"id":"dashboard-no-cart","branch":"VUE_PROJECT","prompt":"Build a dashboard for order metrics; no shopping cart. Use clearly labelled sample data.","exists":false,"expectedSkill":"product-dashboard","requiredQuotes":["dashboard for order metrics","no shopping cart","clearly labelled sample data"]},
+    {"id":"commerce-no-admin","branch":"MULTI_FILE","prompt":"不要后台管理；制作商品商城，展示图片和价格，不接入真实支付。","exists":false,"expectedSkill":"product-commerce","requiredQuotes":["不要后台管理","图片和价格","不接入真实支付"]}
+  ]
+}

@@ -259,6 +259,29 @@ Vue 模型消息的工具历史独立限制为 24 KiB，优先保留近期完整
 
 详见 [第一期交接文档](../doc/generation-preparation-phase-one-handoff.md)。
 
+### 准备阶段诊断与对照评估
+
+`AI_SERVICE_PREPARATION_DIAGNOSTICS_ENABLED` 默认 `true`，独立于两项增强开关。节点在父图的 `preparation_diagnostics` 保存 `rewriteStatus`、`reason`、`durationMs`、`modelAttempted`、`briefBytes`、`skillIds`，同时输出固定字段 JSON 日志；启用现有 LangSmith 旁路时增加 `generation_preparation_diagnostics` span。诊断不会进入 `context`、模型输入、子图或公共 SSE。关闭诊断不影响增强功能；新请求不再产生这些观测字段。checkpoint 完整状态原本仍包含需求/摘要，不应将观测字段脱敏误认为完整 checkpoint 不含业务内容。
+
+原因码区分 `TIMEOUT`、`PROVIDER_ERROR`、`INVALID_JSON`、`INVALID_SCHEMA`、`INCOMPLETE_RESPONSE`、`INVALID_EVIDENCE`、`BRIEF_TOO_LARGE`；正常/禁用为 `NONE/DISABLED`。取消记录 `CANCELLED` 后继续抛出，硬预算/输入错误记录 `BUDGET_EXCEEDED/INPUT_ERROR` 后继续失败，不降级放行。异常终态仅通过日志/旁路观测，不假装已成功返回节点状态。诊断投影与旁路故障不影响原终态。`modelAttempted` 表示本次是否进入模型尝试，预算发送前拒绝及缓存复用为 false；不表示供应商计费凭证。
+
+选择器版本 `2` 补充英文产品别名，并排除分句内明确否定片段；仍是有限关键词启发式，不能解析全部自然语言否定与转折。本地规则正文版本保持 `1`，已有应用继续优先选择保留样式规则。
+
+在 `ai-service` 目录执行（输出父目录须存在，报告文件必须尚不存在）：
+
+```powershell
+# 默认离线，不读取 .env、不创建模型；12 个公开合成样本。
+uv run python -m ai_service.orchestration.preparation_evaluation --dataset evaluation/generation-preparation-v1.json --output ../tmp/preparation-offline.json
+# 显式真实模式，最多 6 次重写；只连接当前 .env 配置的模型，不要求业务服务运行。
+uv run python -m ai_service.orchestration.preparation_evaluation --dataset evaluation/generation-preparation-v1.json --output ../tmp/preparation-real.json --real-model --limit 6
+```
+
+三组为 `baseline`（增强全关）、`skills_only`（仅规则）、`enhanced`（规则和重写）。真实模式只对前至多六个样本的 enhanced 各尝试一次，失败占用额度，SDK 禁重试。离线 enhanced 重写标为 `not_run`，缺少摘要的摘录指标为 null。评估直接复用实际准备节点，输入包含原文、类型、存在标志和空历史，不调用审核、项目文件、构建、发布或截图工具。真实模式强制启用这三组对照，生产增强开关不控制评估分组；耗时/字节/输出预算沿用当前配置。
+
+报告只保存样本 ID、配置指纹、版本、固定诊断、原文是否原样保留和聚合指标，不保存需求/摘要正文或供应商 URL。`sourceQuoteCoverage` 只衡量样本指定摘录是否完整出现在 requirements、preserve_constraints 或 evidence 中；不是语义完整度或视觉评分。聚合给出测量分母、成功/降级率、原因和准备节点耗时；P95 使用最近秩法，小样本应谨慎解释。顶层 `rewriteAttempts` 为委托次数（包括调用前预算拒绝），组内同名字段按 `modelAttempted` 统计。硬预算失败单独计入 `rewriteFailed`，不进入成功率分母。
+
+文件以独占创建方式预先占位，防止覆盖并在调用前发现路径问题；中断或不可恢复错误可能留下空/不完整报告，下次必须指定新文件名，不自动补跑。离线测试和准备评估均不能证明页面质量、构建成功率或完整 SSE 可用性。本轮实测与后续建议见 [评估与诊断交接](../doc/generation-preparation-evaluation-handoff.md)。
+
 ### 三类生成与工具调用
 
 | 类型 | 生成方式 | 完成条件 |

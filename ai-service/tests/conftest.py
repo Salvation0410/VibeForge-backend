@@ -182,6 +182,8 @@ def settings() -> Settings:
         # 旧行为测试固定关闭新增增强；准备阶段专项测试另行覆盖默认开启路径。
         frontend_skills_enabled=False,
         prompt_rewrite_enabled=False,
+        # 既有测试继续验证关闭准备阶段时的原始 checkpoint/追踪形状；诊断专项显式开启。
+        preparation_diagnostics_enabled=False,
         rag_embedding_dimension=2,
     )
 

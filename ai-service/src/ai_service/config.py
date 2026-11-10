@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     # 两项增强可独立关闭；摘要有独立输出/字节上限，不放宽最终消息预算。
     frontend_skills_enabled: bool = True
     prompt_rewrite_enabled: bool = True
+    preparation_diagnostics_enabled: bool = True
     prompt_rewrite_timeout_seconds: float = Field(default=15.0, gt=0, le=60)
     prompt_rewrite_max_tokens: int = Field(default=1500, ge=128, le=4096)
     prompt_rewrite_max_bytes: int = Field(default=8192, ge=256, le=16384)
