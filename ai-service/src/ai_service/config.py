@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     model_temperature: float = 0.1
     model_max_tokens: int = Field(default=8192, ge=1)
 
+    # 两项增强可独立关闭；摘要有独立输出/字节上限，不放宽最终消息预算。
+    frontend_skills_enabled: bool = True
+    prompt_rewrite_enabled: bool = True
+    prompt_rewrite_timeout_seconds: float = Field(default=15.0, gt=0, le=60)
+    prompt_rewrite_max_tokens: int = Field(default=1500, ge=128, le=4096)
+    prompt_rewrite_max_bytes: int = Field(default=8192, ge=256, le=16384)
+
     # 审核默认开启；故障不能静默跳过。字节上界用于保守预算检查，非供应商精确 token 数。
     input_review_enabled: bool = True
     input_review_timeout_seconds: float = Field(default=15.0, gt=0, le=120)

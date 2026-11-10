@@ -29,6 +29,7 @@ from ai_service.orchestration.subgraphs.vue import build_repair_subgraph, build_
 from ai_service.orchestration.subgraphs.schemas import GenerationInput, VerificationInput
 from ai_service.orchestration.nodes.common import guarded as guard_node
 from ai_service.orchestration.nodes.input import create_input_nodes
+from ai_service.orchestration.nodes.preparation import create_preparation_node
 from ai_service.orchestration.nodes.generation import create_generation_nodes
 from ai_service.orchestration.nodes.verification import create_verification_nodes
 from ai_service.orchestration.nodes.publication import create_publication_nodes
@@ -223,8 +224,11 @@ class GenerationWorkflow:
         builder.add_node("finalize", publication_nodes["finalize"])
         builder.add_edge(START, "input_guard")
         builder.add_edge("input_guard", "context_prepare")
+        builder.add_node("generation_prepare", guarded("generation_prepare",
+                         create_preparation_node(self, emitter, thread_id)))
+        builder.add_edge("context_prepare", "generation_prepare")
         builder.add_conditional_edges(
-            "context_prepare",
+            "generation_prepare",
             lambda state: state["code_gen_type"],
             {"HTML": "html_generation", "MULTI_FILE": "multi_file_generation", "VUE_PROJECT": "vue_generation"},
         )

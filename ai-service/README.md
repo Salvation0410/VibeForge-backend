@@ -10,7 +10,7 @@
 Vue 前端（独立仓库）
   -> Spring Boot：业务权限、聊天记录、对外 SSE、项目文件与发布
      -> Python FastAPI：内部 JSON / NDJSON 接口
-        -> LangGraph：输入审核、生成、验证与修复
+        -> LangGraph：输入审核、需求整理与前端规则、生成、验证与修复
            -> OpenAI 兼容模型
            -> Spring 工具网关：文件、图片搜索、构建与静态产物发布
            -> PostgreSQL：请求级 checkpoint
@@ -52,6 +52,7 @@ ai-service/
 │   │   ├── nodes/
 │   │   │   ├── common.py              # 节点事件、取消及状态摘要公共逻辑
 │   │   │   ├── input.py               # 输入审核、产物上下文与主动配图
+│   │   │   ├── preparation.py         # 后台需求整理、规则选择与故障降级
 │   │   │   ├── generation.py          # 各类型生成节点
 │   │   │   ├── verification.py        # 硬校验、构建、质量审查与静态修复
 │   │   │   └── publication.py         # 静态发布与成功终态
@@ -69,6 +70,7 @@ ai-service/
 │   │   ├── base.py                    # 生成模型协议与返回类型
 │   │   ├── openai_compatible.py       # OpenAI 兼容聊天模型适配器
 │   │   ├── input_review.py            # 输入审核结果与异常类型
+│   │   ├── generation_brief.py        # 严格需求摘要与有界原文引用检查
 │   │   ├── quality_review.py          # Reviewer、问题等级与审查结果
 │   │   ├── tool_contract.py           # 工具契约加载与请求/响应校验
 │   │   ├── vue_context.py             # Vue 模型工具历史的有界投影
@@ -78,6 +80,8 @@ ai-service/
 │   │   ├── routing.py                 # 生成类型路由提示词
 │   │   ├── generation.py              # 三种生成类型与修复提示词
 │   │   ├── input_review.py            # 输入语义审核提示词
+│   │   ├── preparation.py             # 结构化需求整理提示词
+│   │   ├── frontend_skills.py          # 本地版本化前端辅助规则
 │   │   ├── review.py                  # 单 Reviewer 与三角色审查提示词
 │   │   └── customer_service.py        # 基于知识来源回答的提示词
 │   └── infrastructure/
@@ -198,6 +202,11 @@ Invoke-RestMethod http://localhost:8000/health/ready
 | `AI_SERVICE_INPUT_REVIEW_TIMEOUT_SECONDS` | `15` | 单次审核超时，秒 |
 | `AI_SERVICE_INPUT_REVIEW_MAX_RETRIES` | `1` | 审核失败额外重试次数 |
 | `AI_SERVICE_INPUT_PROMPT_MAX_CHARS` | `20000` | 输入字符上限 |
+| `AI_SERVICE_FRONTEND_SKILLS_ENABLED` | `true` | 加载内置、版本化的前端辅助规则 |
+| `AI_SERVICE_PROMPT_REWRITE_ENABLED` | `true` | 后台自动整理结构化需求说明，保留原文 |
+| `AI_SERVICE_PROMPT_REWRITE_TIMEOUT_SECONDS` | `15` | 单次需求整理的超时秒数，无自动重试 |
+| `AI_SERVICE_PROMPT_REWRITE_MAX_TOKENS` | `1500` | 需求整理的模型输出额度 |
+| `AI_SERVICE_PROMPT_REWRITE_MAX_BYTES` | `8192` | 需求说明的 UTF-8 字节上限 |
 | `AI_SERVICE_VUE_MAX_TOOL_CALLS` | `40` | Vue 生成与修复共用的模型工具总预算 |
 | `AI_SERVICE_MAX_REPAIR_ATTEMPTS` | `2` | 验证或质量不通过后的最大修复次数 |
 | `AI_SERVICE_MULTI_AGENT_REVIEW_ENABLED` | `false` | Vue 三角色质量审查 |
@@ -214,7 +223,7 @@ Invoke-RestMethod http://localhost:8000/health/ready
 ## 代码生成工作流
 
 ```text
-input_guard -> context_prepare
+input_guard -> context_prepare -> generation_prepare
   -> html_generation / multi_file_generation / vue_generation
   -> verification_repair
        artifact_validation -> project_build（Vue）-> quality_review
@@ -233,6 +242,22 @@ input_guard -> context_prepare
 Spring 向 LangGraph 传入最近最多六条用户需求（每条最多 1000 个 UTF-16 字符）及最多 2000 字符的初始需求。每次请求独立建立状态，不自动传递完整历史回复、源码或上一请求的工具历史。Vue 当前产物上下文先提供最多 200 条文件路径，再由模型按需读取。
 
 Vue 模型消息的工具历史独立限制为 24 KiB，优先保留近期完整结果，对较早结果提供明确省略摘要；这不裁剪图状态和完整工具记录。最新结果或固定上下文无法完整容纳时停止本轮，增加模型窗口不会自动提高该工具历史上限。
+
+### 后台需求整理与前端辅助规则
+
+`generation_prepare` 位于输入审核、当前产物上下文准备之后，三类生成子图之前。两项增强默认开启、可独立关闭；用户无需确认重写结果。原始 `prompt`、生成类型和当前产物不会被摘要覆盖，前端固定的“优化提示”按钮也没有被改成独立模型接口。
+
+服务内置 `prompts/frontend_skills.py` 中人工编写的中文规则：通用设计、可访问性、原生静态/Vue 实现规范。新建应用按关键词选择数据工具、商品或内容页面预设；已有应用选择保留样式规则，并允许用户明确要求的全局改版。每条规则有本地版本和参考来源，运行时只解析本地白名单，不下载或执行第三方 Skill 脚本。这里是适配后的规则接入，不是完整第三方 Skill 执行运行时。
+
+需求整理复用 LangChain `ChatOpenAI`，以一次异步调用返回严格 JSON，经 Pydantic、原文摘录来源和 UTF-8 字节上限校验。输入包含当前原文、最近六条有界用户需求、初始需求及选定规则引用，不包含项目源码；Vue 的文件清单不能代表已经审查了页面风格。摘要将需求摘录、保留要求、设计建议、假设、交互和验收条件分开，原文始终优先。引用存在不等于语义忠实，后续审查仍需对照原始需求。
+
+超时、供应商错误、无效/截断 JSON 或无效引用会回退原始需求及已选规则；不重试重写请求。取消和硬性上下文预算错误继续终止，不按降级放行。重写单独限制输出额度，新增规则和摘要仍计入实际生成/修复消息预算；Vue 工具历史 24 KiB 上限不变。
+
+解析结果保存在当前请求的 `context.generationPreparation`，包含 `version`、`mode`、规则 ID/版本、`brief` 与 `rewriteStatus`（`ready/fallback/disabled`）。它经窄子图输入传入生成、单/多角色审查和修复；规则文本仅从本地白名单生成系统指令，模型摘要保持为用户消息中的辅助数据。图状态不是跨请求长期设计记忆。
+
+准备阶段只发送简短 `node_status`。配套 Spring 网关将静态状态转换为展示帧，Vue 沿用既有消息格式；状态不能进入静态候选或最终源码历史，迟到状态也不使已有候选失效。未新增 SSE 事件种类、工具权限或数据库结构。第一期不包含截图/多模态视觉审查，不代表成品视觉效果已经实测提升。
+
+详见 [第一期交接文档](../doc/generation-preparation-phase-one-handoff.md)。
 
 ### 三类生成与工具调用
 

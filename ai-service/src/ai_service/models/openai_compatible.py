@@ -12,6 +12,9 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError
 from ai_service.config import Settings
 from ai_service.models.input_review import InputReviewError, InputReviewResult, check_context_budget
 from ai_service.models.vue_context import project_vue_context
+from ai_service.models.generation_brief import GenerationBrief
+from ai_service.prompts.preparation import REWRITE_SYSTEM_PROMPT
+from ai_service.prompts.frontend_skills import frontend_instructions
 from ai_service.prompts.input_review import INPUT_REVIEW_SYSTEM_PROMPT
 from ai_service.models.base import (
     CustomerServiceContext,
@@ -128,7 +131,7 @@ class OpenAICompatibleModel:
         if branch not in {"HTML", "MULTI_FILE"}:
             raise ValueError("STATIC_STREAM_UNSUPPORTED: only static artifacts support text deltas")
         return await self._stream_static_turn([
-            SystemMessage(content=generation_system_prompt(branch)),
+            SystemMessage(content=generation_system_prompt(branch) + frontend_instructions(context)),
             HumanMessage(content=json.dumps(context, ensure_ascii=False)),
         ], on_delta)
 
@@ -138,7 +141,7 @@ class OpenAICompatibleModel:
         if context.get("codeGenType") not in {"HTML", "MULTI_FILE"}:
             raise ValueError("STATIC_STREAM_UNSUPPORTED: Vue repair requires complete tool JSON")
         return await self._stream_static_turn([
-            SystemMessage(content=REPAIR_SYSTEM_PROMPT),
+            SystemMessage(content=REPAIR_SYSTEM_PROMPT + frontend_instructions(context)),
             HumanMessage(content=json.dumps({"artifact": artifact, **context}, ensure_ascii=False)),
         ], on_delta)
 
@@ -161,6 +164,33 @@ class OpenAICompatibleModel:
         # 禁止容忍围栏、额外字段和类型转换，防止模型自由文本被误当作审核成功。
         return InputReviewResult.model_validate_json(str(response.content).strip())
 
+    async def rewrite_requirements(self, context: dict[str, Any]) -> GenerationBrief:
+        """复用异步 HTTP 客户端，但在 SDK 层关闭重试；绑定请求参数不能关闭 SDK 重试。"""
+        # 重写与生成解析同一组本地规则，不把源数据中的自由文本提升为系统指令。
+        rules = frontend_instructions({"generationPreparation": {"skills": context.get("selectedSkills", [])}})
+        messages = [SystemMessage(content=REWRITE_SYSTEM_PROMPT + rules),
+                    HumanMessage(content=json.dumps(context, ensure_ascii=False))]
+        check_context_budget(
+            [{"role": message.type, "content": message.content} for message in messages],
+            context_tokens=self._settings.model_context_window_tokens,
+            output_tokens=self._settings.prompt_rewrite_max_tokens,
+            overhead_tokens=self._settings.model_context_overhead_tokens,
+        )
+        root = self._client.root_async_client.with_options(max_retries=0)
+        client = self._client.model_copy(update={
+            "root_async_client": root, "async_client": root.chat.completions, "max_retries": 0,
+        })
+        with tracing_context(enabled=False):
+            response = await client.bind(max_tokens=self._settings.prompt_rewrite_max_tokens,
+                                         temperature=0).ainvoke(messages)
+        metadata = getattr(response, "response_metadata", {}) or {}
+        reason = str(metadata.get("finish_reason") or metadata.get("stop_reason") or "").upper()
+        if reason not in {"STOP", "END_TURN"} or getattr(response, "tool_calls", None) or getattr(response, "invalid_tool_calls", None):
+            raise ValueError("需求摘要响应不完整")
+        if not isinstance(response.content, str) or len(response.content.encode("utf-8")) > self._settings.prompt_rewrite_max_bytes:
+            raise ValueError("需求摘要超出字节上限")
+        return GenerationBrief.model_validate_json(response.content)
+
     async def route(self, prompt: str) -> str:
         """要求模型返回唯一的生成类型标识。"""
         response = await self._invoke(
@@ -173,7 +203,7 @@ class OpenAICompatibleModel:
 
     async def generate(self, branch: str, context: dict[str, Any]) -> ModelTurn:
         """生成代码产物，并解析 Vue 分支返回的结构化工具调用。"""
-        generation_instructions = generation_system_prompt(branch)
+        generation_instructions = generation_system_prompt(branch) + frontend_instructions(context)
         if branch == "VUE_PROJECT":
             generation_instructions = f"{generation_instructions}\n\n{vue_tool_prompt()}"
         messages = self._vue_messages(generation_instructions, context) if branch == "VUE_PROJECT" else [
@@ -190,8 +220,9 @@ class OpenAICompatibleModel:
         """让模型以 PASS 或 REPAIR 判断产物是否通过质量检查。"""
         payload = {"artifact": artifact, **context}
         # 单 Reviewer 会继承 Vue 工具历史，必须同样投影，避免生成结束后才再次超预算。
-        messages = self._vue_messages(QUALITY_REVIEW_SYSTEM_PROMPT, payload) if "toolResults" in context else [
-            SystemMessage(content=QUALITY_REVIEW_SYSTEM_PROMPT),
+        instructions = QUALITY_REVIEW_SYSTEM_PROMPT + frontend_instructions(context)
+        messages = self._vue_messages(instructions, payload) if "toolResults" in context else [
+            SystemMessage(content=instructions),
             HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
         ]
         response = await self._invoke(messages)
@@ -206,7 +237,7 @@ class OpenAICompatibleModel:
         """让指定角色返回严格校验的结构化质量审查结果。"""
         response = await self._invoke(
             [
-                SystemMessage(content=quality_review_system_prompt(role.value)),
+                SystemMessage(content=quality_review_system_prompt(role.value) + frontend_instructions(context)),
                 HumanMessage(content=json.dumps({"artifact": artifact, **context}, ensure_ascii=False)),
             ]
         )
@@ -221,7 +252,7 @@ class OpenAICompatibleModel:
 
     async def repair(self, artifact: str, context: dict[str, Any]) -> ModelTurn:
         """结合验证和构建上下文生成修复后的完整产物。"""
-        repair_instructions = REPAIR_SYSTEM_PROMPT
+        repair_instructions = REPAIR_SYSTEM_PROMPT + frontend_instructions(context)
         if context.get("codeGenType") == "VUE_PROJECT":
             repair_instructions = f"{repair_instructions}\n\n{generation_system_prompt('VUE_PROJECT')}\n\n{vue_tool_prompt()}"
         payload = {"artifact": artifact, **context}

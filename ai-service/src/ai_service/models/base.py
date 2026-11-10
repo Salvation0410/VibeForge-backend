@@ -6,6 +6,7 @@ from typing import Any, Protocol
 
 from ai_service.models.quality_review import ReviewerResult, ReviewerRole
 from ai_service.models.input_review import InputReviewResult
+from ai_service.models.generation_brief import GenerationBrief
 
 
 @dataclass(slots=True)
@@ -61,6 +62,10 @@ class CustomerServiceModelAnswer:
 
 class GenerationModel(Protocol):
     """编排层依赖的模型能力协议，用于隔离具体模型供应商。"""
+
+    async def rewrite_requirements(self, context: dict[str, Any]) -> GenerationBrief:
+        """仅返回有界辅助摘要，不能替代原始需求或改变生成类型。"""
+        ...
 
     async def review_input(self, context: dict[str, Any]) -> InputReviewResult:
         """返回严格输入审核决策，不改写用户原始需求。"""

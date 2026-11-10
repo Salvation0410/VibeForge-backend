@@ -8,6 +8,7 @@ from ai_service.orchestration.state import WorkflowState
 from ai_service.orchestration.routing import _raise_for_incomplete_model_turn
 from ai_service.orchestration.multi_agent_review import run_multi_agent_review
 from ai_service.orchestration.static_generation import invoke_static_model
+from ai_service.models.generation_brief import rewrite_context
 
 if TYPE_CHECKING:
     from ai_service.orchestration.workflow import GenerationWorkflow
@@ -105,6 +106,15 @@ def create_verification_nodes(
                 "validation": state.get("validation"),
                 "build": state.get("build"),
             }
+            if "generationPreparation" in state["context"]:
+                # 关闭增强时保持原上下文契约；开启后保留准备结果与对应用户原文。
+                source = rewrite_context(state["context"], "VUE_PROJECT")
+                review_context["generationPreparation"] = state["context"]["generationPreparation"]
+                review_context["conversation"] = [
+                    {"role": "user", "content": text} for text in source["userHistory"]
+                ]
+                # 摘要可能引用初始需求，审查仍须看见对应原文，不能只依赖模型摘录。
+                review_context["initialPrompt"] = source["initialPrompt"]
             workflow._raise_if_cancelled(thread_id)
             result = await run_multi_agent_review(
                 workflow.model,

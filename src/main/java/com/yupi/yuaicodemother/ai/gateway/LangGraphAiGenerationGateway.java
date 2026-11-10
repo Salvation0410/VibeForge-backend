@@ -149,6 +149,8 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
                                         ParsedEvent event = parseEvent(line, codeGenType, requestId);
                                         if (StaticGenerationStreamFrame.isDisplay(event.message())) {
                                             hasDisplayDeltas = true;
+                                        }
+                                        if (event.startsDraft()) {
                                             // 新一轮草稿开始后，旧候选不能再冒充这一轮的完整产物。
                                             latestArtifact = null;
                                         }
@@ -280,6 +282,14 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
             JsonNode event = objectMapper.readTree(line);
             String type = event.path("type").asText();
             JsonNode data = event.path("data");
+            if ("node_status".equals(type) && "generation_prepare".equals(event.path("node").asText())
+                    && "progress".equals(data.path("status").asText())) {
+                // 需求准备状态只展示，既不写入候选，也不使已经返回的候选失效。
+                String notice = data.path("message").asText() + "\n";
+                return new ParsedEvent(codeGenType == CodeGenTypeEnum.VUE_PROJECT
+                        ? objectMapper.writeValueAsString(Map.of("type", "ai_response", "data", notice))
+                        : StaticGenerationStreamFrame.display(notice), null, false);
+            }
             // 审核提示仅属于展示消息，不能与静态类型的最终产物合并。
             if ("node_status".equals(type) && "input_guard".equals(event.path("node").asText())
                     && "input_warning".equals(data.path("status").asText())) {
@@ -304,7 +314,7 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
                 if (codeGenType != CodeGenTypeEnum.VUE_PROJECT) {
                     String contentMode = data.path("contentMode").asText("");
                     if ("display_delta".equals(contentMode)) {
-                        return new ParsedEvent(StaticGenerationStreamFrame.display(data.path("content").asText()), null, false);
+                        return new ParsedEvent(StaticGenerationStreamFrame.display(data.path("content").asText()), null, false, true);
                     }
                     if (!contentMode.isEmpty() && !"candidate".equals(contentMode)) {
                         throw new GenerationStreamException(ErrorCode.OPERATION_ERROR.getCode(),
@@ -339,8 +349,12 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
     }
 
     /** 表示一条内部事件转换后的前端消息、最终候选或成功终态。 */
-    private record ParsedEvent(String message, String artifact, boolean completed) {
+    private record ParsedEvent(String message, String artifact, boolean completed, boolean startsDraft) {
         private static final ParsedEvent EMPTY = new ParsedEvent("", null, false);
+
+        private ParsedEvent(String message, String artifact, boolean completed) {
+            this(message, artifact, completed, false);
+        }
     }
 
     /**

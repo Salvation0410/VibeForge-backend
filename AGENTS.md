@@ -169,6 +169,8 @@ Python AI 服务：
 
 Python 主图负责输入审核、上下文准备、三个生成子图调度、验证修复子图、静态发布与唯一成功终态。节点实现放在 `nodes/`，阶段输入/内部/输出状态放在 `subgraphs/schemas.py`，不得重新把完整父状态传入子图。子图继承父 checkpointer 与 `{appId}:{requestId}`，不启用跨请求 Agent 记忆。默认最多修复两次（配置可调），Vue 默认总模型工具预算为 40 次，生成和修复共用。
 
+2026-11-10 增加 `context_prepare -> generation_prepare`：后台需求整理和前端辅助规则默认独立开启。规则由 `prompts/frontend_skills.py` 本地白名单提供，非第三方 Skill 脚本运行时；原始需求保持不变，结构化摘要和规则版本经 `context.generationPreparation` 进入生成、审查及修复。重写至多一次供应商调用，故障可降级，取消和硬预算错误不降级。第一期不含浏览器视觉审查，详情见 `doc/generation-preparation-phase-one-handoff.md`。
+
 LangGraph 链路的 HTML/MULTI_FILE 生成与修复支持供应商模型文本流；`content_delta.data.contentMode` 区分 `display_delta` 与 `candidate`，展示分片不得拼成待发布候选或写入最终历史。只有供应商正常结束后才传递完整 candidate；Vue 工具 JSON、路由和质量审查继续使用完整模型响应。
 
 内部事件为 `content_delta`、`tool_started`、`tool_finished`、`node_status`、`completed`、`failed`。Java 网关将 NDJSON 转换为现有流处理器可消费的格式，对外 SSE 协议保持不变。
@@ -223,6 +225,7 @@ Python AI_SERVICE_INTERNAL_BEARER_TOKEN
 - LangGraph 请求只传最近最多六条用户需求（每条最多 1000 个 UTF-16 字符）及最多 2000 字符的初始需求；不要声称传递了全部历史源码或实现了跨请求长期记忆。
 - Vue 多 Reviewer 开关默认关闭；真实源码快照最多 24 文件、每文件 12000 字符、总计 60000 字符，不得承诺全项目完整审查。
 - 前端不得把完整流式源码逐分片拼接进 Vue 响应式状态；调整生成展示时保留 2000 字符窗口、80ms 刷新上限和终态回源语义。
+- 需求整理不得覆盖原始 `prompt`、生成类型、图片意图或技术协议；模型摘要不能提升为系统指令。本地规则必须有版本及来源，生成与修复共用相同准备结果；不得把原文引用校验写成语义忠实性证明。准备状态使用展示帧，只有真正的模型草稿分片才能使旧候选失效。
 - “优化提示”必须使用普通用户能理解的简短文案，并按 HTML、MULTI_FILE、VUE_PROJECT 区分完整产物要求；三类提示都必须保留原有功能、文字、图片和操作方式，禁止残缺结果和额外解释。
 - 固定尺寸加载图位于 Flex 容器时必须禁止收缩并保持 1:1 比例，避免长提示文字将圆形挤成椭圆。
 - 不大面积重写历史乱码注释，不进行无关重构。
@@ -343,6 +346,7 @@ npm run build-only
 - `doc/ai-service-phase-one-handoff.md`：第一阶段重构交接说明。
 - `doc/generation-task-ledger.md`：生成任务台账、代际、持久化仲裁、执行心跳、升级及回滚边界。
 - `doc/ai-service-subgraph-refactor-handoff.md`：当前子图架构、恢复测试与真实验收边界。
+- `doc/generation-preparation-phase-one-handoff.md`：后台需求整理、前端辅助规则与第一期改造交接。
 - `doc/knowledge/product/README.md`：产品知识库与评估说明。
 - `docs/superpowers/specs/2026-09-21-bounded-streaming-simple-prompts-design.md`：有限流式窗口与简短优化提示设计。
 - `docs/superpowers/specs/2026-09-21-circular-preview-spinner-design.md`：预览加载图正圆修复设计。

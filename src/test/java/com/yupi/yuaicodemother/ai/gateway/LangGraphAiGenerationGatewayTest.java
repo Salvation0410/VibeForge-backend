@@ -36,6 +36,51 @@ class LangGraphAiGenerationGatewayTest {
     private ExecutorService serverExecutor;
 
     @Test
+    void preparationProgressIsDisplayOnlyAcrossStaticBranches() throws Exception {
+        var gateway = gatewayReturning(preparationProgress()
+                + event("content_delta", "{\"content\":\"final code\",\"contentMode\":\"candidate\"}")
+                // 阶段消息迟到也不能使已经完整返回的候选失效。
+                + preparationProgress() + event("completed", "{}"));
+        for (var type : java.util.List.of(CodeGenTypeEnum.HTML, CodeGenTypeEnum.MULTI_FILE)) {
+            ChatHistoryService history = mock(ChatHistoryService.class);
+            var chunks = new SimpleTextStreamHandler().handle(
+                    gateway.generate("build", type, 42L, 7L, "req-preparation"), history, 42,
+                    SysUser.builder().id(7L).build()).collectList().block();
+            assertEquals(java.util.List.of("正在整理需求…\n", "正在整理需求…\n"), chunks);
+            verify(history).addChatMessage(eq(42L), eq("final code"), anyString(), eq(7L));
+        }
+    }
+
+    @Test
+    void preparationProgressUsesExistingVueMessage() throws Exception {
+        var gateway = gatewayReturning(preparationProgress() + event("completed", "{}"));
+        var chunks = gateway.generate("build", CodeGenTypeEnum.VUE_PROJECT, 42L, 7L, "req-preparation")
+                .collectList().block();
+        assertEquals(1, chunks.size());
+        var message = new ObjectMapper().readTree(chunks.getFirst());
+        assertEquals("ai_response", message.path("type").asText());
+        assertEquals("正在整理需求…\n", message.path("data").asText());
+    }
+
+    @Test
+    void preparationFailureDoesNotWriteStaticHistory() throws Exception {
+        var gateway = gatewayReturning(preparationProgress()
+                + "{\"type\":\"failed\",\"error\":{\"code\":\"INPUT_CONTEXT_BUDGET_EXCEEDED\",\"message\":\"budget\"}}\n");
+        ChatHistoryService history = mock(ChatHistoryService.class);
+        var error = assertThrows(GenerationStreamException.class,
+                () -> new SimpleTextStreamHandler().handle(
+                        gateway.generate("build", CodeGenTypeEnum.HTML, 42L, 7L, "req-preparation"), history, 42,
+                        SysUser.builder().id(7L).build()).collectList().block());
+        assertEquals("INPUT_CONTEXT_BUDGET_EXCEEDED", error.getErrorCode());
+        verifyNoInteractions(history);
+    }
+
+    private String preparationProgress() {
+        return "{\"type\":\"node_status\",\"node\":\"generation_prepare\","
+                + "\"data\":{\"status\":\"progress\",\"message\":\"正在整理需求…\"}}\n";
+    }
+
+    @Test
     void textDeltasAndRepairCandidatesReachHistoryWithoutDraftDuplication() throws Exception {
         var gateway = gatewayReturning(event("content_delta", "{\"content\":\"old\",\"contentMode\":\"display_delta\"}")
                 + event("content_delta", "{\"content\":\"old candidate\",\"contentMode\":\"candidate\"}")
