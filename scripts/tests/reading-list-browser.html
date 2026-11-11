@@ -1,0 +1,42 @@
+<!doctype html><meta charset="UTF-8"><title>读书清单探针手写夹具</title>
+<script type="module">
+import { verifyReadingList } from '/checks.mjs'
+
+// 手写 DOM 行为用于校验探针本身，不是自然生成应用或 Vue 端到端证据。
+const results = []
+for (const fault of ['none', 'missing-filter', 'stale-count', 'broken-filter']) {
+  const frame = document.createElement('iframe')
+  document.body.append(frame)
+  const d = frame.contentDocument
+  d.body.innerHTML = '<h1>慢读书房</h1><input><button id="add">添加书籍</button><div id="filters"></div><p id="counts"></p><div id="books"></div>'
+  const books = ['小王子', '人类简史', '三体'].map(title => ({ title, read: false }))
+  let active = '全部'
+  const render = () => {
+    d.querySelector('#counts').textContent = `共 ${fault === 'stale-count' ? 3 : books.length} 本 · 已读 ${books.filter(b => b.read).length} 本`
+    const list = d.querySelector('#books'); list.replaceChildren()
+    for (const book of books.filter(b => fault === 'broken-filter' || active === '全部' || b.read === (active === '已读'))) {
+      const item = d.createElement('div'), button = d.createElement('button')
+      item.append(book.title); button.textContent = book.read ? '标记未读' : '标记已读'
+      button.onclick = () => { book.read = !book.read; render() }
+      item.append(button); list.append(item)
+    }
+  }
+  if (fault !== 'missing-filter') for (const name of ['全部', '未读', '已读']) {
+    const button = d.createElement('button'); button.textContent = name
+    button.onclick = () => { active = name; render() }; d.querySelector('#filters').append(button)
+  }
+  d.querySelector('#add').onclick = () => {
+    const input = d.querySelector('input'), title = input.value.trim()
+    if (title) { books.push({ title, read: false }); input.value = ''; render() }
+  }
+  render()
+  const checks = []
+  let error = null
+  try { await verifyReadingList(d, { tick: () => new Promise(r => setTimeout(r, 0)), record: r => checks.push(r) }) }
+  catch (e) { error = e.message }
+  results.push({ fault, error, checks })
+  frame.remove()
+}
+await fetch('/report', { method: 'POST', body: JSON.stringify(results) })
+document.body.textContent = '夹具完成'
+</script>
