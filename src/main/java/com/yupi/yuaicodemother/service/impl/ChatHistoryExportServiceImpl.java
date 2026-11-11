@@ -20,7 +20,14 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -36,6 +43,11 @@ public class ChatHistoryExportServiceImpl implements ChatHistoryExportService {
     private static final Set<String> TEXT_FILE_EXTENSIONS = Set.of(
             "html", "htm", "css", "js", "jsx", "ts", "tsx", "vue",
             "json", "md", "markdown", "yaml", "yml", "txt", "xml"
+    );
+
+    // 与源码 ZIP 的目录排除范围一致，依赖、构建结果和本地工具配置不属于源码附录。
+    private static final Set<String> EXCLUDED_DIRECTORIES = Set.of(
+            "node_modules", "dist", "build", "target", ".git", ".mvn", ".idea", ".vscode"
     );
 
     private final AppService appService;
@@ -94,10 +106,32 @@ public class ChatHistoryExportServiceImpl implements ChatHistoryExportService {
     }
 
     private List<File> listExportableSourceFiles(File sourceDir) {
-        return FileUtil.loopFiles(sourceDir)
-                .stream()
-                .filter(File::isFile)
-                .filter(this::isExportableTextFile)
+        Path root = sourceDir.toPath();
+        List<File> sourceFiles = new ArrayList<>();
+        try {
+            // 在遍历入口剪枝，避免扫描 node_modules 后才过滤；默认不跟随符号链接。
+            Files.walkFileTree(root, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) {
+                    if (!directory.equals(root)
+                            && EXCLUDED_DIRECTORIES.contains(directory.getFileName().toString().toLowerCase(Locale.ROOT))) {
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFile(Path path, BasicFileAttributes attributes) {
+                    if (attributes.isRegularFile() && isExportableTextFile(path.toFile())) {
+                        sourceFiles.add(path.toFile());
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        } catch (IOException exception) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "读取项目源码失败，请稍后重试");
+        }
+        return sourceFiles.stream()
                 .sorted(Comparator.comparing(file -> normalizePath(FileUtil.subPath(sourceDir.getAbsolutePath(), file.getAbsolutePath()))))
                 .toList();
     }

@@ -220,6 +220,8 @@ Python AI_SERVICE_INTERNAL_BEARER_TOKEN
 - AI 服务（`ai-service/`）的 API、配置、编排、模型、基础设施、启动方式或运行行为发生变动时，按影响范围同步更新 `ai-service/README.md`；文档只描述当前已实现并可由代码或测试验证的能力，不把设计规划写成现状。
 - 生成或新增的代码必须包含与复杂度相匹配的必要注释；注释统一使用中文，说明设计意图、边界条件、并发/安全约束或非显然的业务规则，禁止用注释重复直白代码。修改现有代码时，将涉及范围内的英文注释改为中文。
 - Python 不直接访问 MySQL 或项目目录；文件操作必须经过 Spring 工具网关。
+- Markdown 源码附录遍历时剪枝排除 `node_modules/dist/build/target/.git/.mvn/.idea/.vscode`，默认不跟随符号链接，保留项目文本和锁文件；不要恢复为全目录扫描后仅按扩展名过滤。
+- 首次 Vue 不配图识别支持有限并列否定及外部/网络图片修饰，保护旧图不等于禁止配图，后句明确新增仍优先。规则不是通用语义理解；生成构建和 Reviewer PASS 不能证明筛选等交互功能通过。
 - 修改代码生成类型时检查 `CodeGenTypeEnum`、Python `CodeGenType`、Parser、Saver、Builder、Gateway 和 Workflow。
 - 保持公共 SSE 协议兼容；内部 Spring/Python 使用 NDJSON。
 - 静态流改动同时检查 `StaticGenerationStreamFrame`、网关、SimpleTextStreamHandler 的展示/候选分离，禁止把修复草稿覆盖最终候选。

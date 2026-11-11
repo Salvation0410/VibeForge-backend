@@ -339,6 +339,8 @@ PostgreSQL 状态摘要支持可选 `preparation_diagnostics`，写入前再次�
 
 首次 Vue 生成默认搜索配图，明确不配图时跳过；后续修改只有明确新增、替换或搜索图片时触发主动检索。普通保留图片或布局调整不强制搜图。检索无结果可降级继续；检索成功时会检查图片 URL 是否写入源码，实际加载效果仍需浏览器验证。
 
+不配图识别支持同分句内的有限并列否定，例如“不需要登录、远程后端或外部图片”“无需账号和网络配图”，以及 `without external images`。中文匹配限制在否定词后 80 字符内，使用固定图片修饰词；“不要替换原有图片”等保护要求不作为禁止配图，后句明确新增图片仍按新增请求处理。这是规则识别，不能保证理解所有自然语言否定；真实生成及 Reviewer PASS 也不能替代页面功能检查。2026-11-11 的真实对照与审查漏检见交接第 16 节。
+
 ### 质量审查与发布
 
 默认使用单 Reviewer，OpenAI 兼容适配器单次调用要求严格 JSON：`{"verdict":"PASS","issues":[]}`，或 `verdict=REPAIR` 加 1～4 条问题。每条仅含 `code`、`summary`（最多 160 字符）、`evidence` 和 `repair_hint`（各最多 240 字符），问题码限 `REQUIREMENT_MISSING`、`FUNCTIONAL_ERROR`、`TECHNICAL_ERROR`、`SCOPE_VIOLATION`。PASS 必须无问题，REPAIR 必须有问题；裸 PASS/REPAIR、额外字段、重复键、空理由和超限响应返回 `QUALITY_REVIEW_INVALID_OUTPUT`。长度截断/内容过滤响应即使 JSON 完整也返回 `QUALITY_REVIEW_INCOMPLETE`，不再为格式错误重试或修复。原始响应上限 8192 字符、16384 UTF-8 字节，序列化修复反馈最多 4000 字符。

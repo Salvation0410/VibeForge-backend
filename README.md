@@ -11,6 +11,7 @@ AI 应用生成平台的后端仓库，包含 Spring Boot 业务服务和 `ai-se
 - 用户注册、登录、验证码、资料管理与权限控制。
 - 应用管理、HTML / MULTI_FILE / VUE_PROJECT 三类代码生成、流式输出、停止生成与聊天记录导出。
 - 项目文件读写、解析、构建、预览、部署和源码下载。
+- Markdown 对话导出附带当前项目的文本源码与锁文件，遍历时排除依赖、构建结果及本地工具配置目录（如 `node_modules`、`dist`、`.git`），不跟随符号链接。
 - 社区帖子、评论、点赞、标签与管理后台。
 - 客服问答和知识文档管理；启用 RAG 需要单独配置模型、OSS、Milvus 和重排器。
 - AI 引擎切换：Legacy LangChain4j、Python LangGraph，以及按白名单或比例灰度。

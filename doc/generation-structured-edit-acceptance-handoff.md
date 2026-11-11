@@ -585,3 +585,53 @@ Vue 按 files 的排序键 JSON/UTF-8 计算摘要，不构成任意取消时刻
 前端既有客服三文件及后端启动时已有未跟踪计划 `docs/superpowers/plans/2026-11-11-cancellation-drain-regression.md` 均保留，不纳入本次提交。AI README、AGENTS、终态设计与本轮维护记录已同步。回退需整体回退执行登记、事件内部收尾回调、工作流排空与生成响应/路由关闭逻辑，保留上一轮终态等待；不涉及数据库迁移、模型配置、用户数据或前端回退。
 
 本轮提交说明为 `fix(ai): 保护重复取消与断连后的工作流收尾`，可用 `git log -1 --format='%h %s' -- doc/generation-structured-edit-acceptance-handoff.md` 查询对应哈希。
+
+## 16. Vue 从零生成与交付维护
+
+2026-11-11 承接 `e6967ea`，用户授权继续优化并直接进行必要真实测验。先检查两仓库，再选择 Vue 从零生成、部署/下载/导出及迟到交付响应；第 14 节属性矩阵和第 15 节 PostgreSQL 受控事务测试没有重新执行。沿用 `tmp/real-e2e-unlimited-20261111/model-ledger.json`，**新增 51 次，67→118，max_calls=null**；旧 60/20/30 账本 SHA-256 均保持，生产限额代理未改。
+
+### 16.1 三项修复与确定性证据
+
+1. **前端交付回调归属。** 部署、源码下载、Markdown 导出固定发起时的 appId、备用文件名和页面代次，在成功、异常、Blob 错误正文异步读取后和 finally 核对归属。导航/卸载后的旧响应不再修改新页面、触发旧下载或解除新请求 loading；同页新生成不使已发起交付失效。加入重复触发保护，不承诺撤销服务端已开始的部署。独立前端新增 `tests/browser/deliveryLifecycle.*`，使用真实组件和合成 HTTP 门闩，旧代码 **14 失败、6 通过**，修复后 **20/20**。原生成矩阵 **54/54**。早期两次夹具超时源于挂起 HTTP 与 Chrome 虚拟时钟相互等待，改为服务器 tick 后重新取得完整基线，不能计为生产缺陷。
+2. **Markdown 源码附录剪枝。** 第二样本导出 19,732,869 字节、540,959 行，包含 462 个 node_modules 和 3 个 dist 文件章节。原实现全目录遍历后仅按扩展名过滤；改为 `Files.walkFileTree` 在目录入口排除 `node_modules/dist/build/target/.git/.mvn/.idea/.vscode`，不跟随符号链接，保留项目文本、锁文件、文档与排序。三类型及“仅有依赖不能当源码”共 4 项旧实现失败，修复后通过。重启 Spring 后，对原应用零模型导出为 **56,311 字节**，无依赖/构建章节，源码/锁文件/需求保留。原失败导出不覆盖。
+3. **有限并列不配图识别。** 实测“不需要登录、远程后端或外部图片”被旧规则漏掉，第二样本模型上下文包含 6 项 imageAssets，结束后还收到使用图片反馈。扩展同分句内 80 字符的并列否定、外部/网络/在线修饰及英文 `without external images`；固定动作排除避免把保护旧图当禁止配图，后句明确新增仍优先。新增 API 四场景在旧实现失败，修复后相关 20 项通过。工具/修复预算、模型参数和公共 SSE 未变，规则不等于通用自然语言理解。
+
+### 16.2 真实调用与产物结果
+
+三个全新隔离应用都只提交一次生成，需求相同：Vue 中文“慢读书房”，三本未读书、添加及空白校验、已读切换、全部/未读/已读筛选、计数、响应式，并明确不需要外部图片。每个创建入口路由各使用 2 次真实调用，共 6 次；生成共 45 次，失败及格式重试均占账本。
+
+| 样本 | appId / requestId | 调用与终态 | 结果 |
+| --- | --- | --- | --- |
+| 1，修复前 | `478025956899532800` / `ad5408a7-25c7-4d19-aa8b-a28c331e3a7d` | 创建 2 + 生成 18；FAILED / VUE_TOOL_BATCH_LIMIT_EXCEEDED | done=0、业务错误=1、预览刷新=0；已有 9 文件写入，不能算生成通过，也无 Vue 回滚 |
+| 2，修复前 | `478027690220826624` / `949c9c12-9428-428a-b34c-3bde9590991b` | 创建 2 + 生成 16；SUCCEEDED / NOT_VERSIONED | 唯一 done、无业务/传输错误、刷新 1 次；预览与本机部署的添加、空白拒绝、切换及三筛选通过；导出内容另发现缺陷并修复补验 |
+| 3，配图规则修复后 | `478030502103154688` / `349eeb2c-0739-4624-94a6-dfcab286d39b` | 创建 2 + 生成 11；SUCCEEDED / NOT_VERSIONED | 唯一成功终态、刷新 1 次；添加和空白校验通过，但筛选按钮缺失，完整功能验收失败 |
+
+三项结束后均以 appId/requestId 显式重新查询，heartbeat=TERMINAL。样本 1 未捕获完整逐轮原始响应，不断言超限的具体模型根因。首次 UI 预检曾把新应用“暂无任务”的 40400 误当失败，当时未提交生成；原报告保留，修正夹具后才正式提交。
+
+样本 2 的 13 轮 Vue 模型调用包括规划、分批写文件、一次无效 JSON，以及图片使用反馈后的读写；另有输入审核、需求整理和质量审查 3 次。样本 3 为 8 轮 Vue（含一次无效 JSON）及另外 3 次。修复后所有被动观测到的 Vue 消息 imageAssets=0、无 imageUsageFeedback。单次调用 16→11 不是普遍性能保证；两者都没有自然 REPAIR→PASS，额外轮次是格式/配图反馈，不得当作质量修复证据。
+
+样本 3 的真实 Reviewer 严格返回 PASS/空 issues，但 `FilterBar.vue` 要求 filters/active/total/readCount 属性及 change 事件，父组件仅使用 v-model，没有提供筛选数据、计数或对应事件接线，按钮未渲染。浏览器原报告在筛选检查中断；截图和 Spring 非截断源码快照确认组件契约不匹配。零模型观察继续下载、导出和部署，在部署页复现相同缺陷，整体报告仍 passed=false。没有调整断言让失败变通过，没有手改生成源码，也没有为换一个成功样本继续调用。后续应优先评估 Vue 运行期/功能检查如何捕捉这种构建成功但组件缺数据的情况。
+
+### 16.3 交付证据与范围
+
+样本 2 ZIP **14,665 字节/9 条目**，与 Spring 8 个非截断快照文件逐字节一致，额外为 package-lock.json；样本 3 ZIP **15,243 字节/10 条目**，与 9 个快照文件一致，额外同为锁文件。均检查路径安全且无依赖/构建目录。样本 3 Markdown **55,083 字节**，无依赖/构建章节，保留锁文件。没有把 ZIP 解压到工程或修改项目文件。
+
+真实链路包含完整 Vue 前端、Chrome headless DOM 操作、原生 EventSource、Spring、Python、真实供应商、实际工具/构建及 PostgreSQL。适配器观测仅在私有脚本被动保存调用输入输出，不修改提示或供应商返回；不是 Fake 端到端，也不是物理鼠标测试。本机部署访问 localhost/回环地址，两个部署页面 390px 检查无横向溢出；样本 3 的布局/交付通过不能抵消功能失败，不能称公网完整部署验收。
+
+各 Python 运行日志中 `Explicit rollback() forbidden`、`another command is already in progress`、`discarding closed connection` 均为 0。此轮三个生成样本没有覆盖新的取消/并发时序，不扩大第 15 节生命周期保护结论。
+
+### 16.4 本轮验证与私有证据
+
+- Python：`uv run python -m compileall -q src`、`uv lock --check` 通过；最终 `uv run pytest -ra --tb=short` 为 **1280 passed、14 skipped、2 warnings，183.85 秒**。14 项 PostgreSQL opt-in 本轮未独立执行；两条既有弃用警告保留。
+- Java：本机没有 `mvnw.cmd`，尝试 Wrapper 命令失败后改用系统 Maven。`mvn clean -DskipTests compile` 通过；`mvn test -Dtest=ChatHistoryExportServiceTest,DeploymentResourceControllerTest,AppControllerSseTest` **12/12** 通过。
+- 前端：交付浏览器 **20/20**，既有生成浏览器 **54/54**；三项纯函数测试文件合计 **27/27**；`npm run type-check` 和 `npm run build-only` 通过，既有大 chunk 提示保留。浏览器命令分别为 `node scripts/test-generation-ui.mjs --delivery` 与 `node scripts/test-generation-ui.mjs`。
+
+私有证据目录：`tmp/delivery-e2e-20261111/`（首样本、服务/离线日志、逐轮观测、delivery-summary.json），`tmp/delivery-e2e-fresh2-20261111/`（第二样本、原/修复后导出和 ZIP 比较），`tmp/delivery-e2e-no-images-20261111/`（第三样本及失败补验）。前端忽略目录 `doc/` 保存运行器、浏览器基线及修复后报告。原报告、源码、截图、Cookie、密钥和 private-runtime.json 均不提交、不在交付消息中输出。
+
+自然 REPAIR_NO_PROGRESS、全部停止失败时序、长期/跨实例并发、自动恢复、Vue 回滚和公网部署仍未验收；自然 REPAIR→PASS 仍为第 13 节历史证据。下一轮优先补 Vue 功能漏检的确定性回归，再选有价值的真实对照，不为罕见分支无限采样。无上限授权持续适用于本任务，但必须沿用当前 **118 次**账本，不重跑已有提交标记。
+
+### 16.5 收尾与提交范围
+
+最后一次零模型观察已保存 complete 阶段报告、ZIP、Markdown 和截图，功能结果仍 false；Chrome 没有自行退出，核对本次独立 profile 后显式停止，运行器退出码为 1，不计为完整脚本通过。三项生成台账均确认终态后，核对主私有状态 PID 和实际进程归属，停止本轮 Spring/Python/代理及其浏览器子进程，并停止 `langgraph-postgres`。保留原 MySQL、Redis、用户浏览器及其他容器，不删除私有证据。
+
+两仓库仅提交本轮生产修改、必要测试和文档，保留前端客服三文件及后端原未跟踪 cancellation-drain-regression 计划。Java 测试目录被根 `.gitignore` 的 `test/` 规则忽略，新增导出回归需明确纳入提交。没有推送；后端与前端提交分别使用中文 Conventional Commits，不把前端用户修改混入交付。

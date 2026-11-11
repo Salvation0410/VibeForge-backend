@@ -3228,7 +3228,13 @@ def test_vue_empty_image_search_has_visible_fallback(app_factory, auth_headers, 
     assert any("Pexels" in e.get("data", {}).get("message", "") for e in events)
 
 
-@pytest.mark.parametrize("prompt", ["制作Vue任务清单，无需图片。", "创建任务板，不需要任何配图。", "Create a Vue todo app without images."])
+@pytest.mark.parametrize("prompt", [
+    "制作Vue任务清单，无需图片。", "创建任务板，不需要任何配图。", "Create a Vue todo app without images.",
+    "制作 Vue 读书清单，不需要登录、远程后端或外部图片。",
+    "制作 Vue 读书清单，不需要外部图片。",
+    "创建任务板，无需账号和网络配图。",
+    "Create a Vue todo app without external images.",
+])
 def test_first_vue_explicitly_without_images_skips_automatic_search(app_factory, auth_headers, ndjson_parser, prompt):
     gateway = FakeToolGateway()
     events = ndjson_parser(TestClient(app_factory(gateway=gateway)).post(
