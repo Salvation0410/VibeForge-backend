@@ -89,13 +89,20 @@ class GenerationWorkflow:
 
         task = asyncio.create_task(execute())
         self.active_generations.register(thread_id, task)
+        terminal_event: GenerationEvent | None = None
         try:
             while True:
                 event = await queue.get()
                 if event is None:
                     break
+                # 下游收到终态后可能立即断开；先排空图写入和清理，避免断连取消数据库收尾。
+                if event.type in ("completed", "failed"):
+                    terminal_event = event
+                    continue
                 yield event
             await task
+            if terminal_event is not None:
+                yield terminal_event
         finally:
             if not task.done():
                 task.cancel()

@@ -175,6 +175,8 @@ LangGraph 链路的 HTML/MULTI_FILE 生成与修复支持供应商模型文本�
 
 内部事件为 `content_delta`、`tool_started`、`tool_finished`、`node_status`、`completed`、`failed`。Java 网关将 NDJSON 转换为现有流处理器可消费的格式，对外 SSE 协议保持不变。
 
+Python 流边界暂存 `completed` / `failed`，等待后台图执行及 checkpoint 收尾结束后再投递，避免下游收到终态立即断开时取消尚未结束的数据库操作。普通分片仍实时发送；这不代表任意重复取消或数据库故障已得到恢复保证。
+
 HTML 和 MULTI_FILE 只有通过 Spring 的严格解析、确定性校验和不可变版本发布后才能完成。HTML 默认还会执行 Selenium 浏览器烟测；发布失败、模型长度截断或页面运行检查失败时保留上一活动版本。`GenerationLeaseService` 保留 Redis 入口串行化与实时状态，取消和静态提交资格以 MySQL `generation_arbitration` 为权威；静态发布最终按当前 fence token 更新数据库活动指针。Vue 仍直接修改工程目录，没有同等版本回滚保证。
 
 前端仍实时展示流式输出，但只在非响应式累加器中保留最近 2000 个字符，每 80ms 最多提交一次 Vue 快照，同时显示累计字符数。完成后重新读取服务端聊天历史，不能把这 2000 个字符的临时窗口当成最终完整消息。预览在生成期间保留旧版本，只在当前请求成功后刷新一次；失败、停止和迟到回调不得刷新预览。

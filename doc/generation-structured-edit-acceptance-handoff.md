@@ -484,3 +484,61 @@ Vue 摘要按 files 的排序键 JSON、UTF-8 计算，仅说明本次早期取�
 完成后停止本轮 Spring/Python/代理进程及 PostgreSQL 容器，Vite/Chrome 随运行器退出；保留原有 MySQL、Redis 和其他容器，未推送或公网部署。
 
 建议下一轮首先离线定位 PostgreSQL 事务/连接清理告警；随后固化外部资源就绪条件到可复用的验收设施。真实补测优先自然无进展终止、剩余属性及停止失败竞态；本轮未覆盖完整属性矩阵、从零 Vue 生成、部署/下载、跨标签并发或自动恢复。新增真实调用必须再次明确额度，不继续使用本轮已耗尽的 30 次授权。
+
+## 14. 无次数上限续验与终态收尾修复
+
+2026-11-11 用户明确要求“不限制调用次数，继续完成真实端到端测验”，因此本轮不再适用此前 30 次上限。私有 `tmp/real-e2e-unlimited-20261111/counting_proxy.py` 复用原代理的认证、零重试和发送前持久化流程，以 `max_calls=null` 表示本轮不设总上限；生产 `scripts/acceptance_model_proxy.py` 的限额默认及行为未变。私有计数器先做超过 60 次预占及重启保持的离线自检，未访问供应商。
+
+本轮实际 **67 次模型调用、19 个真实生成/取消请求**，旧 60/20/30 账本 SHA 均保持。真实请求的明细为 `tmp/real-e2e-unlimited-20261111/summary.json`，逐项调用差值之和为 67，没有未归属的调用。18 份完整 UI 报告直接通过，1 份修复前 Vue 报告采样退出后零模型补验通过；三类四属性的 12 个核心用例均另有本轮直接通过报告。
+
+### 14.1 核心覆盖与观测边界
+
+- HTML：字号 42→44px、文字色 #345678→#456789、背景 #eef2f6→#dce8f2、center→left，均直接通过，共 12 次调用。
+- MULTI_FILE：字号 36→38px、文字色 #123456→#345678、背景 #ddeeff→#dce8f2、center→left，均直接通过，共 12 次。
+- Vue 修复前字号 26→28px：供应商/构建/审查成功、6 次；脚本在旧文档就绪后遇到新文档替换，原始报告 Missing target，零模型补验确认 28px。没有重写失败报告。
+- 修复后 Vue：字号 28→30px、文字色 #123456→#345678、背景 #eef2f6→#dce8f2、center→left，4 份完整报告直接通过，分别 6/5/5/6 次。Vue 工具输出格式重试计入调用。
+- 修复后 HTML 44→46px、MULTI_FILE 38→40px 再验，各 3 次，直接通过。
+- 修复后三类分别在生成调用开始后取消，各 2 次；全部 CANCELLED、旧 iframe/document 和计数保持、零预览刷新。
+- 受控停止鉴权失败 1 次 HTML：3 次模型调用，真实停止 HTTP 200/code=40100，原流 1 次 done/无业务失败、最终 SUCCEEDED；旧预览 46px 保持、零刷新，服务端已发布新源码。请求为 `e165d4b3-0226-4012-b8b4-679149a6f3c6`。故障由仅对停止请求移除 Cookie 触发，返回真实 Spring 响应，非自然网络故障、非取消成功，也未伪造 SSE。
+
+全部成功用例核对目标计算样式、另外三个样式、固定文字、图片 src/alt/加载、计数操作、唯一目标、生成期间旧预览与成功后一次刷新。全部请求以显式 appId/requestId 复核终态；缺失 UI requestId 的早期 Vue 用例依据独立 Python/Reviewer 日志定位 `d39d5694-8352-4573-a4f1-24e930049745` 再查询。成功 SSE 仍不提供 requestId。
+
+私有浏览器夹具进一步等待“相对于本次旧文档的新 document、文档/外链 CSSOM/图片就绪、跨一次观测 tick 仍为同一 document”，再同步读取快照，避免先检查旧文档就绪再采到新空文档。使用完整真实应用和原生 EventSource，DOM 点击仍不等于物理鼠标验收。
+
+### 14.2 终态过早发送：复现、修复与真实复测
+
+`GenerationWorkflow.stream` 原来直接转发已入队的 completed/failed；此时后台 graph.ainvoke 及 checkpoint 清理可能尚未结束。Spring 收到终态后关闭下游连接，会使流 finally 取消仍在数据库收尾的后台任务。
+
+新增 `tests/test_stream_terminal_cleanup.py`，用清理门闩和“收到终态立即关闭”的消费者分别覆盖成功、失败。修改前两项都失败，证明终态能在清理完成前被观察。修复仅在流边界缓存终态，等队列结束、后台 task 完成后投递；普通分片继续实时发送，不改事件结构、发布规则、模型提示或预算。清理失败仍不反转已确定业务终态。
+
+Python 重启前后独立日志对照：重启前 9 个真实请求中 `another command is already in progress` 文本出现 3 次、连接丢弃 1 次；重启后的 **10 个真实请求**（Vue 四属性、HTML/MULTI_FILE 字号、三类取消、一次停止失败）中两种原始 rollback 告警及连接丢弃均为 **0**，结束前 ready/checkpoint=true。已修复可复现的终态时序缺陷，本轮未再复现清理告警；不据此声称所有 psycopg 问题同源或任意重复取消/并发压力均已验证。
+
+该修复不改变 Java SSE schema 或前端 API；真实 Java/Python/前端联调覆盖了新投递时机，未修改 Java 文件或单独重跑 Maven 单元测试。变更已同步 AI README 和 AGENTS。
+
+### 14.3 取消源码与真实 HTTP 反例
+
+三类取消前后通过 Spring 工具只读比较，HTML/MULTI_FILE 的活动 artifact 相同，Vue 5 文件非截断源码快照相同：
+
+| 类型 | 取消后 SHA-256 |
+| --- | --- |
+| HTML | `752b89884ff1dd3f3ad986b1481ac455352d45093c6549a1655cda4a44db7b74` |
+| MULTI_FILE | `5c9f718d1b4bfa786c38b028c78b93fbf4e126115792cd94da9aa6b8bb3f35df` |
+| Vue | `9cea0f0d814a83a081f0121a08040e1416cf131b68ca24984adf96d76ab722c6` |
+
+Vue 按 files 的排序键 JSON/UTF-8 计算摘要，不构成任意取消时刻的工程回滚保证。后续 HTML 停止鉴权失败的源码与表中取消后源码不同，符合“停止未被接受、原生成继续成功”的预期。
+
+真实 API 边界反例最终 9/9 通过：三类各自匿名生成/停止返回 40100，已登录非法结构化属性返回 40000，模型新增 0 次。入口异常 SSE 当前为 business-error 后接 done，未开始图执行，不把结束标记算作业务成功。预检先遇到匿名 Cookie 与登录 Cookie 混用，修正会话隔离后又遇正常 5次/60秒 限流返回 42900；保存这些原始观测，等待限流窗口后重跑并断言精确错误码，不关闭限流、不改 Redis。
+
+### 14.4 本轮验证、文件与未覆盖项
+
+- 新增成功/失败门闩测试：旧代码 2 失败；修复后通过。
+- `uv run pytest tests/test_stream_terminal_cleanup.py tests/test_static_model_streaming.py tests/test_api.py`：142 passed。
+- `uv run python -m compileall -q src`：通过；`uv lock --check`：通过。
+- 第一次完整 pytest：1253 passed、10 skipped、1 failed，为客服重排器 30ms 超时恢复测试；未改客服逻辑，单独重跑该项通过。结束浏览器测试后再次完整运行：**1254 passed、10 skipped、2 warnings**（171.72 秒），原弃用警告保留。真实资源 opt-in 测试未另行开启；不能把被跳过的集成测试写成通过。
+- 真实生成/取消 19 请求、API 反例最终 9 项、零模型补验和显式任务/源码核对完成。真实日志修复前后分别保存，不混报。
+
+证据保存在忽略目录 `tmp/real-e2e-unlimited-20261111/`：summary、原始 UI 报告/截图、逐项显式台账、审查消息/响应、取消前后源码、失败停止后源码、计数账本、负例预检与最终报告、pytest-final.log、旧账本 hash、私有启动状态和 cleanup.json。前端私有运行器为忽略的 `doc/real-e2e-unlimited.mjs` / `.html`。凭据、日志、源码和截图不提交。
+
+已停止本轮 Spring/Python/代理及 PostgreSQL 容器，Vite/Chrome 随运行退出；保留原有 MySQL、Redis、其他容器及前端客服三个既有修改。未改 `.env`、未推送或公网部署。
+
+本轮完成三类四属性矩阵及所列取消/受控故障验收。自然 REPAIR→PASS 仍以第 13 节为证，本轮未触发自然 REPAIR_NO_PROGRESS，不以构造的假候选补齐真实覆盖。Vue 从零生成、部署/下载、长时间并发、全部停止失败竞态及自动恢复仍不在通过结论中。用户对本任务的无次数上限授权持续有效，但不代表需要无限重复采样或扩展到无关模型任务。
