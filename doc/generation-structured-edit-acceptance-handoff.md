@@ -357,3 +357,69 @@ HTML 字号样例没有再次补做历史失败修改，说明当前样例通过
 回退需整体回退本轮页面请求归属和暂存终态逻辑，保留上一轮停止不刷新预览的修复；无数据库、生成产物、审查协议或客服数据回退。
 
 前端提交为 `73220e3 fix(generation): 隔离迟到响应并恢复停止失败后的终态`。后端本文、设计和计划随 `docs(ai): 记录生成界面竞态修复与浏览器验收` 提交，哈希可通过本文 git log 查询。未推送或部署。
+
+## 12. 真实前端、生成发布与停止操作验收
+
+2026-11-11 按用户明确要求执行第 11 节之后的小范围真实验收。本轮使用原授权剩余 **5 次**，账本从 **15/20 → 20/20**；正常修改 3 次、取消场景 2 次。旧 60/60 账本 SHA-256 保持不变。没有换账本或提高额度，后续真实模型验证必须重新明确新增授权。
+
+### 12.1 环境和执行方式
+
+复用 HTML 隔离应用 `477952435427049472` 和原隔离账号；旧登录会话过期后通过真实登录接口更新。启动真实 Spring、Python、原限额代理及前端 Vite，Python 使用原模型 `deepseek-chat`，代理仍绑定 `tmp/quality-review-acceptance-20261111/model-ledger.json`、`max_calls=20`。本机已有 MySQL 和原生 Redis 服务保持运行，本轮只额外启动 PostgreSQL 容器 `langgraph-postgres`。
+
+当前会话没有可用的桌面控制工具，因此使用 Chrome headless 加载真实前端完整应用，包括登录态、路由、权限、AppChatView、可视化选中及属性表单，并通过 DOM 点击“应用修改”和“停止生成”。使用原生 EventSource、真实 HTTP/SSE、Spring 内部工具、模型、文件校验/发布及 PostgreSQL checkpoint；没有注入 Fake 响应或直接调用组件内部函数。被动观察器只统计原生事件、预览 fetch 和停止响应，不改事件内容、提示或供应商参数。浏览器无远程调试端口，DOM 点击不等于物理鼠标验收。
+
+先执行不提交的预检，确认当前标题为 36px、居中、颜色 `#123456`、背景 `#eef2f6`，图片加载、计数 0→1 和字号表单均正常，额度仍为 15。每个真实场景提交前持久化独占标记，避免脚本失败后重复点击耗费额度。
+
+### 12.2 正常单属性修改：通过
+
+通过可视化表单将标题字号 **36px → 40px**，只点击一次“应用修改”。
+
+| 核对项 | 实际结果 |
+| --- | --- |
+| requestId | `da4779a3-8df8-40ab-9e80-355493cd0200` |
+| 模型调用 | 3 次，账本 15→18：输入审核、生成、质量审查 |
+| 准备与审查 | `skipped/STRUCTURED_EDIT`，含 `structured-edit-scope@1`；严格 JSON PASS、空 issues、STOP |
+| 原生 SSE | 1 个连接、1 次 done、0 次 business-error、0 次传输错误；观测字符数 2738（JS length） |
+| 任务和发布 | SUCCEEDED / COMMITTED，错误码为空；14:11:27 创建，14:11:38 完成 |
+| 预览 | 生成期间旧 document 保持，成功后新增 1 次预览请求并换为新 document |
+| 修改效果 | 计算字号 40px；其余三项样式、页面文字、图片 src/alt/加载状态保持 |
+| 交互 | 新 document 的计数初始为 0，点击后为 1，功能正常 |
+
+成功后 document 更换及计数重置是本次成功刷新的预期行为，不将报告里的 `samePreviewDocument=false`、`counterStatePreserved=false` 当作失败。页面重新加载完整聊天历史，截图显示新产物源码和实际 40px 页面。
+
+### 12.3 真实停止操作：通过
+
+以刚发布的 40px 页面为基线，先点击计数到 **1**。通过同一表单提交 **40px → 44px**，观察代理已预占本轮第 2 次调用、生成尚未结束时，点击实际“停止生成”按钮一次。
+
+| 核对项 | 实际结果 |
+| --- | --- |
+| requestId | `5dcb0135-91d8-4891-bfcb-807b1b027d43` |
+| 模型调用 | 2 次，账本 18→20；停止时第 2 次为 reserved，最终账本 last_status=cancelled |
+| 停止请求 | 前端 HTTP 200、业务 code=0、STOPPING；Python 取消接口 HTTP 202 Accepted |
+| 任务 | CANCELLED / 错误码 CANCELLED / heartbeat TERMINAL；14:13:05 创建，14:13:06 结束 |
+| 发布观测 | 台账 publicationState=NOT_CONFIRMED，不能单独解释为数据库“未发布”的原子证明 |
+| 前端 | 0 次 done，关闭原流后未观测 business-error；页面恢复发送按钮，提示后台任务已停止 |
+| 预览 | 新增预览请求 0，原 iframe/document 保持，字号仍为 40px，计数仍为 1；再次点击可变为 2 |
+
+停止前后另通过 Spring `artifact_context` 只读核对当前活动源码，内容完全相同，SHA-256 为 `0c58bdf88dc39b56e58dbe683d5d2cd7aa4038012f0e477c25b5316e5a01f196`，证明并非仅浏览器缓存保留旧画面。没有直接操作项目目录或连接业务 MySQL；该接口不返回活动版本 ID，因此不声称逐字段核验了数据库活动指针。
+
+两个 requestId 均通过本应用时间窗口内的新任务、Python 日志关联，再用显式 appId + requestId 查询确认终态。成功 SSE 本身仍没有 requestId，取消后前端会主动关闭连接；不虚构 SSE 中出现了取消失败帧或严格原子关联字段。本轮没有额度拦截导致的失败，也没有再发额外修复或诊断模型请求。
+
+### 12.4 新观察到的告警、证据与收尾
+
+正常完成和取消完成后各观察到 PostgreSQL 清理告警：`Explicit rollback() forbidden within a Transaction context`，随后连接池关闭/丢弃连接。两次请求终态、正常发布和取消保持项符合预期，但这不代表 checkpoint 清理健康；需要独立排查事务/连接生命周期。不能未经定位就与历史 `another command already in progress` 认定为同一根因。本轮未修改 Python 以消除告警。
+
+本轮证据位于后端忽略目录 `tmp/real-ui-acceptance-20261111/`：
+
+- `inspect-ui-report.json` / `inspect-ui.png`：真实登录与表单预检；0 模型调用。
+- `edit-ui-report.json` / `edit-ui.png`、`edit-confirmed-task.json`：正常修改、原生事件、保持项及显式任务查询。
+- `cancel-ui-report.json` / `cancel-ui.png`、`cancel-confirmed-task.json`：真实停止、原 document 保留及任务终态。
+- `artifact-before-cancel.json` / `artifact-after-cancel.json`：Spring 返回的当前活动源码，按私有证据保管。
+- `review-67226f585a254d628ad3ee4090dfa39f.json`：实际审查适配器消息与原始响应；无改写提示的诊断回放。
+- 服务日志、私有会话与启动记录、提交独占标记；前端临时观察器位于被忽略的 `doc/real-ui-acceptance.mjs` 和 `.html`。
+
+所有原始上下文、Cookie、凭据、源码、账本及截图不提交。完成只读复核后已停止本轮 Spring/Python/代理进程和 PostgreSQL 容器，Vite 随各次浏览器运行关闭；原有 MySQL、原生 Redis 和其他容器保留，`.env` 未改动。没有发布到公网或推送 Git。
+
+本轮无生产代码变更，只更新本交接文档；两仓库检查 status/diff，保留前端客服三文件。未重跑离线全量、Maven 或前端构建，不能将第 11 节结果改称本轮新跑。此次通过的是 **HTML 的一次完整真实 UI 修改链路与一次有效真实停止**，不覆盖三类全部属性、停止请求失败竞态、Vue 从零生成、部署/下载或自然 REPAIR 后的模型修复质量。
+
+下一步优先离线定位已复现的 PostgreSQL 事务清理告警，再按明确新额度扩展真实失败及 MULTI_FILE/Vue 端到端矩阵。新授权账本现已 20/20，用完后不得复用“剩余 5 次”的旧结论。
