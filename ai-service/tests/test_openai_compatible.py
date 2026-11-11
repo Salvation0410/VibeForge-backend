@@ -69,8 +69,11 @@ async def test_vue_long_tool_history_fits_real_message_budget_without_changing_c
     payload = json.loads(model._client.messages[1].content)
     assert context == original
     assert payload["prompt"] == context["prompt"]
-    assert payload["toolResults"][-1] == context["toolResults"][-1]
-    assert payload["toolResults"][0]["result"]["contextOmitted"] is True
+    if mode == "review":
+        assert "toolResults" not in payload
+    else:
+        assert payload["toolResults"][-1] == context["toolResults"][-1]
+        assert payload["toolResults"][0]["result"]["contextOmitted"] is True
     model._check_budget(model._client.messages)
 
 

@@ -1,0 +1,36 @@
+{
+  "version": "1",
+  "provenance": "手写开发正例，仅用于审查误报检查，不是自然生成端到端产物或独立留出集",
+  "cases": [
+    {
+      "id": "explicit-props-and-event",
+      "prompt": "制作 Vue 页面，显示全部和已读两个按钮，点击后更新页面的当前筛选文字。不需要外部图片。",
+      "expectedVerdict": "PASS",
+      "files": [
+        {
+          "path": "src/App.vue",
+          "content": "<script setup>\nimport { ref } from 'vue'\nimport FilterControls from './FilterControls.vue'\nconst active = ref('全部')\nconst filters = ['全部', '已读']\n</script>\n<template><main><FilterControls :filters=\"filters\" :active=\"active\" @change=\"active = $event\"/><p>当前筛选：{{ active }}</p></main></template>"
+        },
+        {
+          "path": "src/FilterControls.vue",
+          "content": "<script setup>\ndefineProps({ filters: { type: Array, required: true }, active: { type: String, required: true } })\nconst emit = defineEmits(['change'])\n</script>\n<template><nav><button v-for=\"filter in filters\" :key=\"filter\" :aria-pressed=\"active === filter\" @click=\"emit('change', filter)\">{{ filter }}</button></nav></template>"
+        }
+      ]
+    },
+    {
+      "id": "named-define-model",
+      "prompt": "使用 Vue 3.4 以上做文字编辑页面，子组件输入框初始为你好，输入新文字后父页面同步显示。不需要外部图片。",
+      "expectedVerdict": "PASS",
+      "files": [
+        {
+          "path": "src/App.vue",
+          "content": "<script setup>\nimport { ref } from 'vue'\nimport TextEditor from './TextEditor.vue'\nconst value = ref('你好')\n</script>\n<template><main><TextEditor v-model:text=\"value\"/><p>{{ value }}</p></main></template>"
+        },
+        {
+          "path": "src/TextEditor.vue",
+          "content": "<script setup>\nconst text = defineModel('text', { type: String, required: true })\n</script>\n<template><label>文字<input v-model=\"text\" /></label></template>"
+        }
+      ]
+    }
+  ]
+}

@@ -13,6 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError
 from ai_service.config import Settings
 from ai_service.models.input_review import InputReviewError, InputReviewResult, check_context_budget
 from ai_service.models.vue_context import project_vue_context
+from ai_service.models.vue_review_context import vue_review_context
+from ai_service.prompts.review import VUE_REVIEW_EVIDENCE_INSTRUCTIONS
 from ai_service.models.generation_brief import GenerationBrief
 from ai_service.models.preparation_diagnostics import PreparationFailure
 from ai_service.models.single_quality_review import SingleReviewResult, parse_single_review
@@ -232,9 +234,14 @@ class OpenAICompatibleModel:
 
     async def review(self, artifact: str, context: dict[str, Any]) -> SingleReviewResult:
         """单次调用返回结构化判定与拒绝依据，非法响应不触发额外调用。"""
+        is_vue = context.get("codeGenType") == "VUE_PROJECT"
+        if is_vue:
+            context = vue_review_context(context)
         payload = {**context, "artifact": artifact}
-        # 单 Reviewer 会继承 Vue 工具历史，必须同样投影，避免生成结束后才再次超预算。
+        # 正式 Vue 审查以当前快照为准；旧的无类型调用仍保留工具历史投影兼容。
         instructions = QUALITY_REVIEW_SYSTEM_PROMPT + frontend_instructions(context)
+        if is_vue:
+            instructions += "\n\n" + VUE_REVIEW_EVIDENCE_INSTRUCTIONS
         messages = self._vue_messages(instructions, payload) if "toolResults" in context else [
             SystemMessage(content=instructions),
             HumanMessage(content=json.dumps(payload, ensure_ascii=False)),

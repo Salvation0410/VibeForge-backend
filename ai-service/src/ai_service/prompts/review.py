@@ -6,7 +6,7 @@ QUALITY_REVIEW_SYSTEM_PROMPT = """你是专业的代码质量检查专家。请�
 - 是否符合当前生成类型的输出协议和技术约束；
 - 是否保留了修改请求未涉及的原有内容。
 
-Java Spring 会额外执行确定性的格式解析、HTML/CSS/JavaScript 校验、Vue 项目构建和必要的浏览器烟测；你不需要假装替代这些检查。
+Java Spring 按生成类型执行格式校验或项目构建；只能以输入中的检查结果为依据。Vue 构建成功不代表浏览器运行和交互已经验证，不得假设存在未提供的浏览器烟测。
 存在会影响运行或当前用户目标的严重问题时返回 REPAIR，不报告纯审美偏好，不补做历史需求。
 只返回严格 JSON，不输出 Markdown 围栏、完整源码或额外解释：
 {"verdict":"PASS","issues":[]}
@@ -15,6 +15,15 @@ verdict 只允许 PASS/REPAIR；PASS 必须 issues 为空，REPAIR 必须提供 
 每条问题严格四字段：code 只允许 REQUIREMENT_MISSING、FUNCTIONAL_ERROR、TECHNICAL_ERROR、SCOPE_VIOLATION；
 summary 最多 160 字符，evidence 和 repair_hint 各最多 240 字符，三者均不能为空。
 证据只引用给定候选或上下文中可见事实，不能假设看过浏览器、隐藏文件或未提供的当前基线。"""
+
+
+VUE_REVIEW_EVIDENCE_INSTRUCTIONS = """Vue 审查以 artifact 中的本轮源码快照为实际实现，currentArtifact 仅为修改前的保留基线，历史需求不是本轮待补做清单。
+逐项沿可见代码核对用户当前要求的交互，不以组件名称、完成声明或 build.built=true 代替核对：
+1. 对本地父子组件同时可见的调用，核对父组件提供的 props 与子组件 required props、默认值及实际读取是否一致。
+2. 核对子组件 emit 的事件与父组件监听和状态更新；默认 v-model 是 modelValue/update:modelValue，具名 v-model 使用对应名称，也可能通过 defineModel 正确实现。
+3. 沿可见状态核对筛选、列表和计数的数据流；不能仅因按钮模板存在就认定数据已传入、按钮能渲染或交互接线正确。
+有可见证据的契约断开、缺失数据或无效事件导致当前功能失败时返回阻断问题，证据应同时指出调用方和被调用方的路径与不匹配处，建议最小接线修复。
+合法的 v-bind 对象展开、事件转发、动态组件和 defineModel 不应仅因形式不同被判错；快照截断或缺少相关文件时不能凭空断言实现缺失。不得声称执行过浏览器或证明全部交互通过。"""
 
 
 _ROLE_RESPONSIBILITIES = {
@@ -57,7 +66,7 @@ def quality_review_system_prompt(role: str) -> str:
         responsibility = _ROLE_RESPONSIBILITIES[role]
     except (KeyError, TypeError) as exc:
         raise ValueError(f"Unsupported reviewer role: {role}") from exc
-    return f"{responsibility}\n\n{_ROLE_REVIEW_SHARED_CONTRACT.replace('ROLE', role)}"
+    return f"{responsibility}\n\n{VUE_REVIEW_EVIDENCE_INSTRUCTIONS}\n\n{_ROLE_REVIEW_SHARED_CONTRACT.replace('ROLE', role)}"
 
 REPAIR_SYSTEM_PROMPT = """你是代码修复专家。请根据用户需求、当前完整产物以及确定性校验、构建和质量检查结果，生成一个完整的修复后产物。
 

@@ -146,6 +146,7 @@ def create_verification_nodes(
             }
         review_context = {
             **state["context"],
+            "codeGenType": state["code_gen_type"],
             "validation": state.get("validation"),
             "build": state.get("build"),
         }

@@ -635,3 +635,43 @@ Vue 按 files 的排序键 JSON/UTF-8 计算摘要，不构成任意取消时刻
 最后一次零模型观察已保存 complete 阶段报告、ZIP、Markdown 和截图，功能结果仍 false；Chrome 没有自行退出，核对本次独立 profile 后显式停止，运行器退出码为 1，不计为完整脚本通过。三项生成台账均确认终态后，核对主私有状态 PID 和实际进程归属，停止本轮 Spring/Python/代理及其浏览器子进程，并停止 `langgraph-postgres`。保留原 MySQL、Redis、用户浏览器及其他容器，不删除私有证据。
 
 两仓库仅提交本轮生产修改、必要测试和文档，保留前端客服三文件及后端原未跟踪 cancellation-drain-regression 计划。Java 测试目录被根 `.gitignore` 的 `test/` 规则忽略，新增导出回归需明确纳入提交。没有推送；后端与前端提交分别使用中文 Conventional Commits，不把前端用户修改混入交付。
+
+## 17. Vue 审查证据投影与组件契约核对
+
+2026-11-11 承接 `bdc7600` / `becdf0a`。本轮聚焦第 16 节的 Vue 筛选漏检：只读核对保存的供应商消息，确认 App.vue 和 FilterBar.vue 同时在未截断的 9 文件快照中，审查还携带 9 项生成工具历史。因此不是“没有提供父子源码”；不能把删除工具历史视为已证明的唯一根因修复。
+
+### 17.1 实现与确定性验证
+
+工作流单 Reviewer 上下文明传权威 codeGenType。适配器遇到 VUE_PROJECT 时白名单保留当前 prompt、有限用户历史、metadata 中有界 initialPrompt、currentArtifact、imageAssets、editIntent、generationPreparation、validation 和 build，artifact 参数仍为当前快照；不再发送生成工具历史、助手消息、规划/格式反馈、旧 artifact 和任意扩展元数据。原 context 不变，生成/修复工具历史、checkpoint 和无进展指纹保持原语义。
+
+Vue 专用说明由单/多 Reviewer 共用：按可见父子源码核对 required props、默认值、emit/监听、默认或具名 v-model/defineModel，以及列表/筛选/计数状态流。要求证据指出调用方与被调用方的不匹配，避免把合法转发、对象展开、动态组件或不可见文件直接判错。通用审查说明不再暗示 Vue 构建等于浏览器功能检查。JSON 协议、问题上限、修复次数、工具预算、公共 SSE 均未修改，也没有新增静态语义硬门禁或浏览器检查。
+
+旧实现新增两项定向回归为 **1 失败、1 通过**：失败项证明过时工具/规划内容仍进入模型输入；超限快照原本就会在供应商调用前失败。修复后新增 9 项覆盖输入隔离、保留约束、不原地修改、UTF-16/历史上限、完整消息预算、静态分支兼容、三角色说明以及真实嵌套图向适配器边界传递 Vue 类型与当前快照。原生成/修复历史预算测试继续通过。这些使用 Fake/捕获客户端，证明输入和控制流，不能证明模型语义判断准确。
+
+### 17.2 六次真实审查及标注偏差
+
+只启动原无上限计数代理，未启动 Spring/Python 生成服务、PostgreSQL 或浏览器。使用相同模型参数、无 SDK 重试的私有运行器：旧组原样重放第 16 节保存的审查消息，新组将相同 artifact 交给本次生产适配器。旧/新每个样本的源码 SHA 相同，没有修改工程或生成源码。每项发送前建立独占标记，沿用原账本 **118→124，新增 6 次、max_calls=null**；无供应商/解析失败，无重试。旧 60/20/30 账本 SHA 保持。
+
+| 样本与分组 | 真实结果 | 判读 |
+| --- | --- | --- |
+| 第 16 节样本 3，旧消息重审 | REPAIR，2 条 FUNCTIONAL_ERROR | 本次旧版也识别筛选接线问题；历史 PASS 不代表每次都漏检 |
+| 同一失败样本，新审查 | REPAIR，1 条 FUNCTIONAL_ERROR | 证据包含 FilterBar 所需属性/事件与父组件 v-model 不匹配 |
+| 第 16 节样本 2，旧消息重审 | PASS | 符合运行器预设，但该样本不是干净正例 |
+| 同一功能通过样本，新审查 | REPAIR，1 条 SCOPE_VIOLATION | 指出明确不需要外部图片却添加了图片；与第 16 节已知配图偏差一致 |
+| 手写 explicit-props-and-event，新审查 | PASS | 合法显式 props 与 change 事件接线 |
+| 手写 named-define-model，新审查 | PASS | 合法具名 v-model 与 defineModel |
+
+最初四次对照预设样本 2 应为 PASS，新版出现 `matchesExpected=false`。复核后明确“交互通过”不等于满足全部原文限制；原 expected、原响应和 mismatch 均保留，另存判读说明，不能改表算 4/4 全通过。由此补充两个手写合法接线正例，各一次真实审查，不重新抽样历史样本。公开正例在 `ai-service/evaluation/vue-review-contract-v1.json`，仅提供相关 SFC，私有输入明确局部/非完整快照，没有伪造实际构建摘要。这是开发材料，不是独立留出集或自然生成产物。
+
+历史失败样本的新旧输入字符数为 **20,518→18,620**，另一历史样本为 **33,162→19,222**；包含系统说明，不等同于供应商 token/费用。此结果证明具体输入缩减和上述判定，**不能证明检出率普遍提高**，也没有证明工具历史是历史漏检的唯一原因。生产模型审查仍可能漏检、误判；下一步应独立设计 Vue 运行期/交互证据与有边界的确定性检查，而不是仅增加提示或反复重审同样样本。
+
+### 17.3 本轮验证、收尾与未覆盖项
+
+- `uv run python -m compileall -q src`、`uv lock --check` 通过。
+- 审查/修复/适配器定向测试通过；最终 `uv run pytest -ra --tb=short`：**1289 passed、14 skipped、2 warnings，184.60 秒**。PostgreSQL opt-in 未启用，两条原有弃用警告保留。
+- 本轮没有修改 Java 或前端，没有重跑 Maven、前端构建或浏览器测试；第 16 节对应结果保持历史身份。
+- 六次真实审查完成后核对 PID/命令归属，停止本轮代理。8000/8123/18001/5432 无监听，原 MySQL/Redis 保留。无新增生成、修复、发布、下载、部署或应用任务，不据此宣称端到端通过。
+
+私有证据为 `tmp/vue-review-evidence-20261111/` 的原始消息/响应、submitted 标记、summary.json、positive-summary.json、final-summary.json；离线日志为 `tmp/vue-review-evidence-before.log`、`tmp/vue-review-evidence-targeted.log`、`tmp/vue-review-evidence-final.log`。只提交手写测试/正例、生产代码及必要文档，私有配置、令牌、日志和历史生成源码不提交。前端客服三文件及后端原未跟踪 cancellation-drain-regression 计划保持。
+
+自然 REPAIR_NO_PROGRESS、新优化后的自然生成→审查→修复→交互全链路、长期并发、全部停止失败时序、公网部署仍未覆盖；自动恢复、Vue 回滚和通用组件静态验证未实现。自然 REPAIR→PASS 仍引用第 13 节。后续真实调用授权持续，但应沿用 **124 次**账本并保留本轮全部结果，不重跑已有标记。
