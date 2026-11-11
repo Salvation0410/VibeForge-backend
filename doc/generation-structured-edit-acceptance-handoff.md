@@ -423,3 +423,64 @@ HTML 字号样例没有再次补做历史失败修改，说明当前样例通过
 本轮无生产代码变更，只更新本交接文档；两仓库检查 status/diff，保留前端客服三文件。未重跑离线全量、Maven 或前端构建，不能将第 11 节结果改称本轮新跑。此次通过的是 **HTML 的一次完整真实 UI 修改链路与一次有效真实停止**，不覆盖三类全部属性、停止请求失败竞态、Vue 从零生成、部署/下载或自然 REPAIR 后的模型修复质量。
 
 下一步优先离线定位已复现的 PostgreSQL 事务清理告警，再按明确新额度扩展真实失败及 MULTI_FILE/Vue 端到端矩阵。新授权账本现已 20/20，用完后不得复用“剩余 5 次”的旧结论。
+
+## 13. 三类应用真实端到端测试集与新增 30 次验收
+
+2026-11-11 用户要求提供测试集并开始执行，随后明确授权**新增最多 30 次**，包含失败、重试、修复和诊断。本轮账本为 `tmp/real-e2e-matrix-20261111/model-ledger.json`，最终 **30/30**；原 60/60、20/20 账本 SHA-256 保持不变。代理发送前持久化预占，最终 last_status=completed，没有额度拦截造成的业务失败，不得再使用旧授权继续调用。
+
+可执行步骤、通过标准与覆盖矩阵见[真实端到端测试集](generation-real-e2e-test-suite.md)。复用第 12 节隔离账号和三类应用，通过已有会话真实鉴权。真实前端完整应用、原生 EventSource、Spring/Python/DeepSeek、Spring 工具、实际构建/发布及 PostgreSQL 均参与；Chrome headless 通过 DOM 操作真实表单，没有 Fake 生成、审查、工具或 SSE。Vue 基线仍是历史 fixture，不能宣称从零生成通过。
+
+### 13.1 真实请求与调用账本
+
+| 请求 | requestId | 调用 | 真实终态与结果 |
+| --- | --- | --- | --- |
+| HTML 字号 40→42px | `43acf814-a24e-43ed-add8-832d1b4888ee` | 3 | SUCCEEDED / COMMITTED；完整 UI 断言通过 |
+| MULTI_FILE 实际提交 34px | `49dfcfa5-8d88-4b70-982a-3ba6880e4d3b` | 6 | SUCCEEDED / COMMITTED；自然 REPAIR→PASS；测试采样及目标有偏差，不计原定步骤通过 |
+| Vue 字号 24→26px | `2fd5bc12-ff31-4b80-9c06-800494c72622` | 6 | SUCCEEDED / NOT_VERSIONED；构建、审查、UI 通过，含一次工具输出格式重试 |
+| HTML 42→44px 时取消 | `7ab490de-93d7-44ee-83a8-160b09af1382` | 2 | CANCELLED，预览保持 42px |
+| MULTI_FILE 34→36px 时取消 | `da467398-0d92-445b-802c-0b31e1a09d63` | 2 | CANCELLED，预览保持 34px |
+| Vue 26→28px 时取消 | `02a6d0ac-5e9f-49ec-ad07-f6630bf7f9d5` | 2 | CANCELLED，预览保持 26px |
+| MULTI_FILE 新请求 34→36px | `1a4e9dc0-3884-4e00-8841-7d70e0de4a52` | 3 | SUCCEEDED / COMMITTED；原始断言过早采样，零模型补验通过 |
+| HTML 文字颜色 #123456→#345678 | `aa4cdb13-f28b-43d1-9f3a-3bb6fa179d96` | 3 | SUCCEEDED / COMMITTED；完整 UI 断言通过 |
+| MULTI_FILE 对齐 left→center | `26d30097-371b-475f-9404-d5c3bf1559a3` | 3 | SUCCEEDED / COMMITTED；完整 UI 断言通过 |
+| 合计 | 9 个请求 | **30** | 7 个完整原始 UI 报告通过、1 个零模型补验通过、1 个测试步骤偏差；不写成 9/9 全通过 |
+
+所有请求最终又以 appId + requestId 只读确认台账，保存独立 `*-confirmed-task.json`。成功 SSE 本身仍不携带 requestId；第一次 MULTI_FILE 因报告中途退出，使用同应用/时间窗口和 Reviewer/Python 日志识别 requestId 后显式查询。成功刷新检查为新增 1 次预览请求，生成期间旧 document 保留；取消为 0 次、document 与计数保持，终态后点击计数仍加一。固定文字、图片 src/alt/加载、目标唯一性及其他三个样式分别核对。
+
+### 13.2 自然结构化拒绝与真实修复
+
+第一次 MULTI_FILE 请求真实 Reviewer 返回严格 JSON `REPAIR`，唯一问题码 `FUNCTIONAL_ERROR`：基础样式已为要求的 34px，但 `@media (max-width: 480px)` 仍为 22px。证据引用该 CSS，建议同步窄屏字号。后续真实修复的候选将该处改为 34px，Reviewer 再次返回 `PASS`、空 issues。
+
+保存的两次审查候选差异为窄屏 `22px → 34px` 及代码块间空行；并非将完全相同候选重新送审。此次自然拒绝、结构化理由、实际候选改变和最终发布均有真实证据。未捕获独立的修复请求完整消息，因此不据此宣称逐字验证了拒绝反馈在每一层的传递。两个候选 SHA 不同；本轮**没有自然触发 REPAIR_NO_PROGRESS**，该终止分支仍需另行覆盖。
+
+### 13.3 测试采样缺陷与零模型补验
+
+初版私有运行器只等待目标 DOM，第一次 MULTI_FILE 在外链 CSS 加载前读到黑色、透明背景、默认 32px，因此实际表单填写 34px，而不是稳定页面 24px + 2px 的 26px。提交后的真实模型遵循了实际 34px 请求。完成后脚本又在新 iframe 目标尚不可读时退出，原报告 `Error: Missing target` 保留。该次不能计为原定字号步骤通过。
+
+增加 document.readyState 等待后，新请求使用稳定的 34px 基线提交 36px；但终态采样仍短暂读到无样式 32px，原报告 passed=false。截图与后续稳定页面均显示样式已加载。最终运行器增加外部 link 的 stylesheet/CSSOM 及图片就绪检查，并用**零模型** `inspect-MULTI_FILE-fontSize-css-ready` 补验：36px、#123456、#ddeeff、left、13 条样式规则加载、固定文字/图片及计数 0→1 均通过。它与该请求的稳定基线、一次预览刷新和显式 SUCCEEDED/COMMITTED 共同提供补充证据；没有改写两个原始失败报告。
+
+之后 MULTI_FILE 对齐请求使用相同修正后的等待条件，完整报告直接通过，字号仍为 36px。不能将采样修正写成生产预览缺陷已修复，也未验证短暂无样式闪现是否影响普通用户体验。
+
+### 13.4 取消保持与基础设施观测
+
+三类请求均在输入审核后、生成调用预占时点击停止，最终 CANCELLED；每类 2 次调用。Spring 只读源码比较结果：
+
+| 类型 | 取消前后比较 | SHA-256 |
+| --- | --- | --- |
+| HTML | 活动 artifact 原文相同 | `c0d01978a5d5c51ff0f0b4c53b22c46df51166258a6a8d661bcae9f03c6a5fb8` |
+| MULTI_FILE | 活动 artifact 原文相同 | `c7cca6182250b6a0b621846912c2fa4a92f5bdd6ead53e61c7296d8326532023` |
+| Vue | 5 文件快照相同、truncated=false | `863abc671848c10669cd02fa457d54dd3bf4e6afe41c15edf604726f5f66e0fc` |
+
+Vue 摘要按 files 的排序键 JSON、UTF-8 计算，仅说明本次早期取消没有改变所见源码；不证明任意取消时刻回滚、dist 的事务性或全工程一致性。静态台账 NOT_CONFIRMED 也不单独作为未发布原子证明，保持结论来自活动源码比较。未直连业务 MySQL 或直接读写 projects。
+
+本轮 Python 日志仍出现 `Explicit rollback() forbidden within a Transaction context`（文本出现 2 次）、`another command is already in progress`（6 次）和连接池丢弃（4 次）；文本计数不等于独立请求数。结束前 `/health/ready` 返回 ready/checkpoint=true，但 checkpoint 事务清理健康项仍**未通过**。本轮未修复、未定位两种告警的共同根因。
+
+### 13.5 文件、收尾及下一步
+
+全部原始证据在后端忽略目录 `tmp/real-e2e-matrix-20261111/`：`summary.json`、各次原始 UI 报告/截图、显式任务查询、审查消息和响应、候选差异、取消前后及最终源码、调用账本、旧账本 SHA、私有启动信息与 cleanup.json。前端私有运行器在忽略的 `doc/real-e2e-matrix.mjs` / `.html`。原始失败报告保留，凭据、源码、日志和截图均不纳入 Git。
+
+本轮只交付测试集与交接文档，未修改生产代码或配置；前端既有客服三文件保持。没有为文档重跑 Maven/Python 离线全量或前端构建，不沿用第 11 节结果当作本轮新跑。实际运行了三类浏览器预检、9 次真实请求及零模型补验、显式任务与源码核对，文档提交前检查两仓库 diff。
+
+完成后停止本轮 Spring/Python/代理进程及 PostgreSQL 容器，Vite/Chrome 随运行器退出；保留原有 MySQL、Redis 和其他容器，未推送或公网部署。
+
+建议下一轮首先离线定位 PostgreSQL 事务/连接清理告警；随后固化外部资源就绪条件到可复用的验收设施。真实补测优先自然无进展终止、剩余属性及停止失败竞态；本轮未覆盖完整属性矩阵、从零 Vue 生成、部署/下载、跨标签并发或自动恢复。新增真实调用必须再次明确额度，不继续使用本轮已耗尽的 30 次授权。
