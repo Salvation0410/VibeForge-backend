@@ -10,6 +10,8 @@ import com.yupi.yuaicodemother.model.dto.app.StructuredEditIntent;
 import com.yupi.yuaicodemother.service.ChatHistoryService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import reactor.core.publisher.BaseSubscriber;
 import reactor.core.publisher.Flux;
 
@@ -290,17 +292,19 @@ class LangGraphAiGenerationGatewayTest {
         assertEquals("LANGGRAPH_STREAM_INCOMPLETE", error.getErrorCode());
     }
 
-    @Test
-    void failedEventPreservesStableErrorCode() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"MODEL_OUTPUT_TRUNCATED", "QUALITY_REVIEW_INVALID_OUTPUT",
+            "QUALITY_REVIEW_INCOMPLETE", "REPAIR_NO_PROGRESS"})
+    void failedEventPreservesStableErrorCode(String errorCode) throws Exception {
         String body = "{\"requestId\":\"req-fail\",\"type\":\"failed\","
-                + "\"data\":{},\"error\":{\"code\":\"MODEL_OUTPUT_TRUNCATED\",\"message\":\"truncated\"}}\n";
+                + "\"data\":{},\"error\":{\"code\":\"" + errorCode + "\",\"message\":\"stopped\"}}\n";
         var gateway = gatewayReturning(body);
 
         GenerationStreamException error = assertThrows(GenerationStreamException.class,
                 () -> gateway.generate("build", CodeGenTypeEnum.MULTI_FILE, 42L, 7L, "req-fail")
                         .collectList().block());
 
-        assertEquals("MODEL_OUTPUT_TRUNCATED", error.getErrorCode());
+        assertEquals(errorCode, error.getErrorCode());
         assertEquals("req-fail", error.getRequestId());
     }
 

@@ -9,6 +9,8 @@ import com.yupi.yuaicodemother.service.AppService;
 import com.yupi.yuaicodemother.service.SysUserService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.test.util.ReflectionTestUtils;
 import reactor.core.publisher.Flux;
 
@@ -48,10 +50,12 @@ class AppControllerSseTest {
         assertNull(events.getFirst().event()); assertEquals("done", events.getLast().event());
     }
 
-    @Test
-    void failureEmitsBusinessErrorWithoutDoneOrNamedTransportError() {
-        var error = new GenerationStreamException(50001, "MODEL_OUTPUT_TRUNCATED", "req-1",
-                "模型输出达到长度限制，已保留上一版本", null);
+    @ParameterizedTest
+    @ValueSource(strings = {"MODEL_OUTPUT_TRUNCATED", "QUALITY_REVIEW_INVALID_OUTPUT",
+            "QUALITY_REVIEW_INCOMPLETE", "REPAIR_NO_PROGRESS"})
+    void failureEmitsBusinessErrorWithoutDoneOrNamedTransportError(String errorCode) {
+        var error = new GenerationStreamException(50001, errorCode, "req-1",
+                "本轮生成已停止", null);
         var fixture = fixture(Flux.error(error));
         var events = fixture.controller.chatToGenCode(42L, "build", fixture.request).collectList().block();
         assertNotNull(events);
@@ -59,7 +63,7 @@ class AppControllerSseTest {
         assertEquals("business-error", events.getFirst().event());
         assertTrue(events.stream().noneMatch(event -> "done".equals(event.event())));
         assertTrue(events.stream().noneMatch(event -> "error".equals(event.event())));
-        assertTrue(events.getFirst().data().contains("MODEL_OUTPUT_TRUNCATED"));
+        assertTrue(events.getFirst().data().contains(errorCode));
         assertTrue(events.getFirst().data().contains("req-1"));
     }
 
