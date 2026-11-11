@@ -49,6 +49,7 @@ ai-service/
 │   │   ├── static_generation.py       # 静态文本流与完整候选分离
 │   │   ├── vue_tool_loop.py           # Vue 模型轮次、工具执行及预算控制
 │   │   ├── multi_agent_review.py      # Vue 三角色并行质量审查
+│   │   ├── repair_progress.py         # 静态候选与完整 Vue 快照的请求内判重
 │   │   ├── nodes/
 │   │   │   ├── common.py              # 节点事件、取消及状态摘要公共逻辑
 │   │   │   ├── input.py               # 输入审核、产物上下文与主动配图
@@ -72,6 +73,7 @@ ai-service/
 │   │   ├── input_review.py            # 输入审核结果与异常类型
 │   │   ├── generation_brief.py        # 严格需求摘要与有界原文引用检查
 │   │   ├── quality_review.py          # Reviewer、问题等级与审查结果
+│   │   ├── single_quality_review.py   # 单 Reviewer 严格判定、拒绝理由与错误边界
 │   │   ├── tool_contract.py           # 工具契约加载与请求/响应校验
 │   │   ├── vue_context.py             # Vue 模型工具历史的有界投影
 │   │   ├── embeddings.py              # CloseAI/OpenAI 兼容向量模型
@@ -312,7 +314,7 @@ uv run python -m ai_service.orchestration.rewrite_policy_evaluation --dataset ev
 
 前端规则开启时，经过校验的顶层结构化意图还会选择本地 `structured-edit-scope@1`：本轮指定属性是当前修改范围，当前产物/实际源码是保留基线，历史需求只作背景，不补做旧修改。生成、审查和修复使用同一准备结果；规则是模型约束，不是确定性源码补丁，也不能证明修改范围必然正确。
 
-PostgreSQL 状态摘要支持可选 `preparation_diagnostics`，写入前再次投影固定字段；无效诊断省略，不影响既有状态写入，无需新增 SQL 结构。单 Reviewer 正常返回后记录固定的 `quality_review_result`（PASS/REPAIR/INVALID_OUTPUT、响应字符数、白名单结束原因），不记录响应正文。原有仅精确 PASS 才通过的门槛不变；该日志不提供拒绝理由。
+PostgreSQL 状态摘要支持可选 `preparation_diagnostics`，写入前再次投影固定字段；无效诊断省略，不影响既有状态写入，无需新增 SQL 结构。单 Reviewer 使用下述结构化协议；`quality_review_result` 日志只记录 PASS/REPAIR/INVALID_OUTPUT、响应字符数、白名单结束原因、问题数量和固定问题码，不记录证据、建议或源码正文。
 
 启用/回退说明见 [结构化编辑交接](../doc/generation-structured-edit-handoff.md)。三类应用的有限真实验收、失败与未覆盖项，以及本地限额代理、SSE 运行器和浏览器快照工具见 [真实验收交接](../doc/generation-structured-edit-acceptance-handoff.md)。本轮发现过历史修改混入和审查失败，不承诺局部修改必然精确落到源码。
 
@@ -332,7 +334,15 @@ PostgreSQL 状态摘要支持可选 `preparation_diagnostics`，写入前再次�
 
 ### 质量审查与发布
 
-默认使用单 Reviewer；开启 Vue 三角色审查后，并行检查需求、功能和技术质量。审查在硬校验及构建成功后执行，使用 Spring 返回的真实源码快照。快照最多 24 个文件、单文件 12000 字符、合计 60000 字符；存在截断时不代表已完整审查所有源码。单 Reviewer 模式下，完成过修复的 Vue 也会读取快照。
+默认使用单 Reviewer，OpenAI 兼容适配器单次调用要求严格 JSON：`{"verdict":"PASS","issues":[]}`，或 `verdict=REPAIR` 加 1～4 条问题。每条仅含 `code`、`summary`（最多 160 字符）、`evidence` 和 `repair_hint`（各最多 240 字符），问题码限 `REQUIREMENT_MISSING`、`FUNCTIONAL_ERROR`、`TECHNICAL_ERROR`、`SCOPE_VIOLATION`。PASS 必须无问题，REPAIR 必须有问题；裸 PASS/REPAIR、额外字段、重复键、空理由和超限响应返回 `QUALITY_REVIEW_INVALID_OUTPUT`。长度截断/内容过滤响应即使 JSON 完整也返回 `QUALITY_REVIEW_INCOMPLETE`，不再为格式错误重试或修复。原始响应上限 8192 字符、16384 UTF-8 字节，序列化修复反馈最多 4000 字符。
+
+拒绝依据经既有 `qualityReview.repairFeedback` 传入静态与 Vue 修复，仅作为用户消息中的不可信 JSON 数据，不能覆盖原始需求、结构化编辑范围或工具协议。模型证据不等于确定性验证。新候选硬校验前清除旧理由，避免硬校验失败时误用上轮诊断。旧 Fake/注入式模型仍可返回严格布尔值，其 false 不伪造拒绝理由；实际供应商适配器只接受结构化协议。
+
+开启 Vue 三角色审查后，并行检查需求、功能和技术质量，三角色原有结果协议不变。Vue 单/多 Reviewer 从首次成功构建起均读取 Spring 源码快照。快照最多 24 个文件、单文件 12000 字符、合计 60000 字符；存在截断时不代表已完整审查所有源码。
+
+无进展检测只在当前验证子图内保留 SHA-256 指纹列表，条数受 `AI_SERVICE_MAX_REPAIR_ATTEMPTS`（默认 2）约束。HTML/MULTI_FILE 在硬校验前比较候选原文；重复候选（含 A→B→A）直接以 `REPAIR_NO_PROGRESS` 终止，不再硬校验、送审或发布。Vue 在构建成功后的快照读取与模型审查之间比较路径和内容，不使用模型完成文本或工具调用次数判断源码变化；只有明确完整、非空、计数一致且所有文件无截断的快照参与判重。截断快照仍按原有限审查流程处理；构建失败仍受原修复上限控制。指纹不进入父图、模型或公共事件，不裁剪空白或做语义近似判重；有内容变化也不代表质量改善。快照仅覆盖网关选取的文件，不提供全工程相等证明。
+
+本次更新仅有离线证据，未新增真实模型调用；此前真实验收额度仍为 60/60。没有增加环境开关、数据库结构、工具权限或 SSE 事件类型。回退需整体回退 Python 审查解析、提示词及子图行为，不应仅恢复旧 PASS/REPAIR 提示词；回退后的修复可能再次重复送审。
 
 HTML / MULTI_FILE 由 Spring 写入不可变 release，使用 MySQL 代际和持久化取消/提交资格仲裁切换权威活动指针；Redis 提供应用级串行化和实时状态。`.current` 是新协议的兼容镜像，数据库不可用时不回退该镜像。新协议暂未自动清理 release。
 

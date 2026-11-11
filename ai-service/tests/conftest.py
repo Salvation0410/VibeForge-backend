@@ -145,6 +145,17 @@ class FakeToolGateway:
         return {"ok": True, "echo": call}
 
 
+class ChangingSnapshotGateway(FakeToolGateway):
+    """为预算/恢复测试显式提供逐轮变化的源码；无进展测试使用固定快照。"""
+
+    async def invoke(self, name, arguments, **kwargs):
+        result = await super().invoke(name, arguments, **kwargs)
+        if name == "vue_source_snapshot":
+            round_number = sum(call["name"] == name for call in self.calls)
+            result["files"][0]["content"] += f"<!-- candidate {round_number} -->"
+        return result
+
+
 class MemoryCheckpoint:
     available = True
 

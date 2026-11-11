@@ -33,7 +33,7 @@ from ai_service.orchestration.active_generations import ActiveGenerationRegistry
 from ai_service.orchestration.events import EventEmitter
 from ai_service.orchestration.workflow import GenerationWorkflow, _after_build
 from ai_service.api.routes import _run_customer_service_answer
-from conftest import FakeModel, FakeToolGateway, MemoryCheckpoint
+from conftest import ChangingSnapshotGateway, FakeModel, FakeToolGateway, MemoryCheckpoint
 
 
 @pytest.mark.asyncio
@@ -1045,7 +1045,7 @@ def test_all_generation_branches_complete_in_order(app_factory, auth_headers, nd
         assert checkpoint.cleaned_graph_threads == ["42:req-1"]
         build_calls = [call for call in gateway.calls if call["name"] == "project_build"]
         assert bool(build_calls) is (branch == "VUE_PROJECT")
-        assert not [call for call in gateway.calls if call["name"] == "vue_source_snapshot"]
+        assert bool([call for call in gateway.calls if call["name"] == "vue_source_snapshot"]) is (branch == "VUE_PROJECT")
 
 
 def test_generation_failure_cleans_graph_checkpoint(app_factory, auth_headers, ndjson_parser):
@@ -1376,7 +1376,7 @@ def test_non_vue_repair_is_capped_without_source_snapshot(
     assert not [call for call in gateway.calls if call["name"] == "vue_source_snapshot"]
 
 
-def test_vue_multi_agent_switch_off_keeps_first_review_without_snapshot(
+def test_vue_single_reviewer_uses_snapshot_from_first_round(
     app_factory, auth_headers, ndjson_parser
 ):
     model = FakeModel()
@@ -1389,11 +1389,9 @@ def test_vue_multi_agent_switch_off_keeps_first_review_without_snapshot(
     ))
 
     assert events[-1]["type"] == "completed"
-    assert [data["artifact"] for name, data in model.calls if name == "review"] == [
-        "artifact:VUE_PROJECT"
-    ]
+    assert [json.loads(data["artifact"]) for name, data in model.calls if name == "review"] == [gateway.vue_source_snapshot]
     assert not [call for call in model.calls if call[0] == "review_role"]
-    assert not [call for call in gateway.calls if call["name"] == "vue_source_snapshot"]
+    assert len([call for call in gateway.calls if call["name"] == "vue_source_snapshot"]) == 1
 
 
 def test_vue_multi_agent_first_review_uses_snapshot_for_all_roles(
@@ -1480,7 +1478,7 @@ def test_vue_multi_agent_major_issue_repairs_with_feedback_and_reviews_fresh_sna
             ],
         },
     )
-    gateway = FakeToolGateway()
+    gateway = ChangingSnapshotGateway()
 
     events = ndjson_parser(TestClient(app_factory(model=model, gateway=gateway)).post(
         "/internal/v1/generations:stream",
@@ -1568,7 +1566,7 @@ def test_vue_multi_agent_review_context_excludes_unbounded_generation_state(
                 )
             return ModelTurn(content="repaired", finish_reason="STOP")
 
-    class SensitiveGateway(FakeToolGateway):
+    class SensitiveGateway(ChangingSnapshotGateway):
         def __init__(self):
             super().__init__(
                 artifact_context={
@@ -1669,7 +1667,7 @@ def test_vue_multi_agent_two_blocking_rounds_exhaust_repairs_without_leaking_rev
         for _ in range(3)
     ]
     model = FakeModel(role_reviews={ReviewerRole.REQUIREMENT: blocking})
-    gateway = FakeToolGateway(vue_source_snapshot={
+    gateway = ChangingSnapshotGateway(vue_source_snapshot={
         "files": [{"path": "src/App.vue", "content": source_secret, "truncated": False}],
         "eligibleFileCount": 1,
         "includedFileCount": 1,
@@ -1890,7 +1888,7 @@ async def test_vue_blocking_review_real_graph_checkpoint_keeps_only_bounded_feed
     checkpoint = GraphMemoryCheckpoint()
     workflow = GenerationWorkflow(
         model=model,
-        tool_gateway=FakeToolGateway(),
+        tool_gateway=ChangingSnapshotGateway(),
         checkpoint=checkpoint,
         cancellations=CancellationRegistry(),
         settings=settings,
@@ -1954,7 +1952,7 @@ async def test_vue_blocking_review_resumes_from_feedback_without_repeating_revie
     checkpoint = GraphMemoryCheckpoint()
     workflow = GenerationWorkflow(
         model=model,
-        tool_gateway=FakeToolGateway(),
+        tool_gateway=ChangingSnapshotGateway(),
         checkpoint=checkpoint,
         cancellations=CancellationRegistry(),
         settings=settings,
@@ -2182,7 +2180,7 @@ def test_failed_repaired_vue_snapshot_review_triggers_second_repair(
     class SequencedSnapshotGateway(FakeToolGateway):
         def __init__(self):
             super().__init__()
-            self.snapshots = list(snapshots)
+            self.snapshots = [self.vue_source_snapshot, *snapshots]
 
         async def invoke(self, name, arguments, *, app_id, request_id, tool_call_id):
             result = await super().invoke(
@@ -2207,11 +2205,12 @@ def test_failed_repaired_vue_snapshot_review_triggers_second_repair(
     assert len([call for call in model.calls if call[0] == "repair"]) == 2
     snapshot_calls = [call for call in gateway.calls if call["name"] == "vue_source_snapshot"]
     assert [call["toolCallId"] for call in snapshot_calls] == [
+        "req-1:vue-source-snapshot:0",
         "req-1:vue-source-snapshot:1",
         "req-1:vue-source-snapshot:2",
     ]
     review_calls = [data for name, data in model.calls if name == "review"]
-    assert review_calls[0]["artifact"] == "artifact:VUE_PROJECT"
+    assert json.loads(review_calls[0]["artifact"]) == gateway.vue_source_snapshot
     assert "snapshot-v1" in review_calls[1]["artifact"]
     assert "snapshot-v2" not in review_calls[1]["artifact"]
     assert "snapshot-v2" in review_calls[2]["artifact"]
@@ -2235,8 +2234,6 @@ def test_vue_snapshot_review_failure_does_not_leak_source_to_events(
     class LeakingReviewModel(FakeModel):
         async def review(self, artifact, context):
             self.calls.append(("review", {"artifact": artifact, "context": context}))
-            if artifact == "artifact:VUE_PROJECT":
-                return False
             raise RuntimeError(f"provider rejected artifact: {artifact}")
 
     model = LeakingReviewModel()
@@ -2254,7 +2251,7 @@ def test_vue_snapshot_review_failure_does_not_leak_source_to_events(
     serialized_events = json.dumps(events, ensure_ascii=False)
     assert secret not in serialized_events
     assert "src/App.vue" not in serialized_events
-    assert len([call for call in model.calls if call[0] == "review"]) == 2
+    assert len([call for call in model.calls if call[0] == "review"]) == 1
 
 
 def test_vue_build_failure_exhausts_two_repairs_without_review_or_completion(
@@ -2785,7 +2782,7 @@ def test_vue_repair_executes_file_tools_through_spring(app_factory, auth_headers
             return ModelTurn(content="repair completed", finish_reason="STOP")
 
     model = VueRepairModel()
-    gateway = FakeToolGateway()
+    gateway = ChangingSnapshotGateway()
     events = ndjson_parser(TestClient(app_factory(model=model, gateway=gateway)).post(
         "/internal/v1/generations:stream",
         json=generation_payload("VUE_PROJECT"),
@@ -2891,7 +2888,7 @@ def test_vue_generation_and_repair_share_total_tool_budget(
             )
 
     model = BudgetedRepairModel()
-    gateway = FakeToolGateway()
+    gateway = ChangingSnapshotGateway()
     events = ndjson_parser(TestClient(app_factory(model=model, gateway=gateway)).post(
         "/internal/v1/generations:stream",
         json=generation_payload("VUE_PROJECT"),

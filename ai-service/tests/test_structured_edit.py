@@ -17,7 +17,7 @@ from ai_service.orchestration.events import EventEmitter
 from ai_service.orchestration.nodes.preparation import create_preparation_node
 from ai_service.orchestration.cancellation import GenerationCancelled
 from ai_service.prompts.frontend_skills import RULES, frontend_instructions
-from conftest import FakeToolGateway, parse_ndjson
+from conftest import ChangingSnapshotGateway, FakeToolGateway, parse_ndjson
 from test_generation_preparation import CaptureClient, RewriteModel
 
 FIXTURES = json.loads((Path(__file__).parent / "fixtures/structured-edit-v1.json").read_text(encoding="utf-8"))
@@ -57,7 +57,7 @@ def post_edit(app, *, branch="HTML", case=None, metadata=None):
 @pytest.mark.parametrize("branch", ["HTML", "MULTI_FILE", "VUE_PROJECT"])
 def test_full_workflow_preserves_edit_through_repair_without_rewrite(app_factory, settings, branch):
     model = RewriteModel(reviews=[False, True])
-    gateway = FakeToolGateway(artifact_context={"exists": True, "entries": ["src/App.vue"]})
+    gateway = ChangingSnapshotGateway(artifact_context={"exists": True, "entries": ["src/App.vue"]})
     app = app_factory(model=model, gateway=gateway)
     app.state.workflow.settings = settings.model_copy(update={"prompt_rewrite_enabled": True,
                                                             "frontend_skills_enabled": True,
@@ -235,7 +235,7 @@ async def test_scope_rule_reaches_model_boundaries_from_local_whitelist(settings
     ])
     saved = deepcopy(context)
     raw = ('{"reviewer":"requirement","summary":"完成","issues":[]}' if mode == "review_role"
-           else "PASS" if mode == "review" else '{"content":"done","toolCalls":[]}' if branch == "VUE_PROJECT" else "artifact")
+           else '{"verdict":"PASS","issues":[]}' if mode == "review" else '{"content":"done","toolCalls":[]}' if branch == "VUE_PROJECT" else "artifact")
     model = OpenAICompatibleModel.__new__(OpenAICompatibleModel)
     model._settings, model._client = config, CaptureClient(raw)
     async def delta(_):

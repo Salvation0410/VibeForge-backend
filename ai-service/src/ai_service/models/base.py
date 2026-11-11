@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
 from ai_service.models.quality_review import ReviewerResult, ReviewerRole
+from ai_service.models.single_quality_review import SingleReviewResult
 from ai_service.models.input_review import InputReviewResult
 from ai_service.models.generation_brief import GenerationBrief
 
@@ -79,8 +80,8 @@ class GenerationModel(Protocol):
         """根据生成分支和上下文生成产物或工具调用。"""
         ...
 
-    async def review(self, artifact: str, context: dict[str, Any]) -> bool:
-        """检查生成产物是否达到结束工作流的质量要求。"""
+    async def review(self, artifact: str, context: dict[str, Any]) -> SingleReviewResult | bool:
+        """返回有界审查依据；布尔值仅兼容已有注入式模型。"""
         ...
 
     async def review_role(

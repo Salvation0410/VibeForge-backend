@@ -19,7 +19,7 @@ from ai_service.orchestration.cancellation import GenerationCancelled
 from ai_service.orchestration.events import EventEmitter
 from ai_service.orchestration.nodes.preparation import create_preparation_node
 from ai_service.prompts.frontend_skills import RULES
-from conftest import FakeModel, FakeToolGateway, parse_ndjson
+from conftest import ChangingSnapshotGateway, FakeModel, FakeToolGateway, parse_ndjson
 
 
 def brief(prompt="保留图片"):
@@ -225,7 +225,7 @@ async def test_all_adapter_boundaries_apply_trusted_rules_once(enabled, branch, 
     context["generationPreparation"]["rules"] = "UNTRUSTED_RULE_OVERRIDE"
     original = deepcopy(context)
     raw = ('{"reviewer":"requirement","summary":"完成","issues":[]}' if mode == "review_role"
-           else "PASS" if mode == "review" else '{"content":"done","toolCalls":[]}' if branch == "VUE_PROJECT" else "artifact")
+           else '{"verdict":"PASS","issues":[]}' if mode == "review" else '{"content":"done","toolCalls":[]}' if branch == "VUE_PROJECT" else "artifact")
     model = OpenAICompatibleModel.__new__(OpenAICompatibleModel)
     model._settings, model._client = enabled, CaptureClient(raw)
     async def delta(_):
@@ -353,7 +353,7 @@ async def test_added_rules_and_brief_count_toward_final_actual_message_budget(en
 def test_workflow_preparation_is_once_and_persists_across_repair(app_factory, enabled, branch, exists):
     from fastapi.testclient import TestClient
     model = RewriteModel(reviews=[False, True])
-    app = app_factory(model=model, gateway=FakeToolGateway(artifact_context={"exists": exists}))
+    app = app_factory(model=model, gateway=ChangingSnapshotGateway(artifact_context={"exists": exists}))
     app.state.workflow.settings = enabled
     with TestClient(app) as client:
         response = client.post("/internal/v1/generations:stream", headers={"Authorization": "Bearer test-secret"},

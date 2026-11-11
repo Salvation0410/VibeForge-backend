@@ -53,7 +53,7 @@ def model_with_response(response_content: str) -> OpenAICompatibleModel:
 async def test_vue_long_tool_history_fits_real_message_budget_without_changing_context(mode):
     from copy import deepcopy
 
-    model = model_with_response("PASS" if mode == "review" else '{"content":"done","toolCalls":[]}')
+    model = model_with_response('{"verdict":"PASS","issues":[]}' if mode == "review" else '{"content":"done","toolCalls":[]}')
     model._settings = Settings()
     context = {"prompt": "继续完善页面", "codeGenType": "VUE_PROJECT", "toolResults": [
         {"toolCallId": str(i), "tool": "file_read", "arguments": {"relativeFilePath": f"src/{i}.vue"},
@@ -312,9 +312,9 @@ async def test_non_vue_generation_does_not_include_vue_tool_instructions():
 
 @pytest.mark.asyncio
 async def test_review_and_repair_use_their_system_prompts():
-    review_model = model_with_response("PASS")
+    review_model = model_with_response('{"verdict":"PASS","issues":[]}')
 
-    assert await review_model.review("artifact", {"prompt": "check"}) is True
+    assert (await review_model.review("artifact", {"prompt": "check"})).passed is True
     assert review_model._client.messages[0].content == QUALITY_REVIEW_SYSTEM_PROMPT
 
     repair_model = model_with_response("fixed")

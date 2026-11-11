@@ -8,7 +8,7 @@ from ai_service.orchestration.events import EventEmitter
 from ai_service.orchestration.subgraphs.generation import build_generation_subgraph
 from ai_service.orchestration.subgraphs.verification_repair import build_verification_repair_subgraph
 from ai_service.orchestration.subgraphs.vue import build_repair_subgraph
-from conftest import FakeModel
+from conftest import ChangingSnapshotGateway, FakeModel
 from test_subgraphs import CleaningGraphCheckpoint
 from test_vue_subgraph import BatchModel, initial, make_workflow, paused_vue_state
 
@@ -138,7 +138,7 @@ async def test_private_history_survives_rebuild_without_duplication_or_parent_fi
 
     checkpoint = RecordingCheckpoint()
     model = BatchModel(reviews=[False, True] if repair else [True])
-    workflow = make_workflow(settings, model, checkpoint)
+    workflow = make_workflow(settings, model, checkpoint, gateway=ChangingSnapshotGateway())
     emitter = EventEmitter("subgraph-test")
     config = {"configurable": {"thread_id": "42:subgraph-test"}}
     monkeypatch.setattr(workflow_module, "build_vue_tool_subgraph", interrupted)

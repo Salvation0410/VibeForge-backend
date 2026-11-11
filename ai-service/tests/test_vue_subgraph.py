@@ -6,7 +6,7 @@ from ai_service.orchestration.cancellation import CancellationRegistry
 from ai_service.orchestration.events import EventEmitter
 from ai_service.orchestration.workflow import GenerationWorkflow
 from ai_service.orchestration.subgraphs.vue import build_vue_tool_subgraph, vue_recursion_limit
-from conftest import FakeModel, FakeToolGateway, MemoryCheckpoint
+from conftest import ChangingSnapshotGateway, FakeModel, FakeToolGateway, MemoryCheckpoint
 from test_subgraphs import CleaningGraphCheckpoint, request_for
 
 
@@ -108,7 +108,7 @@ async def test_rebuild_parent_resumes_saved_turn_and_batch_without_repeating_wor
 
     checkpoint = CleaningGraphCheckpoint()
     model = BatchModel(reviews=[False, True] if repair else [True])
-    workflow = make_workflow(settings, model, checkpoint)
+    workflow = make_workflow(settings, model, checkpoint, gateway=ChangingSnapshotGateway())
     emitter = EventEmitter("subgraph-test")
     config = {"configurable": {"thread_id": "42:subgraph-test"},
               "recursion_limit": vue_recursion_limit(settings)}

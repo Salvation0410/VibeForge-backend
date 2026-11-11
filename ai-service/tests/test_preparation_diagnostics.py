@@ -313,10 +313,10 @@ async def test_trace_emits_once_with_only_validated_scalars(diagnostic_settings)
 @pytest.mark.parametrize("branch", ["HTML", "MULTI_FILE", "VUE_PROJECT"])
 def test_workflow_keeps_diagnostics_out_of_generation_and_repair_inputs(app_factory, diagnostic_settings, branch):
     from fastapi.testclient import TestClient
-    from conftest import parse_ndjson
+    from conftest import ChangingSnapshotGateway, parse_ndjson
 
     model = RewriteModel(reviews=[False, True])
-    app = app_factory(model=model)
+    app = app_factory(model=model, gateway=ChangingSnapshotGateway())
     app.state.workflow.settings = diagnostic_settings
     with TestClient(app) as client:
         response = client.post("/internal/v1/generations:stream", headers={"Authorization": "Bearer test-secret"},

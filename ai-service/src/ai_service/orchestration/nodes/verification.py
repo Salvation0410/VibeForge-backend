@@ -9,6 +9,11 @@ from ai_service.orchestration.routing import _raise_for_incomplete_model_turn
 from ai_service.orchestration.multi_agent_review import run_multi_agent_review
 from ai_service.orchestration.static_generation import invoke_static_model
 from ai_service.models.generation_brief import rewrite_context
+from ai_service.models.single_quality_review import SingleReviewResult, SingleReviewOutputError
+from ai_service.models.input_review import InputReviewError
+from ai_service.orchestration.repair_progress import candidate_fingerprint, record_candidate, vue_snapshot_fingerprint
+from ai_service.orchestration.subgraphs.schemas import VerificationState
+from ai_service.orchestration.cancellation import GenerationCancelled
 
 if TYPE_CHECKING:
     from ai_service.orchestration.workflow import GenerationWorkflow
@@ -36,9 +41,13 @@ def create_verification_nodes(
     terminal: dict[str, Any],
 ) -> dict[str, Any]:
     """绑定单次请求依赖，节点闭包不进入图状态或检查点。"""
-    async def artifact_validation(state: WorkflowState) -> dict[str, Any]:
+    async def artifact_validation(state: VerificationState) -> dict[str, Any]:
         """先拒绝截断或被过滤的响应，再调用 Spring 执行产物硬校验。"""
         _raise_for_incomplete_model_turn(state.get("finish_reason"))
+        workflow._raise_if_cancelled(thread_id)
+        fingerprints = state.get("candidate_fingerprints", [])
+        if state["code_gen_type"] != "VUE_PROJECT":
+            fingerprints = record_candidate(fingerprints, candidate_fingerprint(state.get("artifact", "")))
         call_id = f"{state['request_id']}:artifact_validation:{state.get('repair_count', 0)}"
         result = await workflow._invoke_tool(
             emitter,
@@ -49,7 +58,9 @@ def create_verification_nodes(
             state["request_id"],
             call_id,
         )
-        return {"validation": result}
+        # 新候选不能沿用上轮模型诊断；硬校验失败的修复只使用本轮硬校验结果。
+        return {"validation": result, "repair_feedback": "", "quality_passed": False,
+                "candidate_fingerprints": fingerprints}
 
     async def project_build(state: WorkflowState) -> dict[str, Any]:
         call_id = f"{state['request_id']}:project_build:{state.get('repair_count', 0)}"
@@ -64,7 +75,7 @@ def create_verification_nodes(
         )
         return {"build": result}
 
-    async def quality_review(state: WorkflowState) -> dict[str, Any]:
+    async def quality_review(state: VerificationState) -> dict[str, Any]:
         """仅对已通过确定性硬校验的候选执行模型质量检查。"""
         if not state.get("validation", {}).get("valid", False):
             return {"quality_passed": False}
@@ -77,7 +88,6 @@ def create_verification_nodes(
         uses_vue_snapshot = (
             state["code_gen_type"] == "VUE_PROJECT"
             and state.get("build", {}).get("built") is True
-            and (multi_agent_enabled or repair_count > 0)
         )
         if uses_vue_snapshot:
             try:
@@ -91,6 +101,8 @@ def create_verification_nodes(
                     f"{state['request_id']}:vue-source-snapshot:{repair_count}",
                     event_result=_vue_snapshot_event_result,
                 )
+            except GenerationCancelled:
+                raise
             except Exception:
                 if multi_agent_enabled:
                     raise RuntimeError(
@@ -99,6 +111,10 @@ def create_verification_nodes(
                     ) from None
                 raise
             review_artifact = _vue_snapshot_artifact(snapshot)
+        workflow._raise_if_cancelled(thread_id)
+        fingerprints = state.get("candidate_fingerprints", [])
+        if uses_vue_snapshot:
+            fingerprints = record_candidate(fingerprints, vue_snapshot_fingerprint(snapshot))
         if multi_agent_enabled:
             review_context = {
                 "prompt": state["prompt"],
@@ -126,20 +142,32 @@ def create_verification_nodes(
             return {
                 "quality_passed": result.passed,
                 "repair_feedback": result.repair_feedback,
+                "candidate_fingerprints": fingerprints,
             }
         review_context = {
             **state["context"],
             "validation": state.get("validation"),
             "build": state.get("build"),
         }
-        if uses_vue_snapshot:
-            try:
-                passed = await workflow.model.review(review_artifact, review_context)
-            except Exception as exc:
-                raise RuntimeError("Vue source snapshot review failed") from exc
+        try:
+            result = await workflow.model.review(review_artifact, review_context)
+        except (SingleReviewOutputError, InputReviewError, GenerationCancelled):
+            raise
+        except Exception:
+            if uses_vue_snapshot:
+                # 供应商异常可能携带快照正文，不能通过公共失败帧回显。
+                raise RuntimeError("Vue source snapshot review failed") from None
+            raise
+        workflow._raise_if_cancelled(thread_id)
+        if isinstance(result, SingleReviewResult):
+            passed, feedback = result.passed, result.repair_feedback
+        elif type(result) is bool:
+            # 旧注入模型没有理由，不能伪造结构化证据；生产适配器强制严格 JSON。
+            passed, feedback = result, ""
         else:
-            passed = await workflow.model.review(review_artifact, review_context)
-        return {"quality_passed": passed}
+            raise SingleReviewOutputError()
+        return {"quality_passed": passed, "repair_feedback": feedback,
+                "candidate_fingerprints": fingerprints}
 
     async def repair(state: WorkflowState) -> dict[str, Any]:
         """生成完整修复候选并更新结束元数据，供下一轮重新校验。"""

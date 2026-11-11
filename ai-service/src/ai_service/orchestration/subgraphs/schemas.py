@@ -49,8 +49,11 @@ class VerificationOutput(GenerationOutput, total=False):
     repair_count: int
 
 
-class VerificationState(VerificationInput, VerificationOutput):
+class VerificationState(VerificationInput, VerificationOutput, total=False):
     """校验、构建、质量结论和反馈仅在验证阶段内部产生。"""
+
+    # 仅在此子图持久化，禁止投影到父图、修复输入或模型上下文。
+    candidate_fingerprints: list[str]
 
 
 class RepairInput(GenerationInput, total=False):

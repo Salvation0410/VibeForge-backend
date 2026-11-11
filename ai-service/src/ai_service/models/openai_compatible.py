@@ -15,6 +15,7 @@ from ai_service.models.input_review import InputReviewError, InputReviewResult, 
 from ai_service.models.vue_context import project_vue_context
 from ai_service.models.generation_brief import GenerationBrief
 from ai_service.models.preparation_diagnostics import PreparationFailure
+from ai_service.models.single_quality_review import SingleReviewResult, parse_single_review
 from ai_service.prompts.preparation import REWRITE_SYSTEM_PROMPT
 from ai_service.prompts.frontend_skills import frontend_instructions
 from ai_service.prompts.input_review import INPUT_REVIEW_SYSTEM_PROMPT
@@ -229,9 +230,9 @@ class OpenAICompatibleModel:
             return _model_turn(response, raw)
         return _vue_model_turn(response)
 
-    async def review(self, artifact: str, context: dict[str, Any]) -> bool:
-        """让模型以 PASS 或 REPAIR 判断产物是否通过质量检查。"""
-        payload = {"artifact": artifact, **context}
+    async def review(self, artifact: str, context: dict[str, Any]) -> SingleReviewResult:
+        """单次调用返回结构化判定与拒绝依据，非法响应不触发额外调用。"""
+        payload = {**context, "artifact": artifact}
         # 单 Reviewer 会继承 Vue 工具历史，必须同样投影，避免生成结束后才再次超预算。
         instructions = QUALITY_REVIEW_SYSTEM_PROMPT + frontend_instructions(context)
         messages = self._vue_messages(instructions, payload) if "toolResults" in context else [
@@ -240,25 +241,28 @@ class OpenAICompatibleModel:
         ]
         response = await self._invoke(messages)
         raw = str(response.content)
-        normalized = raw.strip().upper()
-        passed = normalized == "PASS"
-        # 只记录固定判定与大小，避免把格式偏离误记为模型明确拒绝；观测失败不改变质量门槛。
+        metadata = getattr(response, "response_metadata", None)
+        reason = (metadata.get("finish_reason") or metadata.get("stop_reason")) if isinstance(metadata, dict) else None
+        reason = reason.upper() if isinstance(reason, str) else "UNKNOWN"
+        result = None
         try:
-            import logging
+            result = parse_single_review(raw, reason)
+            return result
+        finally:
+            # 自由文本理由只进入内部修复载荷；日志只记录可信枚举与计数。
+            try:
+                import logging
 
-            metadata = getattr(response, "response_metadata", None)
-            reason = (metadata.get("finish_reason") or metadata.get("stop_reason")) if isinstance(metadata, dict) else None
-            reason = reason.upper() if isinstance(reason, str) else "UNKNOWN"
-            finish_reason = reason if reason in {"STOP", "LENGTH", "CONTENT_FILTER"} else "UNKNOWN"
-            verdict = normalized if normalized in {"PASS", "REPAIR"} else "INVALID_OUTPUT"
-            logging.getLogger(__name__).info(
-                "quality_review_result verdict=%s responseChars=%d finishReason=%s",
-                verdict, len(raw), finish_reason,
-            )
-        except Exception:
-            # 不输出日志异常正文；模型调用位于此边界外，其异常与取消仍按原路径传播。
-            pass
-        return passed
+                logging.getLogger(__name__).info(
+                    "quality_review_result verdict=%s responseChars=%d finishReason=%s issueCount=%d issueCodes=%s",
+                    result.verdict if result else "INVALID_OUTPUT", len(raw),
+                    reason if reason in {"STOP", "LENGTH", "CONTENT_FILTER", "MAX_TOKENS", "CONTENT_FILTERED"} else "UNKNOWN",
+                    len(result.issues) if result else 0,
+                    ",".join(sorted({issue.code for issue in result.issues})) if result else "",
+                )
+            except Exception:
+                # 日志故障不覆盖解析异常；调用异常和取消在此边界之外传播。
+                pass
 
     async def review_role(
         self,
