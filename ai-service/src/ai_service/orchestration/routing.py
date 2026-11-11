@@ -23,11 +23,11 @@ def _after_build(state: WorkflowState, max_attempts: int) -> str:
     """构建成功后才能质量审查，否则修复并重建，耗尽次数后失败。"""
     if state.get("build", {}).get("built") is True:
         return "review"
-    # 目录或入口文件缺失说明模型没有完成文件写入；继续让模型重复生成只会放大
-    # 输出长度并掩盖真实原因，因此直接返回稳定的构建错误。
+    # 缺少入口或检查器环境不可用时直接返回稳定错误，不能让模型反复修复环境。
     if state.get("build", {}).get("errorCode") in {
         "VUE_PROJECT_DIR_MISSING",
         "VUE_PACKAGE_JSON_MISSING",
+        "VUE_COMPONENT_CHECK_UNAVAILABLE",
     }:
         return "fail"
     return "fail" if state.get("repair_count", 0) >= max_attempts else "repair"

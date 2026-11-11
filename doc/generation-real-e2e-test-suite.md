@@ -133,3 +133,16 @@ V02 使用真实前端、Chrome headless DOM 操作、Spring/Python/供应商/�
 - 两个手写局部组件正例：显式 props/事件、具名 v-model/defineModel，真实新版审查均 PASS。正例为开发材料，没有运行/构建证据。
 
 对照不改历史生成源码、不执行工具，无失败供应商调用和重试。输入缩减与具体判定不等于确定性组件语义校验，新优化的自然生成/修复/交互全链路仍未验收。详情及后续边界见[交接第 17 节](generation-structured-edit-acceptance-handoff.md#17-vue-审查证据投影与组件契约核对)；私有证据位于 `tmp/vue-review-evidence-20261111/`。
+
+## Vue 必填属性门禁（第 18 节，零模型）
+
+Spring 强制构建新增官方 Vue AST 的有限必填 props 检查。确定缺失按 `VUE_COMPONENT_CONTRACT_FAILED` 进入原两次修复；检查器环境失败 `VUE_COMPONENT_CHECK_UNAVAILABLE` 直接终止。已有 dist 快路径不重检，失败不回滚源码/dist，不把门禁成功当作全部交互通过。
+
+| ID | 本轮验证 | 结果与限制 |
+| --- | --- | --- |
+| D06 | 有限 AST 规则、跳过范围、文件/输出边界 | Node 21/21；动态绑定、类型、作用域用法等跳过 |
+| D07 | 构建门禁、协议损坏、取消、Java 网关 | Java 53/53，含一项真实 Node/编译器 opt-in；没有真实模型和 npm 构建 |
+| D08 | 错误结果进入有限修复或直接终止 | Python 定向 5 passed，Fake 工具/模型 |
+| O04 | 历史 Vue 快照重检 | 原失败样本准确报告 4 项必填属性缺失；另一历史样本在支持范围内无问题，两者都有跳过用法 |
+
+新增模型调用 **0**，累计 **124**。首次 Python 全量在既有重排器取消锁测试失败一次，单跑通过，随后全量 **1292 passed、14 skipped**；原失败保留，未修改或宣称修复重排器。详情、可执行命令和证据见[交接第 18 节](generation-structured-edit-acceptance-handoff.md#18-vue-显式必填属性的有限确定性门禁)。新门禁的自然生成/修复/浏览器交互端到端仍未执行。

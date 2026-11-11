@@ -675,3 +675,66 @@ Vue 专用说明由单/多 Reviewer 共用：按可见父子源码核对 require
 私有证据为 `tmp/vue-review-evidence-20261111/` 的原始消息/响应、submitted 标记、summary.json、positive-summary.json、final-summary.json；离线日志为 `tmp/vue-review-evidence-before.log`、`tmp/vue-review-evidence-targeted.log`、`tmp/vue-review-evidence-final.log`。只提交手写测试/正例、生产代码及必要文档，私有配置、令牌、日志和历史生成源码不提交。前端客服三文件及后端原未跟踪 cancellation-drain-regression 计划保持。
 
 自然 REPAIR_NO_PROGRESS、新优化后的自然生成→审查→修复→交互全链路、长期并发、全部停止失败时序、公网部署仍未覆盖；自动恢复、Vue 回滚和通用组件静态验证未实现。自然 REPAIR→PASS 仍引用第 13 节。后续真实调用授权持续，但应沿用 **124 次**账本并保留本轮全部结果，不重跑已有标记。
+
+## 18. Vue 显式必填属性的有限确定性门禁
+
+2026-11-11 承接 `fdae652`。本轮从模型提示转向可复现的组件契约检查：HTML 烟测侧重脚本异常与可见内容，无法保证发现生产 Vue 中静默缺失的筛选按钮。新增官方 Vue SFC/Babel AST 检查，未把正则或模型判定作为硬校验。**新增真实模型调用 0 次，账本仍为 124、max_calls=null**，旧 60/20/30 账本 SHA 均保持。
+
+### 18.1 门禁位置和范围
+
+Spring `VueProjectBuilder` 的强制构建在 npm 成功、dist/index.html 存在后，执行随 JAR 发布的 `vue/component-contract-check.cjs`。脚本经临时资源文件和 Node 直接参数运行，命令等待 15 秒；进程树/输出收尾沿用原额外限时，临时文件 finally 删除。加载编译器遵循项目 Node 依赖解析，支持 `@vue/compiler-sfc` 或 `vue/compiler-sfc` 的 parse/babelParse 接口；本轮实际测试版本 3.5.18。没有加载应用组件模块或执行 props 表达式。
+
+仅比较静态相对 `.vue` 默认导入、script setup 中直接运行时 defineProps/defineModel 的显式 required:true 属性，以及父模板的静态属性、具名绑定、默认/具名 v-model；支持 kebab/camel 对齐。没有提供必填属性时返回最多四条路径/组件/属性证据。带默认值、类型 props、Options API、未知配置、声明展开、动态绑定、作用域内调用、保留属性、宏同名合并和 onX 事件属性声明等不确定情况跳过，不猜测运行时结果。事件语义、必填值是否非空、点击后状态是否正确仍不在门禁范围。
+
+扫描最多 20000 项、64 层目录、24 个 Vue 文件，单文件 12000 字符/读取 48000 字节，合计 60000 字符。不跟随符号链接，剪枝隐藏路径与 node_modules/dist/build/target；只使用读到的完整文件。日志只记录检查/跳过计数和截断标记。Windows 上 lstat.dev 与 fstat.dev 可能不同，使用 inode 和实际路径归属校验；其他平台同时检查设备号。读取不是原子全工程快照，跳过范围不能计作已验收。
+
+`project_build` 仍返回 built/errorCode/message，不新增工具或公共 SSE 字段：
+
+- 确定缺失：`VUE_COMPONENT_CONTRACT_FAILED`，按原构建失败进入最多两次修复，修复后强制重建、重检，再做模型审查。
+- 检查器/Node/编译器不可用、输出损坏或超时：`VUE_COMPONENT_CHECK_UNAVAILABLE`，Python 直接失败，不花模型调用修复环境。
+- 取消：保留 `VUE_BUILD_CANCELLED`，沿现有所有者和进程清理流程。
+
+Java 校验 JSON 版本、类型、计数、最多四条诊断、相对路径及长度，拒绝重复键/尾随正文等损坏结果，不将检查器原始 stdout/stderr 或异常正文回显。门禁通过只表示支持范围内没有发现这类缺失。已有 dist 的 ensure 快路径不重检；失败不删除或回滚源码/dist，也不保证阻止旧产物部署或直接预览访问。Vue 仍没有静态版本回滚能力。
+
+### 18.2 复现、历史材料与真实运行时检查
+
+旧构建器新增回归 **1 项失败**：检查结果明确指出缺少 props，但原实现只要 npm/dist 成功就返回成功。新增环境不可用 Python 回归也在旧路由失败，因为旧路由继续修复；修正后直接终止。
+
+提交前补充事件属性反例：`@click` 可提供 `onClick`，原检查会误报缺失；新增回归先失败，修正为保守跳过含 onX 事件属性的声明后通过，defineProps/defineModel 均覆盖。没有将事件监听器转换扩展为完整事件语义检查。
+
+最终 Node **21/21**：覆盖必填缺失、正确显式属性、默认/具名 defineModel、kebab-case、未知/重复/宏合并声明、动态/作用域/v-pre、部分文件、证据上限、依赖剪枝、符号链接和文件数上限。Java 最终 **53/53**：Vue 构建器 18、检查器 10、LangGraph 网关 25；其中一项显式 opt-in 测试使用真实 Node 与本机已安装编译器，通过生产资源提取/命令执行入口验证手写组件“缺失被拒绝→补齐通过”，不运行模型或 npm 构建。该测试只在自身临时目录链接已有依赖，finally 先移除链接，再交给临时目录清理，不修改前端 node_modules。
+
+读取第 16 节已保存的 Spring 非截断快照，对其中 Vue 文件零模型执行同一分析器，没有读写真实项目目录：
+
+| 历史材料 | 本轮结果 | 边界 |
+| --- | --- | --- |
+| 第 16 节样本 3 | FAILED，FilterBar 缺少 filters、active、total、readCount；检查 2 处、跳过 1 处用法 | 确定命中原筛选接线缺陷，不代表本轮修复了该应用 |
+| 第 16 节样本 2 | OK，检查 1 处、跳过 1 处用法 | 循环内用法跳过；该样本的额外图片问题不属于 props 门禁范围，不能重新称为全需求通过 |
+
+这是历史材料重检与手写夹具验证，不是新的自然生成或浏览器端到端。没有为了验证门禁反复采样模型，也没有手改历史产物。
+
+### 18.3 验证命令与一次既有测试波动
+
+在后端根目录执行：
+
+```powershell
+mvn clean -DskipTests compile
+$env:VUE_CHECK_COMPILER_ROOT = (Resolve-Path ../yu-ai-code-mother-frontend).Path
+node --test scripts/tests/vue-component-contract.test.cjs
+$env:VUE_COMPONENT_INTEGRATION = 'true'
+mvn test '-Dtest=VueProjectBuilderTest,VueComponentContractCheckTest,LangGraphAiGenerationGatewayTest'
+```
+
+以上均通过；Node 测试需要指定一个已安装 Vue compiler 的依赖根，默认不会安装依赖。Java opt-in 未设置时该真实 Node 用例跳过，其余仍离线。Java 编译保留既有弃用/unchecked 提示。
+
+Python compileall、uv lock --check 通过；组件环境失败和构建修复定向 **5 passed**。首次全量为 **1 failed、1291 passed、14 skipped**：既有 `test_spawn_worker_cancelled_request_keeps_ipc_lock_until_shutdown` 在取消后检查锁时读到 unlocked。该测试用 30ms 固定等待选择取消时序，源代码发送取消与接收取消走不同收尾路径；本轮未捕获足以确认失败分支的证据，不能断言根因已修复。单独复核 **1 passed**，随后不并行 Maven 的全量重跑为 **1292 passed、14 skipped、2 warnings，207.88 秒**。没有修改重排器生产代码或测试；首次失败日志保留，建议后续单独用门闩消除时序猜测。14 项 PostgreSQL opt-in 未启用，两条原有弃用警告保留。
+
+本轮没有修改前端，没有执行前端构建、真实浏览器或 Spring/Python 服务联调；第 16/17 节结果不计为本轮新门禁端到端证据。工具响应 schema 和 Java/Python 错误传递已核对，现有 errorCode 为字符串，无接口迁移。
+
+### 18.4 证据、交付及下一步
+
+私有证据在 `tmp/`：`vue-required-props-before.log`、`vue-required-props-events-before.log`、`vue-required-props-python-before.log`、`vue-required-props-node-final.log`、`vue-required-props-compile.log`、`vue-required-props-java-verified.log`、`vue-required-props-python-targeted.log`、首次全量 `vue-required-props-python-final.log`、单项复核 `vue-required-props-reranker-recheck.log`、最终全量 `vue-required-props-python-rerun.log`、`vue-required-props-history-final.json`。日志、原始源码和凭据不提交；仅新增手写测试及可信检查器。根 ignore 会忽略 scripts/ 和 test/，新增 Node/Java 回归需明确纳入提交。
+
+本轮未启动生成服务、代理、PostgreSQL 或浏览器，无需关闭用户服务；测试子进程由测试执行器收尾。结束检查 8000/8123/18001/5432 无监听，原 MySQL/Redis 保留。前端客服三文件与原未跟踪 cancellation-drain-regression 计划保持，提交仅涉及后端本轮代码/测试/文档，未推送。
+
+下一步优先针对新门禁做隔离应用的实际生成/修复/交互验证，再评估未支持的事件和运行期证据；不得把这里的四项属性命中扩大成通用 Vue 语义验证。自然 REPAIR_NO_PROGRESS、全部停止失败时序、长期并发、公网部署仍未覆盖；自动恢复和 Vue 回滚未实现。真实调用继续沿用 **124 次**账本、保留新提交标记，不复用旧 requestId 或按任务状态自动恢复。

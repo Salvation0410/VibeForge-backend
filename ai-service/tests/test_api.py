@@ -2007,14 +2007,15 @@ async def test_vue_blocking_review_resumes_from_feedback_without_repeating_revie
     assert len([call for call in model.calls if call[0] == "review_role"]) == 6
 
 
+@pytest.mark.parametrize("build_error", ["VUE_NPM_BUILD_FAILED", "VUE_COMPONENT_CONTRACT_FAILED"])
 def test_vue_build_failure_is_repaired_and_rebuilt_before_review(
-    app_factory, auth_headers, ndjson_parser
+    app_factory, auth_headers, ndjson_parser, build_error
 ):
     class BuildSequenceGateway(FakeToolGateway):
         def __init__(self):
             super().__init__()
             self.build_results = [
-                {"built": False, "errorCode": "VUE_NPM_BUILD_FAILED", "message": "vite failed"},
+                {"built": False, "errorCode": build_error, "message": "vite failed"},
                 {"built": True, "errorCode": "", "message": ""},
             ]
 
@@ -2050,7 +2051,7 @@ def test_vue_build_failure_is_repaired_and_rebuilt_before_review(
     assert len(repair_calls) == 1
     assert repair_calls[0]["context"]["build"] == {
         "built": False,
-        "errorCode": "VUE_NPM_BUILD_FAILED",
+        "errorCode": build_error,
         "message": "vite failed",
     }
     assert len([call for call in model.calls if call[0] == "review"]) == 1
@@ -2254,8 +2255,9 @@ def test_vue_snapshot_review_failure_does_not_leak_source_to_events(
     assert len([call for call in model.calls if call[0] == "review"]) == 1
 
 
+@pytest.mark.parametrize("build_error", ["VUE_NPM_BUILD_FAILED", "VUE_COMPONENT_CONTRACT_FAILED"])
 def test_vue_build_failure_exhausts_two_repairs_without_review_or_completion(
-    app_factory, auth_headers, ndjson_parser
+    app_factory, auth_headers, ndjson_parser, build_error
 ):
     class AlwaysFailingBuildGateway(FakeToolGateway):
         async def invoke(self, name, arguments, *, app_id, request_id, tool_call_id):
@@ -2270,7 +2272,7 @@ def test_vue_build_failure_exhausts_two_repairs_without_review_or_completion(
                 self.calls.append(call)
                 return {
                     "built": False,
-                    "errorCode": "VUE_NPM_BUILD_FAILED",
+                    "errorCode": build_error,
                     "message": "vite failed repeatedly",
                 }
             return await super().invoke(

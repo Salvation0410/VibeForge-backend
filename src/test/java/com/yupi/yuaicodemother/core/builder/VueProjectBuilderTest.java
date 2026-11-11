@@ -23,9 +23,45 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 class VueProjectBuilderTest {
+    private static final String CHECK_OK = "{\"version\":1,\"status\":\"ok\",\"checkedComponents\":1,\"checkedUsages\":1,\"skippedFiles\":0,\"skippedUsages\":0,\"truncated\":false,\"issues\":[]}";
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void rejectsMissingRequiredPropsEvenWhenNpmBuildSucceeded() throws Exception {
+        Files.writeString(tempDir.resolve("package.json"), "{}");
+        Files.createDirectories(tempDir.resolve("dist"));
+        Files.writeString(tempDir.resolve("dist/index.html"), "<html></html>");
+        var builder = new VueProjectBuilder((directory, command, timeout) ->
+                new VueProjectBuilder.CommandResult(0, command.getFirst().equals("node")
+                        ? CHECK_OK.replace("\"ok\"", "\"failed\"").replace("[]", "[{\"file\":\"src/App.vue\",\"component\":\"FilterBar\",\"prop\":\"filters\"}]")
+                        : "ok", ""));
+        VueBuildResult result = builder.buildProjectDetailed(tempDir.toString());
+        assertFalse(result.built());
+        assertEquals("VUE_COMPONENT_CONTRACT_FAILED", result.errorCode());
+        assertTrue(result.message().contains("FilterBar.filters"));
+    }
+
+    @Test
+    void cancellationDuringContractCheckRemainsCancelled() throws Exception {
+        Files.writeString(tempDir.resolve("package.json"), "{}");
+        Files.createDirectories(tempDir.resolve("dist"));
+        Files.writeString(tempDir.resolve("dist/index.html"), "<html></html>");
+        CountDownLatch checking = new CountDownLatch(1);
+        var builder = new VueProjectBuilder((directory, command, timeout) -> {
+            if (command.getFirst().equals("node")) {
+                checking.countDown();
+                new CountDownLatch(1).await();
+            }
+            return new VueProjectBuilder.CommandResult(0, "ok", "");
+        });
+        var execution = CompletableFuture.supplyAsync(() -> builder.buildProjectDetailed(tempDir.toString(), "contract-cancel"));
+        assertTrue(checking.await(2, TimeUnit.SECONDS));
+        assertTrue(builder.cancelBuild("contract-cancel"));
+        assertEquals("VUE_BUILD_CANCELLED", execution.get(2, TimeUnit.SECONDS).errorCode());
+        assertFalse(builder.cancelBuild("contract-cancel"));
+    }
 
     @Test
     void reportsMissingPackageJsonWithoutRunningCommands() {
@@ -181,7 +217,7 @@ class VueProjectBuilderTest {
                 Files.createDirectories(tempDir.resolve("dist"));
                 Files.writeString(tempDir.resolve("dist/index.html"), "current build");
             }
-            return new VueProjectBuilder.CommandResult(0, "ok", "");
+            return new VueProjectBuilder.CommandResult(0, command.getFirst().equals("node") ? CHECK_OK : "ok", "");
         });
 
         CompletableFuture<VueBuildResult> first = CompletableFuture.supplyAsync(

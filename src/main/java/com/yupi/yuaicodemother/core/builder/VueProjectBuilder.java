@@ -213,8 +213,19 @@ public class VueProjectBuilder {
             log.error("构建完成但 dist/index.html 未生成: {}", distIndexFile.getAbsolutePath());
             return VueBuildResult.failure("VUE_DIST_INDEX_MISSING", "dist/index.html was not generated");
         }
+        if (activeBuild.cancelled()) return cancelledBuild();
+        VueBuildResult contract;
+        try {
+            contract = VueComponentContractCheck.verify(projectDir, commandRunner);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return activeBuild.cancelled() ? cancelledBuild()
+                    : VueBuildResult.failure("VUE_COMPONENT_CHECK_UNAVAILABLE", "Vue 组件检查被中断");
+        }
+        if (activeBuild.cancelled()) return cancelledBuild();
+        if (!contract.built()) return contract;
         log.info("Vue 项目构建成功，dist 目录: {}", distDir.getAbsolutePath());
-        return VueBuildResult.success();
+        return contract;
     }
 
     private VueBuildResult waitForBuild(CompletableFuture<VueBuildResult> buildFuture, String projectPath) {

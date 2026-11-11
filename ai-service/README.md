@@ -331,11 +331,17 @@ PostgreSQL 状态摘要支持可选 `preparation_diagnostics`，写入前再次�
 | --- | --- | --- |
 | `HTML` | 单个完整 HTML 文档，模型文本流式输出 | Spring 严格解析、确定性校验、默认浏览器烟测和静态发布 |
 | `MULTI_FILE` | 按固定顺序输出 `index.html`、`style.css`、`script.js` 三个代码区块 | Spring 协议校验、产物校验和静态发布 |
-| `VUE_PROJECT` | 文件规划与完整 JSON 工具决策，分批读写工程 | 产物校验、Vue 构建和质量审查 |
+| `VUE_PROJECT` | 文件规划与完整 JSON 工具决策，分批读写工程 | 产物校验、Vue 构建、有限必填属性检查和质量审查 |
 
 静态文本流将展示增量与完整候选分开；只有模型正常结束后才发送完整候选用于校验。截断或被过滤的响应不能发布。Vue 默认每轮最多两个工具，格式不合法的轮次不执行工具，每阶段最多额外重试两次。
 
 工具契约位于 [internal-ai-tools-v1.json](src/ai_service/contracts/internal-ai-tools-v1.json)。模型可调用 `dir_read`、`file_read`、`file_write`、`file_modify`、`file_delete` 和 `image_search`；产物上下文、校验、发布、构建及源码快照仅由工作流调用。Python 校验工具请求和响应，Spring 负责应用范围、相对路径和文件权限约束。
+
+Spring 的 `project_build` 强制构建在 npm 成功且 dist/index.html 存在后，运行随 JAR 发布的 `vue/component-contract-check.cjs`。它通过官方 Vue SFC/Babel AST 核对静态相对 `.vue` 默认导入与直接运行时 `defineProps`/`defineModel` 中的显式 required 属性；静态属性、具名绑定和 v-model 按实际 prop 名比较。当前只阻断确定缺失的必填项，不验证事件处理器或业务语义。不执行组件模块，不修改源码；按项目 Node 依赖解析规则加载支持 `parse`/`babelParse` 的 Vue compiler。
+
+检查最多遍历 20000 项，选择 24 个 Vue 文件，每文件 12000 字符/读取 48000 字节，总计 60000 字符；不跟随符号链接，排除隐藏路径及 node_modules/dist/build/target。类型 props、Options API、带默认值或无法确定的声明、对象展开/动态绑定、作用域内用法、宏同名合并及 onX 事件属性声明等跳过，只比较可见完整文件；统计记录检查/跳过数与截断标记。这里是独立扫描，不把 Spring 源码快照的文件上限等同于扫描覆盖保证，也不提供原子全工程快照。
+
+`VUE_COMPONENT_CONTRACT_FAILED` 带最多四条有界路径/组件/属性诊断，沿原构建失败流程最多修复两次；Node/编译器/检查器不可用、协议损坏或超时返回 `VUE_COMPONENT_CHECK_UNAVAILABLE`，Python 直接失败，不调用模型修复环境。命令等待上限 15 秒，进程及输出收尾沿用原额外限时；取消保留 `VUE_BUILD_CANCELLED`。`project_build` 的 built/errorCode/message 字段与公共 SSE 不变。通过仅说明已支持的范围未发现阻断问题；已有 dist 的 ensure 快路径不重检，失败不删除或回滚源码/dist，不能当作部署或预览访问拦截保证。
 
 首次 Vue 生成默认搜索配图，明确不配图时跳过；后续修改只有明确新增、替换或搜索图片时触发主动检索。普通保留图片或布局调整不强制搜图。检索无结果可降级继续；检索成功时会检查图片 URL 是否写入源码，实际加载效果仍需浏览器验证。
 
