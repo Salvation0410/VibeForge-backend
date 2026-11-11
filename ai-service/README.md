@@ -367,6 +367,8 @@ Spring 的 `project_build` 强制构建在 npm 成功且 dist/index.html 存在�
 
 HTML / MULTI_FILE 由 Spring 写入不可变 release，使用 MySQL 代际和持久化取消/提交资格仲裁切换权威活动指针；Redis 提供应用级串行化和实时状态。`.current` 是新协议的兼容镜像，数据库不可用时不回退该镜像。新协议暂未自动清理 release。
 
+Spring 应用锁使用每次租约独立的 Redisson 逻辑 owner，隔离同客户端同线程复用及迟到异步解锁；此 owner 不是 Python 活动任务身份或 MySQL 执行所有者。相关确定性资源测试不调用模型，也不代表跨标签浏览器、长时间并发或自动恢复已通过，详见[任务账本说明](../doc/generation-task-ledger.md)。
+
 Vue 通过工具直接修改工程目录，尚无相同的不可变版本切换与失败回滚保证。任务账本、心跳、迁移顺序和发布证据详见 [生成任务说明](../doc/generation-task-ledger.md)。
 
 ## HTTP 接口与事件

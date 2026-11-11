@@ -12,7 +12,12 @@ import com.yupi.yuaicodemother.service.impl.AppServiceImpl;
 import com.yupi.yuaicodemother.service.impl.GenerationTaskServiceImpl;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.AdditionalAnswers;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
+import org.redisson.misc.CompletableFutureWrapper;
 import org.springframework.dao.TransientDataAccessResourceException;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
@@ -26,6 +31,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -414,5 +420,82 @@ class GenerationTaskResourcesIT {
         assertEquals("GENERATION_IN_PROGRESS", assertThrows(GenerationStreamException.class,
                 () -> first.acquire(appId, request())).getErrorCode());
         first.release(lease);
+    }
+
+    @ParameterizedTest(name = "旧解锁命令延迟={0}")
+    @ValueSource(booleans = {false, true})
+    void sameClientSuccessorSurvivesLateUnlock(boolean delayedCommand) throws Exception {
+        RLock realLock = resources.first.getLock("ai:generation:app:" + appId);
+        RLock observedLock = mock(RLock.class, AdditionalAnswers.delegatesTo(realLock));
+        RedissonClient observedClient = mock(RedissonClient.class, AdditionalAnswers.delegatesTo(resources.first));
+        doReturn(observedLock).when(observedClient).getLock("ai:generation:app:" + appId);
+        var delayNext = new AtomicBoolean();
+        var pendingSend = new AtomicReference<Runnable>();
+        var lastUnlock = new AtomicReference<CompletableFuture<Void>>();
+        doAnswer(call -> {
+            long owner = call.getArgument(0);
+            var completion = new CompletableFuture<Void>();
+            lastUnlock.set(completion);
+            // 只延迟命令发送，不伪造 Redis 的所有者校验结果；断言前必须排空真实命令。
+            Runnable send = () -> realLock.unlockAsync(owner).whenComplete((unused, error) -> {
+                if (error == null) completion.complete(null);
+                else completion.completeExceptionally(error);
+            });
+            if (delayNext.getAndSet(false)) pendingSend.set(send);
+            else send.run();
+            return new CompletableFutureWrapper<>(completion);
+        }).when(observedLock).unlockAsync(anyLong());
+        var service = new GenerationLeaseService(observedClient, fences);
+        var old = service.acquire(appId, request());
+        tasks.start(appId, USER, old.requestId(), CodeGenTypeEnum.HTML, old.fenceToken());
+        GenerationLease successor = null;
+        boolean oldReleased = false;
+        try {
+            if (delayedCommand) {
+                delayNext.set(true);
+                service.release(old);
+                oldReleased = true;
+                assertNotNull(pendingSend.get());
+                assertFalse(lastUnlock.get().isDone());
+            }
+            // 仅失效本测试的随机应用锁，模拟租约丢失；不恢复或认领任何真实任务。
+            assertTrue(realLock.forceUnlock());
+            successor = service.acquire(appId, request());
+            tasks.start(appId, USER, successor.requestId(), CodeGenTypeEnum.HTML, successor.fenceToken());
+            assertTrue(successor.fenceToken() > old.fenceToken());
+            assertFalse(service.cancel(old));
+            assertEquals("GENERATION_NOT_ACTIVE", assertThrows(GenerationStreamException.class,
+                    () -> service.commit(appId, old.requestId(), () -> "旧请求不得提交")).getErrorCode());
+            if (delayedCommand) pendingSend.getAndSet(null).run();
+            else {
+                service.release(old);
+                oldReleased = true;
+            }
+            lastUnlock.get().handle((unused, error) -> null).get(5, TimeUnit.SECONDS);
+
+            assertTrue(realLock.isHeldByThread(successor.ownerThreadId()), "旧解锁不得释放后继请求的锁");
+            assertEquals(successor.requestId(), second.getStatus(appId).requestId());
+            assertEquals(GenerationLeaseService.PublicState.RUNNING, second.getStatus(appId).state());
+            assertEquals("GENERATION_IN_PROGRESS", assertThrows(GenerationStreamException.class,
+                    () -> second.acquire(appId, request())).getErrorCode());
+            assertEquals("RUNNING", tasks.findOwned(appId, USER, old.requestId()).getExecutionState());
+            assertEquals("RUNNING", tasks.findOwned(appId, USER, successor.requestId()).getExecutionState());
+            assertEquals("新请求提交动作", service.commit(appId, successor.requestId(), () -> "新请求提交动作"));
+            service.release(successor);
+            lastUnlock.get().get(5, TimeUnit.SECONDS);
+            successor = null;
+            assertFalse(realLock.isLocked());
+            assertEquals(GenerationLeaseService.PublicState.IDLE, second.getStatus(appId).state());
+        } finally {
+            // 失败也发送并排空捕获命令，避免清理期间遗留异步解锁去影响其他断言。
+            Runnable pending = pendingSend.getAndSet(null);
+            if (pending != null) pending.run();
+            if (!oldReleased) service.release(old);
+            if (lastUnlock.get() != null) lastUnlock.get().handle((unused, error) -> null).get(5, TimeUnit.SECONDS);
+            if (successor != null) {
+                service.release(successor);
+                lastUnlock.get().handle((unused, error) -> null).get(5, TimeUnit.SECONDS);
+            }
+        }
     }
 }

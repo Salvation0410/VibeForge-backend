@@ -1,6 +1,6 @@
 # 生成链路真实端到端测试集
 
-**当前执行状态（2026-11-11）**：用户已在后续明确取消本任务的模型调用次数上限。本轮专用计数账本为 `tmp/real-e2e-unlimited-20261111/model-ledger.json`，实际新增 67 次；旧 60/20/30 次账本保留不改。下面的 30 次限制属于上一轮历史记录，不再限制本次已授权验收。无上限仅适用于用户要求的本项验收，不授权无关调用。
+**当前维护状态（2026-11-11，交接第 21 节）**：用户已取消本任务的模型调用次数上限，继续沿用 `tmp/real-e2e-unlimited-20261111/model-ledger.json`，累计 **136 次、max_calls=null**；第 21 节维护新增 **0 次**。下面各节保留各自历史调用数，首次无上限续验的 67 次不是当前累计值。旧 60/20/30 次账本保留不改，其限制不再约束当前已授权任务；不授权无关调用。
 
 本测试集针对真实前端 → Spring SSE → Python → 供应商模型 → Spring 工具/构建/发布 → 前端预览。2026-11-11 新一轮授权上限为 **30 次供应商调用**，失败、取消、重试、修复与诊断均计入；独立账本 `tmp/real-e2e-matrix-20261111/model-ledger.json`，不得通过重建账本或重启服务绕过。历史 60/60、20/20 账本保持不变。
 
@@ -170,3 +170,24 @@ node --test scripts/tests/reading-list-browser.test.mjs
 真实验收运行器可导入 `verifyReadingList(document, { tick, prefix, record })`，传入**同源、隔离的测试页面**。它会添加“验收新书”并操作页面状态，不应作用于用户正在使用的页面；要求固定初始三本书、明确按钮及“共 N 本 · 已读 M 本”计数文案。tick 用于等待实际渲染条件，结果不含正文或源码。图片检查仅限 img 元素，不证明不存在 CSS 背景图。不同需求需独立设计断言，不能调整断言掩盖真实失败。
 
 源码 ZIP 9 条目与 8 个完整快照文件一致，额外为锁文件；Markdown 53,982 字节，无依赖/构建章节。本轮不重跑 Python 全量、Java 单元或前端构建，其历史结果不改记为新结果。新门禁的自然拒绝→修复→交互路径仍未覆盖。详情见[交接第 19 节](generation-structured-edit-acceptance-handoff.md#19-vue-门禁真实续验与读书清单交互探针)。
+
+## 同客户端后继租约保护（第 21 节，零模型）
+
+本轮选择同应用竞争的释放边界，没有重跑上述真实生成提交场景。
+
+| ID | 同步条件 | 本轮结果与边界 |
+| --- | --- | --- |
+| D10 | 旧测试锁失效，同客户端同线程建立后继租约，再释放旧租约并等待 Redis 命令完成 | 旧实现失败，修复后通过；新锁/状态保持、第三请求拒绝、旧取消/提交拒绝、新提交动作可执行 |
+| D11 | 捕获旧 release 的异步解锁命令，新租约建立后再交给真实 Redis 执行 | 旧实现失败，修复后通过；使用明确命令门闩，不用 sleep 选择时序 |
+
+独立逻辑 owner 隔离先后租约；新请求正常 release 也等待实际命令完成后确认 IDLE。最终 Java 限定回归 **147 passed、0 skipped**，含 D10/D11 两项真实 MySQL/Redis 测试；干净编译通过。真实资源仅使用随机测试行、精确 Redis 键，沿现有夹具清理；没有自然模型、HTTP、浏览器、真实 npm 构建或新产物发布。
+
+只运行新增资源场景的命令：
+
+```powershell
+$env:AI_TASK_INTEGRATION = 'true'
+mvn test '-Dtest=GenerationTaskResourcesIT#sameClientSuccessorSurvivesLateUnlock'
+Remove-Item Env:AI_TASK_INTEGRATION
+```
+
+完整命令、失败日志与边界见[交接第 21 节](generation-structured-edit-acceptance-handoff.md#21-同客户端线程复用下的旧租约迟到释放)。当前取消 API 仅接受 appId，尚不能据本轮测试声称跨标签迟到停止不会指向后继请求；此项需要独立请求绑定设计及浏览器同步证据。自然门禁拒绝→修复→交互、自然 REPAIR_NO_PROGRESS、长期并发仍未补齐。

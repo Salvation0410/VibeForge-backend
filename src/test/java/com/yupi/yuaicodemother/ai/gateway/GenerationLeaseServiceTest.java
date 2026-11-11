@@ -1,20 +1,24 @@
 package com.yupi.yuaicodemother.ai.gateway;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.redisson.api.RBucket;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.redisson.misc.CompletableFutureWrapper;
 import com.yupi.yuaicodemother.core.artifact.GenerationFenceService;
 
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.CompletableFuture;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class GenerationLeaseServiceTest {
     @Test
-    void acquiresAndReleasesWithOriginalOwnerThread() {
+    void acquiresAndReleasesWithDistinctLeaseOwnersAcrossServiceInstances() {
         RedissonClient client = mock(RedissonClient.class);
         RLock lock = mock(RLock.class);
         RLock transitionLock = mock(RLock.class);
@@ -24,15 +28,24 @@ class GenerationLeaseServiceTest {
         when(client.getLock("ai:generation:transition:42")).thenReturn(transitionLock);
         when(transitionLock.tryLock()).thenReturn(true);
         when(client.<String>getBucket("ai:generation:state:42")).thenReturn(state);
-        when(lock.tryLock()).thenReturn(true);
+        when(lock.tryLockAsync(anyLong())).thenAnswer(call -> new CompletableFutureWrapper<>(CompletableFuture.completedFuture(true)));
         var service = service(client);
 
         GenerationLease lease = service.acquire(42, "req-1");
         service.release(lease);
 
-        assertEquals(Thread.currentThread().threadId(), lease.ownerThreadId());
+        assertTrue(lease.ownerThreadId() < 0);
         assertNull(value.get());
+        verify(lock).tryLockAsync(lease.ownerThreadId());
         verify(lock).unlockAsync(lease.ownerThreadId());
+
+        // 即使复用客户端和当前线程、重建服务对象，也不能复用已发放的 owner。
+        GenerationLease successor = service(client).acquire(42, "req-2");
+        assertTrue(successor.ownerThreadId() < 0);
+        assertNotEquals(lease.ownerThreadId(), successor.ownerThreadId());
+        verify(lock).tryLockAsync(successor.ownerThreadId());
+        service.release(successor);
+        verify(lock).unlockAsync(successor.ownerThreadId());
     }
 
     @Test
@@ -43,11 +56,12 @@ class GenerationLeaseServiceTest {
         when(client.getLock("ai:generation:transition:42")).thenReturn(transitionLock);
         when(transitionLock.tryLock()).thenReturn(true);
         when(client.getLock("ai:generation:app:42")).thenReturn(lock);
-        when(lock.tryLock()).thenReturn(false);
+        when(lock.tryLockAsync(anyLong())).thenAnswer(call -> new CompletableFutureWrapper<>(CompletableFuture.completedFuture(false)));
         GenerationStreamException error = assertThrows(GenerationStreamException.class,
                 () -> service(client).acquire(42, "req-2"));
         assertEquals("GENERATION_IN_PROGRESS", error.getErrorCode());
         assertEquals("req-2", error.getRequestId());
+        verify(lock, never()).unlockAsync(anyLong());
     }
 
     @Test
@@ -63,7 +77,10 @@ class GenerationLeaseServiceTest {
         when(client.<String>getBucket("ai:generation:state:42")).thenReturn(state);
         AtomicBoolean held = new AtomicBoolean();
         when(appLock.isLocked()).thenAnswer(call -> held.get());
-        when(appLock.tryLock()).thenAnswer(call -> { held.set(true); return true; });
+        when(appLock.tryLockAsync(anyLong())).thenAnswer(call -> {
+            held.set(true);
+            return new CompletableFutureWrapper<>(CompletableFuture.completedFuture(true));
+        });
         var service = service(client);
 
         GenerationLease cancelled = service.acquire(42, "req-cancel");
@@ -183,7 +200,7 @@ class GenerationLeaseServiceTest {
         var error = assertThrows(GenerationStreamException.class,
                 () -> service(client).acquire(42, "new-request"));
         assertEquals("GENERATION_IN_PROGRESS", error.getErrorCode());
-        verify(appLock, never()).tryLock();
+        verify(appLock, never()).tryLockAsync(anyLong());
         verify(client, never()).getBucket(anyString());
         verify(transition).unlock();
     }
@@ -215,6 +232,36 @@ class GenerationLeaseServiceTest {
         when(fence.issue(anyLong(), anyString())).thenReturn(1L);
         when(fence.cancel(anyLong(), anyString())).thenReturn(true);
         return new GenerationLeaseService(client, fence);
+    }
+
+    @ParameterizedTest(name = "状态镜像初始化失败={0}")
+    @ValueSource(booleans = {false, true})
+    void failedInitializationReleasesTheAcquiredLogicalOwner(boolean mirrorFailure) {
+        var client = mock(RedissonClient.class);
+        var lock = mock(RLock.class);
+        var transition = mock(RLock.class);
+        RBucket<String> bucket = mock(RBucket.class);
+        var fences = mock(GenerationFenceService.class);
+        when(client.getLock("ai:generation:app:42")).thenReturn(lock);
+        when(client.getLock("ai:generation:transition:42")).thenReturn(transition);
+        when(transition.tryLock()).thenReturn(true);
+        when(lock.tryLockAsync(anyLong())).thenAnswer(call -> new CompletableFutureWrapper<>(CompletableFuture.completedFuture(true)));
+        var failure = new IllegalStateException("模拟初始化失败");
+        if (mirrorFailure) {
+            when(fences.issue(42, "req")).thenReturn(1L);
+            when(client.<String>getBucket("ai:generation:state:42")).thenReturn(bucket);
+            doThrow(failure).when(bucket).set("req:ACTIVE");
+        } else {
+            when(fences.issue(42, "req")).thenThrow(failure);
+        }
+
+        assertSame(failure, assertThrows(IllegalStateException.class,
+                () -> new GenerationLeaseService(client, fences).acquire(42, "req")));
+        var owner = org.mockito.ArgumentCaptor.forClass(Long.class);
+        verify(lock).tryLockAsync(owner.capture());
+        assertTrue(owner.getValue() < 0);
+        verify(lock).unlockAsync(owner.getValue());
+        verify(transition).unlock();
     }
 
     @Test

@@ -818,3 +818,53 @@ uv run pytest -ra --tb=short
 私有日志：`tmp/reranker-cancellation-before.log`、`tmp/reranker-cancellation-targeted.log`、`tmp/reranker-cancellation-suite.log`、`tmp/reranker-cancellation-full.log`；保留最初的断言反例，不提交日志。新增/修改的四个场景以 finally 和进程/任务断言确认本测试资源已回收。本轮未启动生成服务、代理或数据库，不停止用户原有服务；计数账本仍为 **136**。
 
 两仓库仅后端有本轮测试/文档改动，前端客服三文件及原未跟踪 cancellation-drain-regression 计划保留，中文提交且不推送。下一步可按独立场景扩展跨标签取消与并发证据；不要为证明新 Vue 门禁的自然拒绝→修复或 REPAIR_NO_PROGRESS 无限采样。真实 GPU 重排、全部停止失败时序、长期/跨实例并发、公网部署仍未覆盖；自动恢复和 Vue 回滚仍未实现。
+
+## 21. 同客户端线程复用下的旧租约迟到释放
+
+2026-11-11 承接 `814e43f`。先核对两仓库状态、本文第 18–20 节、真实测试集、AI README、取消仲裁及 fencing 的 specs/plans，再选择现有测试未覆盖的“同 Redisson 客户端、同工作线程在失锁后取得后继租约”。新增真实模型 **0 次**，无供应商失败或重试；原账本保持 **136、max_calls=null**，未重跑已有真实生成提交标记。
+
+### 21.1 失败证据与修复
+
+原 `GenerationLeaseService.acquire` 以 Java 线程 ID 作为 Redisson 应用锁 owner；release 虽按 requestId 防止删除后继状态，finally 仍以原线程 ID 异步解锁。同客户端同线程先后处理请求时，两次租约共享锁身份。已有不同客户端测试不能揭示此问题，其检查也没有等待异步解锁完成。
+
+新增 `GenerationTaskResourcesIT#sameClientSuccessorSurvivesLateUnlock`，两个明确顺序在未修改生产代码时均失败，断言为“旧解锁不得释放后继请求的锁”，不是超时或依赖失败：
+
+1. 显式失效本测试旧锁，同客户端同线程取得新租约，再执行旧 release。
+2. 在旧 release 调用 `unlockAsync` 的边界捕获命令，失效旧锁、取得新租约后才发送原命令。
+
+两种情况都等待实际 Redis 命令完成后才检查锁；5 秒只是等待失败上限，不用固定 sleep 猜测时序。失锁由随机测试 appId 的 `forceUnlock` 控制，不代表自然网络故障，也不恢复真实任务。
+
+修复仅改变 Spring 应用锁身份：静态负向 long 序列为每次获取提供独立逻辑 owner，达到下界失败而不复用；通过 Redisson 显式 owner 的无等待入口获取锁，正常释放及初始化失败释放都沿用该 owner。字段 `GenerationLease.ownerThreadId` 保留名称并说明含义，不再代表 Java 工作线程。Redis 客户端 ID 继续隔离客户端；watchdog、锁键、transition lock、MySQL fencing/仲裁/台账/心跳字段、三类生成和公共 SSE 协议未改。
+
+修复后新锁与新 requestId 状态保持，第三请求仍被拒绝；旧取消/旧提交不能作用于新请求，两条执行记录仍为 RUNNING，不因失锁或 release 改写终态。新请求可执行受控提交动作，正常 release 完成后返回 IDLE。测试提交动作是固定返回值，没有生成或发布应用产物。
+
+### 21.2 本轮实际验证
+
+后端根目录执行，所有 Maven 原始输出保存在 ignored 的 `tmp/`：
+
+```powershell
+mvn clean -DskipTests compile
+$env:AI_TASK_INTEGRATION = 'true'
+mvn test '-Dtest=GenerationLeaseServiceTest,GenerationTaskResourcesIT#sameClientSuccessorSurvivesLateUnlock,AppServiceGenerationCancellationTest,AppGenerationTaskTest,GenerationTaskServiceTest,GenerationTaskMapperTest,GenerationTaskHeartbeatConfigurationTest,ArtifactPublicationServiceTest,ArtifactPublicationEvidenceTest,ArtifactPathResolverTest,LangGraphAiGenerationGatewayTest,DelegatingAiGenerationGatewayTest,AppControllerSseTest,GenerationJsonErrorBoundaryTest,VueProjectBuilderTest'
+Remove-Item Env:AI_TASK_INTEGRATION
+```
+
+- 原实现新增两个资源时序：**2 failed、0 errors**，保留 `tmp/lease-owner-before.log`。
+- 修复后首次定向：租约单元 13 项与真实资源 2 项，**15 passed**，日志 `tmp/lease-owner-targeted.log`。
+- 补充正常 release 完成后的 IDLE 断言后，最终限定回归 **147 passed、0 failed、0 skipped**，含两个新增真实 MySQL/Redis 时序；日志 `tmp/lease-owner-regression.log`。
+- 干净编译通过，日志 `tmp/lease-owner-clean-compile.log`；已有弃用/unchecked 编译提示保留。
+- 单元覆盖逻辑 owner 在同客户端不同服务对象中不复用、忙时拒绝、代际签发失败/状态初始化失败按所获 owner 释放，以及原台账、仲裁、发布、取消、网关与心跳回归。
+
+真实资源测试使用现有本地夹具的真实 Mapper/XML、事务和两个 Redisson 客户端，仅选新增两个时序；其他 `GenerationTaskResourcesIT` 场景本轮未重跑。模型、Spring/Python HTTP、浏览器与自然供应商不参与。Vue 构建器单元使用测试 runner，不能据此称实际 npm 构建或 Vue 功能通过。
+
+Python 源码与配置未变，没有重跑 compileall/pytest/uv lock、PostgreSQL 集成或前端测试/构建。第 20 节 1294 passed、第 19 节真实浏览器结果均保持历史身份。AI README 只同步 Spring 边界说明。
+
+### 21.3 收尾与下一步
+
+测试前确认仅原 MySQL 3306 与 Redis 6379 监听，核对对应进程；未启动或停止 Spring、Python、模型代理、PostgreSQL、Vite 或 Chrome。测试自己的 Redis 客户端由夹具关闭，捕获的解锁命令在 finally 排空，随机测试行及精确键由既有 AfterEach 清理；未做 DDL、清空数据库或读写历史生成项目。
+
+前端客服三文件及后端原未跟踪 `docs/superpowers/plans/2026-11-11-cancellation-drain-regression.md` 保留。仅后端本次 Java/测试/文档提交，中文 Conventional Commits，不推送；无凭据、日志、生成源码或截图入库。
+
+下一步优先评估**跨标签停止请求绑定**：当前 `AppGenerationCancelRequest` 仅接收 appId，Spring 选择调用时的活动 requestId。历史主动取消设计中的“因此可以防止旧页面取消新任务”没有客户端请求身份比较支撑，已补充说明；本轮不宣称该行为已修复。应先用独立标签/请求门闩建立旧停止请求在新任务建立后抵达的证据，再设计兼容的目标绑定与 UI 状态同步。
+
+仍未覆盖自然新门禁拒绝→修复→浏览器交互、自然 REPAIR_NO_PROGRESS、全部停止失败时序、长期/跨实例压力、自然网络失锁、真实 GPU 和公网部署。自动恢复、任务重新认领、SSE 重连与 Vue 回滚仍未实现。回退本轮 owner 分配无需数据库迁移，但会重新暴露已复现窗口；不能把 Redis 无锁作为恢复授权。

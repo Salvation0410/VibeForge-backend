@@ -10,6 +10,7 @@ import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Service;
 
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** 使用 Redis 租约阻止同一应用同时运行多个生成任务。 */
 @Service
@@ -20,6 +21,8 @@ public class GenerationLeaseService {
     private static final String CANCELLED = "CANCELLED";
     private static final String COMMITTING = "COMMITTING";
     private static final String COMMITTED = "COMMITTED";
+    // Redisson 所有者由客户端 ID 与此值组成；负序列隔离工作线程复用，溢出时失败而不复用。
+    private static final AtomicLong OWNER_SEQUENCE = new AtomicLong();
     private final RedissonClient redissonClient;
     private final GenerationFenceService generationFenceService;
 
@@ -46,13 +49,16 @@ public class GenerationLeaseService {
      */
     public GenerationLease acquire(long appId, String requestId) {
         RLock lock = redissonClient.getLock("ai:generation:app:" + appId);
-        long ownerThreadId = Thread.currentThread().threadId();
+        long ownerThreadId = OWNER_SEQUENCE.updateAndGet(Math::decrementExact);
         RLock transitionLock = transitionLock(appId);
         // 状态初始化必须与旧请求的提交/释放互斥；tryLock 保持忙时立即拒绝，不排队等待发布。
         if (!transitionLock.tryLock()) throw inProgress(requestId);
         try {
-            // Redisson 允许同客户端同线程重入，但业务上每个应用只能运行一个请求。
-            if (lock.isLocked() || !lock.tryLock()) throw inProgress(requestId);
+            // 每次租约使用独立逻辑所有者，旧请求迟到的异步解锁不能匹配后继租约。
+            // 显式 owner 的无等待获取仍使用 watchdog；已持锁时立即拒绝，不排队。
+            if (lock.isLocked() || !lock.tryLockAsync(ownerThreadId).toCompletableFuture().join()) {
+                throw inProgress(requestId);
+            }
             try {
                 long fenceToken = generationFenceService.issue(appId, requestId);
                 stateBucket(appId).set(state(requestId, ACTIVE));
@@ -177,7 +183,7 @@ public class GenerationLeaseService {
     }
 
     /**
-     * 按原所有者线程释放租约；锁已释放或已过期时不影响终止链路。
+     * 按本次租约的逻辑所有者释放；即使异步命令迟到，也不能解开同线程的后继租约。
      *
      * @param lease 当前请求持有的租约
      */
