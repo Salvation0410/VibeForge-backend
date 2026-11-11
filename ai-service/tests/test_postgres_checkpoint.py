@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import json
 
 import pytest
 
 from ai_service.infrastructure import checkpoint_setup
 from ai_service.infrastructure.postgres_checkpoint import PostgresCheckpoint
+from ai_service.orchestration.workflow import GenerationWorkflow
 
 
 class FakeCursor:
@@ -163,6 +165,85 @@ async def test_save_upserts_only_sanitized_status():
     assert "ON CONFLICT (thread_id) DO UPDATE" in query
     assert params[0:5] == ("42:req-1", 42, "req-1", "HTML", "quality_review")
     assert params[-1] == 3600
+    assert params[8].obj == {**state, "appId": 42}
+
+
+@pytest.mark.asyncio
+async def test_save_accepts_real_workflow_payload_with_preparation_diagnostics():
+    pool = FakePool()
+    checkpoint = checkpoint_with(pool, FakeSaver(), required=True)
+    checkpoint.available = True
+    payload = GenerationWorkflow._checkpoint_payload(
+        {
+            "request_id": "req-prepared", "app_id": 42, "code_gen_type": "HTML",
+            "prompt": "private-prompt", "artifact": "private-source",
+            "preparation_diagnostics": {
+                "rewriteStatus": "ready", "reason": "NONE", "durationMs": 12.5,
+                "modelAttempted": True, "briefBytes": 128,
+                "skillIds": ["design-core@1", "private-skill"],
+                "brief": "private-brief", "token": "private-token",
+            },
+        },
+        "generation_prepare",
+    )
+
+    await checkpoint.save("42:req-prepared", payload)
+
+    persisted = pool.connection_object.queries[-1][1][8].obj
+    assert persisted == payload
+    assert persisted["preparation_diagnostics"] == {
+        "rewriteStatus": "ready", "reason": "NONE", "durationMs": 12.5,
+        "modelAttempted": True, "briefBytes": 128, "skillIds": ["design-core@1"],
+    }
+    assert "private-" not in json.dumps(persisted)
+    assert checkpoint.available is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("diagnostic", [
+    None, "private-invalid", {},
+    {"rewriteStatus": "private-status"},
+    {"rewriteStatus": "ready", "reason": "NONE", "durationMs": float("nan"),
+     "modelAttempted": True, "briefBytes": 0},
+])
+async def test_save_omits_invalid_optional_diagnostics_without_failing(diagnostic):
+    pool = FakePool()
+    checkpoint = checkpoint_with(pool, FakeSaver(), required=True)
+    checkpoint.available = True
+    legacy = GenerationWorkflow._checkpoint_payload(
+        {"request_id": "req-1", "app_id": 42, "code_gen_type": "HTML"}, "input_guard",
+    )
+
+    await checkpoint.save("42:req-1", {**legacy, "preparation_diagnostics": diagnostic})
+
+    assert pool.connection_object.queries[-1][1][8].obj == legacy
+    assert checkpoint.available is True
+
+
+@pytest.mark.asyncio
+async def test_save_projects_diagnostics_again_at_storage_boundary():
+    pool = FakePool()
+    checkpoint = checkpoint_with(pool, FakeSaver())
+    checkpoint.available = True
+    payload = GenerationWorkflow._checkpoint_payload(
+        {"request_id": "req-1", "app_id": 42, "code_gen_type": "HTML"}, "generation_prepare",
+    )
+    diagnostic = {
+        "rewriteStatus": "skipped", "reason": "STRUCTURED_EDIT", "durationMs": 0,
+        "modelAttempted": False, "briefBytes": 0,
+        "skillIds": ["design-core@1", "private-skill"],
+        "prompt": "private-prompt", "nested": {"source": "private-source"},
+    }
+
+    await checkpoint.save("42:req-1", {**payload, "preparation_diagnostics": diagnostic})
+
+    persisted = pool.connection_object.queries[-1][1][8].obj
+    assert persisted["preparation_diagnostics"] == {
+        "rewriteStatus": "skipped", "reason": "STRUCTURED_EDIT", "durationMs": 0,
+        "modelAttempted": False, "briefBytes": 0, "skillIds": ["design-core@1"],
+    }
+    assert "private-" not in json.dumps(persisted)
+    assert diagnostic["prompt"] == "private-prompt"
 
 
 @pytest.mark.asyncio

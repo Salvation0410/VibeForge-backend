@@ -14,7 +14,7 @@ from ai_service.models.preparation_diagnostics import (
     PreparationFailure, preparation_trace_metadata, safe_preparation_diagnostics, trusted_skill_ids,
 )
 from ai_service.orchestration.cancellation import GenerationCancelled
-from ai_service.prompts.frontend_skills import resolve_skills
+from ai_service.prompts.frontend_skills import RULES, resolve_skills
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +70,10 @@ def create_preparation_node(workflow, emitter, thread_id):
                     "rewriteStatus": "disabled"}
         if settings.frontend_skills_enabled:
             prepared["skills"] = resolve_skills(state["code_gen_type"], source["mode"], state["prompt"])
+            if explicit_edit is not None:
+                # 仅已重验的顶层意图激活范围规则，不能由自由文本或 metadata 冒充。
+                prepared["skills"].append({"id": "structured-edit-scope",
+                                           "version": RULES["structured-edit-scope"].version})
         if diagnostic is not None:
             diagnostic["skillIds"] = trusted_skill_ids(prepared["skills"])
         source["selectedSkills"] = prepared["skills"]

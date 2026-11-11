@@ -239,7 +239,26 @@ class OpenAICompatibleModel:
             HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
         ]
         response = await self._invoke(messages)
-        return str(response.content).strip().upper() == "PASS"
+        raw = str(response.content)
+        normalized = raw.strip().upper()
+        passed = normalized == "PASS"
+        # 只记录固定判定与大小，避免把格式偏离误记为模型明确拒绝；观测失败不改变质量门槛。
+        try:
+            import logging
+
+            metadata = getattr(response, "response_metadata", None)
+            reason = (metadata.get("finish_reason") or metadata.get("stop_reason")) if isinstance(metadata, dict) else None
+            reason = reason.upper() if isinstance(reason, str) else "UNKNOWN"
+            finish_reason = reason if reason in {"STOP", "LENGTH", "CONTENT_FILTER"} else "UNKNOWN"
+            verdict = normalized if normalized in {"PASS", "REPAIR"} else "INVALID_OUTPUT"
+            logging.getLogger(__name__).info(
+                "quality_review_result verdict=%s responseChars=%d finishReason=%s",
+                verdict, len(raw), finish_reason,
+            )
+        except Exception:
+            # 不输出日志异常正文；模型调用位于此边界外，其异常与取消仍按原路径传播。
+            pass
+        return passed
 
     async def review_role(
         self,

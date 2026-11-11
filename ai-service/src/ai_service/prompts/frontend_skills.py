@@ -23,6 +23,11 @@ RULES = {
         "沿用现有 Vue 工程的 JavaScript 和原生 CSS；按职责拆组件，列表使用稳定键，派生值使用计算属性，清理监听器与计时器。不要默认添加 TypeScript、React、Tailwind 或动画库。"),
     "preserve-style": FrontendRule("1", "https://github.com/anthropics/skills/tree/main/skills/frontend-design",
         "已有项目先检查相关源码，保留本次修改未涉及的布局、配色、文字、图片和交互；用户明确要求全局改版时按其范围执行，不擅自扩大范围。"),
+    "structured-edit-scope": FrontendRule("1", "doc/generation-structured-edit-acceptance-handoff.md",
+        "结构化编辑以本轮 prompt 与 editIntent 为唯一操作要求，以 currentArtifact 和实际源码为保留基线；"
+        "conversation 与 initialPrompt 仅作背景，不补做历史需求或失败修改。仅修改指定目标的指定属性，"
+        "其余属性、元素、功能、文字、图片与交互保持当前基线。生成、审查与修复均按本轮单属性要求和当前基线检查，"
+        "不得要求历史目标同时满足，也不得为满足历史目标扩大修改范围。"),
     "product-dashboard": FrontendRule("1", "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill",
         "数据工具优先突出关键指标、筛选条件和可读表格；提供空状态与操作反馈，示例数据明确标识。"),
     "product-commerce": FrontendRule("1", "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill",

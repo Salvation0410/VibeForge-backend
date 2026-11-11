@@ -12,6 +12,8 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
+from ai_service.models.preparation_diagnostics import safe_preparation_diagnostics
+
 logger = logging.getLogger(__name__)
 
 STATUS_FIELDS = frozenset(
@@ -23,6 +25,7 @@ STATUS_FIELDS = frozenset(
         "qualityPassed",
         "repairCount",
         "toolCallCount",
+        "preparation_diagnostics",
     }
 )
 REQUIRED_STATUS_FIELDS = frozenset(
@@ -266,7 +269,7 @@ class PostgresCheckpoint:
             raise ValueError(f"Unsupported checkpoint status fields: {sorted(unknown)}")
         if missing:
             raise ValueError(f"Missing checkpoint status fields: {sorted(missing)}")
-        return {
+        normalized = {
             "node": str(state["node"]),
             "requestId": str(state["requestId"]),
             "appId": int(state["appId"]),
@@ -275,3 +278,8 @@ class PostgresCheckpoint:
             "repairCount": int(state["repairCount"]),
             "toolCallCount": int(state["toolCallCount"]),
         }
+        # 观测字段再次按固定契约投影；缺失或无效时省略，不能阻断原有生成状态落库。
+        diagnostic = safe_preparation_diagnostics(state.get("preparation_diagnostics"))
+        if diagnostic is not None:
+            normalized["preparation_diagnostics"] = diagnostic
+        return normalized

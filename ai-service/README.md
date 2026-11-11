@@ -310,7 +310,11 @@ uv run python -m ai_service.orchestration.rewrite_policy_evaluation --dataset ev
 
 默认 `AI_SERVICE_STRUCTURED_EDIT_ENABLED=true` 时，有效结构化请求标为 `skipped/STRUCTURED_EDIT`、`brief=null`、`modelAttempted=false`，与 conservative 无关。关闭此配置恢复有效请求的辅助重写；关闭总重写开关仍为 disabled。输入审核、硬预算、生成、审查、修复、构建和发布保持原流程。缓存重入复用已有准备结果，开关调整作用于新请求。Legacy 明确拒绝结构化请求（`STRUCTURED_EDIT_UNSUPPORTED`）。
 
-本轮测试与启用/回退说明见 [结构化编辑交接](../doc/generation-structured-edit-handoff.md)。尚未进行真实模型和完整应用生成验收，不承诺局部修改必然精确落到源码。
+前端规则开启时，经过校验的顶层结构化意图还会选择本地 `structured-edit-scope@1`：本轮指定属性是当前修改范围，当前产物/实际源码是保留基线，历史需求只作背景，不补做旧修改。生成、审查和修复使用同一准备结果；规则是模型约束，不是确定性源码补丁，也不能证明修改范围必然正确。
+
+PostgreSQL 状态摘要支持可选 `preparation_diagnostics`，写入前再次投影固定字段；无效诊断省略，不影响既有状态写入，无需新增 SQL 结构。单 Reviewer 正常返回后记录固定的 `quality_review_result`（PASS/REPAIR/INVALID_OUTPUT、响应字符数、白名单结束原因），不记录响应正文。原有仅精确 PASS 才通过的门槛不变；该日志不提供拒绝理由。
+
+启用/回退说明见 [结构化编辑交接](../doc/generation-structured-edit-handoff.md)。三类应用的有限真实验收、失败与未覆盖项，以及本地限额代理、SSE 运行器和浏览器快照工具见 [真实验收交接](../doc/generation-structured-edit-acceptance-handoff.md)。本轮发现过历史修改混入和审查失败，不承诺局部修改必然精确落到源码。
 
 ### 生成分支与完成条件
 

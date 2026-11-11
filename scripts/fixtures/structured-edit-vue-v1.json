@@ -1,0 +1,10 @@
+{
+  "version": "1",
+  "files": {
+    "package.json": "{\"name\": \"structured-edit-fixture\", \"version\": \"1.0.0\", \"type\": \"module\", \"scripts\": {\"build\": \"vite build\"}, \"dependencies\": {\"vue\": \"3.5.17\"}, \"devDependencies\": {\"vite\": \"7.0.6\", \"@vitejs/plugin-vue\": \"6.0.0\"}}",
+    "vite.config.js": "import {defineConfig} from 'vite'; import vue from '@vitejs/plugin-vue'; export default defineConfig({plugins:[vue()],base:'./'});",
+    "index.html": "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>星光实验室</title></head><body><div id=\"app\"></div><script type=\"module\" src=\"/src/main.js\"></script></body></html>",
+    "src/main.js": "import {createApp} from 'vue'; import App from './App.vue'; createApp(App).mount('#app');",
+    "src/App.vue": "<script setup>\nimport {ref} from 'vue';\n// 计数用于验收样式修改后原交互仍可用，不依赖服务端或外部数据。\nconst count=ref(0);\n</script>\n<template><main><h1 id=\"edit-target\">星光实验室</h1><img src=\"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNDAiIGhlaWdodD0iMTIwIj48cmVjdCB3aWR0aD0iMjQwIiBoZWlnaHQ9IjEyMCIgZmlsbD0iI2M4ZTZlZCIvPjxwYXRoIGQ9Ik0wIDEyMEw4MCAzMEwxNDAgMTIwTTkwIDEyMEwxNzUgNDVMMjQwIDEyMCIgZmlsbD0iIzRiOGU3NCIvPjwvc3ZnPg==\" alt=\"山景示意图\" width=\"240\" height=\"120\"><p>每天进步一点点</p><button id=\"counter\" data-testid=\"counter\" @click=\"count++\">记录一次</button><span id=\"count\">{{count}}</span></main></template>\n<style>body{margin:0;background:#f5f7fa;font-family:sans-serif}main{max-width:480px;margin:60px auto;padding:32px;background:white;border-radius:16px}#edit-target{color:#223344;background-color:#eef2f6;font-size:24px;text-align:left;padding:12px}button{padding:10px 20px;margin-right:16px}img{display:block}</style>"
+  }
+}
