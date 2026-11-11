@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     prompt_rewrite_enabled: bool = True
     # 保守门控须显式启用；保持默认行为，待真实产物对照后再决定是否推广。
     prompt_rewrite_policy: Literal["always", "conservative"] = "always"
+    # 仅显式且校验通过的表单需求可省辅助重写；关闭后恢复正常重写。
+    structured_edit_enabled: bool = True
     preparation_diagnostics_enabled: bool = True
     prompt_rewrite_timeout_seconds: float = Field(default=15.0, gt=0, le=60)
     prompt_rewrite_max_tokens: int = Field(default=1500, ge=128, le=4096)

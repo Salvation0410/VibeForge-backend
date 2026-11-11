@@ -25,6 +25,7 @@ import com.yupi.yuaicodemother.exception.ThrowUtils;
 import com.yupi.yuaicodemother.mapper.AppMapper;
 import com.yupi.yuaicodemother.model.dto.app.AppAddRequest;
 import com.yupi.yuaicodemother.model.dto.app.AppQueryRequest;
+import com.yupi.yuaicodemother.model.dto.app.StructuredEditIntent;
 import com.yupi.yuaicodemother.model.entity.App;
 import com.yupi.yuaicodemother.model.entity.SysUser;
 import com.yupi.yuaicodemother.model.vo.AppVO;
@@ -101,10 +102,16 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
      */
     @Override
     public Flux<String> chatToGenCode(Long appId, String message, SysUser loginUser) {
+        return chatToGenCode(appId, message, loginUser, null);
+    }
+
+    @Override
+    public Flux<String> chatToGenCode(Long appId, String message, SysUser loginUser, StructuredEditIntent editIntent) {
         ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "appId is invalid");
         ThrowUtils.throwIf(StrUtil.isBlank(message), ErrorCode.PARAMS_ERROR, "message must not be blank");
 
         App app = requireOwnedApp(appId, loginUser);
+        if (editIntent != null) editIntent.validateMessage(message);
 
         CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(app.getCodeGenType());
         if (codeGenTypeEnum == null) {
@@ -115,13 +122,13 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         return Flux.defer(() -> {
             // 每次实际订阅代表一个新任务，禁止旧 Flux 重订阅复用已执行的请求 ID。
             String requestId = java.util.UUID.randomUUID().toString();
-            return Flux.defer(() -> executeGeneration(appId, message, loginUser, codeGenTypeEnum, requestId))
+            return Flux.defer(() -> executeGeneration(appId, message, loginUser, codeGenTypeEnum, requestId, editIntent))
                     .onErrorMap(error -> wrapGenerationError(requestId, error));
         });
     }
 
     private Flux<String> executeGeneration(Long appId, String message, SysUser loginUser,
-                                           CodeGenTypeEnum codeGenTypeEnum, String requestId) {
+                                           CodeGenTypeEnum codeGenTypeEnum, String requestId, StructuredEditIntent editIntent) {
         var lease = generationLeaseService.acquire(appId, requestId);
         boolean taskStarted = false;
         try {
@@ -143,8 +150,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             chatHistoryOriginalService.addOriginalChatMessage(appId, message,
                     ChatHistoryMessageTypeEnum.USER.getValue(), loginUser.getId());
             // 账本覆盖 Legacy/LangGraph 两条链路，模型与文件边界仍由统一网关负责。
-            Flux<String> contentStream = aiGenerationGateway.generate(message, codeGenTypeEnum, appId,
-                    loginUser.getId(), requestId);
+            Flux<String> contentStream = editIntent == null
+                    ? aiGenerationGateway.generate(message, codeGenTypeEnum, appId, loginUser.getId(), requestId)
+                    : aiGenerationGateway.generate(message, codeGenTypeEnum, appId, loginUser.getId(), requestId, editIntent);
             Flux<String> execution = streamHandlerExecutor.doExecute(contentStream, chatHistoryService,
                             chatHistoryOriginalService, appId, loginUser, codeGenTypeEnum)
                     .doOnComplete(() -> generationTaskService.finish(requestId, "SUCCEEDED", null))

@@ -6,6 +6,7 @@ import com.mybatisflex.core.service.IService;
 import com.yupi.yuaicodemother.model.dto.app.AppAddRequest;
 import com.yupi.yuaicodemother.model.dto.app.AppAdminUpdateRequest;
 import com.yupi.yuaicodemother.model.dto.app.AppQueryRequest;
+import com.yupi.yuaicodemother.model.dto.app.StructuredEditIntent;
 import com.yupi.yuaicodemother.model.dto.app.AppUserUpdateRequest;
 import com.yupi.yuaicodemother.model.entity.App;
 import com.yupi.yuaicodemother.model.entity.SysUser;
@@ -57,6 +58,9 @@ public interface AppService extends IService<App> {
      * @return 流式生成的代码
      */
     public Flux<String> chatToGenCode(Long appId, String message, SysUser loginUser);
+
+    /** 可视化属性编辑仍使用原有权限、任务与聊天历史链路。 */
+    Flux<String> chatToGenCode(Long appId, String message, SysUser loginUser, StructuredEditIntent editIntent);
 
     AppGenerationStatusVO cancelGeneration(Long appId, SysUser loginUser);
 

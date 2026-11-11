@@ -6,6 +6,7 @@ import com.yupi.yuaicodemother.config.AiEngineProperties;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
 import com.yupi.yuaicodemother.core.handler.SimpleTextStreamHandler;
 import com.yupi.yuaicodemother.model.entity.SysUser;
+import com.yupi.yuaicodemother.model.dto.app.StructuredEditIntent;
 import com.yupi.yuaicodemother.service.ChatHistoryService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -34,6 +35,31 @@ import static org.mockito.ArgumentMatchers.*;
 class LangGraphAiGenerationGatewayTest {
     private HttpServer server;
     private ExecutorService serverExecutor;
+
+    @Test
+    void forwardsIntentAtTopLevelAndOmitsItForOrdinaryRequests() throws Exception {
+        var mapper = new ObjectMapper();
+        var received = new AtomicReference<com.fasterxml.jackson.databind.JsonNode>();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/internal/v1/generations:stream", exchange -> {
+            received.set(mapper.readTree(exchange.getRequestBody()));
+            byte[] response = event("completed", "{}").getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        var properties = new AiEngineProperties();
+        properties.setServiceUrl("http://127.0.0.1:" + server.getAddress().getPort());
+        var gateway = new LangGraphAiGenerationGateway(properties, mapper);
+        var intent = new StructuredEditIntent("1", "body > p:nth-of-type(1)", "color", "#ABC123");
+        gateway.generate(intent.canonicalMessage(), CodeGenTypeEnum.HTML, 42L, 7L, "req-edit", intent).blockLast();
+        assertEquals(mapper.valueToTree(intent), received.get().get("editIntent"));
+        assertEquals(intent.canonicalMessage(), received.get().get("prompt").asText());
+        assertFalse(received.get().get("metadata").has("editIntent"));
+        gateway.generate("ordinary request", CodeGenTypeEnum.HTML, 42L, 7L, "req-old").blockLast();
+        assertFalse(received.get().has("editIntent"));
+    }
 
     @Test
     void preparationProgressIsDisplayOnlyAcrossStaticBranches() throws Exception {

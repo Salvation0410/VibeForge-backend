@@ -1,6 +1,8 @@
 package com.yupi.yuaicodemother.ai.gateway;
 
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
+import com.yupi.yuaicodemother.exception.ErrorCode;
+import com.yupi.yuaicodemother.model.dto.app.StructuredEditIntent;
 import reactor.core.publisher.Flux;
 
 /**
@@ -29,6 +31,16 @@ public interface AiGenerationGateway {
      * @return 可被既有 SSE 处理链消费的字符串数据流
      */
     Flux<String> generate(String prompt, CodeGenTypeEnum codeGenType, Long appId, Long userId, String requestId);
+
+    /** 旧引擎必须明确拒绝尚不支持的编辑协议，不能静默丢弃结构化意图。 */
+    default Flux<String> generate(String prompt, CodeGenTypeEnum codeGenType, Long appId, Long userId,
+                                  String requestId, StructuredEditIntent editIntent) {
+        if (editIntent != null) {
+            return Flux.error(new GenerationStreamException(ErrorCode.PARAMS_ERROR.getCode(),
+                    "STRUCTURED_EDIT_UNSUPPORTED", requestId, "当前生成引擎不支持可视化属性修改，请切换到 LangGraph 引擎", null));
+        }
+        return generate(prompt, codeGenType, appId, userId, requestId);
+    }
 
     /**
      * 请求取消正在运行的生成；不支持主动中断的引擎至少应阻止后续发布。

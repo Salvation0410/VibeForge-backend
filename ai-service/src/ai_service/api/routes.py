@@ -201,6 +201,10 @@ def register_routes(
     ) -> JSONResponse:
         if request.url.path.startswith("/internal/v1/customer-service/"):
             return _stable_error("INVALID_REQUEST", status_code=422)
+        if (request.url.path == "/internal/v1/generations:stream" and isinstance(error.body, dict)
+                and ("editIntent" in error.body or "edit_intent" in error.body)):
+            # 结构化请求的跨字段校验可能携带整份输入，不把需求/元数据回显进错误详情。
+            return _stable_error("STRUCTURED_EDIT_INVALID", status_code=422)
         return await request_validation_exception_handler(request, error)
 
     app.add_exception_handler(RequestValidationError, validation_error_handler)

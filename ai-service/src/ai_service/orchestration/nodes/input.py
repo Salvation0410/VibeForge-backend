@@ -6,6 +6,7 @@ from typing import Any, TYPE_CHECKING
 from ai_service.orchestration.events import EventEmitter
 from ai_service.orchestration.state import WorkflowState
 from ai_service.orchestration.image_intent import declines_image_assets, requests_image_assets
+from ai_service.models.structured_edit import validated_edit_intent, require_edit_artifact
 
 if TYPE_CHECKING:
     from ai_service.orchestration.workflow import GenerationWorkflow
@@ -21,6 +22,8 @@ def create_input_nodes(
 ) -> dict[str, Any]:
     """绑定单次请求依赖，节点闭包不进入图状态或检查点。"""
     async def input_guard(state: WorkflowState) -> dict[str, Any]:
+        if state.get("edit_intent") is not None:
+            validated_edit_intent(state["edit_intent"], state["prompt"])
         result = await workflow.input_reviewer.review(
             state["prompt"], request_id=state["request_id"], code_gen_type=state["code_gen_type"],
             conversation=state.get("conversation", []), metadata=state.get("metadata", {}),
@@ -43,6 +46,8 @@ def create_input_nodes(
             f"{state['request_id']}:artifact_context",
         )
         # 首次生成默认配图，但尊重明确不配图要求；后续明确新增指令仍可覆盖前句否定。
+        if state.get("edit_intent") is not None:
+            require_edit_artifact(current_artifact, state["code_gen_type"])
         image_assets = []
         needs_images = state["code_gen_type"] == "VUE_PROJECT" and (
             (not current_artifact.get("exists", False) and not declines_image_assets(state["prompt"]))
@@ -78,6 +83,7 @@ def create_input_nodes(
                 "metadata": state.get("metadata", {}),
                 "currentArtifact": current_artifact,
                 "imageAssets": image_assets,
+                **({"editIntent": state["edit_intent"]} if state.get("edit_intent") is not None else {}),
             }
         }
 

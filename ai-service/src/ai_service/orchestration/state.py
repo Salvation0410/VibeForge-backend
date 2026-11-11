@@ -11,6 +11,7 @@ class WorkflowState(TypedDict, total=False):
     code_gen_type: str
     conversation: list[dict[str, Any]]
     metadata: dict[str, Any]
+    edit_intent: dict[str, str]
     context: dict[str, Any]
     artifact: str
     validation: dict[str, Any]

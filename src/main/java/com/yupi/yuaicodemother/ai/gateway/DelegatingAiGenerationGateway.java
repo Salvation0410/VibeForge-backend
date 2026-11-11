@@ -2,6 +2,7 @@ package com.yupi.yuaicodemother.ai.gateway;
 
 import com.yupi.yuaicodemother.config.AiEngineProperties;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
+import com.yupi.yuaicodemother.model.dto.app.StructuredEditIntent;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
@@ -51,6 +52,14 @@ public class DelegatingAiGenerationGateway implements AiGenerationGateway {
     @Override
     public Flux<String> generate(String prompt, CodeGenTypeEnum codeGenType, Long appId, Long userId, String requestId) {
         return delegate(appId, userId, requestId).generate(prompt, codeGenType, appId, userId, requestId);
+    }
+
+    /** 结构化请求沿用相同灰度选择，不降级成普通生成请求。 */
+    @Override
+    public Flux<String> generate(String prompt, CodeGenTypeEnum codeGenType, Long appId, Long userId,
+                                 String requestId, StructuredEditIntent editIntent) {
+        if (editIntent == null) return generate(prompt, codeGenType, appId, userId, requestId);
+        return delegate(appId, userId, requestId).generate(prompt, codeGenType, appId, userId, requestId, editIntent);
     }
 
     /** 将取消请求发送给本次请求确定性选中的同一生成引擎。 */

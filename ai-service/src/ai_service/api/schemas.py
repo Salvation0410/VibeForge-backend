@@ -6,6 +6,7 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from ai_service.models.structured_edit import StructuredEditIntent
 
 
 class ApiModel(BaseModel):
@@ -52,6 +53,13 @@ class GenerationRequest(ApiModel):
     code_gen_type: CodeGenType
     conversation: list[ChatMessage] = Field(default_factory=list, max_length=200)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    edit_intent: StructuredEditIntent | None = None
+
+    @model_validator(mode="after")
+    def check_edit_prompt(self):
+        if self.edit_intent is not None and self.prompt != self.edit_intent.canonical_prompt():
+            raise ValueError("STRUCTURED_EDIT_PROMPT_MISMATCH")
+        return self
 
 
 class CancelRequest(ApiModel):

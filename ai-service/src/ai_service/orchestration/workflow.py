@@ -130,6 +130,8 @@ class GenerationWorkflow:
             "repair_count": 0,
             "tool_call_count": 0,
         }
+        if request.edit_intent is not None:
+            initial["edit_intent"] = request.edit_intent.model_dump()
         try:
             with tracing_context(enabled=False):
                 await graph.ainvoke(initial, config={"configurable": {"thread_id": thread_id}})

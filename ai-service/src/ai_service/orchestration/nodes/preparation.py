@@ -9,6 +9,7 @@ from time import monotonic
 from ai_service.models.generation_brief import rewrite_context, validate_brief
 from ai_service.models.input_review import InputReviewError
 from ai_service.models.rewrite_policy import should_skip_rewrite
+from ai_service.models.structured_edit import validated_edit_intent, require_edit_artifact
 from ai_service.models.preparation_diagnostics import (
     PreparationFailure, preparation_trace_metadata, safe_preparation_diagnostics, trusted_skill_ids,
 )
@@ -40,6 +41,10 @@ async def _observe(workflow, diagnostic, started_at):
 def create_preparation_node(workflow, emitter, thread_id):
     async def prepare(state, diagnostic):
         context = dict(state["context"])
+        explicit_edit = state.get("edit_intent")
+        if explicit_edit is not None:
+            validated_edit_intent(explicit_edit, context["prompt"])
+            require_edit_artifact(context.get("currentArtifact", {}), state["code_gen_type"])
         # 同一检查点再次进入节点时复用已解析结果，避免重复模型调用。
         if "generationPreparation" in context:
             if diagnostic is not None:
@@ -54,7 +59,7 @@ def create_preparation_node(workflow, emitter, thread_id):
                     if status in {"ready", "fallback", "disabled", "skipped"}:
                         diagnostic.update(rewriteStatus=status, reason={
                             "ready": "NONE", "fallback": "PROVIDER_ERROR", "disabled": "DISABLED",
-                            "skipped": "SIMPLE_EDIT"}[status],
+                            "skipped": "STRUCTURED_EDIT" if explicit_edit is not None else "SIMPLE_EDIT"}[status],
                             skillIds=trusted_skill_ids(prepared.get("skills")))
             return {"context": context}
         settings = workflow.settings
@@ -68,14 +73,15 @@ def create_preparation_node(workflow, emitter, thread_id):
         if diagnostic is not None:
             diagnostic["skillIds"] = trusted_skill_ids(prepared["skills"])
         source["selectedSkills"] = prepared["skills"]
-        skip_rewrite = (settings.prompt_rewrite_enabled
-                        and getattr(settings, "prompt_rewrite_policy", "always") == "conservative"
-                        and should_skip_rewrite(context))
+        structured_skip = explicit_edit is not None and getattr(settings, "structured_edit_enabled", True)
+        skip_rewrite = settings.prompt_rewrite_enabled and (structured_skip or (
+                        getattr(settings, "prompt_rewrite_policy", "always") == "conservative"
+                        and should_skip_rewrite(context)))
         if skip_rewrite:
             # 跳过仅省去辅助摘要，不删除原文、保留规则，也不跳过后续生成和校验。
             prepared["rewriteStatus"] = "skipped"
             if diagnostic is not None:
-                diagnostic.update(rewriteStatus="skipped", reason="SIMPLE_EDIT")
+                diagnostic.update(rewriteStatus="skipped", reason="STRUCTURED_EDIT" if structured_skip else "SIMPLE_EDIT")
         await emitter.emit("node_status", "generation_prepare", data={
             "status": "progress", "message": "正在整理需求与页面设计要点。" if settings.prompt_rewrite_enabled and not skip_rewrite
             else "正在准备页面设计与实现要点。"})

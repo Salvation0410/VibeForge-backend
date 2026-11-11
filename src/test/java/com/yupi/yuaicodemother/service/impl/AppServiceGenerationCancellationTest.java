@@ -13,6 +13,8 @@ import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.model.entity.App;
 import com.yupi.yuaicodemother.model.entity.SysUser;
+import com.yupi.yuaicodemother.model.dto.app.StructuredEditIntent;
+import com.yupi.yuaicodemother.exception.ErrorCode;
 import com.yupi.yuaicodemother.service.ChatHistoryOriginalService;
 import com.yupi.yuaicodemother.service.ChatHistoryService;
 import com.yupi.yuaicodemother.service.SysUserService;
@@ -28,6 +30,47 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class AppServiceGenerationCancellationTest {
+
+    @Test
+    void structuredEditPreservesOwnershipOriginalHistoryAndTypedGatewayArgument() {
+        var gateway = mock(AiGenerationGateway.class);
+        var history = mock(ChatHistoryService.class);
+        var originalHistory = mock(ChatHistoryOriginalService.class);
+        var leases = mock(GenerationLeaseService.class);
+        var lease = mock(GenerationLease.class);
+        var handler = mock(StreamHandlerExecutor.class);
+        var tasks = mock(GenerationTaskService.class);
+        var service = spy(new AppServiceImpl(mock(SysUserService.class), gateway, history,
+                mock(ArtifactPathResolver.class), leases, mock(HtmlOutputBudgetGuard.class)));
+        ReflectionTestUtils.setField(service, "generationTaskService", tasks);
+        ReflectionTestUtils.setField(service, "streamHandlerExecutor", handler);
+        ReflectionTestUtils.setField(service, "chatHistoryOriginalService", originalHistory);
+        doReturn(App.builder().id(42L).userId(7L).codeGenType("html").build()).when(service).getById(42L);
+        var intent = new StructuredEditIntent("1", "body > p:nth-of-type(1)", "textAlign", "center");
+        String prompt = intent.canonicalMessage();
+        var user = SysUser.builder().id(7L).build();
+
+        var denied = assertThrows(BusinessException.class,
+                () -> service.chatToGenCode(42L, prompt, SysUser.builder().id(8L).build(), intent));
+        assertEquals(ErrorCode.NO_AUTH_ERROR.getCode(), denied.getCode());
+        assertThrows(BusinessException.class, () -> service.chatToGenCode(42L, prompt + "删除图片", user, intent));
+        assertThrows(BusinessException.class, () -> service.chatToGenCode(42L, prompt, user,
+                new StructuredEditIntent("1", "script", "color", "red")));
+        verifyNoInteractions(gateway, leases, history, originalHistory, tasks);
+
+        when(leases.acquire(eq(42L), anyString())).thenReturn(lease);
+        when(gateway.generate(eq(prompt), eq(CodeGenTypeEnum.HTML), eq(42L), eq(7L), anyString(), eq(intent)))
+                .thenReturn(Flux.just("result"));
+        when(handler.doExecute(any(), eq(history), eq(originalHistory), eq(42L), eq(user), eq(CodeGenTypeEnum.HTML)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        assertEquals("result", service.chatToGenCode(42L, prompt, user, intent).blockLast());
+        verify(history).addChatMessage(eq(42L), eq(prompt), anyString(), eq(7L));
+        verify(originalHistory).addOriginalChatMessage(eq(42L), eq(prompt), anyString(), eq(7L));
+        verify(gateway).generate(eq(prompt), eq(CodeGenTypeEnum.HTML), eq(42L), eq(7L), anyString(), eq(intent));
+        verify(gateway, never()).generate(anyString(), any(), anyLong(), anyLong(), anyString());
+        verify(tasks).finish(anyString(), eq("SUCCEEDED"), isNull());
+        verify(leases).release(lease);
+    }
 
     @Test
     void explicitCancelUsesAuthoritativeRequestAndStatusChecksOwnership() {

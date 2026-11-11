@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yupi.yuaicodemother.config.AiEngineProperties;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
+import com.yupi.yuaicodemother.model.dto.app.StructuredEditIntent;
 import com.yupi.yuaicodemother.exception.ErrorCode;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import jakarta.annotation.Resource;
@@ -94,6 +95,14 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
      */
     @Override
     public Flux<String> generate(String prompt, CodeGenTypeEnum codeGenType, Long appId, Long userId, String requestId) {
+        return generate(prompt, codeGenType, appId, userId, requestId, null);
+    }
+
+    /** 已验证的结构化意图独立传递；不与可自由扩展的 metadata 混合。 */
+    @Override
+    public Flux<String> generate(String prompt, CodeGenTypeEnum codeGenType, Long appId, Long userId,
+                                 String requestId, StructuredEditIntent editIntent) {
+        if (editIntent != null) editIntent.validateMessage(prompt);
         return Flux.create(sink -> {
             AtomicReference<CompletableFuture<HttpResponse<InputStream>>> requestFuture = new AtomicReference<>();
             AtomicReference<InputStream> responseBody = new AtomicReference<>();
@@ -106,12 +115,13 @@ public class LangGraphAiGenerationGateway implements AiGenerationGateway {
                 Map<String, Object> context = inputContextProvider == null
                         ? Map.of("conversation", java.util.List.of(), "metadata", Map.of("userId", String.valueOf(userId)))
                         : inputContextProvider.build(appId, userId, prompt, codeGenType);
-                Map<String, Object> body = Map.of(
+                Map<String, Object> body = new java.util.HashMap<>(Map.of(
                         "requestId", requestId,
                         "appId", String.valueOf(appId),
                         "prompt", prompt,
                         "codeGenType", codeGenType.name(),
-                        "conversation", context.get("conversation"), "metadata", context.get("metadata"));
+                        "conversation", context.get("conversation"), "metadata", context.get("metadata")));
+                if (editIntent != null) body.put("editIntent", editIntent);
                 HttpRequest request = buildRequest("/internal/v1/generations:stream", body);
                 CompletableFuture<HttpResponse<InputStream>> pending = httpClient.sendAsync(
                         request, HttpResponse.BodyHandlers.ofInputStream());

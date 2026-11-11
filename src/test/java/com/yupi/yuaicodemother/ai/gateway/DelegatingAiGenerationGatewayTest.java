@@ -2,6 +2,9 @@ package com.yupi.yuaicodemother.ai.gateway;
 
 import com.yupi.yuaicodemother.config.AiEngineProperties;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
+import com.yupi.yuaicodemother.model.dto.app.StructuredEditIntent;
+import com.yupi.yuaicodemother.core.AiCodeGeneratorFacade;
+import com.yupi.yuaicodemother.ai.AiCodeGenTypeRoutingServiceFactory;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 
@@ -14,6 +17,28 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 class DelegatingAiGenerationGatewayTest {
+    @Test
+    void structuredEditUsesSelectedEngineAndLegacyRejectsBeforeFacade() {
+        var intent = new StructuredEditIntent("1", "body > p:nth-of-type(1)", "fontSize", "24px");
+        var facade = mock(AiCodeGeneratorFacade.class);
+        var legacy = new LegacyAiGenerationGateway(facade, mock(AiCodeGenTypeRoutingServiceFactory.class));
+        var langGraph = mock(LangGraphAiGenerationGateway.class);
+        var properties = properties("langgraph", 0, "x");
+        var gateway = new DelegatingAiGenerationGateway(properties, legacy, langGraph);
+        when(langGraph.generate(intent.canonicalMessage(), CodeGenTypeEnum.HTML, 42L, 7L, "req-edit", intent))
+                .thenReturn(Flux.just("ok"));
+        assertEquals("ok", gateway.generate(intent.canonicalMessage(), CodeGenTypeEnum.HTML,
+                42L, 7L, "req-edit", intent).blockLast());
+        verify(langGraph).generate(intent.canonicalMessage(), CodeGenTypeEnum.HTML, 42L, 7L, "req-edit", intent);
+        properties.setEngine("legacy");
+        var error = org.junit.jupiter.api.Assertions.assertThrows(GenerationStreamException.class,
+                () -> gateway.generate(intent.canonicalMessage(), CodeGenTypeEnum.HTML,
+                        42L, 7L, "req-legacy", intent).blockLast());
+        assertEquals("STRUCTURED_EDIT_UNSUPPORTED", error.getErrorCode());
+        assertEquals("req-legacy", error.getRequestId());
+        verifyNoInteractions(facade);
+    }
+
     @Test
     void sameUserUsesSameEngineAcrossRequestIds() {
         AiEngineProperties properties = properties("gray", 50, "stable-test");

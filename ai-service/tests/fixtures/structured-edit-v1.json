@@ -1,0 +1,152 @@
+{
+  "schemaVersion": "structured-edit-fixtures/v1",
+  "valid": [
+    {
+      "intent": {
+        "version": "1",
+        "selector": "body > main:nth-of-type(1) > button:nth-of-type(2)",
+        "property": "color",
+        "value": "#12aBcF"
+      },
+      "message": "请只修改选中元素的文字颜色为“#12aBcF”。\n元素定位：body > main:nth-of-type(1) > button:nth-of-type(2)\n保留原有功能、文字、图片和操作方式，其余内容不变。请先确认定位唯一，无法唯一定位时不要修改。"
+    },
+    {
+      "intent": {
+        "version": "1",
+        "selector": "body > div:nth-of-type(1)",
+        "property": "backgroundColor",
+        "value": "#ffffff"
+      },
+      "message": "请只修改选中元素的背景颜色为“#ffffff”。\n元素定位：body > div:nth-of-type(1)\n保留原有功能、文字、图片和操作方式，其余内容不变。请先确认定位唯一，无法唯一定位时不要修改。"
+    },
+    {
+      "intent": {
+        "version": "1",
+        "selector": "body > h1:nth-of-type(1)",
+        "property": "fontSize",
+        "value": "24px"
+      },
+      "message": "请只修改选中元素的字号为“24px”。\n元素定位：body > h1:nth-of-type(1)\n保留原有功能、文字、图片和操作方式，其余内容不变。请先确认定位唯一，无法唯一定位时不要修改。"
+    },
+    {
+      "intent": {
+        "version": "1",
+        "selector": "body > p:nth-of-type(3)",
+        "property": "textAlign",
+        "value": "center"
+      },
+      "message": "请只修改选中元素的对齐方式为“center”。\n元素定位：body > p:nth-of-type(3)\n保留原有功能、文字、图片和操作方式，其余内容不变。请先确认定位唯一，无法唯一定位时不要修改。"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "unknown-field",
+      "intent": {
+        "version": "1",
+        "selector": "body > main:nth-of-type(1) > button:nth-of-type(2)",
+        "property": "color",
+        "value": "#12aBcF",
+        "trusted": true
+      }
+    },
+    {
+      "name": "wrong-version",
+      "intent": {
+        "version": "2",
+        "selector": "body > main:nth-of-type(1) > button:nth-of-type(2)",
+        "property": "color",
+        "value": "#12aBcF"
+      }
+    },
+    {
+      "name": "wildcard",
+      "intent": {
+        "version": "1",
+        "selector": "*",
+        "property": "color",
+        "value": "#12aBcF"
+      }
+    },
+    {
+      "name": "no-child",
+      "intent": {
+        "version": "1",
+        "selector": "body",
+        "property": "color",
+        "value": "#12aBcF"
+      }
+    },
+    {
+      "name": "script",
+      "intent": {
+        "version": "1",
+        "selector": "body > script:nth-of-type(1)",
+        "property": "color",
+        "value": "#12aBcF"
+      }
+    },
+    {
+      "name": "font-overflow",
+      "intent": {
+        "version": "1",
+        "selector": "body > main:nth-of-type(1) > button:nth-of-type(2)",
+        "property": "fontSize",
+        "value": "97px"
+      }
+    },
+    {
+      "name": "font-leading-zero",
+      "intent": {
+        "version": "1",
+        "selector": "body > main:nth-of-type(1) > button:nth-of-type(2)",
+        "property": "fontSize",
+        "value": "01px"
+      }
+    },
+    {
+      "name": "css-injection",
+      "intent": {
+        "version": "1",
+        "selector": "body > main:nth-of-type(1) > button:nth-of-type(2)",
+        "property": "color",
+        "value": "#ffffff;display:none"
+      }
+    },
+    {
+      "name": "not-string",
+      "intent": {
+        "version": "1",
+        "selector": "body > main:nth-of-type(1) > button:nth-of-type(2)",
+        "property": "color",
+        "value": 24
+      }
+    },
+    {
+      "name": "unknown-property",
+      "intent": {
+        "version": "1",
+        "selector": "body > main:nth-of-type(1) > button:nth-of-type(2)",
+        "property": "innerHTML",
+        "value": "hi"
+      }
+    },
+    {
+      "name": "newline-selector",
+      "intent": {
+        "version": "1",
+        "selector": "body > main:nth-of-type(1) > button:nth-of-type(2)\n",
+        "property": "color",
+        "value": "#12aBcF"
+      }
+    },
+    {
+      "name": "wrong-align",
+      "intent": {
+        "version": "1",
+        "selector": "body > main:nth-of-type(1) > button:nth-of-type(2)",
+        "property": "textAlign",
+        "value": "justify"
+      }
+    }
+  ]
+}

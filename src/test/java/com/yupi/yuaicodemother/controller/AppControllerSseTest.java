@@ -2,6 +2,9 @@ package com.yupi.yuaicodemother.controller;
 
 import com.yupi.yuaicodemother.ai.gateway.GenerationStreamException;
 import com.yupi.yuaicodemother.model.entity.SysUser;
+import com.yupi.yuaicodemother.model.dto.app.StructuredEditIntent;
+import com.yupi.yuaicodemother.exception.BusinessException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yupi.yuaicodemother.service.AppService;
 import com.yupi.yuaicodemother.service.SysUserService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -13,6 +16,30 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class AppControllerSseTest {
+    @Test
+    void structuredQueryIsValidatedAndForwardedWithoutChangingSse() throws Exception {
+        var controller = new AppController();
+        var service = mock(AppService.class);
+        var userService = mock(SysUserService.class);
+        var request = mock(HttpServletRequest.class);
+        var user = SysUser.builder().id(7L).build();
+        ReflectionTestUtils.setField(controller, "appService", service);
+        ReflectionTestUtils.setField(controller, "userService", userService);
+        when(userService.getLoginUser(request)).thenReturn(user);
+        var intent = new StructuredEditIntent("1", "body > p:nth-of-type(1)", "fontSize", "24px");
+        String json = new ObjectMapper().writeValueAsString(intent);
+        when(service.chatToGenCode(42L, intent.canonicalMessage(), user, intent)).thenReturn(Flux.just("chunk"));
+        var events = controller.chatToGenCode(42L, intent.canonicalMessage(), json, request).collectList().block();
+        assertEquals("done", events.getLast().event());
+        verify(service).chatToGenCode(42L, intent.canonicalMessage(), user, intent);
+        clearInvocations(service);
+        assertThrows(BusinessException.class,
+                () -> controller.chatToGenCode(42L, intent.canonicalMessage() + "额外修改", json, request));
+        assertThrows(BusinessException.class,
+                () -> controller.chatToGenCode(42L, intent.canonicalMessage(), " ".repeat(2049), request));
+        verifyNoInteractions(service);
+    }
+
     @Test
     void successEndsWithDone() {
         var fixture = fixture(Flux.just("chunk"));

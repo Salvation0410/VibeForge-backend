@@ -204,6 +204,7 @@ Invoke-RestMethod http://localhost:8000/health/ready
 | `AI_SERVICE_INPUT_PROMPT_MAX_CHARS` | `20000` | 输入字符上限 |
 | `AI_SERVICE_FRONTEND_SKILLS_ENABLED` | `true` | 加载内置、版本化的前端辅助规则 |
 | `AI_SERVICE_PROMPT_REWRITE_ENABLED` | `true` | 后台自动整理结构化需求说明，保留原文 |
+| `AI_SERVICE_STRUCTURED_EDIT_ENABLED` | `true` | 有效显式单属性编辑省去辅助重写；总重写开关优先 |
 | `AI_SERVICE_PROMPT_REWRITE_TIMEOUT_SECONDS` | `15` | 单次需求整理的超时秒数，无自动重试 |
 | `AI_SERVICE_PROMPT_REWRITE_MAX_TOKENS` | `1500` | 需求整理的模型输出额度 |
 | `AI_SERVICE_PROMPT_REWRITE_MAX_BYTES` | `8192` | 需求说明的 UTF-8 字节上限 |
@@ -301,7 +302,17 @@ uv run python -m ai_service.orchestration.rewrite_policy_evaluation --dataset ev
 
 输出父目录须存在、文件须尚不存在。`actualModelCalls` 恒为 0；`predictedAvoidedCalls` 包含误跳过，必须与 `falseSkip` 一起阅读。无分母的精确率/召回率为 null。首批 holdout-v1 已用于诊断，不再作为第二版独立证据；当前独立结果及限制见 [保守重写策略交接](../doc/generation-rewrite-policy-handoff.md)。
 
-### 三类生成与工具调用
+### 可视化结构化编辑
+
+前端在已有预览中选中元素后，可单独提交文字颜色、背景颜色、字号或对齐方式。Spring 的生成 GET 接口新增可选 `editIntent` JSON query（最多 2048 字符），Python 内部请求接收同名顶层字段；普通请求保持原路径。结构严格为四个字符串字段：`version="1"`、`selector`、`property`、`value`，拒绝未知字段。颜色仅六位十六进制，字号仅 1–96px 整数，对齐仅 left/center/right。selector 为有限 `body > tag:nth-of-type(n)` 父子路径，最多 12 段、512 字符。
+
+三端生成/核对完全相同的中文原文，不能附加自由文本；Spring 校验权限和原文，Python 在入口及工作流重验。只有顶层意图可触发跳过，metadata 中同名字段不能触发。还要求 Spring 返回已有产物；Vue 的 exists 只表示目录，因此额外要求有界 entries 清单至少包含一份 `.vue/.html/.js/.ts/.jsx/.tsx` 文件。该检查不证明可构建或 DOM 定位存在。前端核对当前 DOM 唯一匹配，后端只校验路径语法，后续模型仍须确认源码定位。
+
+默认 `AI_SERVICE_STRUCTURED_EDIT_ENABLED=true` 时，有效结构化请求标为 `skipped/STRUCTURED_EDIT`、`brief=null`、`modelAttempted=false`，与 conservative 无关。关闭此配置恢复有效请求的辅助重写；关闭总重写开关仍为 disabled。输入审核、硬预算、生成、审查、修复、构建和发布保持原流程。缓存重入复用已有准备结果，开关调整作用于新请求。Legacy 明确拒绝结构化请求（`STRUCTURED_EDIT_UNSUPPORTED`）。
+
+本轮测试与启用/回退说明见 [结构化编辑交接](../doc/generation-structured-edit-handoff.md)。尚未进行真实模型和完整应用生成验收，不承诺局部修改必然精确落到源码。
+
+### 生成分支与完成条件
 
 | 类型 | 生成方式 | 完成条件 |
 | --- | --- | --- |
