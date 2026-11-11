@@ -6,6 +6,7 @@ import multiprocessing
 import threading
 import time
 from typing import Any
+import uuid
 import weakref
 
 import numpy as np
@@ -532,21 +533,153 @@ async def test_spawn_worker_timeout_shutdown_terminates_permanent_child():
 
 
 @pytest.mark.asyncio
-async def test_spawn_worker_cancelled_request_keeps_ipc_lock_until_shutdown():
-    settings = rag_settings(rag_reranker_timeout_seconds=1)
+async def test_spawn_worker_cancelled_request_keeps_ipc_lock_until_shutdown(monkeypatch):
+    settings = cancellation_settings()
     backend = await _ProcessReranker.start(
         settings, worker_target=protocol_test_worker, shutdown_seconds=0.03,
     )
-    request = asyncio.create_task(backend.rerank(
-        "q", [chunk(0, content="block-forever")], top_n=1,
-    ))
-    await asyncio.sleep(0.03)
-    request.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await request
-    assert backend._lock.locked()
-    await backend.close()
+    receiving = observe_receive(backend, monkeypatch)
+    request = asyncio.create_task(backend.rerank("q", [chunk(0, content="block-forever")], top_n=1))
+    try:
+        # 只有实际进入接收阶段才取消，发送阶段取消有不同的释放规则。
+        await asyncio.wait_for(receiving.wait(), 5)
+        request.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(request, 5)
+        assert backend._lock.locked()
+        assert backend._drains
+        assert backend._is_alive()
+    finally:
+        await finish_process_test(backend, request)
+    assert not backend._lock.locked()
+
+
+def cancellation_settings():
+    # 只测试独立的所有者锁名称，不与本机可能运行的真实重排模型竞争。
+    return rag_settings(
+        rag_reranker_model=f"test-cancellation-{uuid.uuid4().hex}",
+        rag_reranker_timeout_seconds=10,
+    )
+
+
+def observe_receive(backend, monkeypatch):
+    receiving = asyncio.Event()
+    original = backend._receive
+
+    async def receive(timeout=None):
+        receiving.set()
+        return await original(timeout)
+
+    monkeypatch.setattr(backend, "_receive", receive)
+    return receiving
+
+
+async def finish_process_test(backend, *tasks):
+    # 即使断言失败，也回收本测试任务和真实子进程，避免污染后续所有者锁测试。
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    try:
+        await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), 5)
+    finally:
+        await asyncio.wait_for(backend.close(), 5)
+        await asyncio.wait_for(asyncio.gather(*backend._drains, *backend._sends, return_exceptions=True), 5)
     assert backend._process_closed
+    assert not backend._drains
+    assert not backend._sends
+
+
+class GatedSendConnection:
+    """在发送线程入口挂起；连接和子进程仍是真实的，门闩只选择取消阶段。"""
+
+    def __init__(self, connection):
+        self.connection = connection
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self.finished = threading.Event()
+        self.closed = asyncio.Event()
+
+    def send(self, message):
+        self.started.set()
+        try:
+            if not self.release.wait(10):
+                raise TimeoutError("发送测试门闩未释放")
+            return self.connection.send(message)
+        finally:
+            self.finished.set()
+
+    def close(self):
+        try:
+            self.connection.close()
+        finally:
+            self.closed.set()
+
+    def __getattr__(self, name):
+        return getattr(self.connection, name)
+
+
+@pytest.mark.asyncio
+async def test_spawn_worker_send_cancellation_drains_before_releasing_lock():
+    backend = await _ProcessReranker.start(
+        cancellation_settings(),
+        worker_target=protocol_test_worker, shutdown_seconds=0.03,
+    )
+    connection = GatedSendConnection(backend._connection)
+    backend._connection = connection
+    request = asyncio.create_task(backend.rerank("q", [chunk(0)], top_n=1))
+    try:
+        assert await asyncio.to_thread(connection.started.wait, 5)
+        request.cancel()
+        await asyncio.wait_for(connection.closed.wait(), 5)
+        assert backend._lock.locked()
+        assert not request.done()
+        assert not connection.finished.is_set()
+        connection.release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(request, 5)
+        assert connection.finished.is_set()
+        assert backend._process_closed
+        assert not backend._sends
+        # 发送被取消后已终止子进程并排空线程，此时释放锁才是正确行为。
+        assert not backend._lock.locked()
+        assert not backend.health_ready()
+    finally:
+        connection.release.set()
+        await finish_process_test(backend, request)
+
+
+@pytest.mark.asyncio
+async def test_spawn_worker_queued_cancellation_does_not_release_active_lock(monkeypatch):
+    backend = await _ProcessReranker.start(
+        cancellation_settings(),
+        worker_target=protocol_test_worker, shutdown_seconds=0.03,
+    )
+    receiving = observe_receive(backend, monkeypatch)
+    active = asyncio.create_task(backend.rerank("q", [chunk(0, content="block-forever")], top_n=1))
+    tasks = [active]
+    try:
+        await asyncio.wait_for(receiving.wait(), 5)
+        waiting = asyncio.Event()
+        acquire = backend._lock.acquire
+
+        async def observed_acquire():
+            waiting.set()
+            return await acquire()
+
+        monkeypatch.setattr(backend._lock, "acquire", observed_acquire)
+        queued = asyncio.create_task(backend.rerank("q", [chunk(1)], top_n=1))
+        tasks.append(queued)
+        await asyncio.wait_for(waiting.wait(), 5)
+        queued.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(queued, 5)
+        assert backend._lock.locked()
+        assert not active.done()
+        assert backend.health_ready()
+        assert not backend._drains
+        assert not backend._sends
+    finally:
+        await finish_process_test(backend, *tasks)
 
 
 @pytest.mark.asyncio
@@ -597,28 +730,49 @@ async def test_large_blocked_ipc_send_does_not_block_loop_and_aborts_child():
 
 
 @pytest.mark.asyncio
-async def test_close_cancellation_keeps_single_cleanup_task_running():
-    settings = rag_settings(rag_reranker_timeout_seconds=1)
+async def test_close_cancellation_keeps_single_cleanup_task_running(monkeypatch):
+    settings = cancellation_settings()
     backend = await _ProcessReranker.start(
         settings, worker_target=protocol_test_worker, shutdown_seconds=0.05,
     )
-    request = asyncio.create_task(backend.rerank(
-        "q", [chunk(0, content="block-forever")], top_n=1,
-    ))
-    await asyncio.sleep(0.02)
-    first_close = asyncio.create_task(backend.close())
-    await asyncio.sleep(0.01)
-    first_close.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await first_close
-    cleanup = backend._close_task
-    assert cleanup is not None
-    await asyncio.wait_for(backend.close(), 0.5)
-    assert backend._close_task is cleanup
-    assert backend._state == "closed"
-    assert backend._process_closed
-    with pytest.raises((RerankerError, asyncio.CancelledError)):
-        await request
+    receiving = observe_receive(backend, monkeypatch)
+    aborting, release = asyncio.Event(), asyncio.Event()
+    original_abort = backend._abort_process
+    abort_calls = 0
+
+    async def gated_abort():
+        nonlocal abort_calls
+        abort_calls += 1
+        aborting.set()
+        await release.wait()
+        await original_abort()
+
+    monkeypatch.setattr(backend, "_abort_process", gated_abort)
+    request = asyncio.create_task(backend.rerank("q", [chunk(0, content="block-forever")], top_n=1))
+    tasks = [request]
+    try:
+        await asyncio.wait_for(receiving.wait(), 5)
+        first_close = asyncio.create_task(backend.close())
+        tasks.append(first_close)
+        await asyncio.wait_for(aborting.wait(), 5)
+        first_close.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(first_close, 5)
+        cleanup = backend._close_task
+        assert cleanup is not None and not cleanup.done()
+        assert backend._is_alive()
+        assert backend._lock.locked()
+        release.set()
+        await asyncio.wait_for(backend.close(), 5)
+        assert backend._close_task is cleanup
+        assert abort_calls == 1
+        assert backend._state == "closed"
+        assert backend._process_closed
+        with pytest.raises(RerankerError):
+            await asyncio.wait_for(request, 5)
+    finally:
+        release.set()
+        await finish_process_test(backend, *tasks)
 
 
 @pytest.mark.asyncio

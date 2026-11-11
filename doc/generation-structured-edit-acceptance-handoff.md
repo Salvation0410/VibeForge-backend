@@ -778,3 +778,43 @@ Python compileall、uv lock --check 通过；组件环境失败和构建修复�
 收尾核对时，本轮记录的 Spring/Python/代理 PID 已不存在，8000/8123/18001/5174 无监听；本轮启动的 langgraph-postgres 已停止，5432 无监听。原 MySQL 3306、Redis 6379 保留。服务日志中此前三类 PostgreSQL 清理告警均未检出；本轮没有新取消或并发请求，不扩大其稳定性结论。前端客服三文件和原未跟踪 cancellation-drain-regression 计划保留，仅后端仓库提交本次探针、夹具和文档，未推送。
 
 后续优先稳定第 18 节出现波动的重排器取消锁回归，先用明确同步条件捕获取消分支再判断是否存在生产缺陷；本轮没有修改或宣称修复它。自然新门禁拒绝→修复→交互、自然 REPAIR_NO_PROGRESS、全部停止失败时序、长期/跨实例并发和公网部署仍未覆盖。无需为触发这些分支重复采样；下一次业务上有价值的真实请求继续沿用 **136 次**账本。自动恢复和 Vue 回滚仍未实现。
+
+## 20. 重排器取消阶段的确定性回归
+
+2026-11-11 承接 `17353e8`。本轮处理第 18 节出现过一次失败的 `test_spawn_worker_cancelled_request_keeps_ipc_lock_until_shutdown`，没有扩展真实客服模型任务。新增模型调用 **0 次**，无上限账本仍 **136**。
+
+### 20.1 已确认的问题与历史证据边界
+
+原测试启动请求后等待 30ms 就取消，随后无条件要求 IPC 锁仍持有。源码实际区分阶段：发送取消会终止子进程并排空发送线程，最后释放锁；响应等待取消才把锁交给 drain，等待响应或进程退出后释放。固定等待无法区分这两种阶段。
+
+本轮在真实发送线程入口用门闩固定取消点，沿真实 `_send` 取消收尾，确认子进程关闭、发送任务排空后，复用旧无条件持锁断言会稳定失败；同时固定进入接收后的原持锁断言通过。反例运行 **1 passed、1 failed**，保留在 `tmp/reranker-cancellation-before.log`。这证明旧断言范围过宽；第 18 节历史失败没有保存取消阶段，不能反推当时必然发生发送取消，也不能宣称修复了生产重排器根因。
+
+### 20.2 测试改动
+
+仅修改 `ai-service/tests/test_reranker.py`，生产 `reranker.py` 保持不变：
+
+- 接收取消：等待实际进入 `_receive` 后取消，检查子进程仍存活、锁由 drain 持有，关闭并排空后释放。
+- 发送取消：在发送线程入口挂起，收到连接关闭信号后确认线程未结束且请求未返回；释放门闩后确认进程关闭、发送任务排空、锁释放。
+- 排队取消：确认第二个请求进入真实锁等待，再取消；原请求和所持锁不受影响。
+- close 取消：等待真实关闭流程进入 `_abort_process` 后挂起，取消调用方，确认唯一清理任务仍运行；释放门闩并再次 close 后确认仅执行一次终止流程。
+
+测试用 UUID 模型名称隔离操作系统所有者锁；finally 释放门闩、回收请求、关闭子进程并排空 sends/drains，断言失败也不遗留该测试的活动资源。5 秒等待和 10 秒门闩保护用于报告测试超时，不作为所处阶段的证据。四项定向验证通过后追加锁名称隔离，再进行最终验证。
+
+使用真实 Windows spawn 子进程、Pipe 与操作系统锁，子进程是手写协议夹具，没有加载 CUDA/FlagEmbedding 重排模型或调用供应商。不能称为真实 GPU 重排、客服端到端或生产全部取消时序通过；生成工作流的无收尾强杀边界也没有改变。
+
+### 20.3 本轮验证、提交与后续
+
+在 `ai-service` 目录执行：
+
+```powershell
+uv run pytest tests/test_reranker.py -ra --tb=short
+uv run python -m compileall -q src
+uv lock --check
+uv run pytest -ra --tb=short
+```
+
+最终重排器全组 **38 passed、2 warnings，104.41 秒**；Python 全量首次运行 **1294 passed、14 skipped、2 warnings，207.14 秒**，compileall 和锁文件检查通过。14 项为未启用的 PostgreSQL opt-in，两条既有 Starlette/LangGraph 弃用警告保留。本轮没有运行真实模型、GPU 推理、浏览器、Java 或前端构建，不把第 19 节真实应用通过结果记为新验证。
+
+私有日志：`tmp/reranker-cancellation-before.log`、`tmp/reranker-cancellation-targeted.log`、`tmp/reranker-cancellation-suite.log`、`tmp/reranker-cancellation-full.log`；保留最初的断言反例，不提交日志。新增/修改的四个场景以 finally 和进程/任务断言确认本测试资源已回收。本轮未启动生成服务、代理或数据库，不停止用户原有服务；计数账本仍为 **136**。
+
+两仓库仅后端有本轮测试/文档改动，前端客服三文件及原未跟踪 cancellation-drain-regression 计划保留，中文提交且不推送。下一步可按独立场景扩展跨标签取消与并发证据；不要为证明新 Vue 门禁的自然拒绝→修复或 REPAIR_NO_PROGRESS 无限采样。真实 GPU 重排、全部停止失败时序、长期/跨实例并发、公网部署仍未覆盖；自动恢复和 Vue 回滚仍未实现。
