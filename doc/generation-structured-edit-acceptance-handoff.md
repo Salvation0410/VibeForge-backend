@@ -273,3 +273,49 @@ HTML 字号样例没有再次补做历史失败修改，说明当前样例通过
 回退本轮只需回退前端文案提取/新增映射及本轮测试文档，不影响 `2b080ed` 的审查协议和判重行为，也不回退产物、数据或用户客服修改。
 
 前端提交为 `3cb74c1 fix(generation): 补充质量审查与无进展失败提示`；后端本节与测试同批提交，说明为 `test(ai): 补充结构化审查真实验收与错误传递验证`，可用 `git log -1 --format='%h %s' -- doc/generation-structured-edit-acceptance-handoff.md` 查询对应哈希。
+
+## 10. 生成界面故障注入与停止预览修复
+
+2026-11-11 承接第 9.4 节第一优先级，本轮真实模型新增 **0 次**。旧账本仍为 60/60，哈希与原记录一致；新授权账本仍为 15/20，剩余 5 次，未启动代理或更改额度。
+
+### 10.1 复现与修复
+
+真实 Chrome headless 中挂载生产 `AppChatView`、Ant Design Vue、Pinia 和 Router，通过 DOM 输入、发送/停止按钮点击执行。业务 HTTP、用户、历史、预览和 EventSource 均为合成夹具；测试 Vite 无 Spring 代理，不加载真实 Cookie，不连接数据库或模型。EventSource 故意允许 close 后继续投递事件，模拟关闭时已排队的迟到回调。
+
+最初 18 项矩阵中有 **6 项失败**：HTML、MULTI_FILE、VUE_PROJECT 各自在停止直接返回 IDLE、或返回 COMMITTING 后查询为 IDLE 时，额外请求一次预览。根因是 `stopGeneration` 和 `waitForGenerationIdle` 两条分支直接调用 `loadPreviewDocument`，绕过仅成功 done 刷新的协调器；旧 iframe 内的交互状态会丢失。三个质量码和 STOPPING→IDLE 路径当时已通过，不能笼统描述成所有失败均会刷新。
+
+本轮移除这两条停止分支的自动预览同步/加载。IDLE 表示执行结束，COMMITTING 不证明发布成功；保留当前预览，提示用户可手动点击“刷新预览”查看最新结果。后台停止请求、状态轮询和聊天回源保留；未改 SSE、生成成功刷新、2000 字符/80ms 流窗口、后端发布协议或 Vue 回滚边界。
+
+### 10.2 可重复运行的浏览器测试
+
+前端新增：
+
+- `scripts/test-generation-ui.mjs`：启动回环隔离 Vite 与合成 HTTP 路由，运行本机 Chrome headless，不开放调试端口，结束时关闭 Vite。
+- `tests/browser/generationFailure.html`、`generationFailure.ts`：挂载真实页面，通过生产 API 封装和组件回调消费注入事件，输出逐场景结果。
+
+在前端仓库运行 `node scripts/test-generation-ui.mjs`。默认使用 `C:/Program Files/Google/Chrome/Application/chrome.exe`，其他安装位置用环境变量 `CHROME_PATH` 指定。缺少 Chrome、缺少结果或断言失败返回非零退出码。首次夹具启动遇到 Vue 运行时模板及依赖预构建时序问题，已改为 `h(RouterView)` 和固定依赖预构建/独立缓存，随后取得稳定矩阵结果；这些是测试设施问题，不计作生产缺陷。
+
+最终 **18 项浏览器场景全部通过**：三类生成 ×（三个质量失败码 + IDLE/STOPPING/COMMITTING 三种停止响应）。逐场景核对：
+
+1. 正确应用与生成类型的预览 URL，Vue 指向 `dist/index.html`。
+2. 质量失败显示对应中文原因和 requestId；失败/停止后重新允许发送且事件流关闭。
+3. 不新增预览请求，原 iframe 和 document 身份不变，预览内计数点击 0→1 的状态保留。
+4. 迟到 done、草稿和传输错误不刷新、不污染对话。
+5. 同一页面再次发送并成功后，预览恰好刷新一次；重复 done 不导致二次刷新。
+
+以上是实际浏览器组件级故障注入，DOM 点击并非物理鼠标，夹具不是原生网络 SSE 服务；不能称为真实 Spring/Python 取消、数据库仲裁或模型端到端验收。没有验证停止请求被拒绝/网络失败的所有竞态，也未验证真实自然 REPAIR 后模型修复的质量。
+
+### 10.3 验证、证据与后续
+
+- `node scripts/test-generation-ui.mjs`：最终 **18/18 通过**。
+- `node --test --experimental-strip-types tests/generationErrorMessage.test.ts tests/generationLifecycle.test.ts tests/generationStreamProgress.test.ts tests/previewRefreshCoordinator.test.ts tests/structuredEdit.test.ts tests/optimizePrompt.test.ts`：**27/27 通过**。
+- `npm run type-check`、`npm run build-only` 通过；保留原有社区组件混合导入和大 chunk 警告。
+- 两仓库 `git diff --check` 通过。后端仅更新设计、计划与本交接文档，未重跑 Maven/Python 或真实资源测试；未修改 Python 行为，因此不更新 AI 服务运行说明。
+
+前端忽略目录 `doc/` 保存 `generation-ui-before.json`（6 项失败）、`generation-ui-result.json`（最终结果）、`generation-ui-before.log` / `generation-ui-after.log`、`generation-ui-unit.log`、`generation-ui-build.log`。这些全为合成数据，本轮没有真实页面截图或模型请求证据。测试启动的 Vite 随脚本关闭，未启动 Spring、AI 服务或容器；前端既有客服三文件仍保留且不纳入提交。
+
+下一步优先检查停止请求失败、跨应用导航及异步回源期间的新请求竞态，并在需要时用真实后端扩展取消矩阵。自然 REPAIR 的修复质量、未覆盖属性及 PostgreSQL 清理告警仍按第 9.4 节保留。真实调用若继续使用剩余 5 次，必须复用原 15/20 账本，不能重置。
+
+回退本轮只涉及前端停止分支、测试夹具和文档；不回退客服修改、数据库、已有生成产物或审查协议。
+
+前端提交 `2a9b858 fix(generation): 停止生成时保留预览并补充浏览器故障回归`。本节随后端提交 `docs(ai): 更新生成界面故障验收与停止预览交接`，哈希可用前述文档 git log 命令查询。未推送或部署。
