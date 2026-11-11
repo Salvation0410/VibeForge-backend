@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import uuid
+from contextlib import aclosing
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -27,6 +28,7 @@ from ai_service.api.schemas import (
     RouteRequest,
     RouteResponse,
 )
+from ai_service.api.generation_response import GenerationStreamingResponse
 from ai_service.infrastructure.checkpoint import CheckpointStore
 from ai_service.models.base import GenerationModel
 from ai_service.models.input_review import InputReviewError
@@ -414,28 +416,31 @@ def register_routes(
         thread_id = f"{body.app_id}:{body.request_id}"
 
         def cancel_generation() -> None:
-            cancellations.cancel(thread_id)
-            active_generations.cancel(thread_id)
+            # 内层可能已经完成排空并清除了标记，不能在 HTTP finally 重新遗留取消状态。
+            if active_generations.is_active(thread_id):
+                cancellations.cancel(thread_id)
+                active_generations.cancel(thread_id)
 
         async def stream():
             completed = False
-            try:
-                async for event in workflow.stream(body):
-                    if await request.is_disconnected():
+            async with aclosing(workflow.stream(body)) as events:
+                try:
+                    async for event in events:
+                        if await request.is_disconnected():
+                            cancel_generation()
+                            break
+                        if event.type in {"completed", "failed"}:
+                            completed = True
+                        yield json.dumps(
+                            event.model_dump(by_alias=True, mode="json", exclude_none=True),
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ) + "\n"
+                finally:
+                    if not completed:
                         cancel_generation()
-                        break
-                    yield json.dumps(
-                        event.model_dump(by_alias=True, mode="json", exclude_none=True),
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                    ) + "\n"
-                    if event.type in {"completed", "failed"}:
-                        completed = True
-            finally:
-                if not completed:
-                    cancel_generation()
 
-        return StreamingResponse(stream(), media_type="application/x-ndjson")
+        return GenerationStreamingResponse(stream(), media_type="application/x-ndjson")
 
     @app.post(
         "/internal/v1/generations/{request_id}:cancel",

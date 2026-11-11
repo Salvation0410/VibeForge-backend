@@ -542,3 +542,46 @@ Vue 按 files 的排序键 JSON/UTF-8 计算摘要，不构成任意取消时刻
 已停止本轮 Spring/Python/代理及 PostgreSQL 容器，Vite/Chrome 随运行退出；保留原有 MySQL、Redis、其他容器及前端客服三个既有修改。未改 `.env`、未推送或公网部署。
 
 本轮完成三类四属性矩阵及所列取消/受控故障验收。自然 REPAIR→PASS 仍以第 13 节为证，本轮未触发自然 REPAIR_NO_PROGRESS，不以构造的假候选补齐真实覆盖。Vue 从零生成、部署/下载、长时间并发、全部停止失败竞态及自动恢复仍不在通过结论中。用户对本任务的无次数上限授权持续有效，但不代表需要无限重复采样或扩展到无关模型任务。
+
+## 15. 重复取消、断连与 checkpoint 事务收尾回归
+
+2026-11-11 承接第 14 节后续维护。本轮真实模型新增 **0 次**，无失败模型调用或模型重试；无上限账本仍为 **67、max_calls=null**，未启动 Spring、Python 服务、计数代理或前端浏览器。第 14 节的 19 请求与 67 次调用均为历史验收，不计作本轮修复后结果。
+
+### 15.1 确定性复现及修复范围
+
+对 `3f2e406` 的实现新增门闩测试，原两项终态等待测试保持通过，新增 **7 项失败**：停止重复注入取消、消费者重复取消、混合取消打断模型退出，及正常成功/失败的清理被迟到停止或断连中断。随后新增真实 FastAPI/Starlette ASGI 应用回归，模型退出/清理阶段 × ASGI 2.3/2.4 共 **4 项失败**。ASGI 2.4 发送异常发生在迭代器 yield 之外，原响应可能在工作流关闭前返回；ASGI 2.3 的取消作用域还会在每次等待时再次取消。
+
+修复包括：
+
+- 终态内部入队前同步进入当前执行的收尾状态，保护 `graph.ainvoke` 返回前的最后写入；无终态异常也在维护 finally 进入收尾。
+- 首次取消继续中断执行，重复停止不再次调用 `Task.cancel()`。消费者用 asyncio shield 和 AnyIO 取消屏蔽排空后台任务，再传播外层取消；收尾失败不能遗留在途登记。
+- 生成专用响应和路由显式关闭两层迭代器；内层完成后不在 HTTP finally 重建取消标记。注册冲突不启动第二份未登记执行，旧所有者不能取消或清除替代执行。
+- checkpoint 维护失败沿用原业务结果规则；即使注入的旁路观测抛出异常也尝试清理、释放标记，异常本身继续传播。
+
+事件字段、普通分片实时输出、展示/候选分离、Java SSE、三类产物发布、修复与工具预算均未变。只读核对了 Java 网关、`StaticGenerationStreamFrame` 和 `SimpleTextStreamHandler`；没有修改 Java 或前端代码。本轮不重新运行 Maven 或前端构建。
+
+### 15.2 真实数据库与证据边界
+
+本轮只额外启动已有 `langgraph-postgres` 容器，测试后已停止；启动前确认 5432、8000、8123、18001、5173 无监听，原 MySQL/Redis 与其他容器保留。测试使用私有 Settings 数据库连接，不输出连接串或凭据。
+
+新增 `test_postgres_generation_drain_integration.py` 四项：主动停止、消费者断连、正常成功、生成失败。使用真实 LangGraph 和官方 PostgreSQL saver，模型和 Spring 工具均为 Fake。在官方 DELETE 已执行、事务提交前挂起，独立连接确认仍可见旧 checkpoint，再发重复取消，释放门闩后检查唯一业务终态或外层取消、连接池可用、三张 checkpoint 物理表无本轮 thread 残留。四项与已有两项生命周期测试合计 **6 passed**，新四项未出现 checkpoint/psycopg 警告。
+
+每项使用 UUID 请求，过期扫描限制到本轮 ID，结束只清除本轮状态与 checkpoint，不修改其他生成数据。没有运行其他 PostgreSQL 子图恢复、Java MySQL/Redis opt-in 测试。ASGI 测试直接调用真实应用，断连消息/发送异常与模型、存储均是受控夹具；没有真实网络、浏览器或自然供应商时序，不能汇总成真实模型端到端通过。
+
+### 15.3 本地证据与后续范围
+
+本轮最终验证：
+
+- 定向流式/ASGI/API 回归（追加观测异常测试前）：**157 passed**。
+- `uv run python -m compileall -q src`、`uv lock --check`：通过。
+- 最终 `uv run pytest -ra --tb=short`：**1270 passed、14 skipped、2 warnings，175.34 秒**；其中 14 项为默认关闭的 PostgreSQL opt-in 测试，已单独执行的 6 项不在这次离线运行中计为通过。两条原有 Starlette/LangGraph 弃用警告保留。
+- 显式启用 PostgreSQL 后运行新增事务测试及原生命周期测试：**6 passed、2 warnings**。
+- 两仓库 `git diff --check` 通过；前端只核对工作树，不执行构建或测试。未推送或部署。
+
+忽略目录 `tmp/` 保存 `cancellation-drain-before.log`、`cancellation-asgi-before.log`、`cancellation-drain-targeted.log`、`cancellation-drain-postgres.log` 和 `cancellation-drain-pytest-final.log`。这是合成回归与数据库测试日志，不包含新增真实模型或 UI 报告；不提交这些日志，也不读取/提交 `private-runtime.json`、Cookie、密钥、生成源码或截图。
+
+本轮没有为命中罕见分支重复采样。自然 REPAIR_NO_PROGRESS 仍未覆盖；自然 REPAIR→PASS 仍引用第 13 节。Vue 从零生成、部署/下载、长期或跨实例并发、全部停止失败时序、数据库永久挂起、进程强制退出和自动恢复均未验收。保护范围是 HTTP/stream 当前进程生命周期，不承诺直接 `run()` 调试入口的任意重复取消安全；没有新增收尾超时、强杀、生产恢复或 Vue 回滚。
+
+前端既有客服三文件及后端启动时已有未跟踪计划 `docs/superpowers/plans/2026-11-11-cancellation-drain-regression.md` 均保留，不纳入本次提交。AI README、AGENTS、终态设计与本轮维护记录已同步。回退需整体回退执行登记、事件内部收尾回调、工作流排空与生成响应/路由关闭逻辑，保留上一轮终态等待；不涉及数据库迁移、模型配置、用户数据或前端回退。
+
+本轮提交说明为 `fix(ai): 保护重复取消与断连后的工作流收尾`，可用 `git log -1 --format='%h %s' -- doc/generation-structured-edit-acceptance-handoff.md` 查询对应哈希。

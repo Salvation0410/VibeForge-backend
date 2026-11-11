@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import Any
 
 from ai_service.api.schemas import EventError, GenerationEvent
@@ -8,11 +9,13 @@ from ai_service.api.schemas import EventError, GenerationEvent
 
 class EventEmitter:
     """为单次请求生成严格递增的事件序号，并可同时写入异步队列。"""
-    def __init__(self, request_id: str, queue: asyncio.Queue[GenerationEvent | None] | None = None):
+    def __init__(self, request_id: str, queue: asyncio.Queue[GenerationEvent | None] | None = None,
+                 *, on_terminal: Callable[[], None] | None = None):
         self.request_id = request_id
         self.sequence = 0
         self.events: list[GenerationEvent] = []
         self.queue = queue
+        self.on_terminal = on_terminal
 
     async def emit(
         self,
@@ -32,6 +35,9 @@ class EventEmitter:
             data=data or {},
             error=error,
         )
+        # 在入队前同步保护终态后的图写入，不能等消费者取到事件才切换收尾状态。
+        if event_type in {"completed", "failed"} and self.on_terminal is not None:
+            self.on_terminal()
         self.events.append(event)
         if self.queue is not None:
             await self.queue.put(event)

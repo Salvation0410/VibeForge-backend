@@ -34,6 +34,7 @@ ai-service/
 │   ├── api/
 │   │   ├── dependencies.py            # 内部 Bearer 鉴权
 │   │   ├── routes.py                  # 健康、路由、生成、取消与客服接口
+│   │   ├── generation_response.py     # 生成流断连后的显式关闭与收尾
 │   │   └── schemas.py                 # 请求、响应、租约及事件模型
 │   ├── contracts/
 │   │   └── internal-ai-tools-v1.json   # Spring/Python 工具 JSON Schema
@@ -238,7 +239,11 @@ input_guard -> context_prepare -> generation_prepare
 
 主图调度三个生成子图和验证修复子图，负责输入、发布与唯一成功终态。各子图使用独立输入、内部状态和输出 schema，并继承父图 checkpointer；Vue 修复也通过工具子图执行。
 
-内部 NDJSON 流的 `completed` / `failed` 终态会等待后台图执行及 checkpoint 收尾结束后再投递，避免下游收到终态立即断连时取消尚未完成的数据库操作。普通内容和进度事件仍实时发送，清理失败仍按原规则记录，不反转已确定的业务结果；真正断连和用户主动取消仍走既有取消路径。这不代表任意时刻的重复取消、数据库故障或恢复能力已通过验收。
+内部 NDJSON 流的 `completed` / `failed` 终态会等待后台图执行及 checkpoint 收尾结束后再投递。终态在内部入队前同步将当前执行标记为收尾，保护终态之后、`graph.ainvoke` 返回之前的图写入；普通内容和进度事件仍实时发送。
+
+执行中的首次主动停止或断连仍取消后台任务。重复停止不再重复注入 `Task.cancel()`；消费者退出通过 asyncio 与 AnyIO 屏蔽等待后台任务排空，外层取消随后继续传播。进入终态维护后保留在途登记，直到清理结束再释放；HTTP 路由及生成专用响应显式关闭迭代器，覆盖 ASGI 2.3 断连通知与 2.4 发送失败，避免依赖垃圾回收收尾。checkpoint 清理失败仍按原规则记录，不反转已确定的业务结果。
+
+这些保护只约束当前进程的生成流生命周期，不撤销 Spring 副作用，不新增恢复、超时强杀或收尾时限；数据库永久挂起、进程强制退出和全部并发时序仍无恢复保证。直接 `run()` 调试调用不具有与 HTTP 流相同的重复取消屏蔽。真实 PostgreSQL 受控事务测试使用 Fake 模型/工具，不能代替真实模型端到端验收。
 
 ### 输入校验与语义审核
 
@@ -524,6 +529,18 @@ uv run pytest tests/test_postgres_checkpoint_integration.py tests/test_postgres_
 ```
 
 上述测试连接真实 PostgreSQL，模型和 Spring 工具仍使用 Fake。Redis 工具幂等、MySQL 任务及发布的集成测试属于 Spring，入口见 [AGENTS.md](../AGENTS.md)。
+
+生成收尾的确定性回归和真实 PostgreSQL 删除事务门闩测试可分别运行：
+
+```powershell
+uv run pytest tests/test_stream_terminal_cleanup.py tests/test_generation_asgi_disconnect.py -ra
+# 仅在准备好独立 PostgreSQL 后显式启用；模型与工具仍为 Fake。
+$env:AI_SERVICE_POSTGRES_INTEGRATION = "true"
+uv run pytest tests/test_postgres_generation_drain_integration.py -ra
+Remove-Item Env:AI_SERVICE_POSTGRES_INTEGRATION
+```
+
+事务测试为每项创建唯一请求标识，限制过期扫描到本轮标识；在官方 saver 删除语句完成、事务提交前暂停，再注入取消。结束后以独立连接核对三张 checkpoint 表和连接池可用性，仅清除本轮记录。ASGI 测试直接调用真实应用与响应类，不连接网络、Spring 或浏览器。
 
 客服离线指标由 `customer_service_evaluation.py` 计算，合成夹具位于 `tests/fixtures/customer_service_eval.json`。产品语料可运行无外部连接的结构校验：
 

@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
 from typing import Any
 
+from anyio import CancelScope
 from langgraph.graph import END, START, StateGraph
 from langsmith import tracing_context
 
@@ -37,6 +38,24 @@ from ai_service.orchestration.nodes.publication import create_publication_nodes
 from ai_service.orchestration.vue_tool_loop import run_vue_tool_loop
 
 logger = logging.getLogger(__name__)
+
+
+async def _drain_generation(task: asyncio.Task[None]) -> None:
+    """屏蔽传输层重复取消，排空唯一后台任务后再向外传播取消或执行异常。"""
+    interrupted: asyncio.CancelledError | None = None
+    # Starlette 的 AnyIO 取消作用域会在每个等待点重新取消，需同时屏蔽作用域取消。
+    with CancelScope(shield=True):
+        waiter = asyncio.gather(task, return_exceptions=True)
+        while not waiter.done():
+            try:
+                await asyncio.shield(waiter)
+            except asyncio.CancelledError as exc:
+                interrupted = exc
+        result = waiter.result()[0]
+    if interrupted is not None:
+        raise interrupted
+    if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
+        raise result
 
 
 def _stable_error_code(exc: Exception) -> str:
@@ -78,8 +97,9 @@ class GenerationWorkflow:
     async def stream(self, request: GenerationRequest) -> AsyncIterator[GenerationEvent]:
         """在后台执行工作流，并按产生顺序异步返回事件。"""
         queue: asyncio.Queue[GenerationEvent | None] = asyncio.Queue()
-        emitter = EventEmitter(request.request_id, queue)
         thread_id = f"{request.app_id}:{request.request_id}"
+        emitter = EventEmitter(request.request_id, queue, on_terminal=lambda:
+                               self.active_generations.begin_draining(thread_id, task))
 
         async def execute() -> None:
             try:
@@ -88,7 +108,13 @@ class GenerationWorkflow:
                 await queue.put(None)
 
         task = asyncio.create_task(execute())
-        self.active_generations.register(thread_id, task)
+        try:
+            self.active_generations.register(thread_id, task)
+        except BaseException:
+            # 登记冲突时新任务尚未获得执行机会，不留下未登记的模型调用。
+            task.cancel()
+            await _drain_generation(task)
+            raise
         terminal_event: GenerationEvent | None = None
         try:
             while True:
@@ -100,17 +126,15 @@ class GenerationWorkflow:
                     terminal_event = event
                     continue
                 yield event
-            await task
+            await asyncio.shield(task)
             if terminal_event is not None:
                 yield terminal_event
         finally:
-            if not task.done():
-                task.cancel()
+            self.active_generations.cancel(thread_id, task)
             try:
-                await task
-            except asyncio.CancelledError:
-                pass
-            self.active_generations.clear(thread_id, task)
+                await _drain_generation(task)
+            finally:
+                self.active_generations.clear(thread_id, task)
 
     async def _execute(
         self,
@@ -173,6 +197,17 @@ class GenerationWorkflow:
                                      message=exc.user_message if isinstance(exc, InputReviewError) else str(exc)),
                 )
         finally:
+            self.active_generations.begin_draining(thread_id, asyncio.current_task())
+            try:
+                await self._finish_execution(request, emitter, terminal, started_at, trace_status, trace_error)
+            finally:
+                # 清理或旁路观测异常也不能遗留协作取消标记。
+                self.cancellations.clear(thread_id)
+
+    async def _finish_execution(self, request, emitter, terminal, started_at, trace_status, trace_error):
+        """终态维护不再接受主动取消；checkpoint 清理无论旁路追踪是否成功都要尝试。"""
+        thread_id = f"{request.app_id}:{request.request_id}"
+        try:
             if self.tracer is not None:
                 if emitter.events and emitter.events[-1].error is not None:
                     trace_error = emitter.events[-1].error.code
@@ -189,13 +224,12 @@ class GenerationWorkflow:
                     error_code=None if terminal.get("completed") else trace_error,
                     started_at=started_at,
                 )
+        finally:
             # checkpoint 清理属于终态维护动作，失败不能覆盖业务终态。
             try:
                 await self.checkpoint.cleanup_graph(thread_id)
             except Exception as exc:
                 logger.warning("Failed to clean graph checkpoint for thread %s: %s", thread_id, exc)
-            # 请求进入明确终态或任务被取消后立即释放注册表标记，避免唯一 requestId 长期累积。
-            self.cancellations.clear(thread_id)
 
     def _build_graph(self, emitter: EventEmitter, thread_id: str, terminal: dict[str, Any]):
         """主图仅调度输入、生成子图、验证修复子图、发布和成功终态。"""
