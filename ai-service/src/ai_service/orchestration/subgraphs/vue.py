@@ -66,6 +66,7 @@ def build_vue_tool_subgraph(workflow, emitter, thread_id, terminal, *, node="vue
     builder.add_node("initialize", initialize, input_schema=RepairInput if is_repair else GenerationInput)
     for name, action in create_vue_loop_nodes(
         workflow, emitter, thread_id, node, invoke_model=invoke_model, repair_read_guard=is_repair,
+        repair_write_guard=is_repair,
     ).items():
         builder.add_node(name, action)
     builder.add_node("finish", finish)

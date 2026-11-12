@@ -2795,7 +2795,8 @@ def test_vue_repair_executes_file_tools_through_spring(app_factory, auth_headers
         call for call in gateway.calls
         if call["toolCallId"].startswith("req-1:vue-repair:1:")
     ]
-    assert [call["name"] for call in repair_calls] == ["file_read", "file_modify"]
+    assert [call["name"] for call in repair_calls] == ["file_read", "file_modify", "vue_source_snapshot"]
+    assert repair_calls[-1]["toolCallId"] == "req-1:vue-repair:1:source-snapshot:2"
     assert all(call["arguments"]["codeGenType"] == "VUE_PROJECT" for call in repair_calls)
     repair_model_calls = [data for name, data in model.calls if name == "repair"]
     assert repair_model_calls[1]["context"]["toolResults"][0]["tool"] == "file_read"

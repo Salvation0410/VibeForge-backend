@@ -70,6 +70,7 @@ async def test_repair_phase_discards_previous_feedback_but_keeps_current_retry(
     assert result["repair_count"] == previous_repairs + 1
     assert result["tool_call_count"] == 8
     assert result["build"] == {}
-    assert len(gateway.calls) == 1
+    assert len(gateway.calls) == 2
     assert gateway.calls[0]["toolCallId"] == f"subgraph-test:vue-repair:{previous_repairs + 1}:1"
+    assert gateway.calls[1]["name"] == "vue_source_snapshot"
     assert context == before

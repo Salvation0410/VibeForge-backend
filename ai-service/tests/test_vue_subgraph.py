@@ -134,7 +134,8 @@ async def test_rebuild_parent_resumes_saved_turn_and_batch_without_repeating_wor
     calls_after = len([call for call in model.calls if call[0] == ("repair" if repair else "generate")])
     assert calls_after == calls_before + 1
     prefix = "subgraph-test:vue-repair:1" if repair else "subgraph-test:vue-generate"
-    calls = [call for call in workflow.tool_gateway.calls if call["toolCallId"].startswith(prefix)]
+    calls = [call for call in workflow.tool_gateway.calls if call["toolCallId"].startswith(prefix)
+             and call["name"] != "vue_source_snapshot"]
     assert [call["toolCallId"] for call in calls] == [f"{prefix}:1", f"{prefix}:2"]
     assert [event.sequence for event in emitter.events] == list(range(1, len(emitter.events) + 1))
     assert sum(event.type == "completed" for event in emitter.events) == 1

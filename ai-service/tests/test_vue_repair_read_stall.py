@@ -148,7 +148,9 @@ async def test_repair_repeated_reads_return_to_build_before_tool_budget_exhausti
     builds = [c for c in gateway.calls if c["name"] == "project_build"]
     assert len(builds) == (2 if fixed else 3)
     assert len({c["toolCallId"] for c in builds}) == len(builds)
-    repairs = [c for c in gateway.calls if ":vue-repair:" in c["toolCallId"]]
+    repairs = [c for c in gateway.calls if ":vue-repair:" in c["toolCallId"]
+               and c["name"] != "vue_source_snapshot"]
     assert len(repairs) == (7 if fixed else 14)
+    assert sum(":source-snapshot:" in c["toolCallId"] for c in gateway.calls) == (1 if fixed else 2)
     assert len([c for c in model.calls if c[0] == "review"]) == (1 if fixed else 0)
     assert sum(e.type in {"completed", "failed"} for e in events) == 1

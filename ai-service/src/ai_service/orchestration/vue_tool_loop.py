@@ -9,6 +9,7 @@ from typing import Any, TYPE_CHECKING, TypedDict
 
 from ai_service.models.tool_contract import validate_vue_tool_call
 from ai_service.orchestration.routing import _raise_for_incomplete_model_turn
+from ai_service.orchestration.repair_progress import vue_snapshot_fingerprint
 from ai_service.orchestration.vue_read_stall import repair_reads_stalled
 from ai_service.orchestration.subgraphs.schemas import RepairState
 
@@ -37,6 +38,8 @@ class VueLoopProgress(TypedDict):
     next_step: str
     call_id_prefix: str
     started_at: str
+    batch_has_successful_write: bool
+    write_fingerprints: list[str]
 
 
 class VueLoopState(RepairState, total=False):
@@ -54,12 +57,13 @@ def initial_progress(context: dict[str, Any], prefix: str, started_at: str) -> V
         "image_used": bool(context.get("imageAssetsApplied")) or not bool(context.get("imageAssets")),
         "turn": {}, "pending_tools": [], "tool_cursor": 0, "next_step": "model_turn",
         "call_id_prefix": prefix, "started_at": started_at,
+        "batch_has_successful_write": False, "write_fingerprints": [],
     }
 
 
 def create_vue_loop_nodes(
     workflow: GenerationWorkflow, emitter, thread_id: str, node: str,
-    *, invoke_model=None, repair_read_guard=False,
+    *, invoke_model=None, repair_read_guard=False, repair_write_guard=False,
 ):
     """生成和修复仅在模型入口不同，批次规则和工具执行路径完全共用。"""
     async def model_turn(state: VueLoopState):
@@ -167,7 +171,7 @@ def create_vue_loop_nodes(
                 {"name": call["name"], "arguments": validate_vue_tool_call(call["name"], call["arguments"])}
                 for call in calls
             ]
-            loop.update(tool_cursor=0, next_step="execute_tool")
+            loop.update(tool_cursor=0, next_step="execute_tool", batch_has_successful_write=False)
         # 工具已转成校验后的列表，不重复保存同一批大体积文件参数。
         loop["turn"] = {}
         if context != state["context"]:
@@ -195,6 +199,9 @@ def create_vue_loop_nodes(
         context = state["context"]
         update = {}
         written_files = set(loop["written_files"])
+        if call["name"] in {"file_write", "file_modify"} and result.get("ok") is True:
+            # 只有明确成功的写入才值得在整批结束后取证，未知结果不作为触发依据。
+            loop["batch_has_successful_write"] = True
         if call["name"] in {"file_write", "file_modify"} and result.get("ok", True):
             written_files.add(arguments["relativeFilePath"])
             # 只认可成功写入源码的 URL，模型文字和搜索结果不能代表已配图。
@@ -213,18 +220,40 @@ def create_vue_loop_nodes(
         if loop["tool_cursor"] < len(loop["pending_tools"]):
             loop["next_step"] = "execute_tool"
         else:
+            write_cycle = False
+            if repair_write_guard and loop.get("batch_has_successful_write", False):
+                # 不进入模型历史；事件仅公开计数，失败沿原工具错误路径传播。
+                snapshot = await workflow._invoke_tool(
+                    emitter, node, "vue_source_snapshot", {"codeGenType": state["code_gen_type"]},
+                    state["app_id"], state["request_id"],
+                    f"{loop['call_id_prefix']}:source-snapshot:{loop['ordinal']}",
+                    event_result=lambda result: {key: result.get(key) for key in (
+                        "eligibleFileCount", "includedFileCount", "omittedFileCount", "truncated",
+                    )},
+                )
+                workflow._raise_if_cancelled(thread_id)
+                fingerprint = vue_snapshot_fingerprint(snapshot)
+                previous = loop.get("write_fingerprints", [])
+                if fingerprint is not None:
+                    write_cycle = fingerprint in previous
+                    if not write_cycle:
+                        loop["write_fingerprints"] = [*previous, fingerprint]
+            ready = loop["image_used"] and all(
+                path in loop["written_files"] for path in loop["file_plan"]
+            )
             # 完整批次执行完才判断，不能跳过同批次后续写入；返回后仍须强制构建与审查。
-            stalled = (
+            read_stall = (
                 repair_read_guard and bool(loop["pending_tools"])
                 and all(call["name"] == "file_read" for call in loop["pending_tools"])
-                and loop["image_used"]
-                and all(path in loop["written_files"] for path in loop["file_plan"])
                 and repair_reads_stalled(state["vue_tool_results"], loop["call_id_prefix"])
             )
+            stalled = ready and (write_cycle or read_stall)
             if stalled:
-                logger.info("Vue repair yielded to verification request_id=%s reason=REPEATED_IDENTICAL_READS",
-                            state["request_id"])
-            loop.update(pending_tools=[], tool_cursor=0, next_step="finish" if stalled else "model_turn")
+                logger.info("Vue repair yielded to verification request_id=%s reason=%s",
+                            state["request_id"],
+                            "REPEATED_SOURCE_SNAPSHOT" if write_cycle else "REPEATED_IDENTICAL_READS")
+            loop.update(pending_tools=[], tool_cursor=0, batch_has_successful_write=False,
+                        next_step="finish" if stalled else "model_turn")
         return {"vue_loop": loop}
 
     return {"model_turn": model_turn, "validate_turn": validate_turn,
