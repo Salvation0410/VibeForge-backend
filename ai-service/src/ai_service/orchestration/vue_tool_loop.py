@@ -69,7 +69,9 @@ def create_vue_loop_nodes(
             "vueGeneration": {
                 # 模型调用无隐式对话记忆，必须明确告知已完成规划，避免每轮重新执行“首次规划”。
                 "phase": "write_files" if loop["file_plan"] else (
-                    "modify_files" if context.get("currentArtifact", {}).get("exists") else "plan_files"
+                    # 首次生成的基线仍为空，但修复面对的是本请求刚写入的项目，不能重新提示首次规划。
+                    "modify_files" if node == "repair" or context.get("currentArtifact", {}).get("exists")
+                    else "plan_files"
                 ),
                 "maxToolCallsPerTurn": loop["batch_limit"],
                 "remainingToolCalls": workflow.settings.vue_max_tool_calls - state.get("tool_call_count", 0),

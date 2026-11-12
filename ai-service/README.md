@@ -335,6 +335,8 @@ PostgreSQL 状态摘要支持可选 `preparation_diagnostics`，写入前再次�
 
 静态文本流将展示增量与完整候选分开；只有模型正常结束后才发送完整候选用于校验。截断或被过滤的响应不能发布。Vue 默认每轮最多两个工具，格式不合法的轮次不执行工具，每阶段最多额外重试两次。
 
+Vue 进入新的有限修复阶段时，没有本阶段文件规划则以 `modify_files` 提示模型修复已写入的工程；即使本次请求开始时 `currentArtifact.exists=false`，也不重新提示首次规划。有本阶段新规划时仍按 `write_files` 处理待写文件。修复入口清除上一阶段的规划、批次重试与格式反馈，本阶段新产生的反馈仍保留；不修改原始产物基线、需求、准备结果、完整工具历史或累计预算。此修正避免错误的阶段提示，不保证模型必然及时结束工具调用；工具内反复读写仍可能耗尽预算，不能视为验证子图已触发 `REPAIR_NO_PROGRESS`。
+
 工具契约位于 [internal-ai-tools-v1.json](src/ai_service/contracts/internal-ai-tools-v1.json)。模型可调用 `dir_read`、`file_read`、`file_write`、`file_modify`、`file_delete` 和 `image_search`；产物上下文、校验、发布、构建及源码快照仅由工作流调用。Python 校验工具请求和响应，Spring 负责应用范围、相对路径和文件权限约束。
 
 Spring 的 `project_build` 强制构建在 npm 成功且 dist/index.html 存在后，运行随 JAR 发布的 `vue/component-contract-check.cjs`。它通过官方 Vue SFC/Babel AST 核对静态相对 `.vue` 默认导入与直接运行时 `defineProps`/`defineModel` 中的显式 required 属性；静态属性、具名绑定和 v-model 按实际 prop 名比较。当前只阻断确定缺失的必填项，不验证事件处理器或业务语义。不执行组件模块，不修改源码；按项目 Node 依赖解析规则加载支持 `parse`/`babelParse` 的 Vue compiler。

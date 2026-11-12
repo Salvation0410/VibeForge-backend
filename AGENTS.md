@@ -227,6 +227,7 @@ Python AI_SERVICE_INTERNAL_BEARER_TOKEN
 - 保持公共 SSE 协议兼容；内部 Spring/Python 使用 NDJSON。
 - 静态流改动同时检查 `StaticGenerationStreamFrame`、网关、SimpleTextStreamHandler 的展示/候选分离，禁止把修复草稿覆盖最终候选。
 - Vue 每轮默认最多两个工具，非法 JSON 每阶段最多额外重试两次，不执行失败轮工具；生成和修复共用总工具预算，不因子图切换重置。
+- Vue 修复无本阶段 filePlan 时使用 modify_files，不因初始 currentArtifact.exists=false 重新进入首次规划。新修复入口清除上一阶段 planningFeedback、batchRetryFeedback、vueFormatFeedback，保留本阶段新反馈、完整工具历史和累计预算；不改写原始产物基线，不把阶段提示修正当成模型一定收敛的证明。
 - Vue 模型工具历史按两层 JSON 转义字节上界限制为 24 KiB，优先保留近期完整结果并标记旧结果省略/失效；不得裁剪成半份源码或把模型投影视为持久化历史。最新结果放不下应返回 `VUE_CONTEXT_BUDGET_EXCEEDED`。
 - 输入审核仅在 LangGraph 链路生效，默认开启；规则预算检查不得随语义审核开关关闭。通用上下文窗口默认 65536、输出 8192、协议预留 4096，本地覆盖值不是默认值；扩容不提高工具历史上限。
 - LangGraph 请求只传最近最多六条用户需求（每条最多 1000 个 UTF-16 字符）及最多 2000 字符的初始需求；不要声称传递了全部历史源码或实现了跨请求长期记忆。

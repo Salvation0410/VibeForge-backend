@@ -868,3 +868,76 @@ Python 源码与配置未变，没有重跑 compileall/pytest/uv lock、PostgreS
 下一步优先评估**跨标签停止请求绑定**：当前 `AppGenerationCancelRequest` 仅接收 appId，Spring 选择调用时的活动 requestId。历史主动取消设计中的“因此可以防止旧页面取消新任务”没有客户端请求身份比较支撑，已补充说明；本轮不宣称该行为已修复。应先用独立标签/请求门闩建立旧停止请求在新任务建立后抵达的证据，再设计兼容的目标绑定与 UI 状态同步。
 
 仍未覆盖自然新门禁拒绝→修复→浏览器交互、自然 REPAIR_NO_PROGRESS、全部停止失败时序、长期/跨实例压力、自然网络失锁、真实 GPU 和公网部署。自动恢复、任务重新认领、SSE 重连与 Vue 回滚仍未实现。回退本轮 owner 分配无需数据库迁移，但会重新暴露已复现窗口；不能把 Redis 无锁作为恢复授权。
+
+## 22. Vue 自然门禁拒绝、修复阶段纠正与后续功能验收
+
+2026-11-12 承接 `de925f3`，按用户最新范围优先处理 Vue 功能与有限修复，不继续跨标签、长期压力、跨实例或恢复。开始时后端在 dev，仅有原未跟踪 cancellation-drain-regression 计划；前端仍是指定的三个客服修改。先核对第 18–21 节、真实测试集、AI README、必填属性与浏览器探针设计/计划，并阅读现有确定性测试及实际构建路由。
+
+### 22.1 原控制流与本轮自然失败
+
+原测试已覆盖构建错误传入修复、重新构建后才审查、两次修复耗尽及检查器不可用直接失败。源码确认每轮 project_build 使用修复次数生成不同工具调用 ID，调用强制构建，不走已有 dist 快路径。因此先执行一个新的隔离应用，不为命中门禁无限采样。
+
+沿用第 19 节固定“慢读书房”需求，新应用 `478319810483597312`，只创建一次、只提交一次从零生成：
+
+| 请求 | 模型调用 | 实际结果 |
+| --- | --- | --- |
+| 原从零生成 `2fb6a47d-e510-44cd-a9f5-26ad3e1b973d` | 创建 2 + 请求内 31，共 33；136→169 | 首次 npm 构建后 AST 拒绝 FilterBar 缺少 filters/active/total/readCount，进入第一次修复，最终 FAILED / VUE_TOOL_CALL_LIMIT_EXCEEDED |
+| 后续明确用户修复 `336490b9-1fb2-49a0-bf61-8c0410ccad4c` | 28；169→197 | 两次构建及门禁通过，真实 SCOPE_VIOLATION → 修复 → PASS，SUCCEEDED |
+
+原请求使用 9 次生成工具及 31 次修复工具，最后一个越界工具请求未执行；21 轮修复模型调用始终没有交回验证子图，因此只有一次构建、没有 Reviewer、没有浏览器功能检查。前端收到一个业务错误、done=0、无传输错误、预览刷新=0；显式查询 heartbeat=TERMINAL、publicationState=NOT_VERSIONED。保留原失败 UI 报告、退出码 1、模型/工具观测和提交标记。
+
+这是本轮首次取得的**自然 AST 拒绝→进入修复**证据，但没有取得该请求的自动修复→重建→交互成功证据。工具内出现往返修改及重复读取，不等于验证子图的 `REPAIR_NO_PROGRESS`；原机制没有在工具循环中做指纹判重，本轮未扩大该机制或预算。
+
+### 22.2 明确发现的问题与最小修复
+
+旁路模型输入显示：首次生成时 currentArtifact.exists=false 被完整保留，修复子图又初始化空 filePlan，原阶段选择遂向修复模型发送 plan_files；原生成的 planningFeedback 和 vueFormatFeedback 也继续传入。它们指向已结束的规划/重试阶段，与实际修复任务不一致。不能据此断言模型反复读写只有这一原因，或纠正阶段提示就必然收敛。
+
+仅修改两个 Python 编排文件：
+
+- `vue_tool_loop.py`：无本阶段 filePlan 时，repair 使用 modify_files；已有产物生成原逻辑不变，有本阶段新规划仍为 write_files。不把原始 currentArtifact 伪造为存在。
+- `subgraphs/vue.py`：新修复初始化时移除 planningFeedback、batchRetryFeedback、vueFormatFeedback。保留原文、准备结果、构建/校验诊断、完整工具历史、修复次数和累计工具预算；本阶段新格式反馈仍按原机制保留。恢复现有子图不重新初始化。
+
+新增 `test_vue_repair_phase.py` 四场景，交叉初始/已有产物与首次/第二次修复。旧代码四项均失败：空基线错误 phase，已有基线仍携带旧反馈；修复后验证新格式重试反馈继续可见、历史保留、33→33→32 剩余预算、一次实际工具调用及修复次数。使用 Fake 模型/工具，不能当作真实生成质量证据。
+
+没有更改提示词、模型参数、工具/修复预算、24 KiB 投影、静态生成、公共 SSE 或前端生产代码。设计与执行记录见 `docs/superpowers/specs/2026-11-12-vue-repair-phase-design.md`、`docs/superpowers/plans/2026-11-12-vue-functional-validation.md`。
+
+### 22.3 后续用户修复与浏览器证据
+
+保留原失败请求后，对同一隔离应用提交新的普通修复需求，明确要求恢复添加、空白拒绝、已读切换、三筛选及总量计数，核对父子组件接线，保留文字/样式，不添加外部图片。使用新 requestId、新独占标记和同一账本；未重发原生成，不手改供应商返回或生成源码，不恢复旧图，也没有新建第二个从零样本。
+
+该请求的两次 project_build 均 built=true，工具 ID 分别以 `:project_build:0`、`:project_build:1` 结尾。单 Reviewer 自然返回一次 SCOPE_VIOLATION，修复后 PASS；本次修复的 10 轮模型输入均为 modify_files，首轮无上一阶段规划/批次/格式反馈。生成/修复总计实际使用 30 次工具。AST 成功统计为 checkedComponents=4、checkedUsages=2、skippedFiles=0、skippedUsages=1、truncated=false；跳过用法不计入通过范围。
+
+显式任务查询为 SUCCEEDED / TERMINAL / NOT_VERSIONED。真实前端原生 SSE 唯一 done、无业务/传输错误，当前生成后预览刷新一次（页面进入时原预览加载另计）。原 UI 报告 **53 项通过**，其中预览与本机部署共享探针 **44 项、16 项计数**：添加、空白拒绝、已读及未读切换、全部/未读/已读筛选和总数一致；另有无 img、下载非空及 390px 无横向溢出检查。没有新增源码 ZIP 与快照逐字节核对，不能沿用历史下载内容通过结论。
+
+原 UI 报告保存后 Chrome 超过一分钟仍未退出，确认专用 profile 归属后停止，运行器退出 **1**；该失败记录保留，不能称原运行器完整通过。私有 HTML 运行器在保存最终报告后移除测试 iframe，停止其后台活动；随后一次**零模型**观察正常退出 **0**，49 项检查通过，含相同 44 项共享探针和 16 项计数。未更改生产前端或探针断言，也不把一次收尾成功称为所有浏览器生命周期均已修复。
+
+该请求证明一次后续用户修复及自然 Reviewer 修复后的功能可用，**不证明原门禁失败请求自动修复成功，也不是修复前后受控模型对照**。本轮没有继续抽样以追求自然门禁拒绝→修复→重建→交互全链路成功。
+
+### 22.4 本轮验证与调用账本
+
+- Python 修复前四个新场景失败，修复后定向 **20 passed**；全量 **1298 passed、14 skipped、2 warnings，206.33 秒**。compileall 与 uv lock --check 通过。14 项 PostgreSQL opt-in 未开启，两条既有弃用警告保留；运行期使用真实 PostgreSQL 不等于运行过这些集成测试。
+- 维护开始时另执行原 Python 构建修复/检查器定向 **5 passed**，Node AST **21 passed**，Java VueProjectBuilderTest/VueComponentContractCheckTest **28 passed、0 skipped**（含真实 Node opt-in），共享探针测试 **1 passed**（内部四种手写夹具）。Java 无代码变动，未执行干净编译；未修改前端生产代码，未重跑前端构建。
+- 原账本 `tmp/real-e2e-unlimited-20261111/model-ledger.json` **136→197，新增 61，max_calls=null**。两次生成请求分别有一次 Vue 非法 JSON 格式重试，该轮未执行工具；共 61 次调用均有 HTTP 200 记录，没有供应商失败/重试。第一次业务失败不能因供应商 HTTP 成功改记通过。旧 60/20/30 次账本保持不变。
+- 两段 Python 服务日志中 `Explicit rollback() forbidden`、`another command is already in progress`、`discarding closed connection` 均为 0；没有新取消/并发样本，不能扩大稳定性结论。
+
+复现命令（后端根目录运行 Java/Node，Python 在 ai-service 目录）：
+
+```powershell
+$env:VUE_CHECK_COMPILER_ROOT = 'D:/VibeForge/yu-ai-code-mother-frontend'
+node --test scripts/tests/vue-component-contract.test.cjs
+$env:VUE_COMPONENT_INTEGRATION = 'true'
+mvn test '-Dtest=VueProjectBuilderTest,VueComponentContractCheckTest'
+node --test scripts/tests/reading-list-browser.test.mjs
+uv run pytest tests/test_vue_repair_phase.py tests/test_vue_subgraph.py tests/test_vue_component_check.py 'tests/test_api.py::test_vue_build_failure_is_repaired_and_rebuilt_before_review' 'tests/test_api.py::test_vue_build_failure_exhausts_two_repairs_without_review_or_completion' -q
+uv run python -m compileall -q src
+uv lock --check
+uv run pytest -ra --tb=short
+```
+
+### 22.5 环境、证据与后续边界
+
+启动前仅 MySQL 3306 监听；Docker 未运行、Redis 未监听。Docker 启动被昨日残留的本地 socket 阻塞，先保存日志，再改名保留仅含 socket 的目录；没有重置 Docker 或修改数据库配置。引擎可用后容器/镜像/卷列表为空，未找到旧 langgraph-postgres；本轮创建隔离 `vue-functional-postgres-20261112`（PostgreSQL 16），使用本地配置的独立 checkpoint 库，不宣称恢复了历史 checkpoint。Redis 随后恢复监听，保留用户原 MySQL/Redis。
+
+私有证据分置 `tmp/vue-functional-20261112/` 与 `tmp/vue-functional-continuation-20261112/`，原 Python 定向日志另在 `tmp/vue-functional-20261112-python-targeted.log`；包括原始失败、调用观测、明确任务查询、后续修复与零模型报告。凭据、运行日志、源码、下载及截图不输出或提交。隔离应用及失败记录保留；本轮专用服务和容器按实际进程归属收尾，容器数据保留供后续核对。
+
+下一步若继续优化，应依据本轮工具内重复读取/往返修改证据单独评估收敛策略；不要把本次阶段提示修正当作已解决所有工具浪费，也不要直接将固定读书清单探针加入生产。原自然 AST 拒绝后的自动修复成功、自然 REPAIR_NO_PROGRESS、所有交互及动态组件语义仍未验证。跨标签、长期/跨实例压力、生产恢复和公网部署继续不在本轮范围。
