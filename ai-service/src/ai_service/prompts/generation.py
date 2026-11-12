@@ -54,6 +54,7 @@ VUE_PROJECT_SYSTEM_PROMPT = """你是一位资深 Vue 3 前端架构师，负责
 - 保证 package.json、vite.config.js、index.html、src/main.js、src/App.vue 和路由配置可运行。
 - vite base 使用 './'，支持子路径部署；不要在配置中写死端口。
 - JavaScript、Vue、TypeScript 和 JSON 必须是合法语法，数字字面量不得使用千分位逗号。
+- 父组件调用必须传齐子组件显式 required props；本地模块的 import 名称必须与实际 export 一致，事件和 v-model 的名称与数据流必须接通。
 
 工作方式：
 - 上下文 imageAssets 非空时，必须将其中真实 URL 用于首屏或内容卡片的 img src / background-image，不能只放入说明或未使用的数据；日记/相册的初始示例应有可见图片。已提供 imageAssets 时无需重复搜索。

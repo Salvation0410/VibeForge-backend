@@ -259,7 +259,7 @@ async def test_parent_checkpoint_resume_keeps_batch_and_phase_fingerprints(setti
 
 
 @pytest.mark.parametrize("node,legacy,expected_writes", [
-    ("repair", False, 2), ("vue_agent", False, 3), ("repair", True, 3),
+    ("repair", False, 1), ("vue_agent", False, 3), ("repair", True, 3),
 ])
 async def test_identical_writes_yield_only_in_formal_repair(settings, node, legacy, expected_writes):
     class Model(FakeModel):
@@ -283,7 +283,8 @@ async def test_identical_writes_yield_only_in_formal_repair(settings, node, lega
                                    node=node, legacy=legacy)
     result = await graph.ainvoke({**initial(), "tool_call_count": 37})
     assert result["tool_call_count"] == 37 + expected_writes
-    assert sum(c["name"] == "vue_source_snapshot" for c in gateway.calls) == (2 if expected_writes == 2 else 0)
+    # 正式修复起始只剩三次额度，第一次完整写入后即按预算保留规则交回。
+    assert sum(c["name"] == "vue_source_snapshot" for c in gateway.calls) == (1 if node == "repair" and not legacy else 0)
 
 
 async def test_successful_write_then_delete_is_scanned_after_deletion(settings):

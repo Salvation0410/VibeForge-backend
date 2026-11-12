@@ -11,6 +11,9 @@ from ai_service.models.tool_contract import validate_vue_tool_call
 from ai_service.orchestration.routing import _raise_for_incomplete_model_turn
 from ai_service.orchestration.repair_progress import vue_snapshot_fingerprint
 from ai_service.orchestration.vue_read_stall import repair_reads_stalled
+from ai_service.orchestration.vue_budget import (
+    REPAIR_READ_BATCH_LIMIT, REPAIR_TOOL_RESERVE, budget_counts, is_complete_file_read,
+)
 from ai_service.orchestration.subgraphs.schemas import RepairState
 
 if TYPE_CHECKING:
@@ -40,6 +43,8 @@ class VueLoopProgress(TypedDict):
     started_at: str
     batch_has_successful_write: bool
     write_fingerprints: list[str]
+    successful_write: bool
+    read_only_batches: int
 
 
 class VueLoopState(RepairState, total=False):
@@ -58,14 +63,29 @@ def initial_progress(context: dict[str, Any], prefix: str, started_at: str) -> V
         "turn": {}, "pending_tools": [], "tool_cursor": 0, "next_step": "model_turn",
         "call_id_prefix": prefix, "started_at": started_at,
         "batch_has_successful_write": False, "write_fingerprints": [],
+        "successful_write": False, "read_only_batches": 0,
     }
 
 
 def create_vue_loop_nodes(
     workflow: GenerationWorkflow, emitter, thread_id: str, node: str,
-    *, invoke_model=None, repair_read_guard=False, repair_write_guard=False,
+    *, invoke_model=None, repair_read_guard=False, repair_write_guard=False, repair_budget_guard=False,
 ):
     """生成和修复仅在模型入口不同，批次规则和工具执行路径完全共用。"""
+    def log_budget(state, loop, *, reason, requested_count=0):
+        counts = budget_counts(state["vue_tool_results"], loop["call_id_prefix"])
+        # 终态摘要可能停在上个已完成节点，失败现场必须使用子图真实累计数。
+        log = logger.warning if reason == "TOOL_BUDGET_EXHAUSTED" else logger.info
+        log("Vue tool budget request_id=%s node=%s reason=%s repair_count=%d tool_count=%d "
+            "read_count=%d write_count=%d other_count=%d phase_tool_count=%d "
+            "phase_read_count=%d phase_write_count=%d phase_other_count=%d "
+            "remaining=%d requested_count=%d read_batches=%d",
+            state["request_id"], node, reason, state.get("repair_count", 0), state.get("tool_call_count", 0),
+            counts["read_count"], counts["write_count"], counts["other_count"], counts["phase_tool_count"],
+            counts["phase_read_count"], counts["phase_write_count"], counts["phase_other_count"],
+            max(0, workflow.settings.vue_max_tool_calls - state.get("tool_call_count", 0)),
+            requested_count, loop.get("read_only_batches", 0))
+
     async def model_turn(state: VueLoopState):
         workflow._raise_if_cancelled(thread_id)
         context, loop = state["context"], state["vue_loop"]
@@ -165,6 +185,7 @@ def create_vue_loop_nodes(
                 loop["next_step"] = "finish"
         else:
             if state.get("tool_call_count", 0) + len(calls) > workflow.settings.vue_max_tool_calls:
+                log_budget(state, loop, reason="TOOL_BUDGET_EXHAUSTED", requested_count=len(calls))
                 raise ValueError("VUE_TOOL_CALL_LIMIT_EXCEEDED: Vue file tool budget exhausted")
             # 必须先整批校验，第二个工具无效时也不允许执行第一个。
             loop["pending_tools"] = [
@@ -202,6 +223,7 @@ def create_vue_loop_nodes(
         if call["name"] in {"file_write", "file_modify"} and result.get("ok") is True:
             # 只有明确成功的写入才值得在整批结束后取证，未知结果不作为触发依据。
             loop["batch_has_successful_write"] = True
+            loop["successful_write"] = True
         if call["name"] in {"file_write", "file_modify"} and result.get("ok", True):
             written_files.add(arguments["relativeFilePath"])
             # 只认可成功写入源码的 URL，模型文字和搜索结果不能代表已配图。
@@ -220,6 +242,18 @@ def create_vue_loop_nodes(
         if loop["tool_cursor"] < len(loop["pending_tools"]):
             loop["next_step"] = "execute_tool"
         else:
+            if repair_budget_guard:
+                batch = loop["pending_tools"]
+                results = state["vue_tool_results"][-len(batch):] if batch else []
+                # 新路径也计入读取开销；混合批次或不完整读取重新累计，不能跨写入累加。
+                pure_reads = bool(batch) and all(call["name"] == "file_read" for call in batch)
+                complete_reads = pure_reads and len(results) == len(batch) and all(
+                    is_complete_file_read(item) for item in results
+                )
+                loop["read_only_batches"] = (
+                    loop.get("read_only_batches", 0) + 1
+                    if complete_reads and loop.get("successful_write", False) else 0
+                )
             write_cycle = False
             if repair_write_guard and loop.get("batch_has_successful_write", False):
                 # 不进入模型历史；事件仅公开计数，失败沿原工具错误路径传播。
@@ -247,11 +281,18 @@ def create_vue_loop_nodes(
                 and all(call["name"] == "file_read" for call in loop["pending_tools"])
                 and repair_reads_stalled(state["vue_tool_results"], loop["call_id_prefix"])
             )
-            stalled = ready and (write_cycle or read_stall)
+            budget_reason = None
+            if repair_budget_guard and ready and loop.get("successful_write", False):
+                if workflow.settings.vue_max_tool_calls - state.get("tool_call_count", 0) <= REPAIR_TOOL_RESERVE:
+                    budget_reason = "LOW_TOOL_BUDGET"
+                elif loop.get("read_only_batches", 0) >= REPAIR_READ_BATCH_LIMIT:
+                    budget_reason = "READ_BATCH_LIMIT"
+            stalled = ready and (write_cycle or read_stall or budget_reason is not None)
             if stalled:
-                logger.info("Vue repair yielded to verification request_id=%s reason=%s",
-                            state["request_id"],
-                            "REPEATED_SOURCE_SNAPSHOT" if write_cycle else "REPEATED_IDENTICAL_READS")
+                reason = ("REPEATED_SOURCE_SNAPSHOT" if write_cycle else (
+                    "REPEATED_IDENTICAL_READS" if read_stall else budget_reason
+                ))
+                log_budget(state, loop, reason=reason)
             loop.update(pending_tools=[], tool_cursor=0, batch_has_successful_write=False,
                         next_step="finish" if stalled else "model_turn")
         return {"vue_loop": loop}
