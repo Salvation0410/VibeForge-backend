@@ -30,9 +30,22 @@ def test_product_selection_respects_public_case_expectations(case):
     ("Create a no-code admin panel", "product-dashboard"),
     ("Build an admin panel, not a shopping website", "product-dashboard"),
     ("展示 shader 示例的作品集", "product-content"),
+    ("做一个适合潮牌的电商首页", "product-commerce"),
+    ("不要电商，做一个读书清单", "product-content"),
+    ("不要后台，但是要做电商首页", "product-commerce"),
 ])
 def test_selector_handles_contrast_and_english_word_boundaries(prompt, expected):
     assert expected in {item["id"] for item in resolve_skills("HTML", "create", prompt)}
+
+
+@pytest.mark.parametrize("branch", ["HTML", "MULTI_FILE", "VUE_PROJECT"])
+@pytest.mark.parametrize("mode", ["create", "edit"])
+def test_controls_rule_selected_without_overriding_existing_page_mode(branch, mode):
+    selected = resolve_skills(branch, mode, "增加电商删除按钮，保留其他内容")
+    assert {"id": "control-consistency", "version": "2"} in selected
+    if mode == "edit":
+        assert {"id": "preserve-style", "version": "1"} in selected
+        assert not any(item["id"].startswith("product-") for item in selected)
 
 
 class FakeRewriter:
@@ -93,7 +106,9 @@ async def test_real_injected_model_is_called_once_per_enhanced_case_and_report_i
     report = await evaluate(dataset, model=model, settings=SETTINGS)
     assert report["rewriteAttempts"] == len(model.contexts) == 6
     assert dataset.model_dump_json() == before
-    assert all(len(context["selectedSkills"]) == 4 for context in model.contexts)
+    assert all(len(context["selectedSkills"]) == 5 for context in model.contexts)
+    assert all({"id": "control-consistency", "version": "2"} in context["selectedSkills"]
+               for context in model.contexts)
     assert report["summary"]["enhanced"]["rewriteReady"] == 6
     assert report["summary"]["enhanced"]["sourceQuoteCoverage"] == 1
     assert report["summary"]["skills_only"]["sourceQuoteCoverage"] is None

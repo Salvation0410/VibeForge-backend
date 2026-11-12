@@ -250,6 +250,8 @@ Python AI_SERVICE_INTERNAL_BEARER_TOKEN
 - `scripts/acceptance_model_proxy.py` 是本地真实验收设施，默认 dry-run，显式执行时发送前持久化预占、最多 60 次，失败/取消也占额度，重启不得换账本绕过授权。SSE 运行器与浏览器快照只提供观测，不自动证明页面质量；真实结果及未测项见结构化编辑真实验收交接。
 - “优化提示”必须使用普通用户能理解的简短文案，并按 HTML、MULTI_FILE、VUE_PROJECT 区分完整产物要求；三类提示都必须保留原有功能、文字、图片和操作方式，禁止残缺结果和额外解释。
 - 固定尺寸加载图位于 Flex 容器时必须禁止收缩并保持 1:1 比例，避免长提示文字将圆形挤成椭圆。
+- 前端白名单新增control-consistency@2，指导新增控件沿用基础样式及窄屏按钮组间距；原文和结构化单属性范围优先，不是视觉门禁。选择器版本3含中文“电商”，已有准备结果不追补规则，旧规则版本保留。
+- 部署封面截图每次独占WebDriver并在finally尝试quit，不恢复虚拟线程ThreadLocal复用。app.screenshot.driver-path优先于原JVM属性和CHROMEDRIVER_PATH，显式错误失败、未配置保留Selenium解析；个人驱动路径不入库。固定阶段耗时不输出URL/路径/异常正文，异步封面失败不撤销部署；OSS键包含独立UUID，禁止同名临时文件覆盖其他封面。关闭失败不等于已强制清理，未新增池、恢复或自动重试。
 - 不大面积重写历史乱码注释，不进行无关重构。
 - 不提交生成文件、日志、下载产物、`.venv`、`.env` 或 `projects/`。
 - Git 提交信息必须使用中文，并符合 Conventional Commits 规范；格式为 `type(scope): 中文说明`，例如 `feat(ai): 接入LangSmith脱敏追踪`。提交前检查 `git log -1 --pretty=%s` 和 `git diff --check`，禁止使用无意义或纯英文提交信息。

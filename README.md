@@ -218,6 +218,10 @@ Spring OpenAPI 可访问仅说明 HTTP 文档入口可用，不代表所有业�
 
 生成目录位于启动工作目录下的 `tmp/code_output/`，部署目录位于 `tmp/code_deploy/`。请从固定工作目录启动服务，并为运行数据设置持久存储。部署地址还需与资源控制器、端口和反向代理保持一致，不能仅替换一个展示域名就认为部署完成。
 
+部署封面在后台截图并上传 OSS，部署链接返回时封面可能仍在生成。本地可在私有 `application-local.yml` 设置 `app.screenshot.driver-path` 为与已安装 Chrome 匹配的 chromedriver 普通文件绝对路径，或在启动 Spring 的终端设置 `APP_SCREENSHOT_DRIVER_PATH`。配置优先级为该 Spring 配置、原 JVM `webdriver.chrome.driver` 属性、`CHROMEDRIVER_PATH`；均未设置时仍使用 Selenium 自动解析，初始化可能受网络影响。显式路径错误直接失败，不自动猜测其他版本；Chrome 更新后需核对驱动兼容性，不提交个人路径。
+
+每次截图结束均尝试关闭浏览器；日志 `screenshot` 按内部关联 ID 记录初始化、导航、就绪等待、截图、压缩、关闭和上传等阶段耗时，`degraded` 表示超时后继续尝试截图，不能当作已成功。30秒页面超时不约束驱动自动解析；关闭失败有单独记录，不保证故障浏览器已强制退出。封面失败不撤销部署，修正配置后需重新部署触发新截图，没有新增自动重试或后台恢复。
+
 客服首次启动建议保持关闭。启用时按 [AI 服务说明](ai-service/README.md) 配置 RAG；Spring 与 Python 的开关都需检查。样例上传限制为 5 MB，而知识文档业务上限默认 20 MiB，需要大文档时同时调整 `spring.servlet.multipart` 和反向代理的上传限制。
 
 ## 生成链路与运行边界

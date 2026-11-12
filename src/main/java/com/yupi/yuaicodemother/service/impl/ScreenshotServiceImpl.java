@@ -12,9 +12,11 @@ import com.yupi.yuaicodemother.exception.ErrorCode;
 import com.yupi.yuaicodemother.exception.ThrowUtils;
 import com.yupi.yuaicodemother.service.ScreenshotService;
 import com.yupi.yuaicodemother.utils.WebScreenshotUtils;
+import com.yupi.yuaicodemother.utils.ScreenshotTimings;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -22,6 +24,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.UUID;
 
 /**
  * 网页截图服务实现
@@ -35,6 +38,9 @@ public class ScreenshotServiceImpl implements ScreenshotService {
 
     private final OssProperties ossProperties;
 
+    @Value("${app.screenshot.driver-path:}")
+    private String driverPath;
+
     /**
      * 生成网页截图并上传至 OSS
      * @param webUrl 网页地址
@@ -43,18 +49,25 @@ public class ScreenshotServiceImpl implements ScreenshotService {
     @Override
     public String generateAndUploadScreenshot(String webUrl) {
         ThrowUtils.throwIf(StrUtil.isBlank(webUrl), ErrorCode.PARAMS_ERROR, "网页URL不能为空");
-        log.info("开始生成网页截图，URL: {}", webUrl);
-
-        String localScreenshotPath = WebScreenshotUtils.saveWebPageScreenshot(webUrl);
+        String screenshotId = ScreenshotTimings.newId();
+        String localScreenshotPath = WebScreenshotUtils.saveWebPageScreenshot(webUrl, driverPath, screenshotId);
         ThrowUtils.throwIf(StrUtil.isBlank(localScreenshotPath), ErrorCode.OPERATION_ERROR, "本地截图生成失败");
 
         try {
-            String ossUrl = uploadScreenshotToOss(localScreenshotPath);
-            ThrowUtils.throwIf(StrUtil.isBlank(ossUrl), ErrorCode.OPERATION_ERROR, "截图上传 OSS 失败");
-            log.info("网页截图生成并上传成功: {} -> {}", webUrl, ossUrl);
-            return ossUrl;
+            return ScreenshotTimings.measure(screenshotId, ScreenshotTimings.Stage.UPLOAD, () -> {
+                String ossUrl = uploadScreenshotToOss(localScreenshotPath);
+                ThrowUtils.throwIf(StrUtil.isBlank(ossUrl), ErrorCode.OPERATION_ERROR, "截图上传 OSS 失败");
+                return ossUrl;
+            });
         } finally {
-            cleanupLocalFile(localScreenshotPath);
+            try {
+                ScreenshotTimings.measure(screenshotId, ScreenshotTimings.Stage.CLEANUP, () -> {
+                    cleanupLocalFile(localScreenshotPath);
+                    return null;
+                });
+            } catch (RuntimeException ignored) {
+                // 清理错误已有固定阶段日志，不能遮盖上传的原始结果。
+            }
         }
     }
 
@@ -70,7 +83,6 @@ public class ScreenshotServiceImpl implements ScreenshotService {
 
         File screenshotFile = new File(localScreenshotPath);
         if (!screenshotFile.exists()) {
-            log.error("截图文件不存在: {}", localScreenshotPath);
             return null;
         }
 
@@ -110,11 +122,11 @@ public class ScreenshotServiceImpl implements ScreenshotService {
 
     /**
      * 生成截图对象存储键
-     * 格式：screenshots/2025/07/31/filename.jpg
+     * 同日多次截图可能使用相同本地文件名，随机前缀防止覆盖其他应用封面。
      */
     private String generateScreenshotObjectKey(String fileName) {
         String datePath = LocalDate.now().format(SCREENSHOT_DATE_FORMATTER);
-        return String.format("screenshots/%s/%s", datePath, fileName);
+        return String.format("screenshots/%s/%s-%s", datePath, UUID.randomUUID(), fileName);
     }
 
     private void cleanupLocalFile(String localFilePath) {
@@ -132,7 +144,6 @@ public class ScreenshotServiceImpl implements ScreenshotService {
         if (parentDir != null && parentDir.exists()) {
             FileUtil.del(parentDir);
         }
-        log.info("本地截图文件已清理: {}", localFilePath);
     }
 
     private void validateOssConfig() {

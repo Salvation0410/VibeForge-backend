@@ -221,6 +221,7 @@ async def test_all_adapter_boundaries_apply_trusted_rules_once(enabled, branch, 
         return
     context, _ = await prepare(enabled, RewriteModel(), branch=branch, exists=exists)
     context["codeGenType"] = branch
+    assert {"id": "control-consistency", "version": "2"} in context["generationPreparation"]["skills"]
     context["generationPreparation"]["brief"]["design_brief"] = "PRIVATE_REWRITE_MARKER"
     context["generationPreparation"]["rules"] = "UNTRUSTED_RULE_OVERRIDE"
     original = deepcopy(context)

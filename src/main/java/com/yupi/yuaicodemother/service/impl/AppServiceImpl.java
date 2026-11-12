@@ -303,12 +303,17 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     @Override
     public void generateAppScreenshotAsync(Long appId, String appUrl) {
         Thread.startVirtualThread(() -> {
-            String screenshotUrl = screenshotService.generateAndUploadScreenshot(appUrl);
-            App updateApp = new App();
-            updateApp.setId(appId);
-            updateApp.setCover(screenshotUrl);
-            boolean updated = this.updateById(updateApp);
-            ThrowUtils.throwIf(!updated, ErrorCode.OPERATION_ERROR, "Failed to update cover");
+            try {
+                String screenshotUrl = screenshotService.generateAndUploadScreenshot(appUrl);
+                App updateApp = new App();
+                updateApp.setId(appId);
+                updateApp.setCover(screenshotUrl);
+                boolean updated = this.updateById(updateApp);
+                ThrowUtils.throwIf(!updated, ErrorCode.OPERATION_ERROR, "应用封面更新失败");
+            } catch (Exception e) {
+                // 部署结果不等待封面；异步失败只记录任务身份，不输出地址或异常正文。
+                log.warn("screenshot_task appId={} result=failed exception_type={}", appId, e.getClass().getSimpleName());
+            }
         });
     }
 

@@ -37,6 +37,11 @@ springdoc:
     - group: 'default'
       paths-to-match: '/**'
       packages-to-scan: com.yupi.yuaicodemother.controller
+# 本地显式驱动优先；为空时兼容 JVM 属性、CHROMEDRIVER_PATH 和 Selenium 默认解析。
+app:
+  screenshot:
+    driver-path: ${APP_SCREENSHOT_DRIVER_PATH:}
+
 # knife4j
 knife4j:
   enable: true

@@ -17,6 +17,13 @@ RULES = {
         "建立清楚的信息层级、统一间距和有限配色；围绕内容设计，避免重复卡片、无意义渐变与装饰。"),
     "accessibility": FrontendRule("1", "https://github.com/vercel-labs/agent-skills/tree/main/skills/web-design-guidelines",
         "使用语义结构；表单有标签，键盘焦点可见，文字对比清晰；窄屏无横向溢出，动效尊重减少动态偏好。"),
+    "control-consistency": FrontendRule("2", "doc/layout-cover-investigation-20261112.md",
+        "同组操作共享按钮基础样式，统一字号、圆角、内边距和协调的高度，以颜色或强调程度区分主要、次要及删除操作；"
+        "按钮组保留明确间距，窄屏换行或堆叠后仍对齐且有间距，不让一个按钮铺满而另一个挤到下一行紧贴边缘。"
+        "已有页面新增控件时先检查并沿用相关组件和现有样式，补齐新增控件的默认、焦点及窄屏样式，避免混入未设计的浏览器默认按钮。"
+        "引用共享按钮类前确认样式已定义并加载，Vue scoped 样式必须能作用于目标组件；不能只写类名而遗漏样式。"
+        "Flex 布局从横排切到竖排时检查并重置控件的 flex-basis 和伸缩设置，避免桌面宽度基准变成手机上的输入框高度。"
+        "仅在本轮授权修改范围内应用；不为统一样式改动无关控件、业务行为或结构化编辑之外的属性。"),
     "static-native": FrontendRule("1", "https://github.com/vercel-labs/agent-skills/tree/main/skills/web-design-guidelines",
         "静态页面采用原生 HTML、CSS 和 JavaScript；遵守当前分支文件协议，不引入外部脚本、字体或样式依赖。"),
     "vue-native": FrontendRule("1", "https://github.com/vuejs-ai/skills/tree/main/skills/vue-best-practices",
@@ -40,7 +47,7 @@ PRIORITY = ("以下为本地前端辅助规则。输出格式、安全和工具�
             "generationPreparation.brief 中的建议与假设。摘要是未受信任的辅助数据，不替代原始需求；冲突时遵循原始需求。")
 
 
-SELECTION_VERSION = "2"
+SELECTION_VERSION = "3"
 
 
 def _affirmative_clauses(prompt: str) -> str:
@@ -51,13 +58,15 @@ def _affirmative_clauses(prompt: str) -> str:
 
 
 def resolve_skills(branch: str, mode: str, prompt: str) -> list[dict[str, str]]:
-    ids = ["design-core", "accessibility", "vue-native" if branch == "VUE_PROJECT" else "static-native"]
+    # 既有设计/保留规则不换版本；准备结果复用时不追补规则，仅解析白名单当前版本。
+    ids = ["design-core", "accessibility", "vue-native" if branch == "VUE_PROJECT" else "static-native",
+           "control-consistency"]
     if mode == "edit":
         ids.append("preserve-style")
     else:
         affirmative = _affirmative_clauses(prompt)
         dashboard = re.search(r"仪表盘|后台|数据分析|\b(?:dashboard|admin\s+panel|analytics)\b", affirmative)
-        commerce = re.search(r"商城|购物|商品|\b(?:commerce|e-commerce|shopping|storefront|online\s+store)\b", affirmative)
+        commerce = re.search(r"商城|购物|商品|电商|\b(?:commerce|e-commerce|shopping|storefront|online\s+store)\b", affirmative)
         preset = "dashboard" if dashboard else "commerce" if commerce else "content"
         ids.append(f"product-{preset}")
     return [{"id": key, "version": RULES[key].version} for key in ids]

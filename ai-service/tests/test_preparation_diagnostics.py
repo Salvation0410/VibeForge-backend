@@ -60,7 +60,8 @@ async def test_success_has_standalone_bounded_diagnostics(diagnostic_settings, c
     assert diagnostic["rewriteStatus"] == "ready" and diagnostic["reason"] == "NONE"
     assert diagnostic["durationMs"] == 125 and diagnostic["modelAttempted"] is True
     assert diagnostic["briefBytes"] == len(brief().model_dump_json().encode("utf-8"))
-    assert diagnostic["skillIds"] == ["design-core@1", "accessibility@1", "static-native@1", "product-content@1"]
+    assert diagnostic["skillIds"] == ["design-core@1", "accessibility@1", "static-native@1",
+                                      "control-consistency@2", "product-content@1"]
     assert logged_diagnostics(caplog) == [diagnostic]
     assert "preparation_diagnostics" not in str(update["context"])
     assert "durationMs" not in str(model.rewrite_calls) + str(events)

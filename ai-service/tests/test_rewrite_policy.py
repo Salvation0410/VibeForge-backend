@@ -94,7 +94,8 @@ async def test_skip_preserves_originals_and_rules_without_model(settings, branch
     prepared = update["context"]["generationPreparation"]
     assert prepared["rewriteStatus"] == "skipped" and prepared["brief"] is None
     assert {item["id"] for item in prepared["skills"]} == {
-        "design-core", "accessibility", "preserve-style", "vue-native" if branch == "VUE_PROJECT" else "static-native"}
+        "design-core", "accessibility", "control-consistency", "preserve-style",
+        "vue-native" if branch == "VUE_PROJECT" else "static-native"}
     assert {key: update["context"][key] for key in saved["context"]} == saved["context"]
     diagnostic = update["preparation_diagnostics"]
     assert diagnostic["reason"] == "SIMPLE_EDIT" and not diagnostic["modelAttempted"] and diagnostic["briefBytes"] == 0
