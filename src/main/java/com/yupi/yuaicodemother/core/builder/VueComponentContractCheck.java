@@ -22,19 +22,31 @@ final class VueComponentContractCheck {
             .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
 
     static VueBuildResult verify(File directory, VueProjectBuilder.CommandRunner runner) throws InterruptedException {
+        return verify(directory, runner, false);
+    }
+
+    static VueBuildResult verifyAnchors(File directory, VueProjectBuilder.CommandRunner runner) throws InterruptedException {
+        return verify(directory, runner, true);
+    }
+
+    private static VueBuildResult verify(File directory, VueProjectBuilder.CommandRunner runner, boolean anchors) throws InterruptedException {
         Path script = null;
         try (var resource = VueComponentContractCheck.class.getResourceAsStream("/vue/component-contract-check.cjs")) {
-            if (resource == null) return unavailable();
+            if (resource == null) return anchors ? VueAnchorCheck.unavailable() : unavailable();
             script = Files.createTempFile("vue-component-contract-", ".cjs");
             Files.copy(resource, script, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             // Node 直接接收参数，不经 cmd 拼接；中断及进程树清理由原 CommandRunner 负责。
-            var output = runner.run(directory, List.of("node", script.toString(), directory.getAbsolutePath()), 15);
-            if (!output.succeeded() || output.stdout().length() > 8000 || !output.stderr().isBlank()) return unavailable();
-            return parse(output.stdout());
+            var command = new ArrayList<>(List.of("node", script.toString(), directory.getAbsolutePath()));
+            if (anchors) command.add("--anchors");
+            var output = runner.run(directory, command, 15);
+            if (!output.succeeded() || output.stdout().length() > 8000 || !output.stderr().isBlank()) {
+                return anchors ? VueAnchorCheck.unavailable() : unavailable();
+            }
+            return anchors ? VueAnchorCheck.parse(output.stdout()) : parse(output.stdout());
         } catch (InterruptedException exception) {
             throw exception;
         } catch (Exception exception) {
-            return unavailable();
+            return anchors ? VueAnchorCheck.unavailable() : unavailable();
         } finally {
             if (script != null) {
                 try { Files.deleteIfExists(script); }

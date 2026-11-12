@@ -2352,8 +2352,11 @@ def test_validation_failure_after_build_repair_does_not_reuse_old_build_error(
     assert len([call for call in model.calls if call[0] == "repair"]) == 2
     assert not [call for call in model.calls if call[0] == "review"]
     assert events[-1]["type"] == "failed"
-    assert events[-1]["error"]["code"] != "VUE_NPM_BUILD_FAILED"
-    assert "VALIDATION_AFTER_BUILD_REPAIR" in events[-1]["error"]["message"]
+    assert events[-1]["error"]["code"] == "ARTIFACT_VALIDATION_FAILED"
+    assert "old build failure" not in events[-1]["error"]["message"]
+    # 详细硬校验信息仍在原工具结果中；终态只展示稳定阶段，不回显任意错误正文。
+    assert any(event["type"] == "tool_finished" and "VALIDATION_AFTER_BUILD_REPAIR" in str(event.get("data"))
+               for event in events)
     assert not [event for event in events if event["type"] == "completed"]
 
 

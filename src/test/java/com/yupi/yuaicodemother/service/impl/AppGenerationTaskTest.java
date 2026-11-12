@@ -97,13 +97,15 @@ class AppGenerationTaskTest {
         verify(leases).release(lease);
     }
 
-    @Test
-    void modelErrorPersistsStableFailureAndCannotReportSuccess() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"MODEL_OUTPUT_TRUNCATED", "QUALITY_REVIEW_FAILED",
+            "ARTIFACT_VALIDATION_FAILED", "VUE_ANCHOR_TARGET_MISSING", "VUE_ANCHOR_CHECK_UNAVAILABLE"})
+    void modelErrorPersistsStableFailureAndCannotReportSuccess(String errorCode) {
         var service = fixture(CodeGenTypeEnum.MULTI_FILE);
         when(gateway.generate(anyString(), any(), anyLong(), anyLong(), anyString()))
-                .thenReturn(Flux.error(new GenerationStreamException(50001, "MODEL_OUTPUT_TRUNCATED", "", "截断", null)));
+                .thenReturn(Flux.error(new GenerationStreamException(50001, errorCode, "", "生成检查未通过", null)));
         assertThrows(GenerationStreamException.class, () -> service.chatToGenCode(42L, "build", owner).blockLast());
-        verify(tasks).finish(anyString(), eq("FAILED"), eq("MODEL_OUTPUT_TRUNCATED"));
+        verify(tasks).finish(anyString(), eq("FAILED"), eq(errorCode));
         verify(tasks, never()).finish(anyString(), eq("SUCCEEDED"), any());
         verify(leases).release(lease);
     }

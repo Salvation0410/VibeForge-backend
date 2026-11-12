@@ -1203,3 +1203,33 @@ ignored 目录新增独立监督父进程：启动服务子进程、保存 PID/�
 确认首次构建因导入不存在的 categories 失败，第一轮修复后因 HeroSection.image 必填属性缺失失败；第二轮修复后构建与硬校验通过，但质量审查未通过，此时两次修复额度已用完。工具计数为36，并非40次工具预算耗尽。fail_quality 打印已通过的 validation.errors，掩盖了质量拒绝来源。当前源码另有多个缺失导航锚点，但审查理由正文已随终态 checkpoint 清理，不能冒充当时的模型拒绝依据。
 
 完整证据、方案收益与代价、推荐顺序见 [失败请求排查与修复建议](generation-quality-review-incident-20261112.md)。建议先修失败诊断，再修当前应用最小接线问题并做浏览器点击验收，最后评估预算；均尚未实施。未新增真实模型调用，未运行浏览器或完整测试，未修改应用文件、重启服务或推送。仅交付排查文档，保留已有 README 修改和未跟踪取消回归计划。
+
+## 30. 2026-11-12 质量失败诊断与静态锚点平台修复
+
+### 30.1 实现与触发边界
+
+用户确认按第29节方案实施后，本轮修复落在后续生成平台；原失败应用只读，不手改其源码、dist 或任务状态。原触发场景是首次构建导出错误、第一次修复缺少必填属性占满两次预算，第二次修复后首次质量审查拒绝，终态却打印已通过硬校验的空错误列表。
+
+`nodes/verification.py` 现在先区分本轮硬校验，再核对 Vue built=true，最后处理质量拒绝。终态分别使用 ARTIFACT_VALIDATION_FAILED、具体构建错误及 QUALITY_REVIEW_FAILED，后者明确构建/产物校验已通过以及已用修复次数。不再回显任意硬校验正文或模型诊断正文。详细硬校验仍沿原工具结果供内部修复使用。两次修复和40次工具预算不变，无新增重试或质量绕过。
+
+`models/review_diagnostics.py` 仅提取固定 stage/verdict/issueCount/issueCodes；新候选清空旧诊断，字段只留在验证子图，不向父图和修复输入投影。工作流 payload 与 PostgreSQL 存储边界再次核验后写入既有 status_payload，节点旁路同样只导出固定标签。多 Reviewer 任意阻断代码归为 UNCLASSIFIED；布尔兼容记录零问题数。选择固定字段而非保存原始 Reviewer 回复，是为了保留可关联请求的失败类别，同时遵守不把提示词、源码和自由文本理由写入日志/旁路的边界；不能据摘要恢复完整理由。
+
+Spring `VueProjectBuilder` 在 npm/dist 和必填属性检查成功后，运行原可信脚本的独立锚点模式。有限静态入口、可解析本地组件闭包和 index.html 提供目标集合，仅对无点击接管的 ASCII 字面同页链接判缺失。VUE_ANCHOR_TARGET_MISSING 进入原有限修复，VUE_ANCHOR_CHECK_UNAVAILABLE 直接失败；取消沿原 CommandRunner，dist 快路径不重检，失败不回滚。选择 AST 检查而非额外模型审查，是因为该有限静态错误可以给出确定路径和目标，且无需增加供应商调用。
+
+路由/插件/未知入口、动态 ID/组件、未知调用、插槽/v-html/自定义指令、不完整扫描等跳过。top/空片段/动态链接/点击接管/下载或新窗口链接不判缺失；数据模块内部副作用不在范围。检查不证明目标唯一、条件渲染可见或浏览器交互正确，不实现购物车，也不是独立预览/部署拦截器。
+
+### 30.2 验证与证据限制
+
+- Python `uv run python -m compileall -q src`、`uv lock --check` 通过。
+- 默认 `uv run pytest -ra --tb=short` 日志中出现本机 RAG 配置影响，未取得完整终态；另以 API 定向命令复核到客服关闭场景期待503却收到200。本轮没有为此改生产配置或既有客服代码。
+- 沿用 ignored `tmp/vue_read_stall_test_isolation.py` 重跑，只在测试进程关闭本机 RAG，并为四个手写重排器进程夹具分配独立模型锁。初次隔离全量为1388 passed、1 failed、14 skipped；唯一失败是旧断言要求终态回显硬校验标记。将其改为核对稳定阶段码、旧构建错误不残留，以及详细信息仍在原工具结果中。
+- 最终隔离全量 **1389 passed、14 skipped、2 warnings，135.60秒**。14项 PostgreSQL opt-in 未启用，两条既有弃用警告保留；不能称默认裸环境全通过。最终日志 `tmp/generation-diagnostics-pytest-final.log`。
+- `mvn clean -DskipTests compile` 最终通过；Java七类定向测试 **93项全部通过**。最终测试显式启用 VUE_COMPONENT_INTEGRATION，使用前端现有编译器依赖和临时手写组件，测试结束移除依赖链接。包括新增锚点协议/强制构建/取消和网关、SSE、任务落账代码透传。日志位于 `tmp/generation-diagnostics-clean-final.log`、`tmp/generation-diagnostics-java-final.log`。本仓库无可用 mvnw.cmd，使用本机 mvn。
+- Node组件与锚点测试 **38项通过**，包括真实 Node CLI 的隔离手写工程：缺失失败、补齐目标通过、插件入口跳过。日志 `tmp/generation-diagnostics-node-final.log`。没有安装额外依赖或执行生成组件。
+- 原失败应用只读检查返回 SiteHeader.shop、HeroSection.series、SiteFooter.new/shop 四条有界问题，不能冒充历史 Reviewer 的拒绝依据。未做新增真实生成、浏览器点击验收或完整端到端验证；真实模型调用增量 **0**。
+
+### 30.3 交付与后续建议
+
+同步 AI README、AGENTS 和排查报告。前端通用 business-error 适配可消费新增稳定代码，未修改前端；保留其三处既有客服修改。README原有末尾围栏修改、后端未跟踪取消回归计划保持，不混入提交。源码、日志、临时工程、密钥和环境文件不提交，不推送，不主动重启任何日常服务。
+
+生效及页面验证需要重启 Spring 后端，并启动或重启 Python AI 服务；前端和数据库不需要因此重启。旧请求不会自动恢复或改成成功，新机制只对加载新代码后的执行生效。下一步优先从正常生成入口核对明确错误展示、实际修复和浏览器导航，再依据失败类别分布评估预算；单纯提高次数会增加耗时/成本，仍不能保证模型收敛。构建问题耗尽共享预算、被跳过的动态范围、购物流程和模型语义误判仍可能失败。

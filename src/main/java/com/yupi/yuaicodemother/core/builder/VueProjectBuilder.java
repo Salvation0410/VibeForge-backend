@@ -215,11 +215,18 @@ public class VueProjectBuilder {
         }
         if (activeBuild.cancelled()) return cancelledBuild();
         VueBuildResult contract;
+        boolean checkingAnchors = false;
         try {
             contract = VueComponentContractCheck.verify(projectDir, commandRunner);
+            if (contract.built() && !activeBuild.cancelled()) {
+                // 仅在编译、dist 和必填属性检查成功后检查可确定的静态链接。
+                checkingAnchors = true;
+                contract = VueComponentContractCheck.verifyAnchors(projectDir, commandRunner);
+            }
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             return activeBuild.cancelled() ? cancelledBuild()
+                    : checkingAnchors ? VueAnchorCheck.unavailable()
                     : VueBuildResult.failure("VUE_COMPONENT_CHECK_UNAVAILABLE", "Vue 组件检查被中断");
         }
         if (activeBuild.cancelled()) return cancelledBuild();

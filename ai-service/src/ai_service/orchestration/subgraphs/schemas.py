@@ -54,6 +54,8 @@ class VerificationState(VerificationInput, VerificationOutput, total=False):
 
     # 仅在此子图持久化，禁止投影到父图、修复输入或模型上下文。
     candidate_fingerprints: list[str]
+    # 仅留在验证子图，摘要经白名单投影；不进入父图或修复模型输入。
+    review_diagnostics: dict[str, Any]
 
 
 class RepairInput(GenerationInput, total=False):

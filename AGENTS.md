@@ -221,6 +221,7 @@ Python AI_SERVICE_INTERNAL_BEARER_TOKEN
 - 生成或新增的代码必须包含与复杂度相匹配的必要注释；注释统一使用中文，说明设计意图、边界条件、并发/安全约束或非显然的业务规则，禁止用注释重复直白代码。修改现有代码时，将涉及范围内的英文注释改为中文。
 - Python 不直接访问 MySQL 或项目目录；文件操作必须经过 Spring 工具网关。
 - Vue 强制构建在 npm/dist 检查后运行可信 AST 必填属性检查；资源为 `vue/component-contract-check.cjs`，解析器来自项目 Node 依赖。只对支持的静态本地调用判缺失，动态/类型/展开/默认值/事件属性声明等范围跳过，不执行组件、不改源码。`VUE_COMPONENT_CONTRACT_FAILED` 进入原有限修复，`VUE_COMPONENT_CHECK_UNAVAILABLE` 直接失败，不能让模型修复运行环境。取消沿原进程清理；已有 dist 快路径不重检，失败不回滚源码/dist，不能宣称全工程、全部事件或浏览器功能通过。
+- 必填属性通过后同一可信脚本以 `--anchors` 检查有限静态页面闭包的字面同页链接；`VUE_ANCHOR_TARGET_MISSING` 进入原有限修复，`VUE_ANCHOR_CHECK_UNAVAILABLE` 直接失败。路由/插件入口、动态 ID/组件、未知调用、插槽/v-html/自定义指令及不完整扫描跳过；仅支持有限 ASCII 标识，top/空片段/动态或点击接管链接跳过。数据模块内部副作用不在范围；不能据检查通过声称目标唯一、可见或浏览器交互通过，不手工修补失败产物冒充平台修复。
 - Markdown 源码附录遍历时剪枝排除 `node_modules/dist/build/target/.git/.mvn/.idea/.vscode`，默认不跟随符号链接，保留项目文本和锁文件；不要恢复为全目录扫描后仅按扩展名过滤。
 - 首次 Vue 不配图识别支持有限并列否定及外部/网络图片修饰，保护旧图不等于禁止配图，后句明确新增仍优先。规则不是通用语义理解；生成构建和 Reviewer PASS 不能证明筛选等交互功能通过。
 - 修改代码生成类型时检查 `CodeGenTypeEnum`、Python `CodeGenType`、Parser、Saver、Builder、Gateway 和 Workflow。
@@ -241,6 +242,7 @@ Python AI_SERVICE_INTERNAL_BEARER_TOKEN
 - 结构化编辑使用可选顶层 `editIntent`，严格四字段并核对 canonical 原文，不能信任 metadata 同名字段。`AI_SERVICE_STRUCTURED_EDIT_ENABLED=true` 默认省去有效单属性编辑的辅助重写，标为 `skipped/STRUCTURED_EDIT`；重写总开关优先。要求已有产物，Vue 还要求有界清单可见页面源码；不代表服务端验证了 DOM 唯一性或产物可构建。Legacy 明确拒绝。前端提交前复核当前 iframe/document/URL、元素连接及唯一定位，保留普通自由输入路径。
 - 前端规则开启时，有效顶层结构化意图追加 `structured-edit-scope@1`；当前产物是保留基线，历史需求不作为待补做清单。生成、审查和修复共用准备结果，不能把规则存在视为修改范围已通过验收。PostgreSQL 状态摘要允许可选准备诊断并再次投影。
 - 单 Reviewer 使用严格 JSON verdict/issues，最多四条白名单问题；拒绝证据和建议仅作为有界、不可信修复反馈。日志只记录判定、大小、结束原因、问题数和固定问题码，不输出理由正文。非法/截断审查输出明确失败，不自动重试；旧注入模型布尔兼容不代表真实供应商仍接受裸 PASS。
+- `fail_quality` 区分 `ARTIFACT_VALIDATION_FAILED`、构建错误和 `QUALITY_REVIEW_FAILED`，保留原修复预算。`review_diagnostics` 仅留验证子图，按严格白名单投影到 PostgreSQL 状态摘要和节点旁路；只存阶段、判定、阻断数和问题码，非白名单多审查代码映射 UNCLASSIFIED。新候选清空旧诊断，不进入父图/修复模型/公共事件；终态图清理不删除原 TTL 内的摘要，不能据此还原完整 Reviewer 理由。
 - 正式 Vue 单审查需显式传入生成类型；适配器只投影原文/有限用户历史、基线、图片、editIntent、准备结果及验证/构建摘要，当前 artifact 为新快照。不要把旧工具源码、规划/格式反馈重新混入审查，也不要因此删除生成/修复的持久化工具历史。单/多 Reviewer 核对组件 props、事件与 v-model；这些提示不是确定性语义门禁，不能据 PASS 声称浏览器交互已通过。
 - 产生 `REPAIR_NO_PROGRESS` 的无进展指纹只在验证子图保留。静态原文重复、或 Vue 明确完整的非空源码快照重复时，以该错误提前终止，含 A→B→A；不增加修复/工具预算。Vue 单/多 Reviewer 首轮成功构建后都读取快照，截断快照不得用于源码未变证明。内容变化不是质量进步，快照不是全工程证明；不实现语义去重、自动恢复或 Vue 回滚。
 - 正式 Vue 修复的完整工具批次含显式成功 file_write/file_modify 时，经 Spring vue_source_snapshot 比较完整非空文件集合；阶段内重复且无待写文件/配图才交回原验证，不直接成功或产生 REPAIR_NO_PROGRESS。批次标记/指纹仅留在 Vue 子图私有进度，阶段重置、checkpoint 恢复保留，不入模型/公共事件；快照异常及取消沿原路径传播，不额外重试。扫描不计入模型工具预算，但次数受原写入批次预算约束；截断、未知、持续变化或单独删除可能不触发，不保证全工程原子性或交互正确。

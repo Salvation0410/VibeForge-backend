@@ -217,7 +217,7 @@ class VueProjectBuilderTest {
                 Files.createDirectories(tempDir.resolve("dist"));
                 Files.writeString(tempDir.resolve("dist/index.html"), "current build");
             }
-            return new VueProjectBuilder.CommandResult(0, command.getFirst().equals("node") ? CHECK_OK : "ok", "");
+            return new VueProjectBuilder.CommandResult(0, command.getFirst().equals("node") ? (command.contains("--anchors") ? VueAnchorCheckTest.OK : CHECK_OK) : "ok", "");
         });
 
         CompletableFuture<VueBuildResult> first = CompletableFuture.supplyAsync(

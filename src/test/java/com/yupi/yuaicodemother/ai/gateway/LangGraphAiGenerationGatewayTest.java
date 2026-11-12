@@ -294,7 +294,8 @@ class LangGraphAiGenerationGatewayTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"MODEL_OUTPUT_TRUNCATED", "QUALITY_REVIEW_INVALID_OUTPUT",
-            "QUALITY_REVIEW_INCOMPLETE", "REPAIR_NO_PROGRESS"})
+            "QUALITY_REVIEW_INCOMPLETE", "REPAIR_NO_PROGRESS", "QUALITY_REVIEW_FAILED",
+            "ARTIFACT_VALIDATION_FAILED", "VUE_ANCHOR_TARGET_MISSING", "VUE_ANCHOR_CHECK_UNAVAILABLE"})
     void failedEventPreservesStableErrorCode(String errorCode) throws Exception {
         String body = "{\"requestId\":\"req-fail\",\"type\":\"failed\","
                 + "\"data\":{},\"error\":{\"code\":\"" + errorCode + "\",\"message\":\"stopped\"}}\n";

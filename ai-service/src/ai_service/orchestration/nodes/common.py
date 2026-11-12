@@ -5,6 +5,7 @@ from typing import Any, TYPE_CHECKING
 
 from ai_service.orchestration.events import EventEmitter
 from ai_service.orchestration.state import WorkflowState
+from ai_service.models.review_diagnostics import review_trace_metadata
 
 if TYPE_CHECKING:
     from ai_service.orchestration.workflow import GenerationWorkflow
@@ -30,6 +31,7 @@ async def complete_node(workflow, emitter, thread_id, terminal, name, state, sta
                 "code_gen_type": state["code_gen_type"],
                 "repair_count": state.get("repair_count", 0),
                 "tool_call_count": state.get("tool_call_count", 0),
+                **review_trace_metadata(state.get("review_diagnostics")),
             },
             status="completed", started_at=started_at,
         )

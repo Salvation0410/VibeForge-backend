@@ -10,6 +10,7 @@ from ai_service.orchestration.multi_agent_review import run_multi_agent_review
 from ai_service.orchestration.static_generation import invoke_static_model
 from ai_service.models.generation_brief import rewrite_context
 from ai_service.models.single_quality_review import SingleReviewResult, SingleReviewOutputError
+from ai_service.models.review_diagnostics import review_diagnostics
 from ai_service.models.input_review import InputReviewError
 from ai_service.orchestration.repair_progress import candidate_fingerprint, record_candidate, vue_snapshot_fingerprint
 from ai_service.orchestration.subgraphs.schemas import VerificationState
@@ -59,7 +60,7 @@ def create_verification_nodes(
             call_id,
         )
         # 新候选不能沿用上轮模型诊断；硬校验失败的修复只使用本轮硬校验结果。
-        return {"validation": result, "repair_feedback": "", "quality_passed": False,
+        return {"validation": result, "repair_feedback": "", "quality_passed": False, "review_diagnostics": {},
                 "candidate_fingerprints": fingerprints}
 
     async def project_build(state: WorkflowState) -> dict[str, Any]:
@@ -142,6 +143,7 @@ def create_verification_nodes(
             return {
                 "quality_passed": result.passed,
                 "repair_feedback": result.repair_feedback,
+                "review_diagnostics": review_diagnostics(result.passed, result.blocking_issues),
                 "candidate_fingerprints": fingerprints,
             }
         review_context = {
@@ -167,7 +169,8 @@ def create_verification_nodes(
             passed, feedback = result, ""
         else:
             raise SingleReviewOutputError()
-        return {"quality_passed": passed, "repair_feedback": feedback,
+        diagnostic = review_diagnostics(passed, result.issues if isinstance(result, SingleReviewResult) else ())
+        return {"quality_passed": passed, "repair_feedback": feedback, "review_diagnostics": diagnostic,
                 "candidate_fingerprints": fingerprints}
 
     async def repair(state: WorkflowState) -> dict[str, Any]:
@@ -195,13 +198,18 @@ def create_verification_nodes(
 
     async def fail_quality(state: WorkflowState) -> dict[str, Any]:
         """在硬校验或质量检查耗尽修复次数后生成明确失败终态。"""
+        count = state.get("repair_count", 0)
+        budget = workflow.settings.max_repair_attempts
+        if not state.get("validation", {}).get("valid", False):
+            raise ValueError(f"ARTIFACT_VALIDATION_FAILED: 产物校验未通过，自动修复次数已用完（{count}/{budget}）")
         build = state.get("build", {})
-        if not build.get("built", True):
+        if state.get("code_gen_type") == "VUE_PROJECT" and build.get("built") is not True:
             code = build.get("errorCode") or "VUE_BUILD_FAILED"
             message = build.get("message") or "Vue project build failed"
             raise ValueError(f"{code}: {message}")
-        errors = state.get("validation", {}).get("errors", [])
-        raise ValueError(f"Artifact did not pass validation or quality review: {errors}")
+        # 质量拒绝不能打印已经通过的硬校验列表，也不能向公共失败帧回显模型理由。
+        prefix = "构建已通过，" if state.get("code_gen_type") == "VUE_PROJECT" else "产物校验已通过，"
+        raise ValueError(f"QUALITY_REVIEW_FAILED: {prefix}质量检查未通过，自动修复次数已用完（{count}/{budget}）")
 
     return {
         "artifact_validation": artifact_validation,

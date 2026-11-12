@@ -264,7 +264,7 @@ async def test_graph_suppresses_callbacks_and_records_actual_terminal(automatic_
     assert final["metadata"]["repair_count"] == repairs
     assert final["metadata"]["tool_call_count"] == tools
     assert final["started_at"] <= datetime.now(UTC)
-    expected_error = None if status == "completed" else "cancelled" if status == "cancelled" else "GENERATION_FAILED"
+    expected_error = None if status == "completed" else "cancelled" if status == "cancelled" else "QUALITY_REVIEW_FAILED"
     assert final["error_code"] == expected_error
     assert checkpoint.cleaned_graph_threads == ["app:req"]
     assert events[-1].type == ("completed" if status == "completed" else "failed")

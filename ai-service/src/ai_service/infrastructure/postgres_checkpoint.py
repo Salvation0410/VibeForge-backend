@@ -12,6 +12,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
+from ai_service.models.review_diagnostics import safe_review_diagnostics
 from ai_service.models.preparation_diagnostics import safe_preparation_diagnostics
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ STATUS_FIELDS = frozenset(
         "repairCount",
         "toolCallCount",
         "preparation_diagnostics",
+        "review_diagnostics",
     }
 )
 REQUIRED_STATUS_FIELDS = frozenset(
@@ -282,4 +284,7 @@ class PostgresCheckpoint:
         diagnostic = safe_preparation_diagnostics(state.get("preparation_diagnostics"))
         if diagnostic is not None:
             normalized["preparation_diagnostics"] = diagnostic
+        review = safe_review_diagnostics(state.get("review_diagnostics"))
+        if review is not None:
+            normalized["review_diagnostics"] = review
         return normalized

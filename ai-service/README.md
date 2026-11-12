@@ -361,7 +361,15 @@ Spring 的 `project_build` 强制构建在 npm 成功且 dist/index.html 存在�
 
 直接否定“不增加/不添加/不新增外部图片”也会禁止首次自动配图，并抑制已有页面的自动搜图。新增动作前紧邻的“不”才参与该判断，不将分句中的任意“不”全局否定；“不但添加图片”以及后句明确要求添加图片继续按请求处理。此修复针对删除增量真实验收发现的误搜图及 VUE_IMAGE_USAGE_MISSING，仍不是通用语义理解，详见交接第 28 节。
 
+强制 Vue 构建在必填属性检查通过后，再运行可信脚本的 `--anchors` 模式，解析 `src/App.vue`（兼容根 App.vue）的静态本地组件闭包和 index.html，不执行组件。仅拦截普通字面同页链接 `href="#name"` 缺少静态 id/命名锚点的情况，标识限80字符的 ASCII 字母/数字/下划线/连字符，最多报告四条，错误码为 `VUE_ANCHOR_TARGET_MISSING`，进入原有限修复。`#top`、空片段、动态 href、点击接管的链接跳过；路由/插件入口、动态 ID、动态组件、未知组件/函数调用、插槽、v-html、自定义指令、缺文件或扫描截断时不作缺失证明。普通入口限直接 createApp(App).mount('#app')，额外插件/脚本跳过；局部数据模块的内部运行行为不在检查范围。
+
+锚点模式复用24文件、单文件12000字符、总60000字符及不跟随链接的扫描边界；index.html 和 main 采用有界读取。不可执行、协议损坏或超时返回 `VUE_ANCHOR_CHECK_UNAVAILABLE`，Python 直接失败，不能让模型修复环境；取消、dist 兼容快路径及失败不回滚边界保持。检查通过不证明锚点唯一、目标可见、路由可用、浏览器滚动或购物流程正确，也不是预览/部署的独立访问门禁。
+
 ### 质量审查与发布
+
+失败终态现在区分 `ARTIFACT_VALIDATION_FAILED`、原有构建错误和 `QUALITY_REVIEW_FAILED`。硬校验/质量拒绝耗尽预算时提示当前自动修复次数；Vue 构建已通过而质量拒绝时明确说明该阶段，不再打印已通过校验的空错误列表。修复仍共用默认两次上限，工具仍共用40次预算，构建修复可能占尽质量修复机会；没有新增重试或跳过质量门禁。
+
+质量节点在验证子图私有 `review_diagnostics` 中保存阶段、PASS/REPAIR、阻断问题数和固定问题码，并沿现有 PostgreSQL `ai_workflow_status.status_payload` 保留白名单摘要，终态清理完整图 checkpoint 后摘要仍遵守原 TTL。节点旁路增加同样受白名单限制的 verdict/数量/代码标签；自由文本证据、建议和源码不进入摘要、日志或旁路。多 Reviewer 的非白名单阻断代码映射为 `UNCLASSIFIED`；旧布尔注入模型没有理由，只记录零问题数，不伪造证据。新候选清除上轮诊断；不投影到父图、修复输入、模型消息或公共事件。旧 checkpoint 无字段时保持兼容，无数据库结构变更。
 
 默认使用单 Reviewer，OpenAI 兼容适配器单次调用要求严格 JSON：`{"verdict":"PASS","issues":[]}`，或 `verdict=REPAIR` 加 1～4 条问题。每条仅含 `code`、`summary`（最多 160 字符）、`evidence` 和 `repair_hint`（各最多 240 字符），问题码限 `REQUIREMENT_MISSING`、`FUNCTIONAL_ERROR`、`TECHNICAL_ERROR`、`SCOPE_VIOLATION`。PASS 必须无问题，REPAIR 必须有问题；裸 PASS/REPAIR、额外字段、重复键、空理由和超限响应返回 `QUALITY_REVIEW_INVALID_OUTPUT`。长度截断/内容过滤响应即使 JSON 完整也返回 `QUALITY_REVIEW_INCOMPLETE`，不再为格式错误重试或修复。原始响应上限 8192 字符、16384 UTF-8 字节，序列化修复反馈最多 4000 字符。
 

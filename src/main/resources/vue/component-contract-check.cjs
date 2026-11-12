@@ -98,7 +98,7 @@ function describe(file, compiler) {
     }
     // defineModel 的生成 props 可能覆盖同名 defineProps；不模拟编译器的合并优先级。
     if ([...declaredProps].some(name => modelProps.has(name))) supportedProps = false
-    return { imports, required: supportedProps ? required : null, template: d.template?.ast }
+    return { imports, required: supportedProps ? required : null, template: d.template?.ast, scriptAst: body }
   } catch {
     // 不支持的语法/类型只减少覆盖；正常编译错误由 npm build 负责。
     return null
@@ -224,12 +224,181 @@ function loadCompiler(root) {
   return compiler
 }
 
+function dynamicAnchorScript(statements) {
+  const calls = new Set(['ref', 'computed', 'reactive', 'readonly', 'shallowRef', 'defineProps', 'defineEmits', 'defineModel', 'withDefaults'])
+  const methods = new Set(['map', 'filter', 'find', 'findIndex', 'some', 'every', 'reduce', 'includes', 'indexOf', 'join',
+    'slice', 'splice', 'sort', 'push', 'pop', 'shift', 'unshift', 'concat', 'flat', 'flatMap', 'trim', 'split', 'replace',
+    'toLowerCase', 'toUpperCase', 'startsWith', 'endsWith'])
+  function visit(node) {
+    if (!node || typeof node !== 'object') return false
+    if (Array.isArray(node)) return node.some(visit)
+    if (node.type === 'Identifier' && ['document', 'window', 'globalThis', 'createVNode', 'resolveComponent', 'render', 'h'].includes(node.name)) return true
+    if (node.type === 'ImportDeclaration' && (node.source.value === 'vue-router' ||
+        (node.source.value !== 'vue' && node.specifiers.some(s => calls.has(s.local.name))) ||
+        (!node.specifiers.length && !node.source.value.endsWith('.css')))) return true
+    if (['FunctionDeclaration', 'VariableDeclarator'].includes(node.type) && calls.has(node.id?.name)) return true
+    if (node.type === 'CallExpression' || node.type === 'OptionalCallExpression') {
+      const callee = node.callee
+      if (!(callee.type === 'Identifier' && calls.has(callee.name)) &&
+          !(callee.type === 'MemberExpression' && !callee.computed && methods.has(callee.property.name))) return true
+    }
+    if (node.type === 'NewExpression' && !(node.callee.type === 'Identifier' && ['Set', 'Map', 'Date'].includes(node.callee.name))) return true
+    return Object.values(node).some(visit)
+  }
+  // 生命周期、外部函数和未知方法可能创建目标；只接受有限无 DOM 操作的语法。
+  return visit(statements)
+}
+
+function analyzeAnchors(files, compiler, partial = false, documentContent = null, bootstrapStatic = true) {
+  const result = { version: 1, status: 'ok', checkedLinks: 0, skippedLinks: 0,
+    truncated: Boolean(partial), reason: 'NONE', issues: [] }
+  const skip = reason => ({ ...result, checkedLinks: 0, reason, issues: [] })
+  if (partial || documentContent === null || files.length > LIMITS.files) return skip('INCOMPLETE')
+  const descriptions = new Map()
+  let total = 0
+  for (const file of files) {
+    if (!file || typeof file.path !== 'string' || file.path.length > 180 || /[\x00-\x1f\x7f:\\]/.test(file.path) ||
+        path.posix.isAbsolute(file.path) || file.path.split('/').includes('..') || !file.path.endsWith('.vue') ||
+        descriptions.has(file.path) || file.truncated || typeof file.content !== 'string' ||
+        file.content.length > LIMITS.chars || (total += file.content.length) > LIMITS.totalChars) return skip('INCOMPLETE')
+    descriptions.set(file.path, { ...describe(file, compiler), content: file.content })
+  }
+  const root = descriptions.has('src/App.vue') ? 'src/App.vue' : descriptions.has('App.vue') ? 'App.vue' : null
+  if (!root) return skip('NO_APP_TEMPLATE')
+  if (!bootstrapStatic) return skip('DYNAMIC_PAGE')
+  const ids = new Set(), links = [], active = new Set(), visited = new Set()
+  let uncertain = false
+  const supportedId = value => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,79}$/.test(value)
+  function visitTemplate(node, file, imports, scoped = false, clickHandled = false) {
+    if (!node) return
+    const props = node.props || []
+    const attr = name => props.find(p => p.type === 6 && p.name === name)?.value?.content
+    scoped ||= props.some(p => p.type === 7 && ['for', 'slot', 'pre'].includes(p.name))
+    clickHandled ||= props.some(p => (p.type === 7 && p.name === 'on') ||
+      (p.type === 6 && /^on/i.test(p.name)) || (p.type === 7 && p.name === 'bind' && /^on/i.test(p.arg?.content || '')))
+    if (props.some(p => p.type === 7 && (['html', 'pre'].includes(p.name) ||
+        !['if', 'else', 'else-if', 'for', 'show', 'on', 'model', 'bind', 'once', 'memo', 'text'].includes(p.name) ||
+        (p.name === 'bind' && (!p.arg?.isStatic || ['id', 'name', 'is'].includes(p.arg.content)))))) uncertain = true
+    for (const id of [attr('id'), node.tag === 'a' ? attr('name') : null]) if (supportedId(id)) ids.add(id)
+    if (node.tag === 'base') uncertain = true
+    if (node.tag === 'script' && (!/^\/?src\/main\.[jt]s$/.test(attr('src') || '') || attr('type') !== 'module')) uncertain = true
+    if (node.type === 1 && node.tagType !== 0) {
+      const target = imports?.get(node.tag) ?? imports?.get([...imports.keys()].find(name => kebab(name) === node.tag))
+      if (!target || scoped) uncertain = true
+      else visitFile(target)
+    }
+    if (node.tag === 'a') {
+      const href = attr('href')
+      // 只判断无点击拦截的字面同文档链接；top 和空片段有浏览器内建语义。
+      if (href?.startsWith('#') && supportedId(href.slice(1)) && href.toLowerCase() !== '#top' && !clickHandled &&
+          !props.some(p => p.type === 6 && ['download', 'target'].includes(p.name))) {
+        links.push({ file, target: href.slice(1) })
+      } else result.skippedLinks++
+    }
+    for (const child of node.children || []) visitTemplate(child, file, imports, scoped, clickHandled)
+  }
+  function visitFile(file) {
+    if (active.has(file)) { uncertain = true; return }
+    if (visited.has(file)) return
+    visited.add(file)
+    const description = descriptions.get(file)
+    if (!description?.template) { uncertain = true; return }
+    // DOM 创建、运行时渲染及路由不在此检查器可证明的范围。
+    if (dynamicAnchorScript(description.scriptAst)) {
+      uncertain = true; return
+    }
+    active.add(file)
+    visitTemplate(description.template, file, description.imports)
+    active.delete(file)
+  }
+  try {
+    // index.html 可能提供目标或改变 URL 语义；不只根据 SFC 就断言目标缺失。
+    if (typeof documentContent !== 'string' || documentContent.length > LIMITS.chars) return skip('INCOMPLETE')
+    const parsed = compiler.parse(`<template>${documentContent}</template>`)
+    if (parsed.errors.length || !parsed.descriptor.template?.ast) return skip('INCOMPLETE')
+    visitTemplate(parsed.descriptor.template.ast, 'index.html', new Map())
+    visitFile(root)
+    if (uncertain) return skip('DYNAMIC_PAGE')
+    result.checkedLinks = links.length
+    for (const link of links) {
+      if (!ids.has(link.target) && result.issues.length < LIMITS.issues &&
+          !result.issues.some(issue => issue.file === link.file && issue.target === link.target)) result.issues.push(link)
+    }
+    if (result.issues.length) result.status = 'failed'
+    return result
+  } catch { return skip('DYNAMIC_PAGE') }
+}
+
+function readBoundedFile(root, relative) {
+  const full = path.join(root, relative)
+  let fd
+  try {
+    const before = fs.lstatSync(full, { bigint: true })
+    if (!before.isFile() || before.isSymbolicLink() || before.size > BigInt(LIMITS.bytes)) return null
+    fd = fs.openSync(full, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0))
+    const opened = fs.fstatSync(fd, { bigint: true })
+    if (opened.ino !== before.ino || !opened.isFile() ||
+        !fs.realpathSync(full).startsWith(fs.realpathSync(root) + path.sep)) return null
+    const buffer = Buffer.alloc(LIMITS.bytes + 1)
+    let size = 0, count
+    while (size < buffer.length && (count = fs.readSync(fd, buffer, size, buffer.length - size, size))) size += count
+    const after = fs.fstatSync(fd, { bigint: true })
+    if (size > LIMITS.bytes || after.size !== opened.size || after.mtimeNs !== opened.mtimeNs) return null
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, size))
+  } catch { return null }
+  finally { if (fd !== undefined) fs.closeSync(fd) }
+}
+
+const collectDocument = root => readBoundedFile(root, 'index.html')
+
+function staticBootstrap(root, compiler, html) {
+  try {
+    const entry = compiler.parse(`<template>${html}</template>`).descriptor.template.ast.children
+      .find(node => node.tag === 'html')
+    const sources = []
+    function visit(node) {
+      if (node.tag === 'script') sources.push(node.props.find(p => p.type === 6 && p.name === 'src')?.value?.content)
+      for (const child of node.children || []) visit(child)
+    }
+    // HTML 可以包含或省略 html/body 标签，始终从模板根遍历。
+    visit(entry || compiler.parse(`<template>${html}</template>`).descriptor.template.ast)
+    if (sources.length !== 1 || !/^\/?src\/main\.[jt]s$/.test(sources[0])) return false
+    const content = readBoundedFile(root, sources[0].replace(/^\//, ''))
+    if (content === null) return false
+    const statements = compiler.babelParse(content, { sourceType: 'module', plugins: ['typescript'] }).program.body
+    let app = false, create = false, mount = false
+    for (const statement of statements) {
+      if (statement.type === 'ImportDeclaration') {
+        if (statement.source.value === 'vue' && statement.specifiers.length === 1 &&
+            statement.specifiers[0].imported?.name === 'createApp' && statement.specifiers[0].local.name === 'createApp') create = true
+        else if (statement.source.value === './App.vue' && statement.specifiers.length === 1 &&
+            statement.specifiers[0].type === 'ImportDefaultSpecifier' && statement.specifiers[0].local.name === 'App') app = true
+        else if (statement.specifiers.length || !/\.css$/.test(statement.source.value)) return false
+      } else {
+        const call = statement.type === 'ExpressionStatement' ? statement.expression : null
+        if (mount || call?.type !== 'CallExpression' || call.callee.type !== 'MemberExpression' || call.callee.computed ||
+            call.callee.property.name !== 'mount' || call.arguments.length !== 1 || call.arguments[0].value !== '#app') return false
+        const factory = call.callee.object
+        if (factory.type !== 'CallExpression' || factory.callee.name !== 'createApp' ||
+            factory.arguments.length !== 1 || factory.arguments[0].name !== 'App') return false
+        mount = true
+      }
+    }
+    return app && create && mount
+  } catch { return false }
+}
+
 if (require.main === module) {
   try {
     const root = path.resolve(process.argv[2])
     const input = collectFiles(root)
-    const result = analyzeFiles(input.files, input.files.length ? loadCompiler(root) : {}, input.truncated)
-    result.skippedFiles += input.skippedFiles
+    const compiler = input.files.length ? loadCompiler(root) : {}
+    const anchors = process.argv[3] === '--anchors'
+    const documentContent = anchors ? collectDocument(root) : null
+    const result = anchors ? analyzeAnchors(input.files, compiler, input.truncated, documentContent,
+      staticBootstrap(root, compiler, documentContent))
+      : analyzeFiles(input.files, compiler, input.truncated)
+    if (!anchors) result.skippedFiles += input.skippedFiles
     process.stdout.write(JSON.stringify(result))
   } catch {
     // 不返回异常正文，路径、源码和供应商数据不能经构建错误泄露。
@@ -237,4 +406,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { analyzeFiles, collectFiles, loadCompiler, LIMITS }
+module.exports = { analyzeFiles, analyzeAnchors, collectFiles, collectDocument, staticBootstrap, loadCompiler, LIMITS }

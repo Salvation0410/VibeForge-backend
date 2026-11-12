@@ -10,11 +10,15 @@ from time import monotonic
 from typing import Any
 
 from ai_service.config import Settings
+from ai_service.models.review_diagnostics import ISSUE_CODES
 from ai_service.models.preparation_diagnostics import PREPARATION_REASONS, PREPARATION_STATUSES, bounded_skill_labels
 
 logger = logging.getLogger(__name__)
 
 _ALLOWED_METADATA = {
+    "review_verdict",
+    "review_issue_count",
+    "review_issue_codes",
     "request_id",
     "app_id",
     "engine",
@@ -76,6 +80,14 @@ def _safe_metadata(values: dict[str, Any]) -> dict[str, str | int | float | bool
             if not isinstance(value, str):
                 continue
             value = bounded_skill_labels(value.split(","))
+        # 审查自由文本不得借助旁路标签绕过白名单。
+        if key == "review_verdict" and (type(value) is not str or value not in {"PASS", "REPAIR"}):
+            continue
+        if key == "review_issue_count" and (type(value) is not int or not 0 <= value <= 12):
+            continue
+        if key == "review_issue_codes" and (type(value) is not str or len(value) > 128 or
+                (value and any(code not in ISSUE_CODES for code in value.split(",")))):
+            continue
         if isinstance(value, (str, int, float, bool)):
             if isinstance(value, float) and not math.isfinite(value):
                 continue

@@ -49,3 +49,15 @@
 ## 本轮验证范围
 
 已只读核对 MySQL 任务台账、PostgreSQL 脱敏摘要、Redis 三轮校验/构建结果、LangSmith 请求级节点元数据及当前应用源码，并静态枚举锚点。未运行新增真实生成、完整测试集或浏览器验收；未重启服务。仓库原有的 `ai-service/README.md` 修改和取消回归计划未动。
+
+## 用户确认后的平台修复（2026-11-12）
+
+上述排查和历史证据保留。用户确认按方案实施后，修改范围落在后续生成平台：没有手工修改、构建或重新发布这个失败应用，也没有把它标为成功。
+
+1. `fail_quality` 现在优先区分本轮硬校验、Vue 构建和质量拒绝；分别保留 `ARTIFACT_VALIDATION_FAILED`、具体构建错误、`QUALITY_REVIEW_FAILED`。硬校验/质量预算耗尽显示次数，质量拒绝不再打印空硬校验列表。缺少明确 built=true 也不能假称构建通过。默认两次修复与40次工具预算不变。
+2. 验证子图私有诊断保存 stage/verdict/issueCount/issueCodes，通过双重白名单投影进入既有 PostgreSQL JSONB 摘要和节点旁路。只保存固定问题码；任意多 Reviewer 代码归为 UNCLASSIFIED，布尔兼容不伪造问题。新候选清空旧诊断，不向父图、修复模型和公共事件输出；完整 Reviewer 理由仍不能从摘要恢复。
+3. Spring 强制 Vue 构建在 npm/dist 与必填属性检查通过后增加可信脚本锚点模式；检查完整、有限的静态本地组件闭包及 index.html。确定缺失以 `VUE_ANCHOR_TARGET_MISSING` 进入原修复，环境或协议异常 `VUE_ANCHOR_CHECK_UNAVAILABLE` 直接失败。它只支持有限字面链接与普通直接挂载入口；动态/路由/插件/未知调用/截断等跳过，不代替浏览器验收。沿用扫描与取消边界，无成功缓存、源码补丁或版本回滚。
+
+只读运行新检查器时，该应用返回四条有界缺失目标：SiteHeader 的 shop、HeroSection 的 series、SiteFooter 的 new 和 shop。此结果来自新静态规则，不能写成历史 Reviewer 的真实拒绝理由，也不代表修复后页面交互通过。
+
+验证数字、运行命令、环境差异和交付边界见[真实验收交接第30节](generation-structured-edit-acceptance-handoff.md)。下一步优先在服务重启后通过正常生成入口验证错误展示与修复结果；不要绕过门禁、重置旧请求或手改失败产物来证明成功。构建问题占满修复额度、动态范围被跳过、模型判断或交互逻辑错误仍可能造成失败。
