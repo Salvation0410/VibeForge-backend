@@ -3237,6 +3237,9 @@ def test_vue_empty_image_search_has_visible_fallback(app_factory, auth_headers, 
     "制作 Vue 读书清单，不需要外部图片。",
     "创建任务板，无需账号和网络配图。",
     "Create a Vue todo app without external images.",
+    "创建读书清单，不增加外部图片。",
+    "创建读书清单，不添加网络图片。",
+    "创建读书清单，不新增图片。",
 ])
 def test_first_vue_explicitly_without_images_skips_automatic_search(app_factory, auth_headers, ndjson_parser, prompt):
     gateway = FakeToolGateway()
@@ -3271,6 +3274,9 @@ def test_vue_missing_image_usage_stops_after_two_reminders(app_factory, auth_hea
     "并确保修改后可以正常运行。请完整完成所有修改，不要附带解释；如果无法完整生成，请不要输出残缺内容。",
     "保留原有照片，只调整相册的布局和图片尺寸。",
     "Keep existing images. Do not replace photos; only improve spacing.",
+    "只增加删除书籍功能，保留原有筛选和计数，不增加外部图片。",
+    "保留页面文字，不添加网络图片。",
+    "保留原有功能，不新增图片。",
 ])
 def test_vue_preserving_images_does_not_require_new_images(app_factory, auth_headers, ndjson_parser, prompt):
     class UnexpectedImages(FakeToolGateway):

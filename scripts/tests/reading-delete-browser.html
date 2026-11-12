@@ -15,7 +15,8 @@ for (const fault of ['none', 'view-only', 'stale-read', 'wrong-book']) {
     const list = d.querySelector('#books'); list.replaceChildren()
     for (const book of books.filter(b => !hidden.has(b.title) && (active === '全部' || b.read === (active === '已读')))) {
       const item = d.createElement('div'), title = d.createElement('span'), toggle = d.createElement('button'), remove = d.createElement('button')
-      title.textContent = book.title; toggle.textContent = book.read ? '标记未读' : '标记已读'; remove.textContent = '删除书籍'
+      title.textContent = fault === 'none' ? '《' + book.title + '》' : book.title
+      toggle.textContent = book.read ? '标记未读' : '标记已读'; remove.textContent = '删除书籍'
       toggle.onclick = () => { book.read = !book.read; render() }
       remove.onclick = () => {
         if (fault === 'view-only') hidden.add(book.title)

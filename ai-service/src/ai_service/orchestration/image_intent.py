@@ -12,6 +12,9 @@ _PRESERVE_ACTION = re.compile(r"替换|更换|修改|改变|调整|删除|移除
 
 def declines_image_assets(prompt: str) -> bool:
     """识别不配图要求，不把“不要替换原有图片”当作禁止首次配图。"""
+    # 直接否定新增动作不属于旧图保护；仅接受有限图片修饰词，避免越过无关需求。
+    if re.search(rf"不(?:增加|添加|新增)(?:任何|外部|网络|在线|的|\s)*{_IMAGE}", prompt, re.IGNORECASE):
+        return True
     # 否定可作用于并列需求（如“不需要登录、后端或外部图片”），但不能越过分句。
     for match in re.finditer(rf"(?:无需|不需要|不要)([^。！？；，,;.!?\n]{{0,80}}?){_IMAGE}", prompt, re.IGNORECASE):
         scope = match.group(1)
@@ -31,6 +34,8 @@ def requests_image_assets(prompt: str) -> bool:
     clauses = re.split(r"[。！？；，,;.!?\n]|但是|不过|但|\bbut\b", prompt, flags=re.IGNORECASE)
     for clause in clauses:
         for match in _REQUEST.finditer(clause):
-            if not _NEGATION.search(clause[:match.start()]):
+            prefix = clause[:match.start()]
+            # “不增加图片”的单字否定紧邻动作；不能泛化为分句里出现“不”就全局否定。
+            if not _NEGATION.search(prefix) and not prefix.rstrip().endswith("不"):
                 return True
     return False

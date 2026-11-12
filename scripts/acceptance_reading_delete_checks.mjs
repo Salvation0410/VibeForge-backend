@@ -20,7 +20,11 @@ export async function verifyReadingDeletion(document, { tick, prefix = 'delete',
   }
   function card(title) {
     // 从精确书名逐层向上，只接受一个状态按钮和一个删除按钮的最小容器。
-    const titles = [...document.body.querySelectorAll('*')].filter(e => e.children.length === 0 && e.textContent.trim() === title)
+    const titles = [...document.body.querySelectorAll('*')].filter(e => {
+      const value = e.textContent.trim()
+      // 展示层允许一对中文书名号，仍精确匹配整段书名并要求唯一。
+      return e.children.length === 0 && (value === title || value === '《' + title + '》')
+    })
     check(titles.length === 1, 'unique-title')
     for (let e = titles[0], depth = 0; e && e !== document.body && depth < 8; e = e.parentElement, depth++) {
       const found = [...e.querySelectorAll('button')]
