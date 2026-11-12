@@ -9,6 +9,7 @@ from typing import Any, TYPE_CHECKING, TypedDict
 
 from ai_service.models.tool_contract import validate_vue_tool_call
 from ai_service.orchestration.routing import _raise_for_incomplete_model_turn
+from ai_service.orchestration.vue_read_stall import repair_reads_stalled
 from ai_service.orchestration.subgraphs.schemas import RepairState
 
 if TYPE_CHECKING:
@@ -58,7 +59,7 @@ def initial_progress(context: dict[str, Any], prefix: str, started_at: str) -> V
 
 def create_vue_loop_nodes(
     workflow: GenerationWorkflow, emitter, thread_id: str, node: str,
-    *, invoke_model=None,
+    *, invoke_model=None, repair_read_guard=False,
 ):
     """生成和修复仅在模型入口不同，批次规则和工具执行路径完全共用。"""
     async def model_turn(state: VueLoopState):
@@ -212,7 +213,18 @@ def create_vue_loop_nodes(
         if loop["tool_cursor"] < len(loop["pending_tools"]):
             loop["next_step"] = "execute_tool"
         else:
-            loop.update(pending_tools=[], tool_cursor=0, next_step="model_turn")
+            # 完整批次执行完才判断，不能跳过同批次后续写入；返回后仍须强制构建与审查。
+            stalled = (
+                repair_read_guard and bool(loop["pending_tools"])
+                and all(call["name"] == "file_read" for call in loop["pending_tools"])
+                and loop["image_used"]
+                and all(path in loop["written_files"] for path in loop["file_plan"])
+                and repair_reads_stalled(state["vue_tool_results"], loop["call_id_prefix"])
+            )
+            if stalled:
+                logger.info("Vue repair yielded to verification request_id=%s reason=REPEATED_IDENTICAL_READS",
+                            state["request_id"])
+            loop.update(pending_tools=[], tool_cursor=0, next_step="finish" if stalled else "model_turn")
         return {"vue_loop": loop}
 
     return {"model_turn": model_turn, "validate_turn": validate_turn,
