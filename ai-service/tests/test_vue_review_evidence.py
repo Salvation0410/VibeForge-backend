@@ -68,6 +68,38 @@ def test_vue_component_evidence_rules_are_shared_by_roles(role):
     assert VUE_REVIEW_EVIDENCE_INSTRUCTIONS in quality_review_system_prompt(role)
 
 
+@pytest.mark.parametrize(
+    "role", [None, "requirement", "function", "technical"],
+)
+async def test_css_scope_evidence_reaches_actual_review_messages(role):
+    from ai_service.models.quality_review import ReviewerRole
+
+    # 固定快照保留合法全局加载与组件局部定义；假响应只验证消息边界，不证明语义判定。
+    artifact = json.dumps({
+        "files": [
+            {"path": "src/main.js", "content": "import './main.css'"},
+            {"path": "src/main.css", "content": ".btn {} .btn--primary {}"},
+            {"path": "src/Filter.vue", "content":
+             '<template><button class="btn btn--filter" /></template>'
+             '<style scoped>.btn--filter {} .btn-primary {}</style>'},
+        ], "truncated": False,
+    })
+    response = ('{"verdict":"PASS","issues":[]}' if role is None else
+                json.dumps({"reviewer": role, "summary": "完成", "issues": []}))
+    model = model_with_response(response)
+    context = {"codeGenType": "VUE_PROJECT", "prompt": "检查按钮"}
+    if role is None:
+        await model.review(artifact, context)
+    else:
+        await model.review_role(ReviewerRole(role), artifact, context)
+    instructions = model._client.messages[0].content
+    for rule in ("沿可见入口的 CSS 导入", "目标组件自身的 scoped 样式",
+                 "近似类名或重复定义本身不是阻断依据", "区分基础样式与变体样式",
+                 "明确要求的样式或布局确实缺失仍可阻断"):
+        assert rule in instructions
+    assert json.loads(model._client.messages[1].content)["artifact"] == artifact
+
+
 @pytest.mark.parametrize("branch", ["HTML", "MULTI_FILE"])
 async def test_static_review_preserves_its_context(branch):
     model = model_with_response('{"verdict":"PASS","issues":[]}')
