@@ -1,0 +1,345 @@
+{
+  "scope": "offline-synthetic-and-local-corpus",
+  "modelCalls": 0,
+  "realVectorWrites": 0,
+  "splitMatrix": [
+    {
+      "size": 300,
+      "overlap": 50,
+      "sections": 72,
+      "chunks": 72,
+      "minChars": 66,
+      "maxChars": 230,
+      "meanChars": 122.32,
+      "totalChars": 8807,
+      "perDocument": {
+        "01-platform-account.md": 7,
+        "02-app-generation.md": 7,
+        "03-generation-requirements.md": 7,
+        "04-generation-types.md": 6,
+        "05-images-preservation.md": 6,
+        "06-preview-history.md": 6,
+        "07-deployment-download.md": 6,
+        "08-community-features.md": 7,
+        "09-community-guidelines.md": 6,
+        "10-admin-knowledge.md": 7,
+        "11-faq.md": 7
+      },
+      "contentLocatorSha256": "7a156cfa7a19abd4f336f456d9cded173f9e7f96fdd163af4b08a50dc26e1229"
+    },
+    {
+      "size": 600,
+      "overlap": 100,
+      "sections": 72,
+      "chunks": 72,
+      "minChars": 66,
+      "maxChars": 230,
+      "meanChars": 122.32,
+      "totalChars": 8807,
+      "perDocument": {
+        "01-platform-account.md": 7,
+        "02-app-generation.md": 7,
+        "03-generation-requirements.md": 7,
+        "04-generation-types.md": 6,
+        "05-images-preservation.md": 6,
+        "06-preview-history.md": 6,
+        "07-deployment-download.md": 6,
+        "08-community-features.md": 7,
+        "09-community-guidelines.md": 6,
+        "10-admin-knowledge.md": 7,
+        "11-faq.md": 7
+      },
+      "contentLocatorSha256": "7a156cfa7a19abd4f336f456d9cded173f9e7f96fdd163af4b08a50dc26e1229"
+    },
+    {
+      "size": 1000,
+      "overlap": 150,
+      "sections": 72,
+      "chunks": 72,
+      "minChars": 66,
+      "maxChars": 230,
+      "meanChars": 122.32,
+      "totalChars": 8807,
+      "perDocument": {
+        "01-platform-account.md": 7,
+        "02-app-generation.md": 7,
+        "03-generation-requirements.md": 7,
+        "04-generation-types.md": 6,
+        "05-images-preservation.md": 6,
+        "06-preview-history.md": 6,
+        "07-deployment-download.md": 6,
+        "08-community-features.md": 7,
+        "09-community-guidelines.md": 6,
+        "10-admin-knowledge.md": 7,
+        "11-faq.md": 7
+      },
+      "contentLocatorSha256": "7a156cfa7a19abd4f336f456d9cded173f9e7f96fdd163af4b08a50dc26e1229"
+    },
+    {
+      "size": 1400,
+      "overlap": 200,
+      "sections": 72,
+      "chunks": 72,
+      "minChars": 66,
+      "maxChars": 230,
+      "meanChars": 122.32,
+      "totalChars": 8807,
+      "perDocument": {
+        "01-platform-account.md": 7,
+        "02-app-generation.md": 7,
+        "03-generation-requirements.md": 7,
+        "04-generation-types.md": 6,
+        "05-images-preservation.md": 6,
+        "06-preview-history.md": 6,
+        "07-deployment-download.md": 6,
+        "08-community-features.md": 7,
+        "09-community-guidelines.md": 6,
+        "10-admin-knowledge.md": 7,
+        "11-faq.md": 7
+      },
+      "contentLocatorSha256": "7a156cfa7a19abd4f336f456d9cded173f9e7f96fdd163af4b08a50dc26e1229"
+    }
+  ],
+  "protocol": [
+    {
+      "scenario": "first_index",
+      "result": "success",
+      "idempotent": false
+    },
+    {
+      "scenario": "same_input_retry",
+      "result": "success",
+      "idempotent": true
+    },
+    {
+      "scenario": "spring_reindex_same_document_version_new_etl",
+      "result": "KNOWLEDGE_VERSION_CONFLICT"
+    },
+    {
+      "scenario": "replacement_new_document_version",
+      "result": "success",
+      "idempotent": false
+    },
+    {
+      "scenario": "spring_enable_after_disable_same_document_version",
+      "result": "KNOWLEDGE_DOCUMENT_DISABLED"
+    },
+    {
+      "scenario": "new_version_after_disable",
+      "result": "success",
+      "idempotent": false
+    },
+    {
+      "scenario": "reindex_after_rebuild_with_spring_etl",
+      "result": "KNOWLEDGE_VERSION_CONFLICT"
+    }
+  ],
+  "headings": [
+    {
+      "content": "仅管理员可执行。",
+      "locator": "上传"
+    },
+    {
+      "content": "需要等待任务完成。",
+      "locator": "上传 / 时限"
+    }
+  ],
+  "docxParagraphs": [
+    {
+      "content": "仅未完成任务可以提出取消请求。",
+      "locator": "取消条件 / paragraph 2"
+    },
+    {
+      "content": "取消时间不代表副作用已停止。",
+      "locator": "取消条件 / paragraph 3"
+    }
+  ],
+  "complementarySelection": {
+    "kept": [
+      "same:1:0",
+      "other:1:0"
+    ],
+    "drops": {
+      "same:1:1": "duplicate_document"
+    },
+    "necessaryFactsLost": true
+  },
+  "emptyRebuild": {
+    "documentCount": 0,
+    "aliasChanged": true
+  },
+  "newCorpusParserProbes": [
+    {
+      "id": "corpus-boundary-01",
+      "name": "heading-only-scope",
+      "sectionCount": 1,
+      "chunkCount": 1,
+      "chunkLengths": [
+        12
+      ],
+      "locators": [
+        "取消"
+      ],
+      "requiredEvidenceInAnySingleChunk": {
+        "取消": false,
+        "仅未完成": true
+      },
+      "semanticQaTested": false
+    },
+    {
+      "id": "corpus-boundary-02",
+      "name": "adjacent-headings",
+      "sectionCount": 2,
+      "chunkCount": 2,
+      "chunkLengths": [
+        11,
+        15
+      ],
+      "locators": [
+        "手册 / 格式",
+        "手册 / 生效"
+      ],
+      "requiredEvidenceInAnySingleChunk": {
+        "PDF": true,
+        "ACTIVE": true
+      },
+      "semanticQaTested": false
+    },
+    {
+      "id": "corpus-boundary-03",
+      "name": "paragraph-docx",
+      "sectionCount": 2,
+      "chunkCount": 2,
+      "chunkLengths": [
+        8,
+        11
+      ],
+      "locators": [
+        "边界文档 / paragraph 2",
+        "边界文档 / paragraph 3"
+      ],
+      "requiredEvidenceInAnySingleChunk": {
+        "管理员": true,
+        "索引完成": true
+      },
+      "semanticQaTested": false
+    },
+    {
+      "id": "corpus-boundary-04",
+      "name": "table-header-docx",
+      "sectionCount": 2,
+      "chunkCount": 2,
+      "chunkLengths": [
+        7,
+        11
+      ],
+      "locators": [
+        "边界文档 / 表格 1 / 行 1",
+        "边界文档 / 表格 1 / 行 2"
+      ],
+      "requiredEvidenceInAnySingleChunk": {
+        "格式": true,
+        "限制": true,
+        "PDF": true,
+        "20MiB": true
+      },
+      "semanticQaTested": false
+    },
+    {
+      "id": "corpus-boundary-07",
+      "name": "long-unbroken-sentence",
+      "sectionCount": 1,
+      "chunkCount": 3,
+      "chunkLengths": [
+        1000,
+        155,
+        1
+      ],
+      "locators": [
+        "限制",
+        "限制",
+        "限制"
+      ],
+      "requiredEvidenceInAnySingleChunk": {
+        "禁止删除当前活动版本": true
+      },
+      "semanticQaTested": false
+    },
+    {
+      "id": "corpus-boundary-08",
+      "name": "english-sentence-boundary",
+      "sectionCount": 1,
+      "chunkCount": 2,
+      "chunkLengths": [
+        995,
+        991
+      ],
+      "locators": [
+        "lines 1-1",
+        "lines 1-1"
+      ],
+      "requiredEvidenceInAnySingleChunk": {
+        "Only administrators": true,
+        "Wait for indexing": true,
+        "Do not publish": true
+      },
+      "semanticQaTested": false
+    },
+    {
+      "id": "corpus-boundary-09",
+      "name": "unicode-json-budget",
+      "sectionCount": 1,
+      "chunkCount": 3,
+      "chunkLengths": [
+        987,
+        988,
+        571
+      ],
+      "locators": [
+        "lines 1-1",
+        "lines 1-1",
+        "lines 1-1"
+      ],
+      "requiredEvidenceInAnySingleChunk": {
+        "🙂": true,
+        "中文": true
+      },
+      "semanticQaTested": false
+    },
+    {
+      "id": "corpus-boundary-10",
+      "name": "markdown-fence-heading",
+      "sectionCount": 1,
+      "chunkCount": 1,
+      "chunkLengths": [
+        26
+      ],
+      "locators": [
+        "正文"
+      ],
+      "requiredEvidenceInAnySingleChunk": {
+        "真实说明": true
+      },
+      "semanticQaTested": false
+    },
+    {
+      "id": "corpus-boundary-11",
+      "name": "overview-distractor",
+      "sectionCount": 2,
+      "chunkCount": 2,
+      "chunkLengths": [
+        8,
+        26
+      ],
+      "locators": [
+        "常见问法",
+        "上传与索引"
+      ],
+      "requiredEvidenceInAnySingleChunk": {
+        "PDF": true,
+        "20MiB": true
+      },
+      "semanticQaTested": false
+    }
+  ]
+}
