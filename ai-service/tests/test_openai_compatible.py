@@ -49,6 +49,27 @@ def model_with_response(response_content: str) -> OpenAICompatibleModel:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mode,exists", [("generate", False), ("generate", True), ("repair", True)])
+async def test_vue_initial_messages_require_one_json_without_retry_feedback(mode, exists):
+    model = model_with_response('{"content":"读取目标文件","toolCalls":[]}')
+    context = {"prompt": "保留其他功能", "codeGenType": "VUE_PROJECT",
+               "currentArtifact": {"exists": exists}}
+    if mode == "repair":
+        await model.repair("当前快照", context)
+    else:
+        await model.generate("VUE_PROJECT", context)
+    system, human = model._client.messages
+    # 三种正式入口在尚未发生格式重试时就收到整轮输出限制；不靠历史反馈补齐。
+    assert "每轮只返回一个完整 JSON 对象" in system.content
+    assert "禁止在 JSON 前后添加说明、前言、总结或输出多段 JSON" in system.content
+    assert "说明必须放在 content 字段内" in system.content
+    payload = json.loads(human.content)
+    assert "vueFormatFeedback" not in payload
+    assert payload["prompt"] == context["prompt"]
+    assert payload["currentArtifact"] == context["currentArtifact"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["generate", "repair", "review"])
 async def test_vue_long_tool_history_fits_real_message_budget_without_changing_context(mode):
     from copy import deepcopy
