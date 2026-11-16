@@ -1,0 +1,37 @@
+<!doctype html><meta charset="UTF-8"><title>排序探针夹具</title>
+<script type="module">
+import { verifyReadingSort } from '/sort.mjs'
+const results = []
+// 固定故障只验证探针，不代表真实生成。
+for (const fault of ['none', 'no-sort', 'mutate-source', 'reset-filter']) {
+  const frame = document.createElement('iframe'); document.body.append(frame)
+  const d = frame.contentDocument
+  d.body.innerHTML = '<input><button id="add">添加书籍</button><div id="controls"></div><p id="counts"></p><div id="books"></div>'
+  const books = ['小王子', '人类简史', '三体'].map(title => ({ title }))
+  let ascending = false
+  const render = () => {
+    const visible = ascending && fault !== 'no-sort'
+      ? (fault === 'mutate-source' ? books : [...books]).sort((a, b) => a.title.localeCompare(b.title, 'zh-CN')) : books
+    d.querySelector('#counts').textContent = `共 ${books.length} 本 · 已读 0 本`
+    d.querySelector('#books').replaceChildren()
+    for (const book of visible) {
+      const card = d.createElement('section'), title = d.createElement('span'), remove = d.createElement('button')
+      title.textContent = book.title; remove.textContent = '删除书籍'
+      remove.onclick = () => { books.splice(books.indexOf(book), 1); render() }
+      card.append(title, remove); d.querySelector('#books').append(card)
+    }
+  }
+  for (const name of ['全部', '未读', '添加顺序', '书名升序']) {
+    const b = d.createElement('button'); b.textContent = name
+    b.onclick = () => { if (name === '书名升序') ascending = true; else if (name === '添加顺序' || fault === 'reset-filter') ascending = false; render() }
+    d.querySelector('#controls').append(b)
+  }
+  d.querySelector('#add').onclick = () => { const input = d.querySelector('input'); books.push({ title: input.value }); input.value = ''; render() }
+  render(); const checks = []; let error = null
+  try { await verifyReadingSort(d, { tick: () => new Promise(r => setTimeout(r, 0)), record: r => checks.push(r) }) }
+  catch (e) { error = e.message }
+  results.push({ fault, error, checks }); frame.remove()
+}
+await fetch('/report', { method: 'POST', body: JSON.stringify(results) })
+document.body.textContent = '夹具完成'
+</script>
