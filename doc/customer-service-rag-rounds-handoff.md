@@ -90,7 +90,7 @@ Spring以documentVersion记录不可变内容，以每文档etlVersion记录稳�
 
 下一轮推荐下节B0b权威发布协议。原因是本轮只确保数据库条件落账和成功日志可信，无法消除“最后检查后暂停、旧执行恢复再写Milvus”窗口。需要将权威指针、稳定publication事实、私有候选、读路径及alias对账一并设计，不能只给现有alias再加一把锁。
 
-## 第三轮建议：B0b 权威发布协议（尚未实现）
+## 第三轮：B0b 权威发布协议（实施中，尚未切换）
 
 ### 为什么需要、什么情况下触发
 
@@ -100,12 +100,12 @@ Spring以documentVersion记录不可变内容，以每文档etlVersion记录稳�
 
 1. Spring维护知识库epoch、稳定publicationId、不可变publication事实和活动指针；任务重试复用publicationId，attempt/租约另计。改变应使旧构建失效的管理员事务同步推进epoch。
 2. Python构建私有不可变候选，写入后验证文档/索引/激活清单、模型/维度、块集合与内容指纹；准备阶段不得改变可服务集合。只重算需要新INDEX的内容，同代重建复用已验证向量。
-3. Python通过带认证的内部API提交候选，不直接访问业务MySQL。Spring在同一事务锁定epoch、核对task owner/claim、fence、禁用及serving快照，登记publication并切权威指针。快照或owner过期则拒绝候选，不激活。
+3. Spring worker通过带认证的内部API要求Python准备候选收据，再调用Spring本地事务Service提交；Python不直接访问业务MySQL。提交锁定epoch、核对task owner/claim、fence、禁用及serving快照，登记publication并切权威指针。快照或owner过期则拒绝候选，不激活。
 4. HTTP提交响应丢失时按稳定publicationId查询事实：已提交返回原结果，未确认保持未知；不同指纹不可覆盖同ID，也不能更换ID绕过。
 5. 同事务生成alias对账outbox。alias仅作兼容镜像，查询必须使用Spring权威目标的具体collection；否则迟到alias写仍可影响检索。对账失败不撤销已提交事实，延后按当前权威目标修复。
-6. 读路径定义快照语义、禁用生效点和有界epoch复核。需要明确在途答案是否允许旧快照；最后一次复核后仍可能发生撤销，不能宣传绝对即时撤销。该产品语义须在实际发布设计中明确。
+6. 读路径定义快照语义、禁用生效点和有界epoch复核。需要明确在途答案是否允许旧快照；最后一次复核后仍可能发生撤销，不能宣传绝对即时撤销。本轮已确认模型调用前后复核epoch，变化丢弃结果且不自动付费重试；最后复核后仍存在变更窗口。
 
-涉及Spring知识管理Service、worker/finalizer、publication/epoch/outbox实体和Mapper、新迁移SQL、内部提交/查询API；Python知识存储与查询、ETL提交适配、schema和契约测试。候选组织方式（整库复制或按文档候选+目录）需要以72块现状及预定规模测量写放大/查询扇出后确定，不先把多路查询成本藏在实现中。
+涉及Spring知识管理Service、worker/finalizer、publication/epoch/outbox实体和Mapper、新迁移SQL、内部提交/查询API；Python知识存储与查询、ETL提交适配、schema和契约测试。候选组织已按72块实测和用户确认采用有界整库复制；不增加按文档查询扇出，超过预算明确失败，未来规模变化另行评估。
 
 ### 收益、代价与仍可能失败的情况
 
@@ -115,7 +115,23 @@ Spring以documentVersion记录不可变内容，以每文档etlVersion记录稳�
 
 ### 预定验收
 
-双实例及真实MySQL/Milvus隔离数据覆盖：检查后暂停/旧owner恢复、任务接管、禁用/启用与重建交错、同publication重试/指纹冲突、提交前后进程退出、数据库提交响应丢失、alias写失败/迟到覆盖/对账收敛、权威目标缺失和空候选。逐项核对读到的文档/索引/激活身份；未做完整故障注入前不开放生产推广。质量实验另行进行，不用版本测试通过替代答案事实正确率。
+双实例及真实MySQL/Milvus隔离数据覆盖：检查后暂停/旧owner恢复、任务接管、禁用/启用与重建交错、同publication重试/指纹冲突、提交前后进程退出、数据库提交响应丢失、alias写失败/迟到覆盖/对账收敛、权威目标缺失和空候选。逐项核对读到的文档/索引/激活身份；本机维护迁移不能当作完整多实例生产推广证据；完整进程崩溃与网络丢包矩阵需另行验证。质量实验另行进行，不用版本测试通过替代答案事实正确率。
+
+### 本轮已完成的组件与当前边界（实施中记录）
+
+用户已明确批准“有上限的整库不可变候选 + 回答生成前后 epoch 复核”。本机旧源测量为72块、11份manifest、83行，完整向量JSON约4.59MB；采用整库候选可保持单集合检索，代价是每次发布复制快照。详细已确认协议见 `docs/superpowers/specs/2026-11-16-rag-authoritative-publication-design.md`，维护流程见 `doc/customer-service-knowledge-publication-migration.md`。
+
+- Spring短事务已经实现epoch→task→lease锁序，同事务落publication、head、serving、任务成功和alias outbox；管理变更先锁state并推进epoch。读控制快照持同一state锁获取head/名单，不跨时点拼接。
+- worker在新候选准备前及提交确认未知时查询稳定task publication事实。查询仍不确定则保留未知，不将已发生副作用改写成普通失败；相同收据的事实确认不要求原claim/lease仍有效。
+- 维护bootstrap、带认证的snapshot/fact入口和周期head alias对账已实现；即使已ACK仍复核镜像，维护期无head不发送空目标。具体别名没有CAS，迟到覆盖仍可能短暂发生；权威读链路接入后将不依赖镜像。
+- Python私有候选、严格收据、源清单/f32向量校验、完成标记与原文重解析已实现。INDEX仅为目标新索引计算Embedding；REBUILD重解析后复用原向量；DELETE最后一篇允许完整空快照，空REBUILD仍阻断。失败候选保留，旧写路径拒绝publication具体target。
+- 审查发现并修复REBUILD取租约前后清单漂移，以及query iterator创建期间取消遗漏关闭、关闭异常覆盖主取消/错误。六项确定性红绿测试覆盖iterator生命周期，不将取消当作可发布完成。
+- Spring响应仍默认64KiB，Python在Embedding前保守预检收据；候选新增64MiB实际JSON上限。已知累计块/文本/向量预算在Embedding前核对；实际向量JSON超限可能在收费之后发生，不能宣传任何失败均零费用。
+- 普通读取接口只获取完成标记和命中证据标量，不每题下载整库向量；候选构建、源复制及显式完整验收仍逐值回读。不可变应用写边界不等于任意运维绕过协议后的全库篡改检测。
+
+本阶段root独立验证：Java最终142项中141通过、1运维入口跳过，含14项真实隔离MySQL；干净编译通过。Python候选相关187项通过，含2项真实随机alias Milvus，逐项清理确认；相关日志为 `tmp/b0b-root-java-final-tests.log`、`tmp/b0b-root-java-final-test-summary.json`、`tmp/b0b-root-java-final-compile.log`、`tmp/b0b-root-candidate-final-tests.log`。规格与质量均经过只读审查，审查不冒充测试执行。两次Maven曾争用共享target导致审阅尝试缺类，随后root独占clean重跑通过，没有为缓存问题改生产代码。
+
+当前已提交组件：`35153ff`（Java权威事务）、`06b25cc`（Python私有候选及取消边界）。目前正在实施HTTP权威客户端、read scope、回答前后epoch复核及app组装；完整Python回归、业务库维护迁移/备份、真实bootstrap和在线切换尚未完成。当前线上旧索引未切换，不把上述组件完成写成整个B0b已部署。下一阶段必须先完成剩余读写闭环和验收，再执行维护切换。
 
 ## 以后每轮必须使用的交接格式
 
