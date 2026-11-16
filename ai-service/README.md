@@ -607,3 +607,24 @@ uv run python -m ai_service.orchestration.product_knowledge_evaluation
 - [生成任务、迁移与发布边界](../doc/generation-task-ledger.md)
 - [子图架构与交接说明](../doc/ai-service-subgraph-refactor-handoff.md)
 - [产品知识库与评估](../doc/knowledge/product/README.md)
+
+## 客服证据评估与隔离快照对照
+
+`evaluation/customer-service-boundaries-v2.json` 是新增的48题诊断集，含40道可答题、8道拒答题、63条精确原文事实。它不替换固定90题，不是独立盲测集，标注仍待人工复核。
+
+```powershell
+# 默认只校验来源、哈希、事实span、问题唯一性与分组，不调用外部依赖。
+uv run python -m ai_service.orchestration.rag_snapshot_experiment
+# 显式调用真实Embedding、本地GPU重排、回答与抽样语义评审；输出目录必须不存在。
+uv run python -m ai_service.orchestration.rag_snapshot_experiment --live --judge --judge-case-limit 12 --max-chat-calls 120 --output ../tmp/rag-study-new-run
+# 只读重算逐题差异及问题组指标，导出Ragas常见单轮字段，不追加模型调用。
+uv run python -m ai_service.orchestration.rag_snapshot_experiment --analyze ../tmp/rag-study-new-run/report.json
+```
+
+真实快照实验用当前1000/150切分的本地公共正文和精确cosine Top8，复用真实BGE重排结果，对比每文档最多1块/2块，总计最多3块，沿用1200/3000字符与JSON字节预算。它不读取业务MySQL、不启动服务、不写Milvus，也不验证生产alias、ANN过滤或文档版本生命周期。运行前确认GPU未被其他服务独占。
+
+全48题两组回答96次，等距抽取12题做两组评审24次，总共预占120次聊天调用；另有4个Embedding批次，最多允许8批。账本发送前落盘，失败/取消计费额度不返还，客户端不自动重试。已有账本和输出目录不可覆盖；重跑是新增费用，须计入当次用户授权总量，不能把更换目录当作绕过额度的方法。
+
+指标分别报告块级不完备标注下的Precision/Recall/MRR/AP/NDCG、精确事实span覆盖、回答/拒答契约、缺失/错误、答案延迟及token usage。语义评审单独评忠实度、相关性与必要事实覆盖，错误保留为空，不折算成通过；同模型评审有偏差，不等于人工正确率。`--analyze`导出的`retrieved_contexts`是实际最终输入，错误响应保留null，拒答题应按契约评，不直接套用空答案忠实度。当前未安装或执行Ragas框架，导出字段仅供后续适配。
+
+完整逐题上下文、回答、向量快照、usage和账本保存在忽略目录tmp；只在交接文档记录脱敏聚合和问题ID，不提交原始运行报告。评估流程、结果与后续方案见[本轮评估交接](../doc/customer-service-rag-evaluation-handoff-20261116.md)。
