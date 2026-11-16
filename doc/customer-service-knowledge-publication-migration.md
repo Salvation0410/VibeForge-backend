@@ -2,6 +2,8 @@
 
 本文件记录 B0b 的维护切换顺序。实施与验收结果以 `customer-service-rag-rounds-handoff.md` 的第三轮记录为准；在该记录确认部署前，下列命令不是已执行结果。用户已确认整库不可变候选与生成前后 epoch 复核。
 
+2026-11-16本机已完成下述维护流程，epoch=1、11 ACTIVE/1 DISABLED、72块/11 manifest原字段及f32向量一致，旧集合保留。业务表备份路径、哈希、publication身份及未测项见逐轮交接。关闭维护并重启后bootstrap请求被拒绝，两端健康及具体检索复验通过；这只代表本机切换验收，不代表完整多实例故障矩阵通过。
+
 ## 切换前提
 
 - 所有 Spring/Python 实例使用同一新版协议，禁止旧二进制混跑。MySQL 仍是业务数据唯一所有者，Python 仅通过带认证的 Spring 内部接口取得权威快照。
@@ -18,6 +20,8 @@
 4. 核对返回的 publication、epoch、candidateCollection、snapshotHash；再通过 `GET /api/internal/customer-service/knowledge-publications/snapshot` 读取持久事实与白名单。维护候选和旧集合必须不同，72 块现有语料须逐项核对，不只比较条数。
 5. alias 对账可能晚于数据库提交。实际读取使用权威具体 collection，不能以 alias 尚未更新认定发布失败。对账响应必须复核当前 head，周期任务即使事件已 ACK 也继续校正迟到覆盖。
 6. 关闭 `publication-bootstrap-allowed` 并重启相应实例，恢复知识管理写入。保持 publication-enabled；禁止将关闭开关当作回滚方案。
+
+本机后续普通启动需保留私有配置：Spring `ai.customer-service.publication-enabled=true`、`publication-bootstrap-allowed=false`，Python `.env` 的 `AI_SERVICE_RAG_PUBLICATION_ENABLED=true`。开关的仓库默认值仍为false；若运行环境丢失该配置，持久模式检查会拒绝旧协议，不能通过切alias绕过。私有配置和原文件备份均不提交Git。
 
 所有内部接口使用原内部 Bearer；不要在命令历史、文档或提交里写真实 token、cookie、下载 URL 或数据库认证信息。
 

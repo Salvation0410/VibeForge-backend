@@ -90,7 +90,7 @@ Spring以documentVersion记录不可变内容，以每文档etlVersion记录稳�
 
 下一轮推荐下节B0b权威发布协议。原因是本轮只确保数据库条件落账和成功日志可信，无法消除“最后检查后暂停、旧执行恢复再写Milvus”窗口。需要将权威指针、稳定publication事实、私有候选、读路径及alias对账一并设计，不能只给现有alias再加一把锁。
 
-## 第三轮：B0b 权威发布协议（实施中，尚未切换）
+## 第三轮：B0b 权威发布协议（已完成本机维护切换）
 
 ### 为什么需要、什么情况下触发
 
@@ -117,7 +117,7 @@ Spring以documentVersion记录不可变内容，以每文档etlVersion记录稳�
 
 双实例及真实MySQL/Milvus隔离数据覆盖：检查后暂停/旧owner恢复、任务接管、禁用/启用与重建交错、同publication重试/指纹冲突、提交前后进程退出、数据库提交响应丢失、alias写失败/迟到覆盖/对账收敛、权威目标缺失和空候选。逐项核对读到的文档/索引/激活身份；本机维护迁移不能当作完整多实例生产推广证据；完整进程崩溃与网络丢包矩阵需另行验证。质量实验另行进行，不用版本测试通过替代答案事实正确率。
 
-### 本轮已完成的组件与当前边界（实施中记录）
+### 组件实施过程与边界记录
 
 用户已明确批准“有上限的整库不可变候选 + 回答生成前后 epoch 复核”。本机旧源测量为72块、11份manifest、83行，完整向量JSON约4.59MB；采用整库候选可保持单集合检索，代价是每次发布复制快照。详细已确认协议见 `docs/superpowers/specs/2026-11-16-rag-authoritative-publication-design.md`，维护流程见 `doc/customer-service-knowledge-publication-migration.md`。
 
@@ -131,7 +131,33 @@ Spring以documentVersion记录不可变内容，以每文档etlVersion记录稳�
 
 本阶段root独立验证：Java最终142项中141通过、1运维入口跳过，含14项真实隔离MySQL；干净编译通过。Python候选相关187项通过，含2项真实随机alias Milvus，逐项清理确认；相关日志为 `tmp/b0b-root-java-final-tests.log`、`tmp/b0b-root-java-final-test-summary.json`、`tmp/b0b-root-java-final-compile.log`、`tmp/b0b-root-candidate-final-tests.log`。规格与质量均经过只读审查，审查不冒充测试执行。两次Maven曾争用共享target导致审阅尝试缺类，随后root独占clean重跑通过，没有为缓存问题改生产代码。
 
-当前已提交组件：`35153ff`（Java权威事务）、`06b25cc`（Python私有候选及取消边界）。目前正在实施HTTP权威客户端、read scope、回答前后epoch复核及app组装；完整Python回归、业务库维护迁移/备份、真实bootstrap和在线切换尚未完成。当前线上旧索引未切换，不把上述组件完成写成整个B0b已部署。下一阶段必须先完成剩余读写闭环和验收，再执行维护切换。
+上述为组件阶段记录；后续完成HTTP/read scope/app集成与本机维护切换，实际结果如下。
+
+### 本轮最终实现、验证与部署（2026-11-16）
+
+权威HTTP客户端、`AuthoritativeKnowledgeStore`、候选入口和app装配已提交 `ceaa943`；前置实现为 `35153ff`（Java事务）、`06b25cc`（私有候选）。每请求用独立ContextVar保存控制快照，检索只查权威具体集合和文档身份白名单，回答模型前后都复核完整快照。变化或数据库/API故障返回无答案、无引用，不进行付费重试；空名单跳过query Embedding和回答模型。准备接口严格绑定当前epoch/source/预期名单，旧INDEX/DELETE/REBUILD逐请求检查持久模式，禁止关本地开关绕回旧协议。
+
+两轮只读审查中发现HTTP依赖注入可以传入未绑定权威store的官方回答服务，现已拒绝裸官方服务和未知实现。测试兼容器必须显式使用LegacyGuard，且不能包装官方RAG或用于publication模式；未知兼容callback仅保证整段调用前后检查，不承诺其内部模型前hook。启动时尚未bootstrap或控制面临时故障只影响知识健康，不销毁候选准备依赖，避免首次迁移无法自举。
+
+- root独立执行 `uv run python -m compileall -q src`、`uv run pytest -q`、`uv lock --check`：**1644项收集，1622通过、22跳过、0失败/错误**。常规完整回归未开启真实资源opt-in；前述187项另含显式隔离Milvus的2项。日志与计数在本机忽略路径 `tmp/b0b-root-python-full-tests.log`、`tmp/b0b-root-python-full-summary.json`。测试前停止自有Python以释放GPU owner锁，完成后用离线模型缓存重启。工作区同时有另一任务的Vue提示改动，未纳入本轮提交；完整测试覆盖当时工作区，不能据此将另一任务改动归因给本轮。
+- Java独立验证仍为本轮前述141通过、1维护入口默认跳过，含14项隔离MySQL；干净编译通过。停Spring后显式运行 `AI_KNOWLEDGE_MYSQL_APPLY_PUBLICATION=true` 的 `KnowledgePublicationMysqlApplyTest`，该1项真实业务维护入口通过。先确认全局0 PENDING/PROCESSING及新三表不存在，在一致快照中备份五表，再迁移并核对旧五表结构/全部字段指纹不变。
+- 迁移备份为本机忽略目录 `tmp/knowledge-publication-backup-d9bf7b6e-3655-414d-9e85-6584079ccd79/knowledge.sql`；SHA-256为 `bb9b127ff97210da5f7eb9026c1ae9e640cd45b22e38117a041c305c46532b12`。不可将含业务数据的备份提交Git。
+- 新版两端维护启动后，管理员bootstrap真实下载并解析原文，复制已验收向量，成功提交 `bootstrap_8fae81e298d34db990405fa2883eb64e`，**epoch=1**。权威集合为 `customer_service_knowledge_pub_a5a7821339274e29a82f241ffaaad8e5`，snapshotHash为 `a39a17a7cd024f447283a2773c471c786851a4674cb65f804d596b9e7699e682`。
+- 完整回读新83行（72块/11 manifest），排除旧可变控制字段后的原业务字段及规范f32向量逐项一致；规范SHA-256仍为 `a4381d141c7648203b85d60d10a0ebc4ed436acafa801556deeddc0db4ca0ad7`。旧具体集合 `customer_service_knowledge_9a3e5b421e0e_staging_446409c019dc` 保留且哈希未变。管理员状态仍11 ACTIVE、1 DISABLED。
+- 使用保存的原块向量执行真实Top8具体集合检索，命中身份均在白名单；检查snapshot/fact整数JSON、错误token拒绝、alias镜像与权威head一致、两端健康。上述迁移/回读验收 **回答模型0次、Embedding 0次**，不能将保存向量检索视为真实自然语言问答质量评估。
+- 精确备份并追加私有本地配置：Spring publication-enabled=true、bootstrap-allowed=false；Python publication=true。关闭维护入口后重启Spring并复验，普通重启继续新协议，不提交私有配置或密钥。已启用后不能仅关闭开关或切旧alias回滚。运行证据为 `tmp/b0b-runtime-verification.json`、`tmp/b0b-bootstrap-result.json`、`tmp/b0b-maintenance-closed.json`、`tmp/b0b-admin-preflight.json`。
+
+本轮边界：没有执行完整双服务实例的进程强杀、真实网络丢包或提交确认丢失矩阵；相关确定性交错/异常测试不冒充该验收。最后epoch复核后仍有撤销窗口，普通查询不验证任意运维篡改的全库向量；alias无CAS，迟到镜像可能短暂失配，但不决定正式读取。候选/旧版本没有自动GC，实际向量JSON超预算可能在INDEX计费后发现。未推广R2、cap2或扩大TopK，R1/denseTop8/每文档1块/final3维持原配置。
+
+### 下一轮建议：故障演练与候选容量观测
+
+**问题和原因：** 本轮已将读取权威从alias移到MySQL，但真实进程退出、提交确认未知和跨实例迟到alias仍缺完整运行证据；整库复制也会持续积累候选。先补恢复证据和容量观测，比立即删除旧版本或继续增加质量参数更可归因。
+
+**建议流程与模块：** 使用独立随机schema、独立Milvus alias/collection和两套服务构造“准备后退出、提交后确认丢失、旧执行恢复写alias、数据库离线、目标缺失、空白名单”场景。按稳定publicationId查事实，核对head/serving/任务/引用结果及周期对账。增加只读候选清单和总字节/年龄观测，区分当前引用、历史事实引用与未提交候选；首轮只报告，不自动删除。涉及publication Service/worker、Python边界及隔离验收运行器，不扩展模型调用预算。
+
+**选择和边界：** 本轮不自动开始GC，因为“非当前head”不等于无引用，在途读和未知提交仍可能引用旧集合。若后续设计删除策略，需先明确引用保护、隔离期、在途读约束、重入/失败恢复和人工审核；若存在不同删除取舍，另向用户给出具体方案确认。恢复演练不自动重算向量或切旧alias，不用删除故障证据制造成功。
+
+**预定验收：** 所有故障都检查实际文档/索引/激活身份，未知提交不重复付费、不覆盖相同ID事实；停止写入后alias应收敛。容量报告不得输出原文、向量、下载URL或凭据。人工标注校准、多证据cap2与拒答质量评估留作后续独立变量，需有新证据再决定推广。
 
 ## 以后每轮必须使用的交接格式
 
