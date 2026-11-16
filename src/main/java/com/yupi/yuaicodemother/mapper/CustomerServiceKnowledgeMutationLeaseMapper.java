@@ -31,6 +31,9 @@ public interface CustomerServiceKnowledgeMutationLeaseMapper extends BaseMapper<
     @Select("SELECT operationId,scope,operation,fence,expiresAt,revokedAt,owner,createTime,updateTime FROM customer_service_knowledge_mutation_lease WHERE operationId=#{operationId}")
     CustomerServiceKnowledgeMutationLease findByOperationId(@Param("operationId") String operationId);
 
+    @Select("SELECT operationId,scope,operation,fence,expiresAt,revokedAt,owner FROM customer_service_knowledge_mutation_lease WHERE operationId=#{operationId} FOR UPDATE")
+    CustomerServiceKnowledgeMutationLease lockLease(@Param("operationId") String operationId);
+
     @Update("UPDATE customer_service_knowledge_mutation_lease SET revokedAt=NOW() WHERE operationId=#{operationId} AND fence=#{fence} AND revokedAt IS NULL")
     int revoke(@Param("operationId") String operationId, @Param("fence") long fence);
 }

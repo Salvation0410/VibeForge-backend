@@ -19,6 +19,42 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class CustomerServiceAiClientTest {
     @Test
+    void publicationPreparePreservesMutationAndStrictReceiptContract() throws Exception {
+        var body=new AtomicReference<String>();
+        var response=new AtomicReference<String>();
+        var server=HttpServer.create(new InetSocketAddress(0),0);
+        server.createContext("/internal/v1/customer-service/knowledge:prepare-publication",exchange -> {
+            body.set(new String(exchange.getRequestBody().readAllBytes(),StandardCharsets.UTF_8));writeJson(exchange,response.get());
+        });server.start();
+        try {
+            var context=new com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol.PublicationContext("task_1",7,"old",List.of());
+            var receipt=KnowledgePublicationServiceTest.receipt(context);
+            String json=new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(receipt);response.set(json);
+            var lease=new KnowledgeMutationCoordinator.Lease("document:1","attempt","INDEX",3,2000000000,"secret");
+            var mutation=new CustomerServiceAiClient.IndexRequest("1",1,"a.txt","TXT","https://example.test/download","a".repeat(64),"2",2,1,lease);
+            var request=new com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol.CandidateRequest(context,mutation);
+            assertEquals(receipt,client(server).preparePublication(request));
+            var sent=new com.fasterxml.jackson.databind.ObjectMapper().readTree(body.get());
+            assertEquals("INDEX",sent.path("mutation").path("operation").asText());
+            assertEquals(2,sent.path("mutation").path("indexRevision").asInt());assertTrue(sent.path("context").path("baseEpoch").isIntegralNumber());
+            response.set(json.replace("\"baseEpoch\":7","\"baseEpoch\":\"7\""));
+            assertEquals("KNOWLEDGE_AI_RESPONSE_INVALID",assertThrows(CustomerServiceAiClient.CallException.class,()->client(server).preparePublication(request)).code());
+        } finally {server.stop(0);}
+    }
+    @Test
+    void aliasReconcileRequiresExactCurrentHeadAcknowledgement() throws Exception {
+        var response=new AtomicReference<>("{\"publicationId\":\"task_1\",\"epoch\":7,\"collectionName\":\"specific\",\"reconciled\":true}");
+        var server=HttpServer.create(new InetSocketAddress(0),0);
+        server.createContext("/internal/v1/customer-service/knowledge:reconcile-alias",exchange -> writeJson(exchange,response.get()));server.start();
+        try {
+            var request=new com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol.ReconcileAliasRequest("alias","specific","task_1",7);
+            client(server).reconcileAlias(request);
+            response.set(response.get().replace("\"epoch\":7","\"epoch\":6"));
+            assertThrows(CustomerServiceAiClient.CallException.class,()->client(server).reconcileAlias(request));
+        } finally {server.stop(0);}
+    }
+
+    @Test
     void answerSendsRequestIdAndRejectsMalformedContract() throws Exception {
         var body = new AtomicReference<String>();
         var server = HttpServer.create(new InetSocketAddress(0), 0);

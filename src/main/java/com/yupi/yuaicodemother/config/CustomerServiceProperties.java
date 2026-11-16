@@ -8,6 +8,8 @@ import jakarta.annotation.PostConstruct;
 @ConfigurationProperties(prefix = "ai.customer-service")
 public class CustomerServiceProperties {
     private boolean enabled = false;
+    private boolean publicationEnabled = false;
+    private boolean publicationBootstrapAllowed = false;
     private String serviceUrl = "http://localhost:8000";
     private long timeoutSeconds = 30;
     private String collectionAlias = "customer_service_knowledge";

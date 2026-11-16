@@ -1,0 +1,213 @@
+package com.yupi.yuaicodemother.customerservice;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yupi.yuaicodemother.config.*;
+import com.yupi.yuaicodemother.mapper.*;
+import com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol.*;
+import com.yupi.yuaicodemother.service.*;
+import org.apache.ibatis.builder.xml.XMLMapperBuilder;
+import org.apache.ibatis.mapping.Environment;
+import org.apache.ibatis.session.Configuration;
+import org.apache.ibatis.session.SqlSessionFactoryBuilder;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.mybatis.spring.SqlSessionTemplate;
+import org.mybatis.spring.transaction.SpringManagedTransactionFactory;
+import org.springframework.aop.framework.ProxyFactory;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.*;
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
+import org.springframework.transaction.interceptor.TransactionInterceptor;
+import java.nio.file.*;
+import java.sql.*;
+import java.time.*;
+import java.util.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+/** 随机独立 schema 中使用真实 Mapper/事务；不改业务库，不调用模型或 Milvus。 */
+@EnabledIfEnvironmentVariable(named="AI_KNOWLEDGE_PUBLICATION_MYSQL_INTEGRATION",matches="true")
+class KnowledgePublicationMysqlIntegrationTest {
+    static final Instant NOW=Instant.parse("2030-01-01T00:00:00Z");
+    static final String HASH="a".repeat(64);
+    @Test void bootstrapCommitsFirstFactAndRepeatsAfterLeaseRevocation() throws Exception {
+        isolated(f->{
+            f.jdbc.update("UPDATE customer_service_knowledge_publication_state SET enabled=0,epoch=0,publicationId=NULL WHERE id=1");
+            f.jdbc.update("DELETE FROM customer_service_knowledge_publication");
+            f.properties.setPublicationBootstrapAllowed(true);
+            String id="bootstrap_"+"f".repeat(32);
+            var lease=f.coordinator.acquire("collection:"+f.properties.getCollectionAlias(),id,"REBUILD","maintenance");
+            var context=f.service.prepareBootstrap(id,"legacy_specific",lease);
+            var receipt=new CandidateReceipt(id,0,id,lease.fence(),"customer_service_knowledge_pub_"+"f".repeat(32),HASH,"model-v1",3,List.of());
+            var fact=f.service.commitBootstrap(context,receipt,lease);
+            assertEquals(1,fact.epoch());assertTrue(f.service.snapshot().enabled());
+            f.coordinator.revoke(lease);f.properties.setPublicationBootstrapAllowed(false);
+            assertEquals(fact,f.service.commitBootstrap(context,receipt,lease));
+            assertEquals(1,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_publication"));
+        });
+    }
+    @Test void deletingLastServingDocumentCanPublishEmptySnapshot() throws Exception {
+        isolated(f->{
+            var index=f.prepare(1);f.service.commit(1,"owner",index.lease,index.context,index.receipt);f.coordinator.revoke(index.lease);
+            new org.springframework.transaction.support.TransactionTemplate(f.transactions).executeWithoutResult(status->{
+                f.service.beforeAdministrativeMutation();
+                f.jdbc.update("UPDATE customer_service_knowledge_document SET status='DISABLED',etlVersion=3 WHERE id=1");
+                f.jdbc.update("INSERT INTO customer_service_knowledge_etl_outbox(id,documentId,documentVersion,etlVersion,operation,status,nextRetryTime) VALUES(2,1,1,3,'DELETE','PENDING','2029-12-31 00:00:00')");
+            });
+            assertEquals(1,f.tasks.claim(2,"owner",LocalDateTime.ofInstant(NOW,ZoneOffset.UTC),LocalDateTime.ofInstant(NOW.plusSeconds(60),ZoneOffset.UTC)));
+            var lease=f.coordinator.acquire("document:1","delete-attempt","DELETE","owner");
+            var context=f.service.prepare(2,"owner",lease);assertTrue(context.documents().isEmpty());
+            var receipt=new CandidateReceipt("task_2",context.baseEpoch(),lease.operationId(),lease.fence(),"customer_service_knowledge_pub_"+"e".repeat(32),HASH,"model-v1",3,List.of());
+            f.service.commit(2,"owner",lease,context,receipt);assertTrue(f.service.snapshot().documents().isEmpty());
+            assertEquals(receipt.candidateCollection(),f.service.snapshot().collectionName());
+        });
+    }
+    @Test void commitsAllFactsAndExpiredRetryReturnsSameFact() throws Exception {
+        isolated(f->{
+            var execution=f.prepare(1);
+            var fact=f.service.commit(1,"owner",execution.lease,execution.context,execution.receipt);
+            assertEquals(2,fact.epoch());assertEquals(1,f.scalar("SELECT indexedVersion FROM customer_service_knowledge_document WHERE id=1"));
+            assertEquals(2,f.scalar("SELECT epoch FROM customer_service_knowledge_publication_state WHERE id=1"));
+            assertEquals(1,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_etl_outbox WHERE status='SUCCEEDED'"));
+            assertEquals(1,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_alias_outbox WHERE status='PENDING'"));
+            f.coordinator.revoke(execution.lease);
+            assertEquals(fact,f.service.commit(1,"owner",execution.lease,execution.context,execution.receipt));
+            var conflict=new CandidateReceipt("task_1",1,execution.lease.operationId(),execution.lease.fence(),
+                    execution.receipt.candidateCollection(),"b".repeat(64),"model-v1",3,execution.receipt.documents());
+            assertEquals("KNOWLEDGE_PUBLICATION_RECEIPT_CONFLICT",assertThrows(IllegalStateException.class,
+                    ()->f.service.commit(1,"owner",execution.lease,execution.context,conflict)).getMessage());
+            assertEquals(HASH,f.service.snapshot().snapshotHash());
+        });
+    }
+    @Test void lateAliasOutboxFailureRollsBackServingHeadFactAndTask() throws Exception {
+        isolated(f->{
+            var execution=f.prepare(1);
+            f.jdbc.update("INSERT INTO customer_service_knowledge_alias_outbox(publicationId,epoch,status) VALUES('task_1',99,'PENDING')");
+            assertThrows(RuntimeException.class,()->f.service.commit(1,"owner",execution.lease,execution.context,execution.receipt));
+            assertEquals(0,f.scalar("SELECT indexedVersion FROM customer_service_knowledge_document WHERE id=1"));
+            assertEquals(1,f.scalar("SELECT epoch FROM customer_service_knowledge_publication_state WHERE id=1"));
+            assertEquals(0,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_publication WHERE publicationId='task_1'"));
+            assertEquals(1,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_etl_outbox WHERE status='PROCESSING'"));
+        });
+    }
+    @Test void administrativeEpochAndOwnerTakeoverRejectOldCandidate() throws Exception {
+        isolated(f->{
+            var execution=f.prepare(1);
+            f.service.beforeAdministrativeMutation();
+            assertEquals("KNOWLEDGE_PUBLICATION_EPOCH_CONFLICT",assertThrows(IllegalStateException.class,
+                    ()->f.service.commit(1,"owner",execution.lease,execution.context,execution.receipt)).getMessage());
+            f.jdbc.update("UPDATE customer_service_knowledge_etl_outbox SET processingOwner='replacement' WHERE id=1");
+            assertEquals("KNOWLEDGE_PUBLICATION_CLAIM_LOST",assertThrows(IllegalStateException.class,
+                    ()->f.service.commit(1,"owner",execution.lease,execution.context,execution.receipt)).getMessage());
+            assertEquals(0,f.scalar("SELECT indexedVersion FROM customer_service_knowledge_document WHERE id=1"));
+        });
+    }
+    @Test void disableImmediatelyRemovesReadWhitelistAndAliasAcknowledgementCannotAcknowledgeReplacement() throws Exception {
+        isolated(f->{
+            var execution=f.prepare(1);f.service.commit(1,"owner",execution.lease,execution.context,execution.receipt);
+            var before=f.service.snapshot();assertEquals(1,before.documents().size());
+            new org.springframework.transaction.support.TransactionTemplate(f.transactions).executeWithoutResult(status->{
+                f.service.beforeAdministrativeMutation();
+                f.jdbc.update("UPDATE customer_service_knowledge_document SET status='DISABLED' WHERE id=1");
+            });
+            var after=f.service.snapshot();assertTrue(after.documents().isEmpty());assertTrue(after.epoch()>before.epoch());
+            f.service.acknowledgeMirror(before);
+            assertEquals(0,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_alias_outbox WHERE status='ACK'"));
+            f.service.acknowledgeMirror(after);
+            assertEquals(1,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_alias_outbox WHERE status='ACK'"));
+        });
+    }
+    @Test void twoPreparedDocumentsCannotCommitSameEpoch() throws Exception {
+        isolated(f->{
+            var first=f.prepare(1);var second=f.prepare(2);
+            try(var executor=java.util.concurrent.Executors.newFixedThreadPool(2)) {
+                var start=new java.util.concurrent.CountDownLatch(1);
+                var a=executor.submit(()->{start.await();return f.tryCommit(1,first);});
+                var b=executor.submit(()->{start.await();return f.tryCommit(2,second);});start.countDown();
+                assertEquals(1,a.get(15,java.util.concurrent.TimeUnit.SECONDS)+b.get(15,java.util.concurrent.TimeUnit.SECONDS));
+            }
+            assertEquals(2,f.scalar("SELECT epoch FROM customer_service_knowledge_publication_state WHERE id=1"));
+            assertEquals(1,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_etl_outbox WHERE status='SUCCEEDED'"));
+        });
+    }
+    void isolated(Scenario scenario) throws Exception {
+        String schema="rag_publication_it_"+UUID.randomUUID().toString().replace("-","");
+        if(!schema.matches("rag_publication_it_[a-f0-9]{32}")) throw new IllegalArgumentException("隔离库名称无效");
+        try(var admin=KnowledgeRevisionMysqlSupport.connect()) {
+            boolean created=false;
+            try {
+                try(var stmt=admin.createStatement()) {stmt.execute("CREATE DATABASE `"+schema+"` CHARACTER SET utf8mb4");created=true;}
+                admin.setCatalog(schema);assertEquals(schema,admin.getCatalog());
+                KnowledgeRevisionMysqlSupport.script(admin,Files.readString(Path.of("sql/alter_customer_service_knowledge.sql")));
+                KnowledgeRevisionMysqlSupport.script(admin,Files.readString(Path.of("sql/alter_customer_service_knowledge_publication.sql")));
+                scenario.run(new Fixture(schema));
+            } finally {
+                if(created) {
+                    admin.setCatalog("yu_ai_code_mother");
+                    try(var stmt=admin.createStatement()) {stmt.execute("DROP DATABASE `"+schema+"`");}
+                    System.out.println("RAG_PUBLICATION_IT_SCHEMA_CLEANED");
+                }
+            }
+        }
+    }
+    static class Fixture {
+        final JdbcTemplate jdbc;
+        final DataSourceTransactionManager transactions;
+        final KnowledgeMutationCoordinator coordinator;
+        final KnowledgePublicationService service;
+        final CustomerServiceKnowledgeEtlOutboxMapper tasks;
+        final CustomerServiceProperties properties=new CustomerServiceProperties();
+        Fixture(String schema) throws Exception {
+            var source=new AbstractDataSource() {
+                @Override public Connection getConnection() throws SQLException {
+                    Connection connection=null;
+                    try {connection=KnowledgeRevisionMysqlSupport.connect();connection.setCatalog(schema);
+                        if(!schema.equals(connection.getCatalog())) throw new SQLException("隔离库切换失败");return connection;
+                    } catch(Exception error) {if(connection!=null) connection.close();throw new SQLException("无法建立隔离连接");}
+                }
+                @Override public Connection getConnection(String user,String password) throws SQLException {throw new SQLException("拒绝非受控凭据");}
+            };
+            jdbc=new JdbcTemplate(source);transactions=new DataSourceTransactionManager(source);
+            var cfg=new Configuration(new Environment("publication-it",new SpringManagedTransactionFactory(),source));
+            cfg.addMapper(CustomerServiceKnowledgeDocumentMapper.class);cfg.addMapper(CustomerServiceKnowledgeEtlOutboxMapper.class);
+            cfg.addMapper(CustomerServiceKnowledgeMutationLeaseMapper.class);cfg.addMapper(KnowledgePublicationMapper.class);
+            try(var input=Files.newInputStream(Path.of("src/main/resources/mapper/KnowledgePublicationMapper.xml"))) {
+                new XMLMapperBuilder(input,cfg,"publication-mapper",cfg.getSqlFragments()).parse();
+            }
+            var sessions=new SqlSessionTemplate(new SqlSessionFactoryBuilder().build(cfg));
+            tasks=sessions.getMapper(CustomerServiceKnowledgeEtlOutboxMapper.class);
+            properties.setPublicationEnabled(true);
+            var ai=new AiEngineProperties();ai.setToken("isolated-signing-secret");
+            coordinator=transactional(new KnowledgeMutationCoordinator(sessions.getMapper(CustomerServiceKnowledgeMutationLeaseMapper.class),ai,properties,Clock.fixed(NOW,ZoneOffset.UTC)));
+            service=transactional(new KnowledgePublicationService(sessions.getMapper(KnowledgePublicationMapper.class),
+                    sessions.getMapper(CustomerServiceKnowledgeDocumentMapper.class),tasks,sessions.getMapper(CustomerServiceKnowledgeMutationLeaseMapper.class),
+                    coordinator,properties,Clock.fixed(NOW,ZoneOffset.UTC)));
+            var initial=new CandidateReceipt("bootstrap_"+"0".repeat(32),0,"bootstrap",1,"customer_service_knowledge_pub_"+"0".repeat(32),HASH,"model-v1",3,List.of());
+            jdbc.update("INSERT INTO customer_service_knowledge_publication(publicationId,epoch,collectionName,receiptJson) VALUES(?,1,?,?)",initial.publicationId(),initial.candidateCollection(),new ObjectMapper().writeValueAsString(initial));
+            jdbc.update("UPDATE customer_service_knowledge_publication_state SET enabled=1,epoch=1,publicationId=? WHERE id=1",initial.publicationId());
+        }
+        <T> T transactional(T target) {
+            var proxy=new ProxyFactory(target);proxy.setProxyTargetClass(true);
+            proxy.addAdvice(new TransactionInterceptor(transactions,new AnnotationTransactionAttributeSource()));
+            @SuppressWarnings("unchecked") T result=(T)proxy.getProxy();return result;
+        }
+        Execution prepare(long id) {
+            jdbc.update("INSERT INTO customer_service_knowledge_document(id,name,fileType,objectKey,fileSize,contentHash,documentVersion,etlVersion,status,createdBy,updatedBy) VALUES(?,'隔离原文','TXT','fake.txt',1,?,1,2,'INDEXING',1,1)",id,String.format("%064d",id));
+            jdbc.update("INSERT INTO customer_service_knowledge_content_revision(documentId,documentVersion,name,fileType,objectKey,fileSize,contentHash) VALUES(?,1,'隔离原文','TXT','fake.txt',1,?)",id,String.format("%064d",id));
+            jdbc.update("INSERT INTO customer_service_knowledge_etl_outbox(id,documentId,documentVersion,etlVersion,operation,status,nextRetryTime) VALUES(?,?,1,2,'INDEX','PENDING','2029-12-31 00:00:00')",id,id);
+            assertEquals(1,tasks.claim(id,"owner",LocalDateTime.ofInstant(NOW,ZoneOffset.UTC),LocalDateTime.ofInstant(NOW.plusSeconds(60),ZoneOffset.UTC)));
+            var lease=coordinator.acquire("document:"+id,"attempt_"+id,"INDEX","owner");
+            var context=service.prepare(id,"owner",lease);
+            var receipt=new CandidateReceipt(context.publicationId(),context.baseEpoch(),lease.operationId(),lease.fence(),
+                    "customer_service_knowledge_pub_"+String.format("%032d",id),HASH,"model-v1",3,
+                    context.documents().stream().map(d->new ReceiptDocument(d.documentId(),d.documentVersion(),d.indexRevision(),d.activationRevision(),d.sha256(),d.fileName(),d.fileType(),4)).toList());
+            return new Execution(lease,context,receipt);
+        }
+        int tryCommit(long id,Execution execution) {
+            try {service.commit(id,"owner",execution.lease,execution.context,execution.receipt);return 1;}
+            catch(IllegalStateException rejected) {assertEquals("KNOWLEDGE_PUBLICATION_EPOCH_CONFLICT",rejected.getMessage());return 0;}
+        }
+        long scalar(String sql) {return jdbc.queryForObject(sql,Long.class);}
+    }
+    record Execution(KnowledgeMutationCoordinator.Lease lease,PublicationContext context,CandidateReceipt receipt) { }
+    interface Scenario {void run(Fixture fixture) throws Exception;}
+}

@@ -34,6 +34,13 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
     private final CustomerServiceKnowledgeEtlOutboxMapper outboxMapper;
     private final OssManager ossManager;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.yupi.yuaicodemother.service.KnowledgePublicationService publicationService;
+
+    private void advancePublicationEpoch() {
+        if (publicationService != null) publicationService.beforeAdministrativeMutation();
+    }
+
     @Override
     @Transactional
     public CustomerServiceKnowledgeDocumentVO upload(MultipartFile file, Long replacementId, long userId) {
@@ -48,6 +55,7 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
             });
         }
         try {
+            advancePublicationEpoch();
             if (documentMapper.findDuplicate(uploaded.sha256(), replacementId) != null)
                 throw new BusinessException(ErrorCode.OPERATION_ERROR, "知识文档内容已存在");
             CustomerServiceKnowledgeDocument document;
@@ -126,6 +134,7 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
     @Override
     @Transactional
     public CustomerServiceKnowledgeDocumentVO reindex(long id, long userId) {
+        advancePublicationEpoch();
         // 递增稳定索引修订，使迟到的旧 worker 结果无法覆盖本次重新索引任务。
         CustomerServiceKnowledgeDocument document = requireDocumentForUpdate(id);
         ensureNotDeleted(document);
@@ -143,6 +152,7 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
     @Override
     @Transactional
     public CustomerServiceKnowledgeDocumentVO disable(long id, long userId) {
+        advancePublicationEpoch();
         // 先更新业务状态，再异步删除向量；删除失败时可通过任务历史重试。
         CustomerServiceKnowledgeDocument document = requireDocumentForUpdate(id);
         ensureNotDeleted(document);
@@ -158,6 +168,7 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
     @Override
     @Transactional
     public CustomerServiceKnowledgeDocumentVO enable(long id, long userId) {
+        advancePublicationEpoch();
         CustomerServiceKnowledgeDocument document = requireDocumentForUpdate(id);
         ensureNotDeleted(document);
         if (!"DISABLED".equals(document.getStatus()))
@@ -175,6 +186,7 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
     @Override
     @Transactional
     public boolean delete(long id, long userId) {
+        advancePublicationEpoch();
         // 数据库软删除与向量删除共用同一 ETL 版本，防止迟到任务重新激活文档。
         CustomerServiceKnowledgeDocument document = requireDocumentForUpdate(id);
         ensureNotDeleted(document);
@@ -197,6 +209,7 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
     @Override
     @Transactional
     public void retryFailedDelete(long documentId, long taskId, long userId) {
+        advancePublicationEpoch();
         if (documentId <= 0 || taskId <= 0) throw new BusinessException(ErrorCode.PARAMS_ERROR);
         CustomerServiceKnowledgeDocument document = requireDocument(documentId);
         boolean disabled = "DISABLED".equals(document.getStatus()) && Integer.valueOf(0).equals(document.getIsDelete());
@@ -222,6 +235,7 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
     @Override
     @Transactional
     public int rebuild(long userId) {
+        advancePublicationEpoch();
         CustomerServiceKnowledgeEtlOutbox task = new CustomerServiceKnowledgeEtlOutbox();
         task.setDocumentId(0L);
         task.setDocumentVersion(0L);

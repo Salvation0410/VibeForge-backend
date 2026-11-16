@@ -57,6 +57,8 @@ logging:
 ai:
   customer-service:
     enabled: ${AI_CUSTOMER_SERVICE_ENABLED:false}
+    publication-enabled: ${AI_CUSTOMER_SERVICE_PUBLICATION_ENABLED:false}
+    publication-bootstrap-allowed: ${AI_CUSTOMER_SERVICE_PUBLICATION_BOOTSTRAP_ALLOWED:false}
     service-url: ${AI_CUSTOMER_SERVICE_SERVICE_URL:http://localhost:8000}
     timeout-seconds: ${AI_CUSTOMER_SERVICE_TIMEOUT_SECONDS:30}
     collection-alias: ${AI_CUSTOMER_SERVICE_COLLECTION_ALIAS:customer_service_knowledge}

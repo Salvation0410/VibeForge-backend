@@ -10,6 +10,9 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 public interface CustomerServiceKnowledgeEtlOutboxMapper extends BaseMapper<CustomerServiceKnowledgeEtlOutbox> {
+    @Select("SELECT * FROM customer_service_knowledge_etl_outbox WHERE id=#{id} FOR UPDATE")
+    CustomerServiceKnowledgeEtlOutbox lockTask(@Param("id") long id);
+
     @Select("SELECT * FROM customer_service_knowledge_etl_outbox WHERE (status='PENDING' AND nextRetryTime<=#{now}) OR (status='PROCESSING' AND processingDeadline<#{now}) ORDER BY id LIMIT #{limit}")
     List<CustomerServiceKnowledgeEtlOutbox> findClaimCandidates(@Param("now") LocalDateTime now, @Param("limit") int limit);
 

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.yupi.yuaicodemother.mapper.KnowledgePublicationMapper">
+  <select id="state" resultType="com.yupi.yuaicodemother.model.entity.KnowledgePublicationState">SELECT epoch,enabled,publicationId FROM customer_service_knowledge_publication_state WHERE id=1</select>
+  <select id="lockState" resultType="com.yupi.yuaicodemother.model.entity.KnowledgePublicationState">SELECT epoch,enabled,publicationId FROM customer_service_knowledge_publication_state WHERE id=1 FOR UPDATE</select>
+  <update id="advanceEpoch">UPDATE customer_service_knowledge_publication_state SET epoch=epoch+1 WHERE id=1</update>
+  <select id="fact" resultType="com.yupi.yuaicodemother.model.entity.KnowledgePublicationRecord">SELECT publicationId,epoch,receiptJson FROM customer_service_knowledge_publication WHERE publicationId=#{id}</select>
+  <insert id="insertFact">INSERT INTO customer_service_knowledge_publication(publicationId,epoch,collectionName,receiptJson) VALUES(#{id},#{epoch},#{collection},#{json})</insert>
+  <update id="activate">UPDATE customer_service_knowledge_publication_state SET enabled=1,publicationId=#{id},epoch=#{epoch} WHERE id=1</update>
+  <insert id="enqueueAlias">INSERT INTO customer_service_knowledge_alias_outbox(publicationId,epoch,status) VALUES(#{id},#{epoch},'PENDING')</insert>
+  <update id="supersedeAliases">UPDATE customer_service_knowledge_alias_outbox SET status='SUPERSEDED' WHERE publicationId&lt;&gt;#{id} AND status&lt;&gt;'SUPERSEDED'</update>
+  <update id="acknowledgeAlias">UPDATE customer_service_knowledge_alias_outbox a JOIN customer_service_knowledge_publication_state s ON s.id=1 SET a.status='ACK' WHERE a.publicationId=#{id} AND a.epoch&lt;=#{epoch} AND s.publicationId=#{id} AND s.epoch=#{epoch}</update>
+  <select id="unfinishedTasks" resultType="long">SELECT COUNT(*) FROM customer_service_knowledge_etl_outbox WHERE status IN ('PENDING','PROCESSING')</select>
+</mapper>

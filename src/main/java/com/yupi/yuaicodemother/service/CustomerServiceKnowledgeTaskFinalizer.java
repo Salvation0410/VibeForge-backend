@@ -11,6 +11,8 @@ import java.time.LocalDateTime;
 @Service
 public class CustomerServiceKnowledgeTaskFinalizer {
     private static final String STALE_CODE = "KNOWLEDGE_TASK_STALE";
+    @org.springframework.beans.factory.annotation.Autowired
+    private KnowledgePublicationService publicationService;
     private final CustomerServiceKnowledgeDocumentMapper documentMapper;
     private final CustomerServiceKnowledgeEtlOutboxMapper outboxMapper;
 
@@ -23,6 +25,7 @@ public class CustomerServiceKnowledgeTaskFinalizer {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void completeIndex(long taskId, String owner, long documentId, long documentVersion,
                               long etlVersion, int chunkCount) {
+        if(publicationService!=null) publicationService.lockTaskForFinalization(taskId);
         int updated = documentMapper.completeIndex(documentId, documentVersion, etlVersion, chunkCount);
         if (updated == 0) {
             requireUpdated(outboxMapper.finish(taskId, owner, "SKIPPED", STALE_CODE));
@@ -35,6 +38,7 @@ public class CustomerServiceKnowledgeTaskFinalizer {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void failIndex(long taskId, String owner, long documentId, long documentVersion,
                           long etlVersion, int retryCount, LocalDateTime failedAt, String code) {
+        if(publicationService!=null) publicationService.lockTaskForFinalization(taskId);
         int updated = documentMapper.failIndex(documentId, documentVersion, etlVersion, code);
         if (updated == 0) {
             requireUpdated(outboxMapper.finish(taskId, owner, "SKIPPED", STALE_CODE));

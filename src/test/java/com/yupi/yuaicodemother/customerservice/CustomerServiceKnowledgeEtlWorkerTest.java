@@ -598,6 +598,74 @@ class CustomerServiceKnowledgeEtlWorkerTest {
                 eq("KNOWLEDGE_REBUILD_CONTENT_REVISION_MISSING"));
     }
 
+    @Test
+    void publicationSuccessOnlyUsesAtomicPublicationCommit() throws Exception {
+        var publication=configurePublication();
+        worker.execute(task("INDEX"));
+        verify(publication).commit(eq(1L),anyString(),any(),any(),any());
+        verify(ai,never()).index(any());verifyNoInteractions(finalizer);
+        verify(outbox,never()).finish(anyLong(),anyString(),anyString(),any());
+    }
+    @Test
+    void publicationEpochConflictCanRetryWithoutCompletingLegacyServing() throws Exception {
+        var publication=configurePublication();
+        when(publication.commit(anyLong(),anyString(),any(),any(),any())).thenThrow(new IllegalStateException("KNOWLEDGE_PUBLICATION_EPOCH_CONFLICT"));
+        worker.execute(task("INDEX"));
+        verify(outbox).retry(eq(1L),anyString(),eq("PENDING"),eq(1),any(),eq("KNOWLEDGE_PUBLICATION_EPOCH_CONFLICT"));
+        verifyNoInteractions(finalizer);
+    }
+    @Test
+    void publicationRebuildChecksRegistryAgainAfterAcquiringCollectionLease() throws Exception {
+        configurePublication();
+        var original=document();var changed=document();changed.setIndexedEtlVersion(4L);
+        when(documents.listRebuildableLimited(anyInt())).thenReturn(List.of(original),List.of(changed));
+        when(coordinator.acquire(any(),any(),any(),any())).thenReturn(new KnowledgeMutationCoordinator.Lease(
+                "collection:"+props.getCollectionAlias(),"rebuild-attempt","REBUILD",4,2000000000,"unused"));
+        worker.execute(task("REBUILD"));
+        verify(ai,never()).preparePublication(any());
+        verify(outbox).retry(eq(1L),anyString(),eq("PENDING"),eq(1),any(),eq("KNOWLEDGE_REBUILD_SNAPSHOT_CHANGED"));
+    }
+    @Test
+    void publicationUnknownCommitReadsFactBeforeReturningSuccess() throws Exception {
+        var publication=configurePublication();
+        var context=new com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol.PublicationContext("task_1",7,"old",List.of());
+        var receipt=KnowledgePublicationServiceTest.receipt(context);
+        when(publication.findTaskFact(1)).thenReturn(null,new com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol.PublicationFact("task_1",8,receipt));
+        when(publication.commit(anyLong(),anyString(),any(),any(),any())).thenThrow(new org.springframework.dao.DataAccessResourceFailureException("test"));
+        worker.execute(task("INDEX"));
+        verify(publication,times(2)).findTaskFact(1);verify(outbox,never()).retry(anyLong(),anyString(),anyString(),anyInt(),any(),any());
+        verifyNoInteractions(finalizer);
+    }
+    @Test
+    void publicationUnknownCommitAndUnavailableFactNeverWritesFailure() throws Exception {
+        var publication=configurePublication();
+        when(publication.findTaskFact(1)).thenReturn(null).thenThrow(new org.springframework.dao.DataAccessResourceFailureException("test"));
+        when(publication.commit(anyLong(),anyString(),any(),any(),any())).thenThrow(new org.springframework.dao.DataAccessResourceFailureException("test"));
+        worker.execute(task("INDEX"));
+        verify(outbox,never()).retry(anyLong(),anyString(),anyString(),anyInt(),any(),any());
+        verify(outbox,never()).finish(anyLong(),anyString(),anyString(),any());verifyNoInteractions(finalizer);
+    }
+    @Test
+    void committedStableIdDoesNotProduceAnotherCandidate() throws Exception {
+        var publication=configurePublication();
+        var context=new com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol.PublicationContext("task_1",7,"old",List.of());
+        when(publication.findTaskFact(1)).thenReturn(new com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol.PublicationFact("task_1",8,KnowledgePublicationServiceTest.receipt(context)));
+        worker.execute(task("INDEX"));verifyNoInteractions(ai,coordinator,finalizer);
+    }
+    private com.yupi.yuaicodemother.service.KnowledgePublicationService configurePublication() throws Exception {
+        props.setPublicationEnabled(true);
+        var publication=mock(com.yupi.yuaicodemother.service.KnowledgePublicationService.class);
+        var field=CustomerServiceKnowledgeEtlWorker.class.getDeclaredField("publicationService");field.setAccessible(true);field.set(worker,publication);
+        var context=new com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol.PublicationContext("task_1",7,"old",List.of());
+        when(publication.prepare(anyLong(),anyString(),any())).thenReturn(context);
+        when(ai.preparePublication(any())).thenReturn(KnowledgePublicationServiceTest.receipt(context));
+        when(documents.findIncludingDeleted(1)).thenReturn(document());
+        when(documents.markIndexing(anyLong(),anyLong(),anyLong())).thenReturn(1);
+        when(oss.generateKnowledgeDownloadUrl(anyString())).thenReturn(new URL("https://example.test/private"));
+        when(coordinator.acquire(any(),any(),any(),any())).thenReturn(lease("INDEX"));
+        return publication;
+    }
+
     private static CustomerServiceKnowledgeEtlOutbox task(String operation) {
         var task = new CustomerServiceKnowledgeEtlOutbox();
         task.setId(1L); task.setDocumentId(1L); task.setDocumentVersion(1L); task.setEtlVersion(1L);

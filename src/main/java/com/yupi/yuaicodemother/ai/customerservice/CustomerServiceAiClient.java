@@ -79,6 +79,46 @@ public class CustomerServiceAiClient {
         return new RebuildResult(documentCount, requiredBoolean(payload, "idempotent"));
     }
 
+    public com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol.CandidateReceipt preparePublication(
+            com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol.CandidateRequest request) {
+        JsonNode payload=call("/internal/v1/customer-service/knowledge:prepare-publication",request);
+        requireFields(payload,Set.of("publicationId","baseEpoch","operationId","fence","candidateCollection",
+                "snapshotHash","embeddingModelVersion","embeddingDimension","documents"));
+        for(String field:List.of("publicationId","operationId","candidateCollection","snapshotHash","embeddingModelVersion"))
+            requiredText(payload,field,255);
+        requiredInt(payload,"embeddingDimension",1,65536);
+        for(String field:List.of("baseEpoch","fence","embeddingDimension")) {
+            JsonNode value=payload.get(field);
+            if(value==null || !value.isIntegralNumber() || !value.canConvertToLong()) invalidResponse();
+        }
+        JsonNode documents=payload.get("documents");
+        if(documents==null || !documents.isArray() || documents.size()>properties.getRebuildMaxDocuments()) invalidResponse();
+        for(JsonNode document:documents) {
+            requireFields(document,Set.of("documentId","documentVersion","indexRevision","activationRevision","sha256","fileName","fileType","chunkCount"));
+            for(String field:List.of("documentId","sha256","fileName","fileType")) requiredText(document,field,256);
+            requiredInt(document,"chunkCount",0,MAX_CHUNK_COUNT);
+            for(String field:List.of("documentVersion","indexRevision","activationRevision","chunkCount")) {
+                JsonNode value=document.get(field);
+                if(value==null || !value.isIntegralNumber() || !value.canConvertToLong()) invalidResponse();
+            }
+        }
+        try {
+            return objectMapper.treeToValue(payload,
+                    com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol.CandidateReceipt.class);
+        } catch(com.fasterxml.jackson.core.JsonProcessingException error) {
+            throw new CallException("KNOWLEDGE_AI_RESPONSE_INVALID",false);
+        }
+    }
+
+    public void reconcileAlias(com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol.ReconcileAliasRequest request) {
+        JsonNode payload=call("/internal/v1/customer-service/knowledge:reconcile-alias",request);
+        requireFields(payload,Set.of("publicationId","epoch","collectionName","reconciled"));
+        requireText(payload,"publicationId",request.publicationId());
+        requireText(payload,"collectionName",request.collectionName());
+        requireRevision(payload,"epoch",request.epoch());
+        if(!requiredBoolean(payload,"reconciled")) throw new CallException("KNOWLEDGE_ALIAS_SUPERSEDED",true);
+    }
+
     public boolean health() {
         try {
             HttpRequest request = baseRequest("/internal/v1/customer-service/health").GET().build();
@@ -149,7 +189,7 @@ public class CustomerServiceAiClient {
     private byte[] serializeRequest(Object body) {
         try {
             byte[] bytes = objectMapper.writeValueAsBytes(body);
-            if (body instanceof RebuildRequest && bytes.length > properties.getRebuildMaxRequestBytes())
+            if ((body instanceof RebuildRequest || body instanceof com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol.CandidateRequest) && bytes.length > properties.getRebuildMaxRequestBytes())
                 throw new CallException("KNOWLEDGE_REBUILD_REQUEST_TOO_LARGE", false);
             return bytes;
         } catch (CallException error) {

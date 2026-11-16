@@ -32,6 +32,17 @@ public class CustomerServiceKnowledgeAdminController {
     private final KnowledgeMutationCoordinator coordinator;
     private final CustomerServiceProperties properties;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.yupi.yuaicodemother.service.KnowledgePublicationBootstrapService publicationBootstrap;
+
+    @PostMapping("/publications/bootstrap")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    public BaseResponse<com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol.PublicationFact> bootstrap(
+            @RequestBody BootstrapRequest request) {
+        return ResultUtils.success(publicationBootstrap.bootstrap(request.sourceCollection()));
+    }
+    public record BootstrapRequest(String sourceCollection) { }
+
     @PostMapping("/upload")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<CustomerServiceKnowledgeDocumentVO> upload(@RequestPart("file") MultipartFile file,

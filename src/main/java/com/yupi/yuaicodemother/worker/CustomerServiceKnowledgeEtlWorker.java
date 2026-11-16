@@ -42,6 +42,8 @@ public class CustomerServiceKnowledgeEtlWorker {
     private final CustomerServiceKnowledgeTaskFinalizer taskFinalizer;
     private final CustomerServiceProperties properties;
     private final Clock clock;
+    @Autowired
+    private com.yupi.yuaicodemother.service.KnowledgePublicationService publicationService;
     private final String owner = UUID.randomUUID().toString();
 
     @Autowired
@@ -88,16 +90,26 @@ public class CustomerServiceKnowledgeEtlWorker {
     }
 
     public void execute(CustomerServiceKnowledgeEtlOutbox task) {
+        if(publicationService!=null) publicationService.requireConfiguredMode();
         log.info("Knowledge task started: taskId={}, documentId={}, operation={}, retryCount={}",
                 task.getId(), task.getDocumentId(), task.getOperation(), task.getRetryCount());
         String operationId = "task_" + task.getId() + "_" + UUID.randomUUID().toString().replace("-", "");
         KnowledgeMutationCoordinator.Lease lease = null;
         try {
+            if(properties.isPublicationEnabled()) {
+                try {
+                    if(publicationService.findTaskFact(task.getId())!=null) return;
+                } catch(RuntimeException unknown) { throw new TaskFinalizationException(unknown); }
+            }
             PreparedOperation prepared = prepare(task);
             refreshClaim(task);
             String scope = "REBUILD".equals(task.getOperation())
                     ? "collection:" + properties.getCollectionAlias() : "document:" + task.getDocumentId();
             lease = coordinator.acquire(scope, operationId, task.getOperation(), owner);
+            if(properties.isPublicationEnabled()) {
+                executePublication(task,prepared,lease);
+                return;
+            }
             switch (task.getOperation()) {
                 case "INDEX" -> executeIndex(task, (PreparedIndex) prepared, lease);
                 case "DELETE" -> executeDelete(task, (PreparedDelete) prepared, lease);
@@ -136,6 +148,54 @@ public class CustomerServiceKnowledgeEtlWorker {
                 }
             }
         }
+    }
+
+    private void executePublication(CustomerServiceKnowledgeEtlOutbox task, PreparedOperation prepared,
+                                    KnowledgeMutationCoordinator.Lease lease) {
+        if(publicationService==null) throw new IllegalStateException("KNOWLEDGE_PUBLICATION_NOT_READY");
+        var context=publicationService.prepare(task.getId(),owner,lease);
+        Object mutation;
+        if(prepared instanceof PreparedIndex index) {
+            var document=index.document();
+            if(documentMapper.markIndexing(document.getId(),task.getDocumentVersion(),task.getEtlVersion())!=1)
+                throw new StaleTaskException();
+            mutation=new CustomerServiceAiClient.IndexRequest(String.valueOf(document.getId()),task.getDocumentVersion(),
+                    document.getName(),document.getFileType(),index.signedUrl(),document.getContentHash(),
+                    String.valueOf(task.getEtlVersion()),task.getEtlVersion(),document.getActivationRevision(),lease);
+        } else if(prepared instanceof PreparedDelete delete) {
+            mutation=new CustomerServiceAiClient.DeleteRequest(String.valueOf(task.getDocumentId()),task.getDocumentVersion(),
+                    delete.snapshot().activationRevision(),lease);
+        } else if(prepared instanceof PreparedRebuild rebuild) {
+            List<RebuildDocumentSnapshot> current=rebuildSnapshot();
+            if(!rebuild.documents().equals(current)) throw new RebuildSnapshotChangedException();
+            List<CustomerServiceAiClient.RebuildDocument> documents=current.stream().map(document ->
+                    new CustomerServiceAiClient.RebuildDocument(String.valueOf(document.documentId()),document.documentVersion(),
+                            document.name(),document.fileType(),ossManager.generateKnowledgeDownloadUrl(document.objectKey()).toString(),
+                            document.contentHash(),document.indexedEtlVersion(),document.activationRevision())).toList();
+            mutation=new CustomerServiceAiClient.RebuildRequest(properties.getCollectionAlias(),documents,rebuild.etlVersion(),lease);
+        } else throw new IllegalStateException("KNOWLEDGE_TASK_OPERATION_INVALID");
+        var receipt=aiClient.preparePublication(new com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol.CandidateRequest(context,mutation));
+        try {
+            publicationService.commit(task.getId(),owner,lease,context,receipt);
+        } catch(IllegalStateException rejected) {
+            // 明确的协议拒绝可重试；数据库确认未知绝不能被写成失败。
+            if(rejected.getMessage()!=null && rejected.getMessage().startsWith("KNOWLEDGE_")) throw rejected;
+            reconcileUnknownCommit(task,receipt,rejected);
+        } catch(RuntimeException unknown) {
+            reconcileUnknownCommit(task,receipt,unknown);
+        }
+    }
+
+    private void reconcileUnknownCommit(CustomerServiceKnowledgeEtlOutbox task,
+            com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol.CandidateReceipt receipt,
+            RuntimeException unknown) {
+        try {
+            var fact=publicationService.findTaskFact(task.getId());
+            if(fact!=null && fact.receipt().equals(receipt)) return;
+        } catch(RuntimeException unavailable) {
+            // 事实查询也失败时继续保留未知状态，禁止把已提交发布误记为执行失败。
+        }
+        throw new TaskFinalizationException(unknown);
     }
 
     private PreparedOperation prepare(CustomerServiceKnowledgeEtlOutbox task) {
