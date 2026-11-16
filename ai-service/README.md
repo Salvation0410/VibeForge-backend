@@ -633,9 +633,9 @@ uv run python -m ai_service.orchestration.rag_snapshot_experiment --analyze ../t
 
 2026-11-16 续轮实现 B0a：`documentVersion` 表示不可变内容，`indexRevision` 表示每文档索引代际（Spring 使用稳定的 `etlVersion`），`activationRevision` 表示启用资格。新版 INDEX 同时携带正整数索引/激活代际；同一任务重试身份不变。DELETE 撤销该文档不高于目标激活的全部索引，不再用内容版本永久阻止重新启用。控制集合保留不可变激活墓碑及协议升级标记，旧 DELETE/INDEX/REBUILD 不得把已升级文档降回旧协议。
 
-重建顶层 `etlVersion` 只表示全库 buildRevision，各文档保留自己的 serving 索引/激活身份。重建同一索引代际必须逐块复现旧物理集合的完整清单、正文、定位与向量；变化时返回 `KNOWLEDGE_VERSION_CONFLICT`，缺旧 v2 清单返回 `KNOWLEDGE_REBUILD_REVISION_UNVERIFIABLE`，应先创建新代际 INDEX。已有 alias 时空重建返回 `KNOWLEDGE_EMPTY_REBUILD_BLOCKED`。检索还核对 query 配置的模型签名与集合元数据，同维不同模型也拒绝；模型别名不能证明供应商权重未变化。
+重建顶层 `etlVersion` 只表示全库 buildRevision，各文档保留自己的 serving 索引/激活身份。v2 重建下载、校验并解析原文后，在同一变更许可内核对旧物理集合的完整清单、正文、定位、哈希、模型与维度，复用已验收的原始向量，不再次调用 Embedding；写入前仍逐值复核同一快照。变化时返回 `KNOWLEDGE_VERSION_CONFLICT`，缺旧 v2 清单或块返回 `KNOWLEDGE_REBUILD_REVISION_UNVERIFIABLE`，不降级重算，应先创建新代际 INDEX。Legacy 重建仍调用 Embedding。已有 alias 时空重建返回 `KNOWLEDGE_EMPTY_REBUILD_BLOCKED`。检索还核对 query 配置的模型签名与集合元数据，同维不同模型也拒绝；模型别名不能证明供应商权重未变化。
 
-Spring 保存不可变原文 registry 与 serving 三元组，替换失败后重建可读取旧成功原文。旧库必须先排空任务并执行增量 SQL，再同步部署两端、逐文档新版重索引，最后重建验收；不能混跑旧 worker，不能删除墓碑或直接切旧 alias 回滚。详见[迁移步骤](../doc/customer-service-knowledge-v2-migration.md)。本轮未执行真实数据库迁移。B0b 的 Spring 权威发布指针、稳定发布账本和 alias outbox 对账尚未实现，当前租约检查不能证明跨系统原子发布，也不保证在途撤销即时生效。
+Spring 保存不可变原文 registry 与 serving 三元组，替换失败后重建可读取旧成功原文。旧库必须先排空任务并执行增量 SQL，再同步部署两端、逐文档新版重索引，最后重建验收；不能混跑旧 worker，不能删除墓碑或直接切旧 alias 回滚。详见[迁移步骤](../doc/customer-service-knowledge-v2-migration.md)。Docker恢复后已执行本机真实备份/SQL迁移及11篇新版INDEX，确认72活动块；首次整库重建冲突后保留原alias，用户确认原向量复用后已部署并成功完成整库重建，72块字段和向量逐值一致、Spring serving身份匹配。B0b 的 Spring 权威发布指针、稳定发布账本和 alias outbox 对账尚未实现，当前租约检查不能证明跨系统原子发布，也不保证在途撤销即时生效。
 
 ### 有界证据与拒答候选实验
 

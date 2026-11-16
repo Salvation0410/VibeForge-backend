@@ -293,7 +293,7 @@ async def test_rebuild_processes_two_documents_sequentially_and_passes_lease(
             return [[0.1, 0.2] for _ in texts]
 
     class Store:
-        async def rebuild_collection(self, documents, *, lease, plan):
+        async def rebuild_collection(self, documents, *, lease, plan, reuse_revision_vectors=False):
             self.lease = lease
             self.plan = plan
             self.documents = [document async for document in documents]
@@ -340,7 +340,7 @@ async def test_rebuild_idempotent_result_skips_download_and_embedding(settings):
             raise AssertionError("idempotent replay requested embeddings")
 
     class Store:
-        async def rebuild_collection(self, documents, *, lease, plan):
+        async def rebuild_collection(self, documents, *, lease, plan, reuse_revision_vectors=False):
             self.plan = plan
             return RebuildResult("existing-staging", 2, 4, True)
 
@@ -377,7 +377,7 @@ async def test_rebuild_document_failure_prevents_store_completion_and_cleans_tem
 
     class Store:
         completed = False
-        async def rebuild_collection(self, documents, *, lease, plan):
+        async def rebuild_collection(self, documents, *, lease, plan, reuse_revision_vectors=False):
             [document async for document in documents]
             self.completed = True
             return RebuildResult("should-not-switch", 2, 2, False)
@@ -418,7 +418,7 @@ async def test_rebuild_total_embedding_budget_is_fail_closed(settings, tmp_path)
             return [[0.1, 0.2] for _ in texts]
 
     class Store:
-        async def rebuild_collection(self, documents, *, lease, plan):
+        async def rebuild_collection(self, documents, *, lease, plan, reuse_revision_vectors=False):
             [document async for document in documents]
             raise AssertionError("budget failure should originate from iterator")
 
@@ -469,7 +469,7 @@ async def test_rebuild_text_byte_budget_stops_before_next_download(settings, tmp
             return [[0.1, 0.2] for _ in texts]
 
     class Store:
-        async def rebuild_collection(self, documents, *, lease, plan):
+        async def rebuild_collection(self, documents, *, lease, plan, reuse_revision_vectors=False):
             [document async for document in documents]
 
     downloader, embeddings = Downloader(), Embeddings()
@@ -506,7 +506,7 @@ async def test_rebuild_total_chunk_budget_is_fail_closed(settings, tmp_path):
             return [[0.1, 0.2] for _ in texts]
 
     class Store:
-        async def rebuild_collection(self, documents, *, lease, plan):
+        async def rebuild_collection(self, documents, *, lease, plan, reuse_revision_vectors=False):
             [document async for document in documents]
 
     service = KnowledgeEtlService(settings, Downloader(), Embeddings(), Store())
@@ -541,7 +541,7 @@ async def test_rebuild_cancellation_cleans_current_temp_file(settings, tmp_path)
             await asyncio.Event().wait()
 
     class Store:
-        async def rebuild_collection(self, documents, *, lease, plan):
+        async def rebuild_collection(self, documents, *, lease, plan, reuse_revision_vectors=False):
             [document async for document in documents]
 
     service = KnowledgeEtlService(settings, Downloader(), Embeddings(), Store())

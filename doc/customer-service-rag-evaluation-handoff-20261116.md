@@ -121,3 +121,29 @@ Java五组知识单测 **67/67**：AiClient11、Worker24、Schema10、Service15�
 Docker引擎初查不可用，已尝试后台启动Docker Desktop，随后docker info仍超时12秒；已请用户检查Docker/WSL启动界面。没有执行真实MySQL迁移、OSS历史对账、Milvus生命周期、管理员API全90题、双实例迟到owner或在途撤销。Spring权威发布指针、稳定publication账本、私有候选/epoch提交和alias outbox属于B0b，**尚未实现**；当前租约检查不证明跨资源原子性，不能声称整个B0或路线B已完成。
 
 下一步先恢复依赖，在隔离数据中验迁移和串联，再实施B0b；质量侧先裁决公开016及标注争议，随后用有界互补证据选择解决021/029/030，标题输入单独实验。清理墓碑、直接改TopK/提示默认、或仅切旧alias都不能替代这些步骤。
+
+## Docker 恢复后的真实资源续验（2026-11-16）
+
+用户确认 Docker 可用、Redis 已启动，并授权启动 Python/Spring。Milvus 3.0.2、etcd、PostgreSQL 容器就绪；没有删除或覆盖用户的其他容器。Python checkpoint、知识库依赖、Spring 管理员知识健康均通过。这里更新上文的历史阻塞状态，不改写此前未执行的事实。
+
+真实库迁移前共12篇文档（11 ACTIVE、1 DISABLED），outbox无PENDING/PROCESSING、16 FAILED/14 SUCCEEDED。停止本轮启动的 Spring worker 后，经已有 Spring datasource 的 Java 工具备份知识库四表，再执行一次 v2 SQL；12条原文 registry 及全部 serving 身份逐项校验通过。备份位于本机忽略目录 `tmp/knowledge-v2-backup-52f5d460-0c88-4176-a7a3-5a8a83be3184/knowledge.sql`，SHA-256 `84c0bce8b9f242cd784ebc700c98b8db0054663d3eedb67ae38ce7e8b9e54775`。DDL 不具事务性，备份恢复仍需单独人工审查，不提供自动回滚。
+
+随后通过原管理员会话及新版 Spring reindex API 顺序提交11次INDEX，每次预先持久化预占，无自动补调，逐篇等待成功并核对 serving 三元组；11篇均成功，内容版本和激活版本仍为1，索引版本首篇5、其余3。真实 OSS 原文下载、Embedding、Spring许可校验和Milvus写入均实际参与。禁用旧文档未启用，旧失败任务保留审计。Milvus只读盘点确认11份v2 manifest、72个活动块，所有活动文档ID均与公开语料映射一致。
+
+首次整库重建任务 `479828560495325184` 执行一次失败，稳定错误码 `KNOWLEDGE_VERSION_CONFLICT`；没有切换alias，失败候选已清理。离线核对11篇原文hash、解析/块内容、定位及manifest均可复现；追加一次预占、关闭自动重试的Embedding诊断，首篇7块与已存向量逐值一致。失败当次的候选向量未持久化，不能据后续成功重算认定当次向量相同，也不能断言provider非确定性是已证根因。
+
+首次全量测试在在线Python独占重排器锁时有4项进程测试失败（1514 passed/19 skipped）；已停止自启动Python后重测，不能把资源冲突写成业务逻辑回归。真实隔离Milvus5项已显式opt-in通过（62.51秒），使用合成向量和进程内协调器，不代表多Spring实例仲裁验收。真实随机schema迁移测试4项通过，覆盖正常/禁用回填、未排空和未知serving阻断及备份中文/转义/NULL/时间/生成列往返；业务库只读验收另行执行。
+
+真实环境记录保存在忽略目录 `tmp/rag-resource-acceptance-20261116/`，包含预占账本、健康结果、版本盘点和受控诊断。没有新增96次聊天对照或重跑90题；质量门槛和B0b未实现范围仍按上文执行。
+
+用户随后明确确认采用原向量复用。候选修复位于 `KnowledgeEtlService.rebuild` 与 `MilvusKnowledgeStore._restore_rebuild_revision_vectors`：v2下载/校验/重新解析后传递无向量块，存储层在原 collection 变更许可内读取完整原快照，核对身份、模型、维度、manifest名单与数量、正文、locator及hash后复用原向量；原逐值复核、墓碑、fence及候选发布门禁继续执行。旧协议仍调用Embedding；缺原清单/块、模型错配、解析变化、坏向量明确失败，不回退重算。新INDEX仍计算新向量。该选择避免同版本重新计算与不可变身份的冲突，也减少重建外部调用；不适用于原向量已经丢失、需要模型升级或分块变化的场景。
+
+新增13项专项覆盖供应商漂移不再调用、坏/缺快照、模型和维度错配、读后向量变化；连同原专项149项通过。最终全量 **1531 passed、20 skipped、2 warnings（146.79秒）**，20跳过项为14 PostgreSQL及6显式Milvus。compileall与uv lock检查通过。真实Milvus最终 **6 passed（72.53秒）**，含独立原向量快照复用、重建前后逐值相等；原严格重算冲突测试仍保留。Java最终 **71 passed、2 skipped**（67原知识测试+4隔离迁移），一次性实际迁移及业务预检入口在该批默认跳过；此前实际迁移和预检的执行证据独立保留。干净编译通过。
+
+两条有预占、无自动重试的真实query Embedding+Milvus Top8烟测分别命中平台能力、下载部署目标文档（2/2）；没有调用聊天模型或语义裁判，不能据此宣称完整问答质量通过。
+
+用户确认后已启动新版Python，并以独立上限1的预占账本提交REBUILD `479832495083827200`，一次成功。alias从 `customer_service_knowledge_9a3e5b421e0e_staging_8d353fc91f7f` 切至 `customer_service_knowledge_9a3e5b421e0e_staging_446409c019dc`；最终逐项比较72个活动块的全部校验字段及f32向量（仅忽略active/fence），全部相等。11份manifest与Spring内容/索引/激活serving三元组一致；原禁用文档保持禁用。最终只读MySQL审计无PENDING/PROCESSING，新任务SUCCEEDED，历史17个FAILED保留（含首次失败REBUILD）。这次v2 REBUILD未调用Embedding，OSS、Spring许可验证及Milvus发布真实参与。
+
+Spring JVM17744持续监听8123，新版Python经 `uv run python -m ai_service.server` 后台启动；本轮运行时用缓存模型离线加载（HF_HUB_OFFLINE/TRANSFORMERS_OFFLINE），不修改模型或检索默认值。一次直接启动出现客服依赖降级，改用缓存模式启动后全部依赖恢复；未据此声称已定位首次启动失败的精确根因。Spring本轮知识开关开启，timeout/claim/lease为180/300/240秒、batch2、retryMax1，均为进程环境覆盖，不改代码默认或私有.env。最终管理员健康coordinator/enabled/python全true，Python checkpoint及知识依赖全true。
+
+后续优先实施B0b权威发布指针和对账，并补多实例迟到owner/在途撤销。当前快照复用仍依赖完整源集合；缺失或解析变化会失败，模型升级需独立候选迁移。质量侧R2及召回候选继续受人工校准/盲测门槛约束，不能把恢复索引当作质量提升已全面验收。

@@ -210,6 +210,7 @@ class KnowledgeStore(Protocol):
         self, documents: AsyncIterator[IndexedDocument], *,
         lease: KnowledgeMutationLease | None = None,
         plan: RebuildPlan,
+        reuse_revision_vectors: bool = False,
     ) -> RebuildResult: ...
     async def ping(self) -> bool: ...
 
@@ -1893,16 +1894,70 @@ class MilvusKnowledgeStore:
         self, documents: AsyncIterator[IndexedDocument], *,
         lease: KnowledgeMutationLease | None = None,
         plan: RebuildPlan,
+        reuse_revision_vectors: bool = False,
     ) -> RebuildResult:
         self._validate_rebuild_plan(plan)
         scope = f"collection:{self._alias}"
         async with self._mutation(lease, scope=scope, operation="rebuild") as permit:
             assert lease is not None
-            return await self._rebuild_collection(documents, permit, lease, plan)
+            return await self._rebuild_collection(
+                documents, permit, lease, plan, reuse_revision_vectors=reuse_revision_vectors,
+            )
+
+    async def _restore_rebuild_revision_vectors(
+        self, document: IndexedDocument, collection: str | None,
+        dimension: int, permit: MutationPermit,
+    ) -> IndexedDocument:
+        """同一许可内核对解析结果与已验收清单，只复用完整的原向量快照。"""
+        if any(chunk.embedding for chunk in document.chunks):
+            raise MilvusKnowledgeError("KNOWLEDGE_DOCUMENT_INVALID")
+        # 占位向量只用于复用原参数/块身份校验，不写入 Milvus，也不用于检索。
+        placeholder = replace(document, chunks=tuple(
+            replace(chunk, embedding=(0.0,) * dimension) for chunk in document.chunks
+        ))
+        self._validate_document(placeholder)
+        if collection is None:
+            raise MilvusKnowledgeError("KNOWLEDGE_REBUILD_REVISION_UNVERIFIABLE")
+        await self._assert_permit(permit)
+        await self._validate_collection(collection, document.embedding_model_version, dimension)
+        rows = await self._document_rows(collection, document.document_id)
+        by_id: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            by_id.setdefault(row["id"], []).append(row)
+        expected = self._chunk_rows(placeholder, dimension, active=False, fence=permit.fence)
+        manifest = self._manifest_row(placeholder, dimension, expected, fence=permit.fence)
+        manifests = by_id.get(manifest["id"], [])
+        if not manifests:
+            raise MilvusKnowledgeError("KNOWLEDGE_REBUILD_REVISION_UNVERIFIABLE")
+        if len(manifests) != 1 or not self._rows_match(
+            manifests[0], manifest, ignore_active=True, ignore_fence=True,
+        ):
+            raise MilvusKnowledgeError("KNOWLEDGE_VERSION_CONFLICT")
+        restored: list[IndexedChunk] = []
+        for chunk, expected_row in zip(document.chunks, expected, strict=True):
+            matches = by_id.get(expected_row["id"], [])
+            if len(matches) != 1:
+                raise MilvusKnowledgeError("KNOWLEDGE_REBUILD_REVISION_UNVERIFIABLE")
+            actual = matches[0]
+            try:
+                vector = self._canonical_vector(actual.get("embedding"))
+            except (TypeError, MilvusKnowledgeError):
+                raise MilvusKnowledgeError("KNOWLEDGE_REBUILD_REVISION_UNVERIFIABLE") from None
+            if len(vector) != dimension:
+                raise MilvusKnowledgeError("KNOWLEDGE_EMBEDDING_DIMENSION_MISMATCH")
+            if not self._rows_match(
+                actual, {**expected_row, "embedding": vector},
+                ignore_active=True, ignore_fence=True,
+            ):
+                raise MilvusKnowledgeError("KNOWLEDGE_VERSION_CONFLICT")
+            restored.append(replace(chunk, embedding=tuple(vector)))
+        await self._assert_permit(permit)
+        return replace(document, chunks=tuple(restored))
 
     async def _rebuild_collection(
         self, documents: AsyncIterator[IndexedDocument], permit: MutationPermit,
         lease: KnowledgeMutationLease, plan: RebuildPlan,
+        *, reuse_revision_vectors: bool = False,
     ) -> RebuildResult:
         async with self._write_lock:
             old = await self._alias_target()
@@ -1953,6 +2008,10 @@ class MilvusKnowledgeStore:
                     document_count += 1
                     if document_count > plan.document_count:
                         raise MilvusKnowledgeError("KNOWLEDGE_REBUILD_PLAN_INVALID")
+                    if reuse_revision_vectors and document.index_revision:
+                        document = await self._restore_rebuild_revision_vectors(
+                            document, old, dimension, permit,
+                        )
                     document_dimension = self._validate_document(document)
                     if (
                         document_dimension != dimension

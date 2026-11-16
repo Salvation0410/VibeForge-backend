@@ -556,16 +556,21 @@ class KnowledgeEtlService:
                     remaining = self._settings.rag_max_embedding_elements - (
                         embedded_chunks * self._settings.rag_embedding_dimension
                     )
-                    vectors = await self._embeddings.embed_documents(
-                        [chunk.content for chunk in chunks],
-                        max_elements=remaining,
-                    )
+                    if field(item, "index_revision"):
+                        # v2 重建保持原索引身份，向量由存储层在同一变更许可内核对并复用。
+                        # 不向供应商重算，避免相同模型别名下的数值漂移改变已验收快照。
+                        vectors = [() for _ in chunks]
+                    else:
+                        vectors = await self._embeddings.embed_documents(
+                            [chunk.content for chunk in chunks],
+                            max_elements=remaining,
+                        )
                     if len(vectors) != len(chunks):
                         raise EmbeddingOutputError(
                             "KNOWLEDGE_EMBEDDING_COUNT_MISMATCH"
                         )
                     try:
-                        wrong_dimension = any(
+                        wrong_dimension = not field(item, "index_revision") and any(
                             len(vector) != self._settings.rag_embedding_dimension
                             for vector in vectors
                         )
@@ -611,7 +616,7 @@ class KnowledgeEtlService:
                     )
 
             return await self._store.rebuild_collection(
-                indexed_documents(), lease=lease, plan=plan
+                indexed_documents(), lease=lease, plan=plan, reuse_revision_vectors=True,
             )
 
     async def ping(self) -> bool:
