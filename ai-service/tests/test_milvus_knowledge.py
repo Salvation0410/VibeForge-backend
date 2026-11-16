@@ -677,6 +677,7 @@ def document(version=1, *, etl="etl-v1", model="embedding-v1", dimension=2,
 
 def store(settings, client):
     settings.milvus_collection_alias = "customer_service_knowledge"
+    settings.rag_embedding_model = "embedding-v1"
     return MilvusKnowledgeStore(
         settings, client_factory=lambda **_kwargs: client,
         mutation_coordinator=client.coordinator,
@@ -902,6 +903,7 @@ async def test_search_pins_physical_collection_across_alias_switch(settings):
         call["collection_name"] == old
         for call in client.iterator_calls
         if call["filter"] == 'documentId == "doc-1"'
+        and call["collection_name"] != knowledge._control_collection_name()
     )
 
 
@@ -1860,22 +1862,17 @@ async def test_rebuild_integrity_or_alias_failure_keeps_old_alias(settings):
 
 
 @pytest.mark.asyncio
-async def test_empty_rebuild_clears_old_alias_with_inherited_schema(settings):
+async def test_empty_rebuild_cannot_clear_existing_alias(settings):
     client = FakeMilvusClient()
     knowledge = store(settings, client)
     await index_document(knowledge, document())
     alias = settings.milvus_collection_alias
     old = client.aliases[alias]
 
-    result = await rebuild(knowledge, documents(), document_count=0)
-
-    assert result.document_count == 0
-    assert result.chunk_count == 0
-    assert not result.idempotent
-    assert client.aliases[alias] == result.collection_name
-    assert result.collection_name != old
-    assert client.dimensions[result.collection_name] == 2
-    assert await knowledge.search([0.1, 0.2], 8) == []
+    with pytest.raises(MilvusKnowledgeError, match="KNOWLEDGE_EMPTY_REBUILD_BLOCKED"):
+        await rebuild(knowledge, documents(), document_count=0)
+    assert client.aliases[alias] == old
+    assert len(await knowledge.search([0.1, 0.2], 8)) == 2
 
 
 @pytest.mark.asyncio
@@ -2521,6 +2518,7 @@ async def test_max_length_alias_can_rebuild_and_publish_staging(settings):
 
 @pytest.mark.asyncio
 async def test_long_alias_fingerprints_keep_business_and_control_data_isolated(settings):
+    settings.rag_embedding_model = "embedding-v1"
     aliases = ("a" * 254 + "x", "a" * 254 + "y")
     client = FakeMilvusClient()
     stores = []

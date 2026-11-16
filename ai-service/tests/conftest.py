@@ -195,6 +195,8 @@ def settings() -> Settings:
         prompt_rewrite_enabled=False,
         # 既有测试继续验证关闭准备阶段时的原始 checkpoint/追踪形状；诊断专项显式开启。
         preparation_diagnostics_enabled=False,
+        # 运行器或开发环境可能加载本地客服开关；离线夹具显式隔离，专项测试自行开启。
+        customer_service_rag_enabled=False,
         rag_embedding_dimension=2,
     )
 

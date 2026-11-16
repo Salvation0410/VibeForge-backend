@@ -1,4 +1,4 @@
-"""复现两端版本约定对应的已知存储行为；通过不表示目标生命周期已修好。"""
+"""保留旧协议冲突作为迁移回归；新版目标见 test_knowledge_revision_lifecycle。"""
 from dataclasses import replace
 import pytest
 
@@ -37,7 +37,7 @@ async def test_enable_using_same_content_version_is_blocked_by_version_tombstone
 
 
 @pytest.mark.asyncio
-async def test_rebuild_epoch_conflicts_with_later_document_etl_and_empty_rebuild_switches(settings):
+async def test_legacy_rebuild_etl_conflict_is_explicit_and_empty_rebuild_is_blocked(settings):
     client=FakeMilvusClient()
     knowledge=store(settings,client)
     value=document(etl='rebuild-epoch')
@@ -50,9 +50,9 @@ async def test_rebuild_epoch_conflicts_with_later_document_etl_and_empty_rebuild
             await knowledge.upsert_document_version(document(etl='2'),lease=lease('document:doc-1',11))
         before=client.aliases['customer_service_knowledge']
         empty=RebuildPlan('embedding-v1',2,'empty-epoch',0,rebuild_fingerprint([],etl='empty-epoch'))
-        result=await knowledge.rebuild_collection(documents(),
-            lease=lease('collection:customer_service_knowledge',12,operation='REBUILD'),plan=empty)
-        assert result.document_count==0
-        assert client.aliases['customer_service_knowledge'] != before
+        with pytest.raises(MilvusKnowledgeError, match='KNOWLEDGE_EMPTY_REBUILD_BLOCKED'):
+            await knowledge.rebuild_collection(documents(),
+                lease=lease('collection:customer_service_knowledge',12,operation='REBUILD'),plan=empty)
+        assert client.aliases['customer_service_knowledge'] == before
     finally:
         await knowledge.close()

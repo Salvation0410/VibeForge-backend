@@ -121,7 +121,19 @@ class KnowledgeMutationLeaseRequest(ApiModel):
         return self
 
 
-class KnowledgeEtlRequest(ApiModel):
+class KnowledgeDocumentRevisions(ApiModel):
+    # 零值只用于迁移期旧契约；新版调用必须同时携带两个正整数。
+    index_revision: int = Field(default=0, ge=0, strict=True)
+    activation_revision: int = Field(default=0, ge=0, strict=True)
+
+    @model_validator(mode="after")
+    def validate_revision_pair(self):
+        if bool(self.index_revision) != bool(self.activation_revision):
+            raise ValueError("index and activation revisions must be supplied together")
+        return self
+
+
+class KnowledgeEtlRequest(KnowledgeDocumentRevisions):
     model_config = ConfigDict(extra="forbid")
 
     operation: Literal["INDEX"]
@@ -169,6 +181,8 @@ class KnowledgeEtlRequest(ApiModel):
 
     @model_validator(mode="after")
     def validate_lease_scope(self) -> "KnowledgeEtlRequest":
+        if self.index_revision and self.etl_version != str(self.index_revision):
+            raise ValueError("ETL version must match document index revision")
         if (
             self.lease.scope != f"document:{self.document_id}"
             or self.lease.operation != self.operation
@@ -183,6 +197,7 @@ class KnowledgeDeleteRequest(ApiModel):
     operation: Literal["DELETE"]
     document_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
     document_version: int = Field(ge=1, strict=True)
+    activation_revision: int = Field(default=0, ge=0, strict=True)
     lease: KnowledgeMutationLeaseRequest
 
     @model_validator(mode="after")
@@ -195,7 +210,7 @@ class KnowledgeDeleteRequest(ApiModel):
         return self
 
 
-class KnowledgeRebuildDocument(ApiModel):
+class KnowledgeRebuildDocument(KnowledgeDocumentRevisions):
     model_config = ConfigDict(extra="forbid")
 
     document_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
@@ -251,6 +266,8 @@ class KnowledgeEtlResponse(ApiModel):
     document_version: int
     chunk_count: int = Field(ge=0)
     idempotent: bool = False
+    index_revision: int | None = Field(default=None, ge=1)
+    activation_revision: int | None = Field(default=None, ge=1)
 
 
 class KnowledgeRebuildResponse(ApiModel):

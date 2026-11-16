@@ -44,11 +44,13 @@ _VERIFIED_FIELDS = {
     "content", "contentHash", "documentContentHash", "embeddingDimension",
     "schemaVersion", "mutationFence", "isActive", "embedding",
     "rebuildFingerprint", "actualDocumentCount", "actualChunkCount",
+    "indexRevision", "activationRevision", "revisionProtocol",
+    "chunkIds", "expectedChunkCount",
 }
 
 
 class RebuildFingerprint:
-    """Order-sensitive, incremental fingerprint shared by planning and storage."""
+    """规划与存储共享有序指纹；新版同时绑定文档索引及激活代际。"""
 
     def __init__(self, collection_alias: str, etl_version: str) -> None:
         self._hasher = hashlib.sha256()
@@ -63,12 +65,16 @@ class RebuildFingerprint:
 
     def add_document(
         self, *, document_id: str, document_version: int, file_name: str,
-        file_type: str, content_hash: str,
+        file_type: str, content_hash: str, index_revision: int = 0,
+        activation_revision: int = 0,
     ) -> None:
         for value in (
             document_id, document_version, file_name, file_type.lower(), content_hash,
         ):
             self._add(value)
+        if index_revision or activation_revision:
+            for value in ("revision-v2", index_revision, activation_revision):
+                self._add(value)
 
     def hexdigest(self) -> str:
         return self._hasher.hexdigest()
@@ -143,6 +149,8 @@ class IndexedDocument:
     file_type: str
     content_hash: str
     chunks: tuple[IndexedChunk, ...] | list[IndexedChunk]
+    index_revision: int = 0
+    activation_revision: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,6 +203,7 @@ class KnowledgeStore(Protocol):
     async def delete_document(
         self, document_id: str, document_version: int, *,
         lease: KnowledgeMutationLease | None = None,
+        activation_revision: int = 0,
     ) -> None: ...
     async def search(self, vector: list[float], limit: int) -> list[RetrievedChunk]: ...
     async def rebuild_collection(
@@ -217,6 +226,7 @@ class MilvusKnowledgeStore:
         if not self._valid_collection_identifier(self._alias):
             raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_ALIAS_INVALID")
         self._schema_version = schema_version
+        self._query_embedding_model = settings.rag_embedding_model
         self._rpc_timeout = settings.milvus_rpc_timeout_seconds
         self._retention_generations = settings.rag_collection_retention_generations
         self._cleanup_grace_seconds = settings.rag_collection_cleanup_grace_seconds
@@ -333,6 +343,11 @@ class MilvusKnowledgeStore:
 
     @classmethod
     def _validate_document(cls, document: IndexedDocument) -> int:
+        revisions = (document.index_revision, document.activation_revision)
+        if (any(type(value) is not int or value < 0 for value in revisions)
+                or bool(revisions[0]) != bool(revisions[1])
+                or (document.index_revision and document.etl_version != str(document.index_revision))):
+            raise MilvusKnowledgeError("KNOWLEDGE_REVISION_INVALID")
         if (
             not cls._valid_id(document.document_id)
             or not document.etl_version or len(document.etl_version) > 128
@@ -1066,6 +1081,10 @@ class MilvusKnowledgeStore:
 
     @staticmethod
     def _identity(document: IndexedDocument) -> str:
+        if document.index_revision:
+            return (f"revision-v2\0{document.document_id}\0{document.document_version}"
+                    f"\0{document.index_revision}\0{document.activation_revision}"
+                    f"\0{document.embedding_model_version}")
         return (
             f"{document.document_id}\0{document.document_version}\0{document.etl_version}"
             f"\0{document.embedding_model_version}"
@@ -1087,6 +1106,7 @@ class MilvusKnowledgeStore:
             "contentHash": chunk.content_hash, "documentContentHash": document.content_hash,
             "embeddingDimension": dimension, "schemaVersion": self._schema_version,
             "mutationFence": fence, "isActive": active,
+            **self._revision_fields(document),
             "embedding": self._canonical_vector(chunk.embedding),
         } for chunk in (document.chunks if chunks is None else chunks)]
 
@@ -1108,7 +1128,80 @@ class MilvusKnowledgeStore:
             "schemaVersion": self._schema_version, "isActive": False,
             "embedding": [0.0] * dimension, "chunkIds": chunk_ids,
             "expectedChunkCount": len(chunk_ids), "mutationFence": fence,
+            **self._revision_fields(document),
         }
+
+    @staticmethod
+    def _revision_fields(document: IndexedDocument) -> dict[str, int]:
+        if not document.index_revision:
+            return {}
+        return {"revisionProtocol": 2, "indexRevision": document.index_revision,
+                "activationRevision": document.activation_revision}
+
+    @staticmethod
+    def _revision_order(row: dict[str, Any]) -> tuple[int, int, int]:
+        # 旧索引仅作为迁移前基线；新代际须显式提供，不从执行 fence 推断。
+        return (int(row.get("activationRevision", 1)), int(row["documentVersion"]),
+                int(row.get("indexRevision", 0)))
+
+    async def _live_manifests(
+        self, document_id: str, manifests: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        legacy = await self._tombstoned_versions(
+            document_id, {int(row["documentVersion"]) for row in manifests})
+        cutoff = await self._revoked_activation(document_id)
+        return [row for row in manifests if not row.get("isDeleted")
+                and int(row.get("activationRevision", 1)) > cutoff
+                and (int(row["documentVersion"]) not in legacy
+                     or int(row.get("activationRevision", 1)) > 1)]
+
+    async def _revoked_activation(self, document_id: str) -> int:
+        control = self._control_collection_name()
+        if not await self._call("has_collection", control):
+            return 0
+        # 独立不可变墓碑不会因迟到旧任务覆盖而降低撤销水位。
+        rows = await self._document_rows(control, document_id)
+        return max((int(row["activationRevision"]) for row in rows
+                    if row.get("recordType") == "activation_tombstone"), default=0)
+
+    async def _write_activation_tombstone(
+        self, document_id: str, activation_revision: int, permit: MutationPermit,
+    ) -> None:
+        collection = await self._ensure_control_collection(permit.fence)
+        identity = f"activation-tombstone\0{document_id}\0{activation_revision}"
+        row = {"id": hashlib.sha256(identity.encode()).hexdigest(),
+               "recordType": "activation_tombstone", "documentId": document_id,
+               "activationRevision": activation_revision, "schemaVersion": self._schema_version,
+               "isActive": False, "embedding": [0.0] * _CONTROL_VECTOR_DIMENSION}
+        await self._assert_permit(permit)
+        await self._write_exact("upsert", collection, [row])
+        actual = await self._get_rows(collection, [row["id"]])
+        if len(actual) != 1 or any(actual[0].get(key) != value for key, value in row.items()):
+            raise MilvusKnowledgeError("KNOWLEDGE_VECTOR_WRITE_INCOMPLETE")
+
+    async def _assert_revision_protocol(
+        self, document_id: str, revision_v2: bool, permit: MutationPermit,
+    ) -> None:
+        """协议升级标记独立于 alias，重建、回滚集合或失败重试不能恢复旧写法。"""
+        control = self._control_collection_name()
+        identity = hashlib.sha256(f"revision-protocol\0{document_id}".encode()).hexdigest()
+        rows = await self._get_rows(control, [identity]) if await self._call("has_collection", control) else []
+        if rows:
+            if len(rows) != 1 or rows[0].get("revisionProtocol") != 2:
+                raise MilvusKnowledgeError("KNOWLEDGE_REVISION_INVALID")
+            if not revision_v2:
+                raise MilvusKnowledgeError("KNOWLEDGE_REVISION_PROTOCOL_REQUIRED")
+            return
+        if revision_v2:
+            control = await self._ensure_control_collection(permit.fence)
+            marker = {"id": identity, "documentId": document_id, "recordType": "revision_protocol",
+                      "revisionProtocol": 2, "schemaVersion": self._schema_version,
+                      "isActive": False, "embedding": [0.0] * _CONTROL_VECTOR_DIMENSION}
+            await self._assert_permit(permit)
+            await self._write_exact("upsert", control, [marker])
+            actual = await self._get_rows(control, [identity])
+            if len(actual) != 1 or any(actual[0].get(key) != value for key, value in marker.items()):
+                raise MilvusKnowledgeError("KNOWLEDGE_VECTOR_WRITE_INCOMPLETE")
 
     def _rebuild_completion_row(
         self, model: str, dimension: int, lease: KnowledgeMutationLease,
@@ -1429,7 +1522,8 @@ class MilvusKnowledgeStore:
                 ),
                 output_fields=[
                     "id", "recordType", "documentId", "documentVersion",
-                    "isDeleted", "chunkIds", "expectedChunkCount",
+                    "isDeleted", "chunkIds", "expectedChunkCount", "indexRevision",
+                    "activationRevision", "revisionProtocol",
                 ],
                 consistency_level="Strong",
             )
@@ -1461,15 +1555,12 @@ class MilvusKnowledgeStore:
         for _ in range(5):
             rows = await self._document_rows(collection, document_id)
             manifests = [row for row in rows if row.get("recordType") == "manifest"]
-            tombstoned = await self._tombstoned_versions(
-                document_id, {int(row["documentVersion"]) for row in manifests}
-            )
-            manifests = [row for row in manifests
-                         if int(row["documentVersion"]) not in tombstoned]
+            manifests = await self._live_manifests(document_id, manifests)
             if not manifests:
                 raise MilvusKnowledgeError("KNOWLEDGE_STAGING_INCOMPLETE")
-            highest = max(int(row["documentVersion"]) for row in manifests)
-            candidates = [row for row in manifests if int(row["documentVersion"]) == highest]
+            highest_order = max(self._revision_order(row) for row in manifests)
+            candidates = [row for row in manifests if self._revision_order(row) == highest_order]
+            highest = highest_order[1]
             identities = {(row.get("etlVersion"), row.get("embeddingModelVersion"),
                            row.get("documentContentHash")) for row in candidates}
             if len(candidates) != 1 or len(identities) != 1:
@@ -1485,11 +1576,14 @@ class MilvusKnowledgeStore:
             await self._assert_permit(permit)
             await self._write_exact("upsert", collection, updates)
             verified = await self._document_rows(collection, document_id)
-            latest = max(int(row["documentVersion"]) for row in verified
-                         if row.get("recordType") == "manifest")
+            live = await self._live_manifests(
+                document_id, [row for row in verified if row.get("recordType") == "manifest"])
+            if not live:
+                raise MilvusKnowledgeError("KNOWLEDGE_DOCUMENT_DISABLED")
+            latest = max(self._revision_order(row) for row in live)
             active_ids = {row.get("id") for row in verified
                           if row.get("recordType") == "chunk" and row.get("isActive")}
-            if latest == highest and active_ids == target_ids:
+            if latest == highest_order and active_ids == target_ids:
                 return highest
         raise MilvusKnowledgeError("KNOWLEDGE_ACTIVATION_UNCERTAIN")
 
@@ -1521,9 +1615,11 @@ class MilvusKnowledgeStore:
     ) -> IndexResult:
         canonical = self._collection_name(document.embedding_model_version, dimension)
         async with self._write_lock:
-            if document.document_version in await self._tombstoned_versions(
-                document.document_id, {document.document_version}
-            ):
+            await self._assert_revision_protocol(document.document_id, bool(document.index_revision), permit)
+            fields = self._revision_fields(document)
+            live = await self._live_manifests(document.document_id, [{
+                "documentVersion": document.document_version, **fields}])
+            if not live:
                 raise MilvusKnowledgeError("KNOWLEDGE_DOCUMENT_DISABLED")
             target = await self._alias_target()
             collection = target or canonical
@@ -1536,21 +1632,31 @@ class MilvusKnowledgeStore:
                 await self._validate_collection(collection, document.embedding_model_version, dimension)
             existing = await self._document_rows(collection, document.document_id)
             manifests = [row for row in existing if row.get("recordType") == "manifest"]
+            if not document.index_revision and any(row.get("revisionProtocol") == 2 for row in manifests):
+                raise MilvusKnowledgeError("KNOWLEDGE_REVISION_PROTOCOL_REQUIRED")
+            expected_order = self._revision_order({"documentVersion": document.document_version, **fields})
+            if manifests and max(self._revision_order(row) for row in manifests) > expected_order:
+                raise MilvusKnowledgeError("KNOWLEDGE_STALE_VERSION")
             if manifests and max(int(row["documentVersion"]) for row in manifests) > document.document_version:
                 raise MilvusKnowledgeError("KNOWLEDGE_STALE_VERSION")
+            # 同一内容版本的原文登记不可变，新增索引代际不等于允许换原文。
+            if any(row.get("documentContentHash") != document.content_hash for row in manifests
+                   if int(row["documentVersion"]) == document.document_version):
+                raise MilvusKnowledgeError("KNOWLEDGE_VERSION_CONFLICT")
             chunks = self._chunk_rows(
                 document, dimension, active=False, fence=permit.fence
             )
             manifest = self._manifest_row(
                 document, dimension, chunks, fence=permit.fence
             )
-            same = [row for row in manifests if int(row["documentVersion"]) == document.document_version]
+            same = [row for row in manifests if self._revision_order(row) == expected_order]
             idempotent = False
             if same:
                 if any(row.get("isDeleted") for row in same):
                     raise MilvusKnowledgeError("KNOWLEDGE_DOCUMENT_DISABLED")
                 fields = ("etlVersion", "embeddingModelVersion", "documentContentHash",
-                          "contentHash", "chunkIds", "expectedChunkCount")
+                          "contentHash", "chunkIds", "expectedChunkCount",
+                          "indexRevision", "activationRevision", "revisionProtocol")
                 if len(same) != 1 or any(same[0].get(field) != manifest.get(field) for field in fields):
                     raise MilvusKnowledgeError("KNOWLEDGE_VERSION_CONFLICT")
                 if not await self._verify_rows(
@@ -1582,24 +1688,38 @@ class MilvusKnowledgeStore:
     async def delete_document(
         self, document_id: str, document_version: int, *,
         lease: KnowledgeMutationLease | None = None,
+        activation_revision: int = 0,
     ) -> None:
         if not self._valid_id(document_id) or not isinstance(document_version, int) or document_version < 1:
             raise MilvusKnowledgeError("KNOWLEDGE_DOCUMENT_INVALID")
+        if type(activation_revision) is not int or activation_revision < 0:
+            raise MilvusKnowledgeError("KNOWLEDGE_REVISION_INVALID")
         scope = f"document:{document_id}"
         async with self._mutation(lease, scope=scope, operation="delete") as permit:
-            await self._delete_document(document_id, document_version, permit)
+            await self._delete_document(document_id, document_version, permit, activation_revision)
 
     async def _delete_document(
         self, document_id: str, document_version: int, permit: MutationPermit,
+        activation_revision: int = 0,
     ) -> None:
         async with self._write_lock:
             await self._assert_permit(permit)
-            await self._write_tombstone(document_id, document_version, permit.fence)
+            await self._assert_revision_protocol(document_id, bool(activation_revision), permit)
             target = await self._alias_target()
+            rows = await self._document_rows(target, document_id) if target is not None else []
+            if activation_revision:
+                await self._write_activation_tombstone(document_id, activation_revision, permit)
+            else:
+                if any(row.get("revisionProtocol") == 2 for row in rows):
+                    raise MilvusKnowledgeError("KNOWLEDGE_REVISION_PROTOCOL_REQUIRED")
+                await self._write_tombstone(document_id, document_version, permit.fence)
             if target is None:
                 return
-            rows = await self._document_rows(target, document_id)
-            selected = [row for row in rows if int(row.get("documentVersion", -1)) == document_version]
+            def selected_revision(row: dict[str, Any]) -> bool:
+                if activation_revision:
+                    return int(row.get("activationRevision", 1)) <= activation_revision
+                return int(row.get("documentVersion", -1)) == document_version
+            selected = [row for row in rows if selected_revision(row)]
             if selected:
                 updates = [
                     {**row, "isActive": False,
@@ -1609,14 +1729,14 @@ class MilvusKnowledgeStore:
                 await self._assert_permit(permit)
                 await self._write_exact("upsert", target, updates)
                 verified = await self._document_rows(target, document_id)
-                if any(row.get("isActive") and int(row.get("documentVersion", -1)) == document_version
+                if any(row.get("isActive") and selected_revision(row)
                        for row in verified):
                     raise MilvusKnowledgeError("KNOWLEDGE_VECTOR_WRITE_INCOMPLETE")
 
     async def _current_document_state(
         self, collection: str, document_id: str,
     ) -> tuple[int, frozenset[str]] | None:
-        """Prove the current version and its allowed physical row IDs."""
+        """读取同一激活及索引代际的精确物理块，禁止混入旧代际。"""
 
         manifests_source = await self._manifest_rows(collection, document_id)
         manifests: list[dict[str, Any]] = []
@@ -1629,16 +1749,13 @@ class MilvusKnowledgeStore:
                 continue
             manifests.append(row)
             versions.add(version)
-        tombstoned = await self._tombstoned_versions(document_id, versions)
-        manifests = [
-            row for row in manifests
-            if int(row["documentVersion"]) not in tombstoned
-        ]
+        manifests = await self._live_manifests(document_id, manifests)
         if not manifests:
             return None
-        highest = max(int(row["documentVersion"]) for row in manifests)
+        highest_order = max(self._revision_order(row) for row in manifests)
+        highest = highest_order[1]
         current = [
-            row for row in manifests if int(row["documentVersion"]) == highest
+            row for row in manifests if self._revision_order(row) == highest_order
         ]
         if len(current) != 1:
             return None
@@ -1689,6 +1806,8 @@ class MilvusKnowledgeStore:
         if collection is None:
             raise MilvusKnowledgeError("CUSTOMER_SERVICE_VECTOR_STORE_UNAVAILABLE")
         try:
+            # 维度相同不能证明向量空间相同，必须先核对 query 模型签名。
+            await self._validate_collection(collection, self._query_embedding_model, len(vector))
             result = await self._call(
                 "search", collection, data=[[float(v) for v in vector]],
                 filter='recordType == "chunk" and isActive == true', limit=limit,
@@ -1787,21 +1906,11 @@ class MilvusKnowledgeStore:
     ) -> RebuildResult:
         async with self._write_lock:
             old = await self._alias_target()
+            if plan.document_count == 0 and old is not None:
+                # 重建不是清空指令；即使所有文档被禁用，也不自动发布空候选。
+                raise MilvusKnowledgeError("KNOWLEDGE_EMPTY_REBUILD_BLOCKED")
             model = plan.embedding_model_version
             dimension = plan.embedding_dimension
-            if plan.document_count == 0 and old is not None:
-                description = await self._describe_collection(old)
-                metadata = self._metadata(description)
-                inherited_model = metadata.get("embeddingModelVersion")
-                inherited_dimension = metadata.get("embeddingDimension")
-                if not isinstance(inherited_model, str) or not isinstance(
-                    inherited_dimension, int
-                ):
-                    raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_MISMATCH")
-                await self._validate_collection(
-                    old, inherited_model, inherited_dimension
-                )
-                model, dimension = inherited_model, inherited_dimension
             collection = self._rebuild_collection_name(
                 model, dimension, lease, plan
             )
@@ -1852,21 +1961,41 @@ class MilvusKnowledgeStore:
                         raise MilvusKnowledgeError(
                             "KNOWLEDGE_EMBEDDING_DIMENSION_MISMATCH"
                         )
-                    if document.etl_version != plan.etl_version:
+                    if not document.index_revision and document.etl_version != plan.etl_version:
                         raise MilvusKnowledgeError("KNOWLEDGE_REBUILD_PLAN_INVALID")
                     if document.document_id in document_ids:
                         raise MilvusKnowledgeError("KNOWLEDGE_VERSION_CONFLICT")
                     document_ids.add(document.document_id)
+                    await self._assert_revision_protocol(document.document_id, bool(document.index_revision), permit)
+                    source_rows = await self._document_rows(old, document.document_id) if old else []
+                    if not document.index_revision and any(row.get("revisionProtocol") == 2 for row in source_rows):
+                        raise MilvusKnowledgeError("KNOWLEDGE_REVISION_PROTOCOL_REQUIRED")
+                    if document.index_revision:
+                        # 同一索引代际必须逐块复现已验收快照，不能用当前解析/模型设置悄悄重写。
+                        # 缺少原清单时先执行新代际 INDEX，不把重建当作可证明的灾备恢复。
+                        expected_rows = self._chunk_rows(document, dimension, active=False, fence=permit.fence)
+                        expected_manifest = self._manifest_row(document, dimension, expected_rows, fence=permit.fence)
+                        sources = [row for row in source_rows if row.get("id") == expected_manifest["id"]]
+                        if not sources:
+                            raise MilvusKnowledgeError("KNOWLEDGE_REBUILD_REVISION_UNVERIFIABLE")
+                        source = sources[0]
+                        if (len(sources) != 1 or not self._rows_match(source, expected_manifest,
+                                ignore_active=True, ignore_fence=True)
+                                or source.get("chunkIds") != expected_manifest["chunkIds"]
+                                or not await self._verify_rows(old, expected_rows,
+                                    ignore_active=True, ignore_fence=True)):
+                            raise MilvusKnowledgeError("KNOWLEDGE_VERSION_CONFLICT")
                     fingerprint.add_document(
                         document_id=document.document_id,
                         document_version=document.document_version,
                         file_name=document.file_name,
                         file_type=document.file_type,
                         content_hash=document.content_hash,
+                        index_revision=document.index_revision,
+                        activation_revision=document.activation_revision,
                     )
-                    if document.document_version in await self._tombstoned_versions(
-                        document.document_id, {document.document_version}
-                    ):
+                    if not await self._live_manifests(document.document_id, [{
+                        "documentVersion": document.document_version, **self._revision_fields(document)}]):
                         raise MilvusKnowledgeError("KNOWLEDGE_DOCUMENT_DISABLED")
                     chunk_ids: list[dict[str, str]] = []
                     for start in range(

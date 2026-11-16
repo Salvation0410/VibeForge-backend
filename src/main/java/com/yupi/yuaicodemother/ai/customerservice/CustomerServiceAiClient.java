@@ -52,6 +52,8 @@ public class CustomerServiceAiClient {
     public Result index(IndexRequest request) {
         JsonNode payload = call("/internal/v1/customer-service/knowledge:etl", request);
         validateDocumentResponse(payload, "INDEX", request.documentId(), request.documentVersion());
+        requireRevision(payload, "indexRevision", request.indexRevision());
+        requireRevision(payload, "activationRevision", request.activationRevision());
         int chunkCount = requiredInt(payload, "chunkCount", 0, MAX_CHUNK_COUNT);
         return new Result(chunkCount, requiredBoolean(payload, "idempotent"));
     }
@@ -59,6 +61,7 @@ public class CustomerServiceAiClient {
     public Result delete(DeleteRequest request) {
         JsonNode payload = call("/internal/v1/customer-service/knowledge:delete", request);
         validateDocumentResponse(payload, "DELETE", request.documentId(), request.documentVersion());
+        requireRevision(payload, "activationRevision", request.activationRevision());
         if (requiredInt(payload, "chunkCount", 0, MAX_CHUNK_COUNT) != 0) invalidResponse();
         return new Result(0, requiredBoolean(payload, "idempotent"));
     }
@@ -212,6 +215,13 @@ public class CustomerServiceAiClient {
         if (version == null || !version.isIntegralNumber() || version.longValue() != documentVersion) invalidResponse();
     }
 
+    // 版本必须精确回显，拒绝迟到响应或低版本服务省略 v2 身份。
+    private static void requireRevision(JsonNode payload, String field, long expected) {
+        JsonNode value = payload.get(field);
+        if (expected <= 0 || value == null || !value.isIntegralNumber() || !value.canConvertToLong()
+                || value.longValue() != expected) invalidResponse();
+    }
+
     private static void requireText(JsonNode payload, String field, String expected) {
         JsonNode value = payload.get(field);
         if (value == null || !value.isTextual() || !expected.equals(value.textValue())) invalidResponse();
@@ -362,17 +372,32 @@ public class CustomerServiceAiClient {
 
     public record IndexRequest(String documentId, long documentVersion, String fileName, String fileType,
                                String signedUrl, String sha256, String etlVersion,
+                               long indexRevision, long activationRevision,
                                KnowledgeMutationCoordinator.Lease lease) {
+        public IndexRequest(String documentId, long documentVersion, String fileName, String fileType,
+                            String signedUrl, String sha256, String etlVersion,
+                            KnowledgeMutationCoordinator.Lease lease) {
+            this(documentId, documentVersion, fileName, fileType, signedUrl, sha256, etlVersion,
+                    Long.parseLong(etlVersion), 1, lease);
+        }
         @JsonProperty("operation")
         public String operation() { return "INDEX"; }
     }
-    public record DeleteRequest(String documentId, long documentVersion,
+    public record DeleteRequest(String documentId, long documentVersion, long activationRevision,
                                 KnowledgeMutationCoordinator.Lease lease) {
+        public DeleteRequest(String documentId, long documentVersion, KnowledgeMutationCoordinator.Lease lease) {
+            this(documentId, documentVersion, 1, lease);
+        }
         @JsonProperty("operation")
         public String operation() { return "DELETE"; }
     }
     public record RebuildDocument(String documentId, long documentVersion, String fileName, String fileType,
-                                  String signedUrl, String sha256) { }
+                                  String signedUrl, String sha256, long indexRevision, long activationRevision) {
+        public RebuildDocument(String documentId, long documentVersion, String fileName, String fileType,
+                               String signedUrl, String sha256) {
+            this(documentId, documentVersion, fileName, fileType, signedUrl, sha256, 1, 1);
+        }
+    }
     public record RebuildRequest(String collectionAlias, List<RebuildDocument> documents, String etlVersion,
                                  KnowledgeMutationCoordinator.Lease lease) {
         @JsonProperty("operation")

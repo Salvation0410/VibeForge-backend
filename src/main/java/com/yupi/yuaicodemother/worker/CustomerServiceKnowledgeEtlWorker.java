@@ -152,6 +152,9 @@ public class CustomerServiceKnowledgeEtlWorker {
                 || !task.getEtlVersion().equals(document.getEtlVersion()) || Integer.valueOf(1).equals(document.getIsDelete())) {
             throw new StaleTaskException();
         }
+        if (document.getActivationRevision() == null || document.getActivationRevision() <= 0
+                || task.getEtlVersion() == null || task.getEtlVersion() <= 0)
+            throw new CustomerServiceAiClient.CallException("KNOWLEDGE_INDEX_REVISION_INVALID", false);
         String signedUrl = ossManager.generateKnowledgeDownloadUrl(document.getObjectKey()).toString();
         return new PreparedIndex(document, signedUrl);
     }
@@ -173,7 +176,8 @@ public class CustomerServiceKnowledgeEtlWorker {
             throw new StaleTaskException();
         CustomerServiceAiClient.Result result = aiClient.index(new CustomerServiceAiClient.IndexRequest(
                 String.valueOf(document.getId()), task.getDocumentVersion(), document.getName(), document.getFileType(),
-                prepared.signedUrl(), document.getContentHash(), String.valueOf(task.getEtlVersion()), lease));
+                prepared.signedUrl(), document.getContentHash(), String.valueOf(task.getEtlVersion()),
+                task.getEtlVersion(), document.getActivationRevision(), lease));
         try {
             taskFinalizer.completeIndex(task.getId(), owner, document.getId(), task.getDocumentVersion(),
                     task.getEtlVersion(), result.chunkCount());
@@ -188,7 +192,7 @@ public class CustomerServiceKnowledgeEtlWorker {
                 documentMapper.findIncludingDeleted(task.getDocumentId()));
         if (!prepared.snapshot().equals(current)) throw new StaleTaskException();
         aiClient.delete(new CustomerServiceAiClient.DeleteRequest(
-                String.valueOf(task.getDocumentId()), task.getDocumentVersion(), lease));
+                String.valueOf(task.getDocumentId()), task.getDocumentVersion(), current.activationRevision(), lease));
     }
 
     private PreparedRebuild prepareRebuild(CustomerServiceKnowledgeEtlOutbox task) {
@@ -203,7 +207,7 @@ public class CustomerServiceKnowledgeEtlWorker {
                 new CustomerServiceAiClient.RebuildDocument(String.valueOf(document.documentId()),
                         document.documentVersion(), document.name(), document.fileType(),
                         ossManager.generateKnowledgeDownloadUrl(document.objectKey()).toString(),
-                        document.contentHash())).toList();
+                        document.contentHash(), document.indexedEtlVersion(), document.activationRevision())).toList();
         refreshClaim(task);
         long requiredLeaseExpiry = clock.instant()
                 .plusSeconds(Math.max(1, properties.getTimeoutSeconds())).getEpochSecond();
@@ -226,7 +230,7 @@ public class CustomerServiceKnowledgeEtlWorker {
         if ((!disabled && !deleting) || !Objects.equals(task.getDocumentVersion(), targetVersion))
             throw new StaleTaskException();
         return new DeleteSnapshot(document.getId(), document.getDocumentVersion(), document.getIndexedVersion(),
-                document.getEtlVersion(), document.getStatus(), document.getIsDelete(), targetVersion);
+                document.getEtlVersion(), document.getStatus(), document.getIsDelete(), targetVersion, document.getActivationRevision());
     }
 
     private List<RebuildDocumentSnapshot> rebuildSnapshot() {
@@ -235,10 +239,18 @@ public class CustomerServiceKnowledgeEtlWorker {
         List<CustomerServiceKnowledgeDocument> documents = documentMapper.listRebuildableLimited(queryLimit);
         if (documents.size() > maximumDocuments)
             throw new CustomerServiceAiClient.CallException("KNOWLEDGE_REBUILD_TOO_MANY_DOCUMENTS", false);
+        for (CustomerServiceKnowledgeDocument document : documents) {
+            if (document.getObjectKey() == null || document.getName() == null || document.getFileType() == null
+                    || document.getContentHash() == null || document.getIndexedEtlVersion() == null
+                    || document.getIndexedEtlVersion() <= 0 || document.getIndexedActivationRevision() == null
+                    || document.getIndexedActivationRevision() <= 0)
+                throw new CustomerServiceAiClient.CallException("KNOWLEDGE_REBUILD_CONTENT_REVISION_MISSING", false);
+        }
         return documents.stream().map(document ->
-                new RebuildDocumentSnapshot(document.getId(), document.getDocumentVersion(), document.getEtlVersion(),
+                new RebuildDocumentSnapshot(document.getId(), document.getIndexedVersion(), document.getEtlVersion(),
                         document.getIndexedVersion(), document.getName(), document.getFileType(), document.getObjectKey(),
-                        document.getContentHash(), document.getStatus(), document.getIsDelete())).toList();
+                        document.getContentHash(), document.getStatus(), document.getIsDelete(),
+                        document.getIndexedEtlVersion(), document.getIndexedActivationRevision())).toList();
     }
 
     private void fail(CustomerServiceKnowledgeEtlOutbox task, String code, boolean transientFailure) {
@@ -312,8 +324,9 @@ public class CustomerServiceKnowledgeEtlWorker {
     private record PreparedRebuild(List<RebuildDocumentSnapshot> documents,
                                    String etlVersion) implements PreparedOperation { }
     private record DeleteSnapshot(Long documentId, Long documentVersion, Long indexedVersion, Long etlVersion,
-                                  String status, Integer isDelete, Long targetVersion) { }
+                                  String status, Integer isDelete, Long targetVersion, Long activationRevision) { }
     private record RebuildDocumentSnapshot(Long documentId, Long documentVersion, Long etlVersion,
                                            Long indexedVersion, String name, String fileType, String objectKey,
-                                           String contentHash, String status, Integer isDelete) { }
+                                           String contentHash, String status, Integer isDelete, Long indexedEtlVersion,
+                                           Long activationRevision) { }
 }

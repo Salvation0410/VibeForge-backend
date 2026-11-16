@@ -13,6 +13,9 @@ public class CustomerServiceKnowledgeDocumentVO {
     private Long documentVersion;
     private Long indexedVersion;
     private Long etlVersion;
+    private Long activationRevision;
+    private Long indexedEtlVersion;
+    private Long indexedActivationRevision;
     private Integer chunkCount;
     private String status;
     private String lastErrorCode;

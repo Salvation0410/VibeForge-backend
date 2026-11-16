@@ -35,6 +35,7 @@ class CustomerServiceKnowledgeServiceTest {
             call.getArgument(0, CustomerServiceKnowledgeDocument.class).setId(11L);
             return 1;
         });
+        when(documents.insertContentRevision(any())).thenReturn(1);
         when(outbox.insert(any())).thenReturn(1);
         service = new CustomerServiceKnowledgeServiceImpl(documents, outbox, oss);
     }
@@ -44,6 +45,10 @@ class CustomerServiceKnowledgeServiceTest {
         var result = service.upload(new MockMultipartFile("file", "guide.txt", "text/plain", "data".getBytes()), null, 7);
         assertEquals(11, result.getId());
         assertEquals(1, result.getDocumentVersion());
+        assertEquals(1, result.getActivationRevision());
+        assertEquals(0, result.getIndexedEtlVersion());
+        assertEquals(0, result.getIndexedActivationRevision());
+        verify(documents).insertContentRevision(argThat(d -> d.getId() == 11L && d.getDocumentVersion() == 1L));
         assertNotNull(result.getCreateTime());
         assertNotNull(result.getUpdateTime());
         verify(documents).insert(any());
@@ -160,12 +165,66 @@ class CustomerServiceKnowledgeServiceTest {
         verify(documents, never()).update(any());
     }
 
+    @Test
+    void disabledReindexCannotImplicitlyReactivate() {
+        var disabled = document(9, 3, 2); disabled.setStatus("DISABLED");
+        when(documents.findIncludingDeletedForUpdate(9)).thenReturn(disabled);
+        assertThrows(RuntimeException.class, () -> service.reindex(9, 7));
+        verify(documents, never()).update(any());
+        verifyNoInteractions(outbox);
+    }
+
+    @Test
+    void enableStartsNewActivationButRetainsOldServingIdentity() {
+        var disabled = document(9, 3, 2); disabled.setStatus("DISABLED");
+        when(documents.findIncludingDeletedForUpdate(9)).thenReturn(disabled);
+        var enabled = service.enable(9, 7);
+        assertEquals(3L, enabled.getActivationRevision());
+        assertEquals(5L, enabled.getEtlVersion());
+        assertEquals(2L, enabled.getIndexedActivationRevision());
+        assertEquals(3L, enabled.getIndexedEtlVersion());
+        assertEquals(2L, enabled.getIndexedVersion());
+    }
+
+    @Test
+    void disableKeepsActivationAsDeleteUpperBound() {
+        var active = document(9, 3, 2); active.setStatus("ACTIVE");
+        when(documents.findIncludingDeletedForUpdate(9)).thenReturn(active);
+        var result = service.disable(9, 7);
+        assertEquals(2L, result.getActivationRevision());
+        assertEquals(5L, result.getEtlVersion());
+    }
+
+    @Test
+    void replacingDisabledDocumentCreatesNewActivationAndRegistersNewContent() {
+        var disabled = document(9, 3, 2); disabled.setStatus("DISABLED");
+        when(documents.findIncludingDeletedForUpdate(9)).thenReturn(disabled);
+        when(documents.update(any())).thenReturn(1);
+        var result = service.upload(new MockMultipartFile("file", "guide.txt", "text/plain", "data".getBytes()), 9L, 7);
+        assertEquals(3L, result.getActivationRevision());
+        assertEquals(2L, result.getIndexedActivationRevision());
+        verify(documents).insertContentRevision(argThat(d -> d.getDocumentVersion() == 4L && d.getObjectKey().endsWith(".txt")));
+        verify(oss, never()).deleteKnowledgeObject("old-key");
+    }
+
+    @Test
+    void registryFailureCompensatesNewObjectAndDoesNotEnqueue() {
+        when(documents.insertContentRevision(any())).thenReturn(0);
+        assertThrows(IllegalStateException.class, () -> service.upload(
+                new MockMultipartFile("file", "guide.txt", "text/plain", "data".getBytes()), null, 7));
+        verify(oss).deleteKnowledgeObject(any());
+        verifyNoInteractions(outbox);
+    }
+
     private static CustomerServiceKnowledgeDocument document(long id, long version, long indexed) {
         var document = new CustomerServiceKnowledgeDocument();
         document.setId(id);
         document.setDocumentVersion(version);
         document.setIndexedVersion(indexed);
         document.setEtlVersion(4L);
+        document.setActivationRevision(2L);
+        document.setIndexedEtlVersion(3L);
+        document.setIndexedActivationRevision(2L);
         document.setChunkCount(2);
         document.setIsDelete(0);
         return document;

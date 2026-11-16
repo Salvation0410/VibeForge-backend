@@ -24,7 +24,7 @@ class CustomerServiceKnowledgeSchemaTest {
         String table = tableDefinition("customer_service_knowledge_document");
 
         for (String column : new String[]{"documentVersion", "contentHash", "indexedVersion",
-                "etlVersion", "isDelete"}) {
+                "etlVersion", "activationRevision", "indexedEtlVersion", "indexedActivationRevision", "isDelete"}) {
             assertColumn(table, column);
         }
         assertTrue(Pattern.compile("(?i)`?contentHash`?\\s+CHAR\\(64\\)").matcher(table).find(),
@@ -116,24 +116,34 @@ class CustomerServiceKnowledgeSchemaTest {
     }
 
     @Test
-    void rebuildQueryExcludesDisabledDocuments() throws Exception {
-        assertTrue(rebuildableQuery().contains("status='ACTIVE'"));
-    }
-
-    @Test
-    void rebuildQueryExcludesFailedReplacementWithOnlyOldIndexedVersion() throws Exception {
+    void rebuildQueryRetainsCurrentActivationServingAcrossReplacementFailure() throws Exception {
         String sql = rebuildableQuery();
+        assertTrue(sql.contains("status IN ('ACTIVE','UPLOADED','INDEXING','FAILED')"));
         assertTrue(sql.contains("indexedVersion>0"));
-        assertTrue(sql.contains("indexedVersion=documentVersion"));
+        assertTrue(sql.contains("indexedActivationRevision=d.activationRevision"));
+        assertTrue(sql.contains("LEFT JOIN customer_service_knowledge_content_revision"));
+        assertTrue(sql.contains("c.documentVersion=d.indexedVersion"));
+        assertFalse(sql.contains("indexedVersion=documentVersion"));
+        assertTrue(sql.contains("LIMIT #{limit}"));
     }
 
     @Test
-    void rebuildQueryIncludesOnlyCurrentActiveDocuments() throws Exception {
-        String sql = rebuildableQuery();
-        assertTrue(sql.contains("isDelete=0"));
-        assertTrue(sql.contains("status='ACTIVE'"));
-        assertTrue(sql.contains("indexedVersion=documentVersion"));
-        assertTrue(sql.contains("LIMIT #{limit}"));
+    void successfulIndexCommitsWholeServingIdentityInSameCas() throws Exception {
+        String sql = CustomerServiceKnowledgeDocumentMapper.class
+                .getMethod("completeIndex", long.class, long.class, long.class, int.class)
+                .getAnnotation(Update.class).value()[0];
+        assertTrue(sql.contains("indexedVersion=#{version},indexedEtlVersion=#{etlVersion},indexedActivationRevision=activationRevision"));
+        assertTrue(sql.contains("etlVersion=#{etlVersion}"));
+        assertTrue(sql.contains("status='INDEXING'"));
+    }
+
+    @Test
+    void migrationBlocksUnknownHistoricalServingAndLegacyPendingTasks() throws IOException {
+        String sql = Files.readString(Path.of("sql", "alter_customer_service_knowledge_v2_revisions.sql"));
+        assertTrue(sql.contains("SIGNAL SQLSTATE '45000'"));
+        assertTrue(sql.contains("indexedVersion<>documentVersion"));
+        assertTrue(sql.contains("status IN ('PENDING','PROCESSING')"));
+        assertTrue(sql.contains("SELECT id,documentVersion,name,fileType,objectKey,fileSize,contentHash,createTime"));
     }
 
     private static String rebuildableQuery() throws Exception {

@@ -231,6 +231,7 @@ def register_routes(
         "/internal/v1/customer-service/knowledge:etl",
         response_model=KnowledgeEtlResponse,
         response_model_by_alias=True,
+        response_model_exclude_none=True,
         dependencies=[Depends(require_internal_auth)],
         responses={400: {"description": "Invalid request"}, 409: {"description": "Conflict"}},
     )
@@ -249,6 +250,8 @@ def register_routes(
                 sha256=body.sha256,
                 etl_version=body.etl_version,
                 lease=_lease(body.lease),
+                **({"index_revision": body.index_revision,
+                    "activation_revision": body.activation_revision} if body.index_revision else {}),
             )
             logger.info("Knowledge INDEX completed: documentId=%s chunks=%s idempotent=%s",
                         result.document_id, result.chunk_count, result.idempotent)
@@ -258,6 +261,8 @@ def register_routes(
                 document_version=result.document_version,
                 chunk_count=result.chunk_count,
                 idempotent=result.idempotent,
+                index_revision=body.index_revision or None,
+                activation_revision=body.activation_revision or None,
             )
         except Exception as error:
             logger.warning("Knowledge INDEX failed: documentId=%s errorType=%s",
@@ -268,6 +273,7 @@ def register_routes(
         "/internal/v1/customer-service/knowledge:delete",
         response_model=KnowledgeEtlResponse,
         response_model_by_alias=True,
+        response_model_exclude_none=True,
         dependencies=[Depends(require_internal_auth)],
     )
     async def knowledge_delete(body: KnowledgeDeleteRequest, request: Request):
@@ -279,12 +285,14 @@ def register_routes(
                 document_id=body.document_id,
                 document_version=body.document_version,
                 lease=_lease(body.lease),
+                **({"activation_revision": body.activation_revision} if body.activation_revision else {}),
             )
             return KnowledgeEtlResponse(
                 operation="DELETE",
                 document_id=body.document_id,
                 document_version=body.document_version,
                 chunk_count=0,
+                activation_revision=body.activation_revision or None,
             )
         except Exception as error:
             return _stable_exception(error, "KNOWLEDGE_ETL_FAILED")

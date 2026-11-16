@@ -58,6 +58,9 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
                 document.setUpdateTime(now);
                 document.setDocumentVersion(1L);
                 document.setIndexedVersion(0L);
+                document.setActivationRevision(1L);
+                document.setIndexedEtlVersion(0L);
+                document.setIndexedActivationRevision(0L);
                 document.setEtlVersion(1L);
                 document.setChunkCount(0);
                 document.setCreatedBy(userId);
@@ -65,6 +68,9 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
             } else {
                 document = requireDocumentForUpdate(replacementId);
                 ensureNotDeleted(document);
+                // 禁用文档的替换上传是一次明确重新激活；旧激活墓碑不能撤销新索引。
+                if ("DISABLED".equals(document.getStatus()))
+                    document.setActivationRevision(document.getActivationRevision() + 1);
                 document.setDocumentVersion(document.getDocumentVersion() + 1);
                 document.setEtlVersion(document.getEtlVersion() + 1);
                 document.setUpdateTime(now);
@@ -79,6 +85,8 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
             document.setUpdatedBy(userId);
             int changed = replacementId == null ? documentMapper.insert(document) : documentMapper.update(document);
             if (changed != 1) throw new IllegalStateException("KNOWLEDGE_DOCUMENT_WRITE_FAILED");
+            if (documentMapper.insertContentRevision(document) != 1)
+                throw new IllegalStateException("KNOWLEDGE_CONTENT_REVISION_WRITE_FAILED");
             enqueue(document, "INDEX", document.getDocumentVersion());
             return toVO(document);
         } catch (RuntimeException error) {
@@ -118,9 +126,11 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
     @Override
     @Transactional
     public CustomerServiceKnowledgeDocumentVO reindex(long id, long userId) {
-        // 递增 ETL 版本，使迟到的旧 worker 结果无法覆盖本次重新索引任务。
+        // 递增稳定索引修订，使迟到的旧 worker 结果无法覆盖本次重新索引任务。
         CustomerServiceKnowledgeDocument document = requireDocumentForUpdate(id);
         ensureNotDeleted(document);
+        if ("DISABLED".equals(document.getStatus()))
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "禁用文档请先启用");
         document.setEtlVersion(document.getEtlVersion() + 1);
         document.setStatus("UPLOADED");
         document.setUpdatedBy(userId);
@@ -150,6 +160,9 @@ public class CustomerServiceKnowledgeServiceImpl implements CustomerServiceKnowl
     public CustomerServiceKnowledgeDocumentVO enable(long id, long userId) {
         CustomerServiceKnowledgeDocument document = requireDocumentForUpdate(id);
         ensureNotDeleted(document);
+        if (!"DISABLED".equals(document.getStatus()))
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "仅禁用文档可以重新启用");
+        document.setActivationRevision(document.getActivationRevision() + 1);
         document.setEtlVersion(document.getEtlVersion() + 1);
         document.setStatus("UPLOADED");
         document.setUpdatedBy(userId);

@@ -10,6 +10,9 @@ CREATE TABLE IF NOT EXISTS customer_service_knowledge_document
     documentVersion BIGINT     DEFAULT 1                NOT NULL COMMENT '文档内容版本',
     indexedVersion  BIGINT     DEFAULT 0                NOT NULL COMMENT '已建索引的文档版本，0表示未索引',
     etlVersion      BIGINT     DEFAULT 0                NOT NULL COMMENT '当前ETL任务版本，0表示未安排',
+    activationRevision BIGINT DEFAULT 1 NOT NULL COMMENT '当前激活修订',
+    indexedEtlVersion BIGINT DEFAULT 0 NOT NULL COMMENT 'serving索引修订',
+    indexedActivationRevision BIGINT DEFAULT 0 NOT NULL COMMENT 'serving激活修订',
     chunkCount      INT        DEFAULT 0                NOT NULL COMMENT '已索引分块数',
     status          VARCHAR(32) DEFAULT 'UPLOADED'      NOT NULL COMMENT '文档处理状态',
     lastErrorCode   VARCHAR(128)                        NULL COMMENT '最近一次处理错误码',
@@ -69,3 +72,17 @@ CREATE TABLE IF NOT EXISTS customer_service_knowledge_mutation_lease
     KEY idx_knowledge_mutation_active (scope, revokedAt, expiresAt),
     KEY idx_knowledge_mutation_global (revokedAt, expiresAt)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '客服知识变更租约审计';
+
+-- 内容版本原文登记：不删除旧 serving 所引用的 OSS 对象。
+CREATE TABLE IF NOT EXISTS customer_service_knowledge_content_revision
+(
+    documentId BIGINT NOT NULL COMMENT '文档ID',
+    documentVersion BIGINT NOT NULL COMMENT '不可变内容修订',
+    name VARCHAR(256) NOT NULL,
+    fileType VARCHAR(32) NOT NULL,
+    objectKey VARCHAR(512) NOT NULL,
+    fileSize BIGINT NOT NULL,
+    contentHash CHAR(64) NOT NULL,
+    createTime DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (documentId, documentVersion)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='客服知识不可变原文登记';

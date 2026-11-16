@@ -232,24 +232,26 @@ class CustomerServiceAiClientTest {
             for (String invalid : List.of(
                     "{}",
                     "{\"error\":{\"code\":\"signed-secret\"}}",
-                    "{\"operation\":\"DELETE\",\"status\":\"SUCCEEDED\",\"documentId\":\"1\",\"documentVersion\":2,\"chunkCount\":1,\"idempotent\":false}",
-                    "{\"operation\":\"INDEX\",\"status\":\"FAILED\",\"documentId\":\"1\",\"documentVersion\":2,\"chunkCount\":1,\"idempotent\":false}",
-                    "{\"operation\":\"INDEX\",\"status\":\"SUCCEEDED\",\"documentId\":\"other\",\"documentVersion\":2,\"chunkCount\":1,\"idempotent\":false}",
-                    "{\"operation\":\"INDEX\",\"status\":\"SUCCEEDED\",\"documentId\":\"1\",\"documentVersion\":3,\"chunkCount\":1,\"idempotent\":false}",
-                    "{\"operation\":\"INDEX\",\"status\":\"SUCCEEDED\",\"documentId\":\"1\",\"documentVersion\":2,\"chunkCount\":1000001,\"idempotent\":false}")) {
+                    "{\"operation\":\"DELETE\",\"status\":\"SUCCEEDED\",\"documentId\":\"1\",\"documentVersion\":2,\"indexRevision\":7,\"activationRevision\":1,\"chunkCount\":1,\"idempotent\":false}",
+                    "{\"operation\":\"INDEX\",\"status\":\"FAILED\",\"documentId\":\"1\",\"documentVersion\":2,\"indexRevision\":7,\"activationRevision\":1,\"chunkCount\":1,\"idempotent\":false}",
+                    "{\"operation\":\"INDEX\",\"status\":\"SUCCEEDED\",\"documentId\":\"other\",\"documentVersion\":2,\"indexRevision\":7,\"activationRevision\":1,\"chunkCount\":1,\"idempotent\":false}",
+                    "{\"operation\":\"INDEX\",\"status\":\"SUCCEEDED\",\"documentId\":\"1\",\"documentVersion\":3,\"indexRevision\":7,\"activationRevision\":1,\"chunkCount\":1,\"idempotent\":false}",
+                    "{\"operation\":\"INDEX\",\"status\":\"SUCCEEDED\",\"documentId\":\"1\",\"documentVersion\":2,\"indexRevision\":7,\"activationRevision\":1,\"chunkCount\":1000001,\"idempotent\":false}")) {
                 responseBody.set(invalid);
                 var error = assertThrows(CustomerServiceAiClient.CallException.class, () -> client.index(request));
                 assertEquals("KNOWLEDGE_AI_RESPONSE_INVALID", error.code());
                 assertFalse(error.getMessage().contains("signed-secret"));
             }
-            responseBody.set("{\"operation\":\"INDEX\",\"status\":\"SUCCEEDED\",\"documentId\":\"1\",\"documentVersion\":2,\"chunkCount\":4,\"idempotent\":false}");
+            responseBody.set("{\"operation\":\"INDEX\",\"status\":\"SUCCEEDED\",\"documentId\":\"1\",\"documentVersion\":2,\"indexRevision\":7,\"activationRevision\":1,\"chunkCount\":4,\"idempotent\":false}");
             assertEquals(4, client.index(request).chunkCount());
+            responseBody.set(responseBody.get().replace("\"indexRevision\":7", "\"indexRevision\":8"));
+            assertThrows(CustomerServiceAiClient.CallException.class, () -> client.index(request));
         } finally { server.stop(0); }
     }
 
     @Test
     void deleteAndRebuildUseDedicatedSuccessSchemas() throws Exception {
-        var responseBody = new AtomicReference<>("{\"operation\":\"DELETE\",\"status\":\"SUCCEEDED\",\"documentId\":\"1\",\"documentVersion\":2,\"chunkCount\":0,\"idempotent\":true}");
+        var responseBody = new AtomicReference<>("{\"operation\":\"DELETE\",\"status\":\"SUCCEEDED\",\"documentId\":\"1\",\"documentVersion\":2,\"activationRevision\":1,\"chunkCount\":0,\"idempotent\":true}");
         var server = HttpServer.create(new InetSocketAddress(0), 0);
         server.createContext("/internal/v1/customer-service/knowledge:delete", exchange -> writeJson(exchange, responseBody.get()));
         server.createContext("/internal/v1/customer-service/knowledge:rebuild", exchange -> writeJson(exchange, responseBody.get()));
@@ -275,6 +277,24 @@ class CustomerServiceAiClientTest {
             assertThrows(CustomerServiceAiClient.CallException.class, () -> client.rebuild(
                     new CustomerServiceAiClient.RebuildRequest("customer_service_knowledge", rebuildDocuments, "9", rebuildLease)));
         } finally { server.stop(0); }
+    }
+
+    @Test
+    void requestSerializationCarriesStablePerDocumentRevisions() throws Exception {
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var lease = new KnowledgeMutationCoordinator.Lease("document:1", "op_1", "INDEX", 3, 2000000000L, "proof");
+        var index = mapper.readTree(mapper.writeValueAsBytes(new CustomerServiceAiClient.IndexRequest(
+                "1", 2, "a.txt", "TXT", "https://example.com/a", "a".repeat(64), "7", 7, 3, lease)));
+        assertEquals(7, index.path("indexRevision").asLong());
+        assertEquals(3, index.path("activationRevision").asLong());
+        var deletion = mapper.readTree(mapper.writeValueAsBytes(new CustomerServiceAiClient.DeleteRequest("1", 2, 3, lease)));
+        assertEquals(3, deletion.path("activationRevision").asLong());
+        var rebuild = mapper.readTree(mapper.writeValueAsBytes(new CustomerServiceAiClient.RebuildRequest(
+                "knowledge", List.of(new CustomerServiceAiClient.RebuildDocument("1", 2, "a.txt", "TXT",
+                "https://example.com/a", "a".repeat(64), 7, 3)), "99", lease)));
+        assertEquals("99", rebuild.path("etlVersion").asText());
+        assertEquals(7, rebuild.path("documents").get(0).path("indexRevision").asLong());
+        assertEquals(3, rebuild.path("documents").get(0).path("activationRevision").asLong());
     }
 
     private static HttpServer jsonServer(String path, AtomicReference<String> responseBody) throws Exception {

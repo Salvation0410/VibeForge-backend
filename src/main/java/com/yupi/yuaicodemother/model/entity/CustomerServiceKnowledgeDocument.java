@@ -50,6 +50,17 @@ public class CustomerServiceKnowledgeDocument implements Serializable {
     @Column("etlVersion")
     private Long etlVersion;
 
+    // 只有明确重新启用才产生新激活；禁用墓碑撤销当前及更早激活。
+    @Column("activationRevision")
+    private Long activationRevision;
+
+    // serving 身份独立于正在处理的内容/索引修订，失败时保留旧可用版本。
+    @Column("indexedEtlVersion")
+    private Long indexedEtlVersion;
+
+    @Column("indexedActivationRevision")
+    private Long indexedActivationRevision;
+
     @Column("chunkCount")
     private Integer chunkCount;
 

@@ -130,7 +130,7 @@ class CustomerServiceKnowledgeEtlWorkerTest {
         worker.execute(task);
 
         verify(documents, times(2)).findIncludingDeleted(1);
-        verify(ai).delete(argThat(request -> request.documentVersion() == 1 && request.lease() == lease));
+        verify(ai).delete(argThat(request -> request.documentVersion() == 1 && request.activationRevision() == 2 && request.lease() == lease));
         verify(outbox).finish(eq(1L), anyString(), eq("SUCCEEDED"), isNull());
         verify(coordinator).revoke(lease);
     }
@@ -362,6 +362,8 @@ class CustomerServiceKnowledgeEtlWorkerTest {
         order.verify(outbox).refreshClaim(eq(1L), anyString(), eq(LocalDateTime.parse("2030-01-01T00:01:00")));
         order.verify(ai).rebuild(argThat(request -> request.lease() == lease
                 && request.documents().size() == 1
+                && request.documents().getFirst().indexRevision() == 3
+                && request.documents().getFirst().activationRevision() == 2
                 && "https://example.com/rebuild".equals(request.documents().getFirst().signedUrl())));
         order.verify(outbox).finish(eq(1L), anyString(), eq("SUCCEEDED"), isNull());
         order.verify(coordinator).revoke(lease);
@@ -449,6 +451,47 @@ class CustomerServiceKnowledgeEtlWorkerTest {
                 eq("KNOWLEDGE_REBUILD_TOO_MANY_DOCUMENTS"));
     }
 
+    @Test
+    void retriesSendSameIndexIdentityDespiteNewOperationLease() throws Exception {
+        var doc = document();
+        when(documents.findIncludingDeleted(1)).thenReturn(doc);
+        when(documents.markIndexing(1, 1, 1)).thenReturn(1);
+        when(oss.generateKnowledgeDownloadUrl(any())).thenReturn(new URL("https://example.com/file"));
+        when(coordinator.acquire(any(), any(), any(), any())).thenReturn(lease("INDEX"));
+        when(ai.index(any())).thenThrow(new CustomerServiceAiClient.CallException("TEMPORARY", true))
+                .thenReturn(new CustomerServiceAiClient.Result(1, false));
+        var task = task("INDEX");
+        worker.execute(task);
+        task.setRetryCount(1);
+        worker.execute(task);
+        verify(ai, times(2)).index(argThat(r -> r.indexRevision() == 1 && r.activationRevision() == 2));
+    }
+
+    @Test
+    void rebuildUsesOldServingContentAfterReplacementFailed() throws Exception {
+        var serving = document();
+        serving.setDocumentVersion(4L); serving.setEtlVersion(8L); serving.setStatus("FAILED");
+        serving.setIndexedVersion(2L); serving.setIndexedEtlVersion(6L);
+        serving.setObjectKey("old-original");
+        when(documents.listRebuildableLimited(1001)).thenReturn(List.of(serving));
+        when(oss.generateKnowledgeDownloadUrl("old-original")).thenReturn(new URL("https://example.com/old"));
+        when(coordinator.acquire(any(), any(), any(), any())).thenReturn(lease("REBUILD"));
+        worker.execute(task("REBUILD"));
+        verify(ai).rebuild(argThat(r -> r.documents().getFirst().documentVersion() == 2
+                && r.documents().getFirst().indexRevision() == 6
+                && r.documents().getFirst().activationRevision() == 2));
+    }
+
+    @Test
+    void rebuildMissingRegisteredOriginalFailsClosed() {
+        var missing = document(); missing.setObjectKey(null);
+        when(documents.listRebuildableLimited(1001)).thenReturn(List.of(missing));
+        worker.execute(task("REBUILD"));
+        verifyNoInteractions(ai, coordinator, oss);
+        verify(outbox).retry(eq(1L), anyString(), eq("FAILED"), eq(1), any(),
+                eq("KNOWLEDGE_REBUILD_CONTENT_REVISION_MISSING"));
+    }
+
     private static CustomerServiceKnowledgeEtlOutbox task(String operation) {
         var task = new CustomerServiceKnowledgeEtlOutbox();
         task.setId(1L); task.setDocumentId(1L); task.setDocumentVersion(1L); task.setEtlVersion(1L);
@@ -457,6 +500,8 @@ class CustomerServiceKnowledgeEtlWorkerTest {
     }
     private static CustomerServiceKnowledgeDocument document() {
         var doc = new CustomerServiceKnowledgeDocument();
+        doc.setActivationRevision(2L); doc.setIndexedVersion(1L);
+        doc.setIndexedEtlVersion(3L); doc.setIndexedActivationRevision(2L);
         doc.setId(1L); doc.setDocumentVersion(1L); doc.setEtlVersion(1L); doc.setIsDelete(0);
         doc.setName("a.txt"); doc.setFileType("TXT"); doc.setObjectKey("key"); doc.setContentHash("a".repeat(64));
         return doc;

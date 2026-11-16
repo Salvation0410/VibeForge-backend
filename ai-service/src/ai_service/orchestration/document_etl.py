@@ -374,6 +374,7 @@ class KnowledgeEtlService:
         self, *, document_id: str, document_version: int, file_name: str,
         file_type: str, signed_url: str, sha256: str, etl_version: str,
         lease: KnowledgeMutationLease,
+        index_revision: int = 0, activation_revision: int = 0,
     ):
         async with self._semaphore:
             # 通过信号量限制并行 ETL 数量，避免下载、解析和向量化同时耗尽资源。
@@ -386,12 +387,14 @@ class KnowledgeEtlService:
                 sha256=sha256,
                 etl_version=etl_version,
                 lease=lease,
+                index_revision=index_revision, activation_revision=activation_revision,
             )
 
     async def _index(
         self, *, document_id: str, document_version: int, file_name: str,
         file_type: str, signed_url: str, sha256: str, etl_version: str,
         lease: KnowledgeMutationLease,
+        index_revision: int = 0, activation_revision: int = 0,
     ):
         # 每一步都在进入下一阶段前校验大小、数量和向量维度，避免不可信结果写入 Milvus。
         logger.info("Knowledge INDEX downloading: documentId=%s", document_id)
@@ -445,6 +448,7 @@ class KnowledgeEtlService:
             file_type=file_type.lower(),
             content_hash=sha256,
             chunks=indexed_chunks,
+            index_revision=index_revision, activation_revision=activation_revision,
         )
         logger.info("Knowledge INDEX storing: documentId=%s version=%s", document_id, document_version)
         return await self._store.upsert_document_version(document, lease=lease)
@@ -452,9 +456,11 @@ class KnowledgeEtlService:
     async def delete(
         self, *, document_id: str, document_version: int,
         lease: KnowledgeMutationLease,
+        activation_revision: int = 0,
     ) -> None:
         await self._store.delete_document(
-            document_id, document_version, lease=lease
+            document_id, document_version, lease=lease,
+            **({"activation_revision": activation_revision} if activation_revision else {}),
         )
 
     async def rebuild(
@@ -471,8 +477,10 @@ class KnowledgeEtlService:
                     camel = name.split("_")[0] + "".join(
                         part.capitalize() for part in name.split("_")[1:]
                     )
+                    if name in {"index_revision", "activation_revision"}:
+                        return document.get(camel, 0)
                     return document[camel]
-                return getattr(document, name)
+                return getattr(document, name, 0) if name in {"index_revision", "activation_revision"} else getattr(document, name)
 
             fingerprint_builder = RebuildFingerprint(
                 self._settings.milvus_collection_alias, etl_version
@@ -484,6 +492,8 @@ class KnowledgeEtlService:
                     file_name=field(item, "file_name"),
                     file_type=field(item, "file_type"),
                     content_hash=field(item, "sha256"),
+                    index_revision=field(item, "index_revision"),
+                    activation_revision=field(item, "activation_revision"),
                 )
             fingerprint = fingerprint_builder.hexdigest()
             plan = RebuildPlan(
@@ -589,12 +599,15 @@ class KnowledgeEtlService:
                     yield IndexedDocument(
                         document_id=document_id,
                         document_version=document_version,
-                        etl_version=etl_version,
+                        # 全库构建身份不覆盖文档自己的索引代际，重试可复用物理块身份。
+                        etl_version=str(field(item, "index_revision")) if field(item, "index_revision") else etl_version,
                         embedding_model_version=self._settings.rag_embedding_model,
                         file_name=file_name,
                         file_type=file_type.lower(),
                         content_hash=sha256,
                         chunks=indexed_chunks,
+                        index_revision=field(item, "index_revision"),
+                        activation_revision=field(item, "activation_revision"),
                     )
 
             return await self._store.rebuild_collection(
