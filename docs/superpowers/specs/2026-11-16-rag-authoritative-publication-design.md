@@ -1,6 +1,6 @@
 # B0b：客服知识权威发布协议
 
-依据：用户要求继续逐轮交接中的下一步。沿已批准路线B推进；候选组织及在途读语义是本次待确认的具体取舍，不将已有租约等同于跨存储原子性。
+依据：用户要求继续逐轮交接中的下一步。沿已批准路线B推进；候选组织及在途读语义是本次已确认的具体取舍，不将已有租约等同于跨存储原子性。
 
 ## 问题与选择
 
@@ -29,7 +29,7 @@
 
 `CandidateReceipt`：`publicationId, baseEpoch, operationId, fence, candidateCollection, snapshotHash, embeddingModelVersion, embeddingDimension, documents`。其中documents包含DocumentIdentity全部字段及`chunkCount:int`。不含下载地址或proof。snapshotHash绑定按id排序的完整块/manifest（f32向量、正文和定位），不包含仅用于该attempt的fence/活动位。
 
-`ReadSnapshot`：`enabled:bool, epoch:int, publicationId:string|null, collectionName:string|null, embeddingModelVersion:string|null, embeddingDimension:int, documents:DocumentIdentity[]`。documents是当前serving且未禁用/删除、激活仍匹配的白名单；可能小于物理快照。
+`ReadSnapshot`：`enabled:bool, epoch:int, publicationId:string|null, collectionName:string|null, snapshotHash:string|null, embeddingModelVersion:string|null, embeddingDimension:int, documents:DocumentIdentity[]`。documents是当前serving且未禁用/删除、激活仍匹配的白名单；可能小于物理快照。
 
 Spring内部入口：GET `/internal/customer-service/knowledge-publications/snapshot`；GET `/internal/customer-service/knowledge-publications/{publicationId}` 查询事实。worker在本地事务Service执行prepare/commit，不绕HTTP访问自己的数据库。
 
@@ -68,3 +68,4 @@ Spring定时worker读取当前权威head并调用Python对账；旧outbox标SUPE
 离线与真实MySQL/Milvus隔离矩阵：私有候选不影响源、旧owner检查后暂停、接管、禁用/启用/重建交错、epoch冲突、同publication重复/冲突、提交前后故障、提交确认丢失后的事实查询、alias失败/迟到覆盖/周期收敛、缺权威目标/坏完成标记/模型错配、预算/空集合、在途回答epoch改变不泄露旧结果。两个Coordinator或Fake时钟不冒称完整双实例网络故障注入。
 
 首个生产bootstrap只有隔离协议测试、全部必要Java/Python回归及备份完成后执行；本轮不新增真实回答调用。旧原文registry、旧集合和墓碑保留，不新增无引用证明的自动GC。模型升级、分块策略变化、无限规模、多轮长期记忆与人工质量推广均不在本次范围。
+
