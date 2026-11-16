@@ -27,6 +27,9 @@ public class KnowledgePublicationAliasWorker {
         if(!properties.isPublicationEnabled()) return;
         try {
             var snapshot=publications.snapshot();
+            // bootstrap 前没有权威镜像目标；不能把维护状态转成携带空目标的对账请求。
+            if(!snapshot.enabled() || snapshot.publicationId()==null || snapshot.publicationId().isBlank()
+                    || snapshot.collectionName()==null || snapshot.collectionName().isBlank()) return;
             client.reconcileAlias(new ReconcileAliasRequest(properties.getCollectionAlias(),snapshot.collectionName(),
                     snapshot.publicationId(),snapshot.epoch()));
             publications.acknowledgeMirror(snapshot);

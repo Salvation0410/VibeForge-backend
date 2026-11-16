@@ -34,6 +34,22 @@ class KnowledgePublicationEdgesTest {
         verify(client,times(2)).reconcileAlias(new ReconcileAliasRequest(properties.getCollectionAlias(),"specific_collection","task_1",7));
         verify(publications,times(2)).acknowledgeMirror(snapshot);
     }
+    @Test void aliasMirrorSkipsMaintenanceStateAndMissingAuthorityTargets() {
+        properties.setPublicationEnabled(true);
+        for(var snapshot:List.of(
+                new ReadSnapshot(false,0,null,null,null,null,0,List.of()),
+                new ReadSnapshot(false,7,"task_1","specific_collection",null,null,0,List.of()),
+                new ReadSnapshot(true,7,null,"specific_collection",null,null,0,List.of()),
+                new ReadSnapshot(true,7,"  ","specific_collection",null,null,0,List.of()),
+                new ReadSnapshot(true,7,"task_1",null,null,null,0,List.of()),
+                new ReadSnapshot(true,7,"task_1","  ",null,null,0,List.of()))) {
+            reset(publications,client);
+            when(publications.snapshot()).thenReturn(snapshot);
+            new KnowledgePublicationAliasWorker(publications,client,properties).reconcile();
+            verifyNoInteractions(client);
+            verify(publications,never()).acknowledgeMirror(any());
+        }
+    }
     @Test void failedAliasMirrorNeverAcknowledgesOrRollsBackPublication() {
         properties.setPublicationEnabled(true);
         when(publications.snapshot()).thenReturn(new ReadSnapshot(true,7,"task_1","specific_collection","a".repeat(64),"model",3,List.of()));

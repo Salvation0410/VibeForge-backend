@@ -12,20 +12,20 @@
 
 文件：新增 publication DTO、Mapper/XML、Service、内部 Controller、alias worker、迁移 SQL；修改 CustomerServiceKnowledgeEtlWorker、CustomerServiceKnowledgeServiceImpl、CustomerServiceAiClient、CustomerServiceProperties、租约 Mapper。
 
-- [ ] 为同 ID 重复/冲突、过期 owner、epoch 变化、事务回滚、禁用白名单、bootstrap 条件编写失败测试。
-- [ ] 新表保存 epoch/head、不可变 receipt、alias outbox。管理变更按 epoch→document 锁序；提交按 epoch→task→lease 锁序。
-- [ ] worker 在新模式调用 prepare-publication，再本地提交；未知提交结果按稳定 ID 查事实，禁止落入旧 finalizer。
-- [ ] 添加内部 snapshot/fact 入口、维护 bootstrap 和周期性 head alias 对账；持久 enabled 阻止关闭配置退回旧协议。
-- [ ] 执行相关 Java 单测和干净编译，审查后仅提交本任务文件。
+- [x] 为同 ID 重复/冲突、过期 owner、epoch 变化、事务回滚、禁用白名单、bootstrap 条件编写失败测试。
+- [x] 新表保存 epoch/head、不可变 receipt、alias outbox。管理变更按 epoch→document 锁序；提交按 epoch→task→lease 锁序。
+- [x] worker 在新模式调用 prepare-publication，再本地提交；未知提交结果按稳定 ID 查事实，禁止落入旧 finalizer。
+- [x] 添加内部 snapshot/fact 入口、维护 bootstrap 和周期性 head alias 对账；持久 enabled 阻止关闭配置退回旧协议。
+- [x] 执行相关 Java 单测和干净编译，审查后仅提交本任务文件。
 
 ## 任务二：Python 私有候选与严格收据
 
 文件：新增 orchestration/knowledge_publication.py、协议模型及候选测试；修改 infrastructure/milvus_knowledge.py、必要 ETL 适配。
 
-- [ ] 测试准备不触碰源/alias、缺行/坏向量/错模型/超预算、删除最后文档、空重建、精确回读与完成标记。
-- [ ] 复用已有 INDEX 解析嵌入和 REBUILD 原文校验；复制已验证 f32 向量，随机 _pub_UUID 新集合，64MiB 上限及既有预算。
-- [ ] 完成回读后写 snapshotHash 完成标记；publication kind 排除旧清理器。
-- [ ] 执行候选单测及显式隔离 Milvus 验证，审查后提交。
+- [x] 测试准备不触碰源/alias、缺行/坏向量/错模型/超预算、删除最后文档、空重建、精确回读与完成标记。
+- [x] 复用已有 INDEX 解析嵌入和 REBUILD 原文校验；复制已验证 f32 向量，随机 _pub_UUID 新集合，64MiB 上限及既有预算。
+- [x] 完成回读后写 snapshotHash 完成标记；publication kind 排除旧清理器。
+- [x] 执行候选单测及显式隔离 Milvus 验证，审查后提交。
 
 ## 任务三：Python 权威读取与 HTTP 集成
 

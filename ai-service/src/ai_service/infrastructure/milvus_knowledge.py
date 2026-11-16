@@ -177,6 +177,9 @@ class RetrievedChunk:
     score: float
     is_active: bool = True
     current_document_version: int | None = None
+    index_revision: int = 0
+    activation_revision: int = 0
+    document_content_hash: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -1705,8 +1708,18 @@ class MilvusKnowledgeStore:
     ) -> None:
         async with self._write_lock:
             await self._assert_permit(permit)
-            await self._assert_revision_protocol(document_id, bool(activation_revision), permit)
             target = await self._alias_target()
+            if target is not None:
+                # 入口许可检查后仍可能暂停；恢复时具体目标若已成为权威候选，绝不写活动位。
+                description = await self._describe_collection(target)
+                metadata = self._metadata(description)
+                if (target.startswith(self._alias[:210] + "_pub_")
+                        or metadata.get("kind") == "customer-service-knowledge-publication"):
+                    raise MilvusKnowledgeError("KNOWLEDGE_COLLECTION_MISMATCH")
+                await self._validate_collection(
+                    target, self._query_embedding_model, self._described_dimension(description),
+                )
+            await self._assert_revision_protocol(document_id, bool(activation_revision), permit)
             rows = await self._document_rows(target, document_id) if target is not None else []
             if activation_revision:
                 await self._write_activation_tombstone(document_id, activation_revision, permit)

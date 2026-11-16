@@ -1,0 +1,128 @@
+{
+  "candidateRequest": {
+    "context": {
+      "publicationId": "task_100",
+      "baseEpoch": 7,
+      "sourceCollection": "customer_service_knowledge_pub_11111111111111111111111111111111",
+      "documents": [
+        {
+          "documentId": "42",
+          "documentVersion": 3,
+          "indexRevision": 5,
+          "activationRevision": 2,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "fileName": "guide.txt",
+          "fileType": "TXT"
+        }
+      ]
+    },
+    "mutation": {
+      "operation": "INDEX",
+      "documentId": "42",
+      "documentVersion": 3,
+      "fileName": "guide.txt",
+      "fileType": "TXT",
+      "signedUrl": "https://example.test/download",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "etlVersion": "5",
+      "indexRevision": 5,
+      "activationRevision": 2,
+      "lease": {
+        "scope": "document:42",
+        "operationId": "task_100_example",
+        "operation": "INDEX",
+        "fence": 10,
+        "expiresAt": 2000000000,
+        "proof": "synthetic-example-only"
+      }
+    }
+  },
+  "candidateReceipt": {
+    "publicationId": "task_100",
+    "baseEpoch": 7,
+    "operationId": "task_100_example",
+    "fence": 10,
+    "candidateCollection": "customer_service_knowledge_pub_22222222222222222222222222222222",
+    "snapshotHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "embeddingModelVersion": "example-model",
+    "embeddingDimension": 3072,
+    "documents": [
+      {
+        "documentId": "42",
+        "documentVersion": 3,
+        "indexRevision": 5,
+        "activationRevision": 2,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "fileName": "guide.txt",
+        "fileType": "TXT",
+        "chunkCount": 4
+      }
+    ]
+  },
+  "publicationFact": {
+    "code": 0,
+    "data": {
+      "publicationId": "task_100",
+      "epoch": 8,
+      "receipt": {
+        "publicationId": "task_100",
+        "baseEpoch": 7,
+        "operationId": "task_100_example",
+        "fence": 10,
+        "candidateCollection": "customer_service_knowledge_pub_22222222222222222222222222222222",
+        "snapshotHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "embeddingModelVersion": "example-model",
+        "embeddingDimension": 3072,
+        "documents": [
+          {
+            "documentId": "42",
+            "documentVersion": 3,
+            "indexRevision": 5,
+            "activationRevision": 2,
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "fileName": "guide.txt",
+            "fileType": "TXT",
+            "chunkCount": 4
+          }
+        ]
+      }
+    },
+    "message": "ok"
+  },
+  "readSnapshot": {
+    "code": 0,
+    "data": {
+      "enabled": true,
+      "epoch": 8,
+      "publicationId": "task_100",
+      "collectionName": "customer_service_knowledge_pub_22222222222222222222222222222222",
+      "snapshotHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "embeddingModelVersion": "example-model",
+      "embeddingDimension": 3072,
+      "documents": [
+        {
+          "documentId": "42",
+          "documentVersion": 3,
+          "indexRevision": 5,
+          "activationRevision": 2,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "fileName": "guide.txt",
+          "fileType": "TXT"
+        }
+      ]
+    },
+    "message": "ok"
+  },
+  "reconcileRequest": {
+    "collectionAlias": "customer_service_knowledge",
+    "collectionName": "customer_service_knowledge_pub_22222222222222222222222222222222",
+    "publicationId": "task_100",
+    "epoch": 8
+  },
+  "reconcileResponse": {
+    "publicationId": "task_100",
+    "epoch": 8,
+    "collectionName": "customer_service_knowledge_pub_22222222222222222222222222222222",
+    "reconciled": true
+  }
+}
