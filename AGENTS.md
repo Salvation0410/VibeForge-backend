@@ -138,6 +138,7 @@ Python AI 服务：
 - 管理概览：`AdminDashboardController`。
 - 生成任务：`GenerationTaskService`、`GenerationTaskMapper`、`GenerationTaskVO`；通过 AppController 查询。
 - 客服与知识管理：`CustomerServiceController`、`CustomerServiceKnowledgeAdminController`、`CustomerServiceKnowledgeEtlWorker`；Python 负责 ETL、Milvus 检索、重排和引用校验。
+- 客服权威发布：`KnowledgePublicationService`、`KnowledgePublicationBootstrapService`、`KnowledgePublicationAliasWorker`；Python 使用 `KnowledgePublicationPreparer` / `PublicationStore` 构建私有候选，`AuthoritativeKnowledgeStore` 维护请求级读快照。
 - 部署静态资源：`StaticResourceController`。
 
 应用与代码生成链路：
@@ -301,6 +302,10 @@ Spring 对外接口使用统一响应：
 已有库升级生成链路时，依次执行 `alter_generation_task.sql`、`alter_generation_fencing.sql`、`alter_generation_arbitration.sql`、`alter_generation_execution_heartbeat.sql`；新建库的 `init_database.sql` 已包含这些结构。Spring 不自动迁移，缺少结构时在模型调用前失败关闭。升级前排空旧实例执行，统一切换支持数据库指针的版本；不能直接混跑旧协议实例或直接回退旧代码。具体回滚与数据核对见 `doc/generation-task-ledger.md`。
 
 做数据库修改时检查实体、表字段、Mapper、Service、VO 聚合、默认值、索引、逻辑删除、审核状态和时间字段。Python AI 服务不得直接连接业务 MySQL。
+
+客服 B0b 使用 `customer_service_knowledge_publication_state`、不可变 publication 与 alias outbox，现有知识库须先完成 v2，再停写排空、备份并执行 `alter_customer_service_knowledge_publication.sql`，随后维护 bootstrap。两端 publication 开关默认关闭；持久启用后不得关闭配置回到旧 alias 权威，数据库/API 不可用失败关闭。管理员变更与发布共用 epoch 锁，发布原子核对 task owner/claim、锁定 lease 当前行和目标文档身份；候选不改源，alias 仅镜像且无 CAS，周期对账修复迟到覆盖。
+
+正式 RAG 在模型前后复核请求快照，变化丢弃回答及引用且不自动重试模型，最后复核后仍有撤销竞态。普通读取不下载全库向量，完整向量回读用于构建/源复制/显式验收；publication 和失败候选尚无自动 GC。实际 f32 JSON 上限检查可能发生在 INDEX Embedding 之后，不宣称失败均免费。迁移、恢复和兼容边界见 `doc/customer-service-knowledge-publication-migration.md`，本轮真实部署状态只看逐轮交接，不将设计或隔离测试冒称在线验收。
 
 ## 测试策略
 

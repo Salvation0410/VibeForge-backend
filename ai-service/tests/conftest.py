@@ -197,6 +197,7 @@ def settings() -> Settings:
         preparation_diagnostics_enabled=False,
         # 运行器或开发环境可能加载本地客服开关；离线夹具显式隔离，专项测试自行开启。
         customer_service_rag_enabled=False,
+        rag_publication_enabled=False,
         rag_embedding_dimension=2,
     )
 
@@ -216,6 +217,27 @@ def disable_implicit_tracing(monkeypatch):
 def app_factory(settings: Settings):
     def factory(*, model=None, gateway=None, checkpoint=None, **kwargs):
         kwargs.setdefault("reranker", DisabledReranker())
+        # 明确注入控制面；既有离线测试不连接 Spring，也不关闭生产入口守卫。
+        if 'knowledge_publication_client' not in kwargs and 'publication_transport' not in kwargs:
+            from ai_service.api.knowledge_publication_schemas import ReadSnapshot
+            from ai_service.infrastructure.spring_knowledge_publication import SpringKnowledgePublicationClient
+            class FakePublicationClient:
+                async def snapshot(self):
+                    return ReadSnapshot(enabled=False, epoch=0, publication_id=None,
+                        collection_name=None, snapshot_hash=None, embedding_model_version=None,
+                        embedding_dimension=0, documents=[])
+                require_legacy = SpringKnowledgePublicationClient.require_legacy
+                async def close(self):
+                    pass
+            kwargs['knowledge_publication_client'] = FakePublicationClient()
+        injected_answer = kwargs.get('customer_service_rag_service')
+        if injected_answer is not None and callable(getattr(injected_answer, 'answer', None)):
+            from ai_service.orchestration.customer_service_rag import CustomerServiceRagService
+            from ai_service.infrastructure.authoritative_knowledge import LegacyAnswerServiceGuard
+            if not isinstance(injected_answer, (CustomerServiceRagService, LegacyAnswerServiceGuard)):
+                # 旧 HTTP fake 明确选择受持久模式保护的兼容适配器，生产不自动包装未知实现。
+                kwargs['customer_service_rag_service'] = LegacyAnswerServiceGuard(
+                    injected_answer, settings, kwargs['knowledge_publication_client'])
         return create_app(
             settings=settings,
             model=model or FakeModel(),

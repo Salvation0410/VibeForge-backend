@@ -635,7 +635,21 @@ uv run python -m ai_service.orchestration.rag_snapshot_experiment --analyze ../t
 
 重建顶层 `etlVersion` 只表示全库 buildRevision，各文档保留自己的 serving 索引/激活身份。v2 重建下载、校验并解析原文后，在同一变更许可内核对旧物理集合的完整清单、正文、定位、哈希、模型与维度，复用已验收的原始向量，不再次调用 Embedding；写入前仍逐值复核同一快照。变化时返回 `KNOWLEDGE_VERSION_CONFLICT`，缺旧 v2 清单或块返回 `KNOWLEDGE_REBUILD_REVISION_UNVERIFIABLE`，不降级重算，应先创建新代际 INDEX。Legacy 重建仍调用 Embedding。已有 alias 时空重建返回 `KNOWLEDGE_EMPTY_REBUILD_BLOCKED`。检索还核对 query 配置的模型签名与集合元数据，同维不同模型也拒绝；模型别名不能证明供应商权重未变化。
 
-Spring 保存不可变原文 registry 与 serving 三元组，替换失败后重建可读取旧成功原文。旧库必须先排空任务并执行增量 SQL，再同步部署两端、逐文档新版重索引，最后重建验收；不能混跑旧 worker，不能删除墓碑或直接切旧 alias 回滚。详见[迁移步骤](../doc/customer-service-knowledge-v2-migration.md)。Docker恢复后已执行本机真实备份/SQL迁移及11篇新版INDEX，确认72活动块；首次整库重建冲突后保留原alias，用户确认原向量复用后已部署并成功完成整库重建，72块字段和向量逐值一致、Spring serving身份匹配。B0b 的 Spring 权威发布指针、稳定发布账本和 alias outbox 对账尚未实现，当前租约检查不能证明跨系统原子发布，也不保证在途撤销即时生效。
+Spring 保存不可变原文 registry 与 serving 三元组，替换失败后重建可读取旧成功原文。旧库必须先排空任务并执行增量 SQL，再同步部署两端、逐文档新版重索引，最后重建验收；不能混跑旧 worker，不能删除墓碑或直接切旧 alias 回滚。详见[迁移步骤](../doc/customer-service-knowledge-v2-migration.md)。Docker恢复后已执行本机真实备份/SQL迁移及11篇新版INDEX，确认72活动块；首次整库重建冲突后保留原alias，用户确认原向量复用后已部署并成功完成整库重建，72块字段和向量逐值一致、Spring serving身份匹配。B0b 已实现 Spring 权威发布指针、稳定发布账本、alias outbox 与周期对账，以及 Python 私有候选和权威读取；部署迁移需单独完成，见[权威发布迁移](../doc/customer-service-knowledge-publication-migration.md)。这些机制不构成跨系统事务，也不保证在途撤销即时生效。
+
+### B0b 权威发布与读取
+
+`AI_SERVICE_RAG_PUBLICATION_ENABLED` 默认 `false`，候选序列化预算 `AI_SERVICE_RAG_PUBLICATION_MAX_BYTES` 默认 64 MiB；它不提高原文、块数或向量元素预算。候选接口 `/internal/v1/customer-service/knowledge:prepare-publication` 返回原始严格收据，不切 alias、不删除源集合。候选准备复用 ETL 信号量；首个 bootstrap 在尚无 head 的控制模式下仍可准备，最终维护授权、registry 与提交由 Spring 核对，Python 不访问业务 MySQL。
+
+所有生产 RAG 读取及旧 ETL/DELETE/REBUILD 入口每请求向 Spring 核对持久模式，本地开关关闭但 Spring 已启用时拒绝旧协议；缺 schema、接口故障或已启用却缺 head 均失败关闭。维护期尚未 bootstrap 的合法控制快照为 `enabled:false`、当前 epoch 和空 head；本地 publication 开启时该状态允许候选准备，但不能回答知识问题。客服健康检查仅观察控制面、候选元数据和本地依赖，不调用回答或 Embedding 供应商；代码生成健康独立。
+
+publication 读取使用权威具体 collection 和当前身份白名单，检查模型、维度、完成标记、快照 hash 与命中文档身份；不通过 alias 回退。普通检索只取有界元数据和命中标量，不按题下载整库向量；完整向量回读用于准备/验收，不保证检测运维绕过协议后的任意全库篡改。空白名单仍验证合法 head，跳过 query Embedding 和回答模型。请求内独立保存 epoch/head/白名单，模型调用前和返回后复核；变更或数据库故障丢弃答案及来源，不自动重试付费调用。最终复核后仍存在撤销竞态边界。
+
+`/internal/v1/customer-service/knowledge:reconcile-alias` 在写前后核对权威 head，响应固定为 publicationId、epoch、collectionName、reconciled。alias 仅为镜像，失败或迟到不补偿恢复旧镜像、不撤销发布；周期对账在写入静止后收敛。内部 Spring GET 客户端使用现有 Bearer、禁止重定向和环境代理，并对声明长度及解压后 JSON 执行默认 64 KiB 上限；坏类型、未知字段或事实 ID 不匹配均拒绝，不回显响应正文、proof 或签名 URL。
+
+所有 publication 集合保留，旧 GC 仅处理旧 kind，不新增无引用证明的 publication 清理。迁移须排空旧实例、备份、执行 schema 并统一部署，显式维护 bootstrap 后关闭维护入口；禁止混跑旧二进制、切旧 alias 或仅关闭开关回滚。具体操作与未执行部署项以[迁移文档](../doc/customer-service-knowledge-publication-migration.md)和[逐轮交接](../doc/customer-service-rag-rounds-handoff.md)为准。
+
+HTTP 回答入口只接受绑定本应用控制客户端的官方权威 RAG；注入的官方裸 store 服务直接拒绝。旧 Fake/兼容服务必须显式注入 `LegacyAnswerServiceGuard`，生产不会自动包装未知实现；该守卫只保证整个服务调用前后模式检查，不能证明任意自定义内部模型调用前已复核，并且禁止包装官方 RAG 或用于 publication 模式。
 
 ### 有界证据与拒答候选实验
 

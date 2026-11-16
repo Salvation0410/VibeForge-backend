@@ -510,5 +510,5 @@ def test_enabled_app_assembles_answer_service_from_shared_dependencies(
     )) as client:
         assembled = client.app.state.customer_service_rag_service
         assert assembled._embeddings is embeddings
-        assert assembled._store is store
+        assert assembled._store.legacy is store
         assert assembled._reranker is reranker

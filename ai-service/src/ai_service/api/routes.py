@@ -29,6 +29,7 @@ from ai_service.api.schemas import (
     RouteResponse,
 )
 from ai_service.api.generation_response import GenerationStreamingResponse
+from ai_service.api.knowledge_publication_schemas import CandidateRequest, CandidateReceipt, ReconcileRequest, ReconcileResponse
 from ai_service.infrastructure.checkpoint import CheckpointStore
 from ai_service.models.base import GenerationModel
 from ai_service.models.input_review import InputReviewError
@@ -211,6 +212,38 @@ def register_routes(
 
     app.add_exception_handler(RequestValidationError, validation_error_handler)
 
+    async def require_legacy(request):
+        client = request.app.state.knowledge_publication_client
+        await client.require_legacy(publication_enabled=request.app.state.settings.rag_publication_enabled)
+
+    @app.post('/internal/v1/customer-service/knowledge:prepare-publication',
+              response_model=CandidateReceipt, response_model_by_alias=True,
+              dependencies=[Depends(require_internal_auth)])
+    async def prepare_publication(body: CandidateRequest, request: Request):
+        preparer = request.app.state.knowledge_publication_preparer
+        if not customer_service_rag_enabled or not request.app.state.settings.rag_publication_enabled or preparer is None:
+            return _stable_error('CUSTOMER_SERVICE_RAG_DISABLED')
+        from ai_service.orchestration.knowledge_publication_boundary import validate_candidate_request
+        try:
+            await validate_candidate_request(body, request.app.state.knowledge_publication_client, request.app.state.settings)
+            return await preparer.prepare(body)
+        except Exception as error:
+            return _stable_exception(error, 'KNOWLEDGE_PUBLICATION_FAILED')
+
+    @app.post('/internal/v1/customer-service/knowledge:reconcile-alias',
+              response_model=ReconcileResponse, response_model_by_alias=True,
+              dependencies=[Depends(require_internal_auth)])
+    async def publication_alias(body: ReconcileRequest, request: Request):
+        preparer = request.app.state.knowledge_publication_preparer
+        if not customer_service_rag_enabled or not request.app.state.settings.rag_publication_enabled or preparer is None:
+            return _stable_error('CUSTOMER_SERVICE_RAG_DISABLED')
+        from ai_service.orchestration.knowledge_publication_boundary import reconcile_alias
+        try:
+            return await reconcile_alias(body, request.app.state.knowledge_publication_client,
+                                         preparer.publications, request.app.state.settings)
+        except Exception as error:
+            return _stable_exception(error, 'KNOWLEDGE_PUBLICATION_FAILED')
+
     @app.get("/internal/v1/health/live")
     @app.get("/health/live")
     async def live() -> dict[str, str]:
@@ -240,6 +273,7 @@ def register_routes(
         if not customer_service_rag_enabled or service is None:
             return _stable_error("CUSTOMER_SERVICE_RAG_DISABLED")
         try:
+            await require_legacy(request)
             logger.info("Knowledge INDEX started: documentId=%s version=%s", body.document_id, body.document_version)
             result = await service.index(
                 document_id=body.document_id,
@@ -281,6 +315,7 @@ def register_routes(
         if not customer_service_rag_enabled or service is None:
             return _stable_error("CUSTOMER_SERVICE_RAG_DISABLED")
         try:
+            await require_legacy(request)
             await service.delete(
                 document_id=body.document_id,
                 document_version=body.document_version,
@@ -313,6 +348,7 @@ def register_routes(
         if len(body.documents) > settings.rag_rebuild_max_documents:
             return _stable_error("KNOWLEDGE_REBUILD_TOO_MANY_DOCUMENTS")
         try:
+            await require_legacy(request)
             result = await service.rebuild(
                 documents=body.documents,
                 etl_version=body.etl_version,
@@ -359,6 +395,23 @@ def register_routes(
         if not customer_service_rag_enabled or service is None:
             return _stable_error("CUSTOMER_SERVICE_RAG_DISABLED")
         try:
+            # HTTP 注入不能绕过官方服务的模型前复核。未知实现必须显式采用旧协议守卫。
+            from ai_service.infrastructure.authoritative_knowledge import AuthoritativeKnowledgeStore, LegacyAnswerServiceGuard
+            from ai_service.orchestration.customer_service_rag import CustomerServiceRagService
+            from ai_service.infrastructure.milvus_knowledge import MilvusKnowledgeError
+            mode_client = request.app.state.knowledge_publication_client
+            settings = request.app.state.settings
+            store = getattr(service, '_store', None)
+            official = (isinstance(service, CustomerServiceRagService)
+                        and isinstance(store, AuthoritativeKnowledgeStore)
+                        and store.client is mode_client and store.settings is settings)
+            legacy = (isinstance(service, LegacyAnswerServiceGuard)
+                      and service.client is mode_client and service.settings is settings)
+            if not official and not legacy:
+                raise MilvusKnowledgeError('KNOWLEDGE_PUBLICATION_UNAVAILABLE')
+            current = await mode_client.snapshot()
+            if (current.enabled and not settings.rag_publication_enabled) or (legacy and settings.rag_publication_enabled):
+                raise MilvusKnowledgeError('KNOWLEDGE_PUBLICATION_REQUIRED')
             result = await _run_customer_service_answer(
                 request, service, body.question,
                 timeout_seconds=request.app.state.settings.rag_answer_timeout_seconds,

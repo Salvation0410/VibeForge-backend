@@ -85,6 +85,9 @@ def create_app(
     reranker_model_factory: Any | None = None,
     customer_service_rag_service: Any | None = None,
     customer_service_health_provider: Any | None = None,
+    knowledge_publication_client: Any | None = None,
+    publication_transport: Any | None = None,
+    knowledge_publication_preparer: Any | None = None,
 ) -> FastAPI:
     """创建并组装 AI 服务。
 
@@ -151,6 +154,21 @@ def create_app(
                         CustomerServiceRagService,
                     )
                     from ai_service.orchestration.document_etl import KnowledgeEtlService
+                    from ai_service.infrastructure.spring_knowledge_publication import SpringKnowledgePublicationClient
+                    from ai_service.infrastructure.authoritative_knowledge import AuthoritativeKnowledgeStore
+                    from ai_service.infrastructure.knowledge_publication_store import PublicationStore
+                    from ai_service.orchestration.knowledge_publication import KnowledgePublicationPreparer
+
+                    publication_client = knowledge_publication_client or SpringKnowledgePublicationClient(
+                        gateway_base_url=str(config.spring_gateway_base_url),
+                        bearer_token=config.spring_gateway_bearer_token, transport=publication_transport)
+                    app.state.knowledge_publication_client = publication_client
+                    resources.append(publication_client)
+                    # 启动只观察模式，不因尚未 bootstrap 或暂时离线销毁候选准备依赖。
+                    try:
+                        app.state.knowledge_publication_startup_snapshot = await publication_client.snapshot()
+                    except Exception:
+                        app.state.knowledge_publication_startup_snapshot = None
 
                     if app.state.reranker is None:
                         app.state.reranker = DisabledReranker()
@@ -207,9 +225,18 @@ def create_app(
                         store,
                         semaphore=asyncio.Semaphore(config.rag_etl_max_concurrency),
                     )
+                    if config.rag_publication_enabled:
+                        app.state.knowledge_publication_preparer = knowledge_publication_preparer or KnowledgePublicationPreparer(
+                            config, downloader, embeddings, store,
+                            semaphore=app.state.knowledge_etl_service._semaphore)
+                    authoritative_store = AuthoritativeKnowledgeStore(
+                        config, store,
+                        app.state.knowledge_publication_preparer.publications
+                        if app.state.knowledge_publication_preparer is not None else PublicationStore(config, store),
+                        publication_client)
                     if app.state.customer_service_rag_service is None:
                         app.state.customer_service_rag_service = CustomerServiceRagService(
-                            config, embeddings, store, app.state.reranker, generation_model,
+                            config, embeddings, authoritative_store, app.state.reranker, generation_model,
                         )
                 elif (
                     config.customer_service_rag_enabled
@@ -218,13 +245,32 @@ def create_app(
                     and knowledge_store is not None
                 ):
                     app.state.customer_service_rag_service = CustomerServiceRagService(
-                        config, embedding_provider, knowledge_store,
+                        config, embedding_provider, AuthoritativeKnowledgeStore(
+                            config, knowledge_store,
+                            app.state.knowledge_publication_preparer.publications
+                            if app.state.knowledge_publication_preparer is not None else PublicationStore(config, knowledge_store),
+                            publication_client),
                         app.state.reranker, generation_model,
                     )
                 if (
                     config.customer_service_rag_enabled
                     and app.state.customer_service_health_provider is None
                 ):
+                    async def etl_and_publication_ready():
+                        if app.state.knowledge_etl_service is None:
+                            return False
+                        try:
+                            snapshot = await app.state.knowledge_publication_client.snapshot()
+                            if config.rag_publication_enabled:
+                                preparer = app.state.knowledge_publication_preparer
+                                if preparer is None:
+                                    return False
+                                await preparer.publications.validate_publication(snapshot)
+                            elif snapshot.enabled:
+                                return False
+                            return True
+                        except Exception:
+                            return False
                     app.state.customer_service_health_provider = (
                         CustomerServiceDependencyHealth({
                             "answerModel": CustomerServiceDependencyReference(
@@ -236,7 +282,7 @@ def create_app(
                             "embedding": CustomerServiceDependencyReference(
                                 lambda: app.state.customer_service_embedding_provider
                             ),
-                            "etl": lambda: app.state.knowledge_etl_service is not None,
+                            "etl": etl_and_publication_ready,
                             "leaseValidator": CustomerServiceDependencyReference(
                                 lambda: app.state.knowledge_mutation_coordinator
                             ),
@@ -262,6 +308,7 @@ def create_app(
                         pass
                 resources.clear()
                 app.state.knowledge_etl_service = None
+                app.state.knowledge_publication_preparer = None
                 app.state.knowledge_mutation_coordinator = None
                 app.state.customer_service_embedding_provider = None
                 app.state.customer_service_knowledge_store = None
@@ -333,6 +380,8 @@ def create_app(
     app.state.reranker = initial_reranker
     app.state.customer_service_rag_service = initial_rag_service
     app.state.customer_service_health_provider = customer_service_health_provider
+    app.state.knowledge_publication_client = knowledge_publication_client
+    app.state.knowledge_publication_preparer = knowledge_publication_preparer
 
     register_routes(
         app,

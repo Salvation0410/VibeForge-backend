@@ -91,7 +91,19 @@ class CustomerServiceRagService:
         self, question: str, *, trace: CustomerServiceRagTrace | None = None,
     ) -> CustomerServiceAnswer:
         try:
-            return await self._answer(question, trace=trace)
+            scope = getattr(self._store, "read_scope", None)
+            if scope is None:
+                return await self._answer(question, trace=trace)
+            try:
+                async with scope():
+                    if self._store.empty:
+                        await self._store.assert_current()
+                        return _no_answer(degraded=False)
+                    return await self._answer(question, trace=trace)
+            except Exception:
+                if trace:
+                    trace.finish('service_error', 'KNOWLEDGE_PUBLICATION_UNAVAILABLE')
+                return CustomerServiceAnswer(False, SYSTEM_FALLBACK_TEXT, (), False)
         except asyncio.CancelledError:
             if trace:
                 trace.finish('cancelled', 'CANCELLED')
@@ -229,12 +241,17 @@ class CustomerServiceRagService:
             return refused('BYTE_CONTEXT_EMPTY', degraded)
         reason = 'MODEL_CALL_FAILED'
         try:
+            assert_current = getattr(self._store, 'assert_current', None)
+            if assert_current is not None:
+                await assert_current()
             if trace:
                 trace.model_called()
             with stage('model'):
                 model_answer = await self._model.answer_customer_service(
                     normalized_question, contexts,
                 )
+            if assert_current is not None:
+                await assert_current()
             if trace:
                 trace.model_answered(model_answer.answered)
             citations = model_answer.cited_chunk_ids
