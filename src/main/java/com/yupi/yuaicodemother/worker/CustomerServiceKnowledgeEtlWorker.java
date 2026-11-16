@@ -105,19 +105,20 @@ public class CustomerServiceKnowledgeEtlWorker {
                 default -> throw new CustomerServiceAiClient.CallException("KNOWLEDGE_TASK_OPERATION_INVALID", false);
             }
             if (!"INDEX".equals(task.getOperation()))
-                outboxMapper.finish(task.getId(), owner, "SUCCEEDED", null);
+                completeNonIndexTask(task);
             log.info("Knowledge task succeeded: taskId={}, documentId={}, operation={}",
                     task.getId(), task.getDocumentId(), task.getOperation());
         } catch (LostClaimException ignored) {
             log.info("Knowledge task claim lost: taskId={}", task.getId());
-            // 当前 worker 准备请求期间，任务已被其他 worker 重新认领。
+            // 准备或回执落账期间失去所有权，旧执行不得重写替代所有者的任务状态。
         } catch (StaleTaskException error) {
             log.info("Knowledge task skipped as stale: taskId={}", task.getId());
             finishSafely(task, "SKIPPED", "KNOWLEDGE_TASK_STALE");
         } catch (RebuildSnapshotChangedException error) {
             fail(task, "KNOWLEDGE_REBUILD_SNAPSHOT_CHANGED", true);
         } catch (TaskFinalizationException error) {
-            logFinalizationFailure(task, "KNOWLEDGE_INDEX_FINALIZATION_FAILED", error.getCause());
+            logFinalizationFailure(task, "INDEX".equals(task.getOperation())
+                    ? "KNOWLEDGE_INDEX_FINALIZATION_FAILED" : "KNOWLEDGE_TASK_FINALIZATION_FAILED", error.getCause());
         } catch (CustomerServiceAiClient.CallException error) {
             fail(task, error.code(), error.transientFailure());
         } catch (IllegalStateException error) {
@@ -167,6 +168,17 @@ public class CustomerServiceKnowledgeEtlWorker {
     private void refreshClaim(CustomerServiceKnowledgeEtlOutbox task) {
         LocalDateTime deadline = now().plusSeconds(Math.max(1, properties.getClaimTimeoutSeconds()));
         if (outboxMapper.refreshClaim(task.getId(), owner, deadline) != 1) throw new LostClaimException();
+    }
+
+    private void completeNonIndexTask(CustomerServiceKnowledgeEtlOutbox task) {
+        int changed;
+        try {
+            changed = outboxMapper.finish(task.getId(), owner, "SUCCEEDED", null);
+        } catch (RuntimeException error) {
+            // RPC 已成功，数据库写入或确认失败不能再当成执行失败写入重试状态。
+            throw new TaskFinalizationException(error);
+        }
+        if (changed != 1) throw new LostClaimException();
     }
 
     private void executeIndex(CustomerServiceKnowledgeEtlOutbox task, PreparedIndex prepared,
@@ -274,7 +286,7 @@ public class CustomerServiceKnowledgeEtlWorker {
 
     private void logFinalizationFailure(CustomerServiceKnowledgeEtlOutbox task, String code,
                                         Throwable persistenceError) {
-        log.warn("Knowledge worker failure state was not persisted; task remains reclaimable: taskId={}, operation={}, errorCode={}, persistenceError={}",
+        log.warn("Knowledge worker finalization outcome unknown; reconcile persisted state before retry: taskId={}, operation={}, errorCode={}, persistenceError={}",
                 task.getId(), task.getOperation(), code, persistenceError.getClass().getSimpleName());
     }
 

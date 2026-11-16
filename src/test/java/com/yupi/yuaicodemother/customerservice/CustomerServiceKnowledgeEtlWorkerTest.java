@@ -10,8 +10,14 @@ import com.yupi.yuaicodemother.model.entity.CustomerServiceKnowledgeEtlOutbox;
 import com.yupi.yuaicodemother.service.CustomerServiceKnowledgeTaskFinalizer;
 import com.yupi.yuaicodemother.service.KnowledgeMutationCoordinator;
 import com.yupi.yuaicodemother.worker.CustomerServiceKnowledgeEtlWorker;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 import java.net.URL;
@@ -23,6 +29,8 @@ import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -42,6 +50,7 @@ class CustomerServiceKnowledgeEtlWorkerTest {
         props = new CustomerServiceProperties();
         props.setRetryMax(5);
         when(outbox.refreshClaim(anyLong(), anyString(), any())).thenReturn(1);
+        when(outbox.finish(anyLong(), anyString(), anyString(), any())).thenReturn(1);
         worker = new CustomerServiceKnowledgeEtlWorker(documents, outbox, oss, ai, coordinator, finalizer, props,
                 Clock.fixed(Instant.parse("2030-01-01T00:00:00Z"), ZoneOffset.UTC));
     }
@@ -133,6 +142,103 @@ class CustomerServiceKnowledgeEtlWorkerTest {
         verify(ai).delete(argThat(request -> request.documentVersion() == 1 && request.activationRevision() == 2 && request.lease() == lease));
         verify(outbox).finish(eq(1L), anyString(), eq("SUCCEEDED"), isNull());
         verify(coordinator).revoke(lease);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"DELETE", "REBUILD"})
+    void successfulRpcWithLostFinalizationClaimDoesNotReportSuccessOrRewriteTask(String operation) {
+        var task = task(operation);
+        task.setStatus("PROCESSING");
+        task.setProcessingOwner("replacement-owner");
+        var lease = prepareSuccessfulNonIndexRpc(operation);
+        when(outbox.finish(eq(1L), anyString(), eq("SUCCEEDED"), isNull())).thenReturn(0);
+
+        var logs = executeCapturingLogs(task);
+
+        assertTrue(logs.contains("Knowledge task claim lost: taskId=1"));
+        assertFalse(logs.contains("Knowledge task succeeded:"));
+        assertNoFailureRewrite(task, lease);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"DELETE", "REBUILD"})
+    void successfulRpcWithUncertainFinalizationDoesNotRetryOrReportSuccess(String operation) {
+        var task = task(operation);
+        task.setStatus("PROCESSING");
+        task.setProcessingOwner("replacement-owner");
+        var lease = prepareSuccessfulNonIndexRpc(operation);
+        when(outbox.finish(eq(1L), anyString(), eq("SUCCEEDED"), isNull()))
+                .thenThrow(new IllegalStateException("database acknowledgement unavailable"));
+
+        var logs = executeCapturingLogs(task);
+
+        assertTrue(logs.contains("Knowledge worker finalization outcome unknown; reconcile persisted state before retry:"));
+        assertTrue(logs.contains("errorCode=KNOWLEDGE_TASK_FINALIZATION_FAILED"));
+        assertFalse(logs.contains("Knowledge task succeeded:"));
+        assertFalse(logs.contains("Knowledge task failed:"));
+        assertNoFailureRewrite(task, lease);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"DELETE", "REBUILD"})
+    void successfulRpcReportsSuccessOnlyAfterOwnedFinalization(String operation) {
+        var task = task(operation);
+        var lease = prepareSuccessfulNonIndexRpc(operation);
+        when(outbox.finish(eq(1L), anyString(), eq("SUCCEEDED"), isNull())).thenReturn(1);
+
+        var logs = executeCapturingLogs(task);
+
+        assertTrue(logs.contains("Knowledge task succeeded: taskId=1, documentId=1, operation=" + operation));
+        assertFalse(logs.contains("Knowledge task claim lost:"));
+        assertFalse(logs.contains("finalization outcome unknown;"));
+        var order = inOrder(ai, outbox, coordinator);
+        if ("DELETE".equals(operation)) order.verify(ai).delete(any());
+        else order.verify(ai).rebuild(any());
+        order.verify(outbox).finish(eq(1L), anyString(), eq("SUCCEEDED"), isNull());
+        order.verify(coordinator).revoke(same(lease));
+        verify(outbox, never()).retry(anyLong(), anyString(), anyString(), anyInt(), any(), anyString());
+        verifyNoInteractions(finalizer);
+    }
+
+    private KnowledgeMutationCoordinator.Lease prepareSuccessfulNonIndexRpc(String operation) {
+        var lease = lease(operation);
+        when(coordinator.acquire(any(), any(), eq(operation), any())).thenReturn(lease);
+        if ("DELETE".equals(operation)) {
+            var disabled = document();
+            disabled.setStatus("DISABLED");
+            when(documents.findIncludingDeleted(1)).thenReturn(disabled);
+        } else {
+            when(documents.listRebuildableLimited(1001)).thenReturn(List.of());
+            when(ai.rebuild(any())).thenReturn(new CustomerServiceAiClient.RebuildResult(0, false));
+        }
+        return lease;
+    }
+
+    private void assertNoFailureRewrite(CustomerServiceKnowledgeEtlOutbox task,
+                                        KnowledgeMutationCoordinator.Lease lease) {
+        if ("DELETE".equals(task.getOperation())) verify(ai).delete(any());
+        else verify(ai).rebuild(any());
+        verify(outbox).finish(eq(1L), anyString(), eq("SUCCEEDED"), isNull());
+        verify(outbox, never()).retry(anyLong(), anyString(), anyString(), anyInt(), any(), anyString());
+        verifyNoInteractions(finalizer);
+        verify(coordinator).revoke(same(lease));
+        // 迟到回执不得修改替代所有者或本地任务快照；真实条件写另由数据库集成测试覆盖。
+        assertEquals("PROCESSING", task.getStatus());
+        assertEquals("replacement-owner", task.getProcessingOwner());
+    }
+
+    private String executeCapturingLogs(CustomerServiceKnowledgeEtlOutbox task) {
+        Logger logger = (Logger) LoggerFactory.getLogger(CustomerServiceKnowledgeEtlWorker.class);
+        var appender = new ListAppender<ILoggingEvent>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> worker.execute(task));
+            return String.join("\n", appender.list.stream().map(ILoggingEvent::getFormattedMessage).toList());
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
     }
 
     @Test
