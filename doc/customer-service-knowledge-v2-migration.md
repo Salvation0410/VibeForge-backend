@@ -25,4 +25,10 @@ B0a 只提供版本身份和不可变原文基础。Spring 权威发布指针与
 
 Python `tests/test_knowledge_revision_milvus_integration.py` 需 `AI_SERVICE_MILVUS_INTEGRATION=true`，使用固定本地 Milvus 地址、随机 alias、合成向量和进程内协调器，精确清理本例资源；不会调用真实 Embedding，也不代表 Spring 多实例 fence 验收。
 
+### 任务回执和所有权边界
+
+DELETE/REBUILD 的Python调用成功后，worker必须由当前owner条件更新任务终态且命中1行才记录成功。命中0行视为失去claim，旧执行不再重写失败或重试；Mapper异常只记录落账结果未知，不能断言数据库没有提交或Milvus没有执行。没有自动对账能力，仍需核对持久任务和索引事实；原PROCESSING任务到期可能被认领，不保证副作用严格一次。
+
+`KnowledgeOwnershipMysqlIntegrationTest` 需 `AI_KNOWLEDGE_MYSQL_OWNERSHIP_INTEGRATION=true`，在随机隔离schema使用真实生产Mapper及Spring事务代理，验证双物理连接认领、过期接管、旧owner成功/失败的事务回滚、版本推进与Coordinator互斥。它模拟持久PROCESSING的丢回执状态，不制造真实网络丢包，也不代表完整双Spring/Python/Milvus实例验收。逐轮结果及未完成的B0b见 `customer-service-rag-rounds-handoff.md`。
+
 2026-11-16 本机已执行备份、SQL迁移和11篇新INDEX，确认72活动块。首次采用重算向量的整库重建失败，alias未切换；用户随后确认采用原向量复用。实际部署及重建结果详见 `customer-service-rag-evaluation-handoff-20261116.md` 真实资源续验。

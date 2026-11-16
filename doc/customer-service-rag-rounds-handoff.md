@@ -49,7 +49,7 @@ Spring以documentVersion记录不可变内容，以每文档etlVersion记录稳�
 
 先补B0b前置的真实多连接接管/迟到回执/事务回滚验证，并修复有证据的任务落账问题。它能明确“存储副作用已发生、任务是否有权成功”的差别，为权威publication协议提供可复现的故障模型。然后实施B0b完整协议，最后再推进证据组合/标题向量和人工校准；不把所有内容捆绑成一次生产变更。
 
-## 第二轮：并发所有权与回执落账（本轮开始）
+## 第二轮：并发所有权与回执落账（已完成并部署）
 
 ### 问题与目标
 
@@ -69,9 +69,53 @@ Spring以documentVersion记录不可变内容，以每文档etlVersion记录稳�
 - 普通离线测试与真实MySQL测试分别记录；两个事务客户端不冒充两套完整Spring/Python/Milvus实例。
 - 验证完保留当前在线索引；不以本轮通过声称解决检查后暂停/alias双写/在途禁用读可见性。
 
-### 本轮结束必须补齐
+### 实际改动及边界处理
 
-记录具体复现、修复文件、测试命令与计数、真实资源影响、提交哈希，以及下一轮B0b协议的触发条件、判断依据、处理流程、失败保留策略、迁移和回滚边界。没有完成的项目保留未完成标记，并给出原因。
+`CustomerServiceKnowledgeEtlWorker.completeNonIndexTask` 专门处理DELETE/REBUILD的完成回执。Python成功后只有outbox.finish命中1行才继续记录成功；命中0行进入LostClaim分支，不再改失败或重试。Mapper异常进入TaskFinalizationException专门分支，固定诊断为`KNOWLEDGE_TASK_FINALIZATION_FAILED`，日志只记录任务身份、操作、固定码和异常类型。INDEX原诊断码保留。
+
+落账异常改用“finalization outcome unknown”：数据库可能未写入，也可能已经提交但确认丢失；不声称一定未提交、一定可重新认领或Milvus未执行。当前没有自动publication对账，持久PROCESSING仍可能按既有超时机制被接管，副作用仍非严格一次。finally继续只按本执行operationId/fence撤销自己的lease，不能撤销替代执行。
+
+### 本轮验证与运行状态
+
+- 红测：新增DELETE/REBUILD各3种回执场景，原实现30项中4项失败（两操作×CAS0/数据库异常）；修复后worker30/30通过。
+- 最终Java命令：显式`AI_KNOWLEDGE_MYSQL_OWNERSHIP_INTEGRATION=true`，执行 `mvn test '-Dtest=CustomerService*Test,InternalCustomerServiceKnowledgeControllerTest,KnowledgeMutationCoordinatorTest,KnowledgeOwnershipMysqlIntegrationTest' -q`，**106 passed、0 failed/error/skipped**，其中99项普通测试、7项真实MySQL。`mvn clean -DskipTests compile -q`通过。
+- 真实7项使用生产Mapper、Finalizer/Coordinator及Spring事务代理，包含不同物理连接同时认领、固定过期边界、旧owner成功/失败落账导致文档与任务整笔回滚、当前owner双写成功、5种禁用/删除/内容/ETL/enable式激活推进保护、4类租约范围竞争及过期/撤销proof。最终7个随机schema均DROP后查询确认不存在。
+- 两位只读审阅分别完成规格/代码质量核对；没有将审阅当作测试执行。普通及真实结果见本机忽略日志`tmp/round2-worker-red.log`、`tmp/round2-final-tests.log`。
+- 业务库只读预检0 PENDING/PROCESSING后，重启本轮已授权管理的Spring使修复生效，运行参数沿前轮，不改模型/索引配置。管理员健康、Python checkpoint及RAG依赖全通过；运行记录`tmp/round2-runtime-verification.json`。
+- 生产collection仍为`customer_service_knowledge_9a3e5b421e0e_staging_446409c019dc`；11 ACTIVE/1 DISABLED、72活动块、11份manifest和Spring serving三元组均匹配。没有触发新INDEX/REBUILD、真实回答或Embedding，没有迁移业务schema。
+- 本轮未改Python代码，未为Java回执修复重复Python全量；1531/20的Python结果仅属于前一轮，不能称本轮重跑通过。完整双Spring/Python/Milvus故障注入、真实网络丢包、数据库提交确认丢失及跨资源原子发布仍未测。
+- 源码/测试提交：`02b88e5`；交接入口首次提交`30dc059`、执行计划`f9b3c30`。本轮生产修复范围仅上述回执分支，不声称整个B0b已完成。
+
+### 下一轮说明
+
+下一轮推荐下节B0b权威发布协议。原因是本轮只确保数据库条件落账和成功日志可信，无法消除“最后检查后暂停、旧执行恢复再写Milvus”窗口。需要将权威指针、稳定publication事实、私有候选、读路径及alias对账一并设计，不能只给现有alias再加一把锁。
+
+## 第三轮建议：B0b 权威发布协议（尚未实现）
+
+### 为什么需要、什么情况下触发
+
+第二轮只保护MySQL终态及成功观测；Python在最后一次租约检查后暂停、旧执行随后恢复并写Milvus/切alias的窗口依然存在。MySQL成功指针、Milvus活动标记及alias可能不一致。下一轮应在发布和读取两侧建立一个权威版本，而不是继续增加检查次数。
+
+### 推荐流程与关键模块
+
+1. Spring维护知识库epoch、稳定publicationId、不可变publication事实和活动指针；任务重试复用publicationId，attempt/租约另计。改变应使旧构建失效的管理员事务同步推进epoch。
+2. Python构建私有不可变候选，写入后验证文档/索引/激活清单、模型/维度、块集合与内容指纹；准备阶段不得改变可服务集合。只重算需要新INDEX的内容，同代重建复用已验证向量。
+3. Python通过带认证的内部API提交候选，不直接访问业务MySQL。Spring在同一事务锁定epoch、核对task owner/claim、fence、禁用及serving快照，登记publication并切权威指针。快照或owner过期则拒绝候选，不激活。
+4. HTTP提交响应丢失时按稳定publicationId查询事实：已提交返回原结果，未确认保持未知；不同指纹不可覆盖同ID，也不能更换ID绕过。
+5. 同事务生成alias对账outbox。alias仅作兼容镜像，查询必须使用Spring权威目标的具体collection；否则迟到alias写仍可影响检索。对账失败不撤销已提交事实，延后按当前权威目标修复。
+6. 读路径定义快照语义、禁用生效点和有界epoch复核。需要明确在途答案是否允许旧快照；最后一次复核后仍可能发生撤销，不能宣传绝对即时撤销。该产品语义须在实际发布设计中明确。
+
+涉及Spring知识管理Service、worker/finalizer、publication/epoch/outbox实体和Mapper、新迁移SQL、内部提交/查询API；Python知识存储与查询、ETL提交适配、schema和契约测试。候选组织方式（整库复制或按文档候选+目录）需要以72块现状及预定规模测量写放大/查询扇出后确定，不先把多路查询成本藏在实现中。
+
+### 收益、代价与仍可能失败的情况
+
+收益是把“已构建”与“已发布”分开，允许重复提交查询、阻断旧owner提交，并使alias失配不再成为读取权威。代价是增加数据库/内部HTTP依赖、候选存储、迁移和对账维护；只加分布式锁改动小，但无法抵御旧进程检查后暂停恢复，因此不推荐作为完整替代。
+
+数据库不可用时读取/提交应明确失败关闭，不能回退到未经权威核对的旧alias。候选丢失/不完整时不推进指针；提交已成功但候选随后丢失需要显式运维恢复，不能自动伪造新事实。失败候选及旧release不自动清理到只剩一个版本；回收需另做权威引用保护。迁移需停写排空、备份、验证旧serving、统一升级读写实例，禁止混跑旧alias权威实例；启用新权威后不能仅回退旧代码或切旧alias。
+
+### 预定验收
+
+双实例及真实MySQL/Milvus隔离数据覆盖：检查后暂停/旧owner恢复、任务接管、禁用/启用与重建交错、同publication重试/指纹冲突、提交前后进程退出、数据库提交响应丢失、alias写失败/迟到覆盖/对账收敛、权威目标缺失和空候选。逐项核对读到的文档/索引/激活身份；未做完整故障注入前不开放生产推广。质量实验另行进行，不用版本测试通过替代答案事实正确率。
 
 ## 以后每轮必须使用的交接格式
 

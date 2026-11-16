@@ -295,4 +295,5 @@ git ls-files src/main/resources/application-local.yml ai-service/.env
 - [生成任务账本、数据库迁移与心跳说明](doc/generation-task-ledger.md)
 - [子图重构与验收边界](doc/ai-service-subgraph-refactor-handoff.md)
 - [产品知识库说明](doc/knowledge/product/README.md)
+- [客服 RAG 逐轮优化交接](doc/customer-service-rag-rounds-handoff.md)
 - [协作规范](AGENTS.md)

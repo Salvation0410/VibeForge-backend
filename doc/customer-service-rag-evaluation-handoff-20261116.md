@@ -147,3 +147,11 @@ Docker引擎初查不可用，已尝试后台启动Docker Desktop，随后docker
 Spring JVM17744持续监听8123，新版Python经 `uv run python -m ai_service.server` 后台启动；本轮运行时用缓存模型离线加载（HF_HUB_OFFLINE/TRANSFORMERS_OFFLINE），不修改模型或检索默认值。一次直接启动出现客服依赖降级，改用缓存模式启动后全部依赖恢复；未据此声称已定位首次启动失败的精确根因。Spring本轮知识开关开启，timeout/claim/lease为180/300/240秒、batch2、retryMax1，均为进程环境覆盖，不改代码默认或私有.env。最终管理员健康coordinator/enabled/python全true，Python checkpoint及知识依赖全true。
 
 后续优先实施B0b权威发布指针和对账，并补多实例迟到owner/在途撤销。当前快照复用仍依赖完整源集合；缺失或解析变化会失败，模型升级需独立候选迁移。质量侧R2及召回候选继续受人工校准/盲测门槛约束，不能把恢复索引当作质量提升已全面验收。
+
+## 下一轮已执行：owner 与回执落账（2026-11-16）
+
+逐轮统一入口改为 `customer-service-rag-rounds-handoff.md`，同时记录本轮和下一轮的问题、原因、方案、触发/判断/处理流程、边界、验证与提交。后续每轮必须追加并向用户用文字说明，不只给出链接。
+
+本轮源码发现DELETE/REBUILD成功RPC后未检查finish条件写返回值：owner已接管时仍记录成功，数据库确认异常则误入普通失败/重试。已由`02b88e5`修复：只有命中1行记录成功，0行视为失去claim，Mapper异常保留落账结果未知且不立即重写失败或重试；自身lease仍按operationId/fence撤销。原实现新增场景红测4失败，修复后worker30通过；最终Java相关106项全部通过（99普通+7真实MySQL），干净编译通过。真实隔离schema覆盖不同物理连接竞争、接管、成功/失败Finalizer事务回滚、禁用/版本保护和双Coordinator互斥；最终7个schema均清理确认。
+
+已重启Spring并复核健康；未调用收费模型、未重建或切换索引、未改业务schema。仍保持11篇/72块、原禁用状态、原alias目标及serving身份。此处“真实多连接/两个Coordinator实例”不是两套完整Spring/Python/Milvus发布系统；仅模拟持久丢回执状态，不声称网络故障或跨系统原子性已验。下一轮完整B0b设计、迁移/回退与验收要求见统一入口第三轮建议。
