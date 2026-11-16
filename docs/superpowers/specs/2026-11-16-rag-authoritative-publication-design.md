@@ -31,9 +31,13 @@
 
 `ReadSnapshot`：`enabled:bool, epoch:int, publicationId:string|null, collectionName:string|null, snapshotHash:string|null, embeddingModelVersion:string|null, embeddingDimension:int, documents:DocumentIdentity[]`。documents是当前serving且未禁用/删除、激活仍匹配的白名单；可能小于物理快照。
 
+尚未bootstrap的控制快照返回`enabled:false`、当前epoch、空head和空名单，即便维护期配置已开启；这仅用于模式观察，配置开启的RAG适配器必须拒绝实际读取。已持久enabled却缺head属于损坏，不能返回disabled。
+
 Spring内部入口：GET `/internal/customer-service/knowledge-publications/snapshot`；GET `/internal/customer-service/knowledge-publications/{publicationId}` 查询事实。worker在本地事务Service执行prepare/commit，不绕HTTP访问自己的数据库。
 
-Python内部入口：POST `/internal/v1/customer-service/knowledge:prepare-publication`，返回CandidateReceipt；POST `/internal/v1/customer-service/knowledge:reconcile-alias`，请求`collectionAlias,collectionName,publicationId,epoch`，执行前后与Spring权威快照核对，绝不回滚到旧指针。
+Python内部入口：POST `/internal/v1/customer-service/knowledge:prepare-publication`，返回CandidateReceipt；POST `/internal/v1/customer-service/knowledge:reconcile-alias`，请求`collectionAlias,collectionName,publicationId,epoch`，执行前后与Spring权威快照核对，不主动恢复先前alias。Milvus alias无CAS，检查后暂停仍可能造成短暂旧镜像，必须二次确认当前head才能ACK并由周期对账修复。
+
+对账响应固定为`{publicationId, epoch, collectionName, reconciled:bool}`；只有前后复核都与请求一致且alias确实指向目标时，reconciled才能为true。错位/故障不ACK，不向旧目标执行补偿回滚。
 
 ## 写路径
 
@@ -41,11 +45,13 @@ Spring新模式worker准备原操作及lease后，prepare在短事务核对owner
 
 Python在同一请求的许可边界内复制源快照中预期身份的完整manifest/块；严格比较名单、数量、正文hash、原文hash、定位、模型/维度。INDEX只为新索引调用原ETL下载/解析/Embedding；REBUILD复用原解析校验及原向量；DELETE只删除候选中的目标，不改源集合或写共享活动位。允许DELETE最后一篇产生空权威集合；REBUILD保留已有非空库的空候选阻断。
 
-候选使用`<alias前缀>_pub_<UUID32>`命名，元数据kind为`customer-service-knowledge-publication`，记录aliasHash、模型、维度、schema、publicationId/baseEpoch/operationId/fence。写入全部行后逐值回读，最后写完成标记、绑定snapshotHash；只有完整回读验证后才返回收据。失败保留不可发布候选，不自动删除可能已被其他提交引用的集合；回收另做设计。
+候选使用`alias[:210] + "_pub_" + UUID32`命名（最多247字符），元数据kind为`customer-service-knowledge-publication`，记录aliasHash、模型、维度、schema、publicationId/baseEpoch/operationId/fence。写入全部行后逐值回读，最后写完成标记、绑定snapshotHash；只有完整回读验证后才返回收据。失败保留不可发布候选，不自动删除可能已被其他提交引用的集合；回收另做设计。
 
 Spring commit再次锁epoch→任务→租约行，核对owner、未过期claim、当前签名租约及预期文档集合；禁止仅凭返回status成功。INDEX同事务更新serving；所有操作同时落任务成功及publication事实/活动指针/alias outbox。并发其他文档提交也推进epoch，旧候选提交失败，可按既有任务重试从新源准备，不能把旧候选强行发布。
 
 ## 读路径和在途语义
+
+ReadSnapshot在新事务中首先锁定state，再在同一事务持锁获取head及serving白名单；不得将独立查询所得的不同时点epoch/head/documents拼接。所有管理变更和发布共用同一state锁，读取前不能已有旧的一致性快照。
 
 新配置开启时使用权威store适配器：先取ReadSnapshot，再向具体collection按允许documentId过滤检索，逐条核对内容/索引/激活及原文hash。模型签名、维度和候选元数据/完成标记不匹配时失败关闭。保持原Top8/每文档1块/final3，禁止借协议改动推广质量候选。
 
@@ -57,15 +63,18 @@ Spring定时worker读取当前权威head并调用Python对账；旧outbox标SUPE
 
 ## 开关、迁移与回滚
 
-两端新增显式publication开关，默认关闭以保持现有单测/旧库兼容；新模式开启但schema或权威head不存在时拒绝新任务/读取，不降级旧协议。启动只读校验持久mode；已经启用的库不得通过关闭开关回到alias权威，需明确报协议要求。
+两端新增显式publication开关，默认关闭以保持现有单测/旧库兼容；新模式开启但schema或权威head不存在时拒绝新任务/读取，不降级旧协议。启动只读校验持久mode；包括配置关闭的存活新版实例，所有旧读写入口每次执行前也必须从Spring核对持久mode，查询不可用失败关闭。已经启用的库不得通过关闭开关回到alias权威，需明确报协议要求。迁移不允许旧二进制混跑；仅启动检查不能防止另一实例随后bootstrap。
+
+旧存储写路径还必须按具体target拒绝publication命名空间/kind，尤其DELETE不能只读alias后直接upsert活动位。入口mode核对仍有检查后暂停窗口：随后若alias已指向新publication，旧INDEX/DELETE不能修改其行；若旧执行已经捕获旧target，最多写旧源/覆盖镜像，不能修改权威候选。publication源读取使用独立验证方法，不扩大旧写路径的collection允许集合。
 
 迁移SQL只新建epoch/active state、publication、alias outbox，不伪造旧发布事实。先停写/排空/备份、统一部署两端，再通过明确维护开关和管理员bootstrap入口，从指定已核对的旧具体collection构建新的私有完整快照，验证现有serving，条件提交首个publication并写持久启用标记。bootstrap不改变内容/索引/激活身份、不调用Embedding。启用后关闭维护入口。禁止混跑旧实例、切旧alias或仅回退旧二进制；回滚需排空并按权威事实另行迁移。
 
 管理员bootstrap入口：POST `/admin/customer-service/knowledge/publications/bootstrap`，body `sourceCollection`；要求ADMIN、显式`publicationBootstrapAllowed`、无活动head/未完成任务、精确source命名校验；使用REBUILD许可、当前registry原文及完整候选验证，Spring本地事务提交。已存在head时拒绝再次bootstrap。
+
+普通任务publicationId为`task_<十进制outboxId>`；维护bootstrap为`bootstrap_<UUID32>`。事实查询返回`{publicationId, epoch, receipt}`，Spring内部GET沿用`BaseResponse`包装。Spring配置键为`ai.customer-service.publication-enabled`与`publication-bootstrap-allowed`，默认均为false；Python对应`AI_SERVICE_RAG_PUBLICATION_ENABLED`。正常任务source只能取自权威head，不能由外部请求替换。
 
 ## 验收与限制
 
 离线与真实MySQL/Milvus隔离矩阵：私有候选不影响源、旧owner检查后暂停、接管、禁用/启用/重建交错、epoch冲突、同publication重复/冲突、提交前后故障、提交确认丢失后的事实查询、alias失败/迟到覆盖/周期收敛、缺权威目标/坏完成标记/模型错配、预算/空集合、在途回答epoch改变不泄露旧结果。两个Coordinator或Fake时钟不冒称完整双实例网络故障注入。
 
 首个生产bootstrap只有隔离协议测试、全部必要Java/Python回归及备份完成后执行；本轮不新增真实回答调用。旧原文registry、旧集合和墓碑保留，不新增无引用证明的自动GC。模型升级、分块策略变化、无限规模、多轮长期记忆与人工质量推广均不在本次范围。
-
