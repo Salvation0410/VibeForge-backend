@@ -636,3 +636,17 @@ uv run python -m ai_service.orchestration.rag_snapshot_experiment --analyze ../t
 重建顶层 `etlVersion` 只表示全库 buildRevision，各文档保留自己的 serving 索引/激活身份。重建同一索引代际必须逐块复现旧物理集合的完整清单、正文、定位与向量；变化时返回 `KNOWLEDGE_VERSION_CONFLICT`，缺旧 v2 清单返回 `KNOWLEDGE_REBUILD_REVISION_UNVERIFIABLE`，应先创建新代际 INDEX。已有 alias 时空重建返回 `KNOWLEDGE_EMPTY_REBUILD_BLOCKED`。检索还核对 query 配置的模型签名与集合元数据，同维不同模型也拒绝；模型别名不能证明供应商权重未变化。
 
 Spring 保存不可变原文 registry 与 serving 三元组，替换失败后重建可读取旧成功原文。旧库必须先排空任务并执行增量 SQL，再同步部署两端、逐文档新版重索引，最后重建验收；不能混跑旧 worker，不能删除墓碑或直接切旧 alias 回滚。详见[迁移步骤](../doc/customer-service-knowledge-v2-migration.md)。本轮未执行真实数据库迁移。B0b 的 Spring 权威发布指针、稳定发布账本和 alias outbox 对账尚未实现，当前租约检查不能证明跨系统原子发布，也不保证在途撤销即时生效。
+
+### 有界证据与拒答候选实验
+
+```powershell
+# 复用上一轮向量，只比较配额并计算 dense Top8/16/24；不调用聊天或 Embedding。
+uv run python -m ai_service.orchestration.rag_bounded_evidence_experiment --source ../tmp/rag-evaluation-20261116/live-snapshot --output ../tmp/rag-bounded-new --prepare-title-inputs
+# 追加 --local-rerank 才会独占本地 GPU 重排三组；标题输入导出不等于已生成标题向量。
+# 拒答成对诊断默认离线校验，依赖固定历史快照或显式 --snapshot。
+uv run python -m ai_service.orchestration.rag_refusal_experiment
+```
+
+有界证据实验仍总计三块及原字符/字节预算。扩大候选但未重排时最终覆盖保留 null；不得拿旧 Top8 顺序冒充 Top16/24 的结果。本轮同文档 cap3 未比 cap2 增益，Top16/24 的最终证据覆盖反而略降，生产仍保持 Top8、每文档一块。标题与父章节扩展尚未完成质量验证。
+
+`evaluation/customer-service-refusal-pairs-v1.json` 含八条冻结拒答题及八条公开解释反例，仍是开发诊断集。显式 `--live --rounds 3 --max-chat-calls 96 --output <不存在的tmp目录>` 才调用模型；预占落盘、失败占额、无自动重试，连续三次错误终止。R2 仅为候选，生产仍用 R1。本轮真实96次对照中 R2 拒答24/24、公开题24/24可答，但有两条公开回答证据范围存疑，不能据此宣称语义质量通过。原 v2 标注冻结；人工裁决和独立盲测仍待完成。
