@@ -1,0 +1,11 @@
+# 第九轮：MySQL持久准备执行仲裁
+
+用户已选方案5。第一期仅INDEX+prepareAnchor，Spring/MySQL权威，Python不直连MySQL。每个Python请求随机executorId；首次准备在付费前POST begin，以epoch→task→lease锁序校验当前业务context、已登记anchor和有效claim/lease，再按taskId唯一键登记STARTED。首次响应唯一granted=true；所有后续请求（含相同executor重传）均不再次授予资格。HTTP确认丢失不自动重试，Python不Embedding。
+
+台账保存taskId、原operationId/fence、executorId、status、观察期限和可选完整receipt；不保存proof/URL/正文/向量。STARTED期限内BUSY，过期只观测UNKNOWN，不释放资格或接管；异常/cancel可显式标UNKNOWN，资格仍不可重授。完整候选允许当前lease下完整验收再恢复，即使数据库仍UNKNOWN；最终发布不凭执行台账授权。
+
+完成登记要求原executor及当前lease/context和完整收据身份，条件更新COMPLETE；同收据重复完成幂等，不同收据拒绝。台账只证明受信Python报告完成，Milvus完整验收仍独立进行。登记结果未知时候选保留，下次先核验候选，不重算。无完整候选的STARTED/UNKNOWN不得再Embedding。新lease只能复用完整旧候选，不申请第二次首次资格。
+
+正式HTTP的anchor INDEX要求仲裁客户端，不能未装配时默默沿旧付费路径；直接测试Preparer可显式无仲裁注入，用以保留前轮基线证据。旧客户端无anchor、DELETE/REBUILD不在本轮仲裁保证内。供应商客户端内部重试/新INDEX任务不属于计费exactly-once。本轮不实现自动任务接管、GC、永久失败自动重算。
+
+验收：MySQL并发只一份资格、原executor重复不重授、过期UNKNOWN不接管、epoch/claim/lease拒绝、完成幂等/冲突；Python授权异常零Embedding、重复BUSY/UNKNOWN零Embedding、完整候选恢复；隔离HTTP两个独立Python实例同一请求并发合计Embedding1次，保留响应丢失后重启恢复场景。正式部署先排空备份、新表、两端切换、只读原字段/f32核对。
