@@ -63,4 +63,3 @@ class KnowledgePrepareExecutionMysqlApplyTest {
         try(var statement=connection.createStatement();var result=statement.executeQuery(sql)) {assertTrue(result.next());return result.getLong(1);}
     }
 }
-

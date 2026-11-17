@@ -224,6 +224,8 @@ Python compileall（含测试运行器）、完整pytest、uv lock检查通过�
 
 最终已启动新版两端服务，正式只读核对通过：epoch=1、原publication/head/alias不变，11 ACTIVE/1 DISABLED，72块/11 manifest原字段和f32向量逐项一致，旧源未变，两端健康，真实回答/Embedding0；日志tmp/round9-runtime-final.log。本轮已部署仲裁源码和空执行表，不执行正式INDEX/REBUILD/bootstrap，保留用户README两反引号和未跟踪取消计划。
 
+第九轮设计提交6bb6ba2；实现、测试、迁移及运行交接提交e400e8e（feat(rag): 持久仲裁首次准备资格并阻止并发重复计算）。提交检查发现迁移测试文件尾多余空行，随后仅移除尾部空白，不改变已验证行为。
+
 ### 下一轮建议
 
 优先补真实worker到prepare-publication的全链路及未知准备响应：Python已经完成候选，但Java未收到收据时，任务保持何种状态、重试是否产生额外候选、当前epoch变化怎样拒绝旧尝试。原因是本轮确认的是数据库commit事实丢响应及读取故障，尚未覆盖付费/候选构建阶段的未知结果。使用隔离任务与可计数合成Embedding，把发送前屏障、完成后断开和claim/lease接管放进同一演练；逐项核对原head、候选数量、事实唯一及调用数。若据此需要新增候选准备幂等/恢复策略，应先给用户说明稳定ID、attempt隔离、费用和存储代价的方案，不直接推广生产行为。自动GC仍需独立无引用保护设计。
