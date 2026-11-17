@@ -212,6 +212,7 @@ Spring OpenAPI 可访问仅说明 HTTP 文档入口可用，不代表所有业�
 | `/api/admin/dashboard/overview` | 管理概览 |
 | `/api/customer-service/ask` | 客服问答 |
 | `/api/admin/customer-service/knowledge` | 管理员知识文档管理 |
+| `/api/admin/customer-service/knowledge/{id}/tasks/{taskId}/prepare-execution` | 管理员单任务准备状态只读观测 |
 | `/api/internal/ai-tools/invoke` | Python 调用的内部工具网关，须携带 Bearer 令牌 |
 
 普通 Spring 接口统一返回 `code`、`data`、`message`；SSE、文件下载和静态资源按各自协议返回。Python 内部接口不使用 Spring `BaseResponse`。具体参数及权限以源码和 OpenAPI 文档为准。

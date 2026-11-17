@@ -5,6 +5,8 @@ import com.yupi.yuaicodemother.model.entity.KnowledgePublicationRecord;
 import org.apache.ibatis.annotations.Param;
 
 public interface KnowledgePublicationMapper {
+    com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePrepareObservationRow observePrepareExecution(
+            @Param("documentId") long documentId, @Param("taskId") long taskId);
     KnowledgePublicationState state();
     KnowledgePublicationState lockState();
     int advanceEpoch();

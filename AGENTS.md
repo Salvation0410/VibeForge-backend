@@ -356,6 +356,8 @@ npm run build-only
 
 ## 交付前检查
 
+- 管理员GET `/api/admin/customer-service/knowledge/{id}/tasks/{taskId}/prepare-execution`按任务主键及文档归属无锁查询，只投影状态、固定原因与UTC观察时间/期限，不读receiptJson/执行身份、不改记录或触发恢复。COMPLETE只代表登记完成；UNKNOWN不授权接管；NOT_REGISTERED不证明未计费。数据库不可用返回错误，不能伪装无记录；损坏状态投影INVALID/UNKNOWN。
+
 - INDEX+prepareAnchor首次计算经Spring/MySQL prepare_execution仲裁；每个Python请求随机executorId，BEGIN只首次granted=true，同executor重传不重授。300秒仅观察UNKNOWN、不接管；完整Milvus候选恢复仍验收并受当前lease/epoch约束。正式入口无仲裁失败，缺表启动拒绝；升级停写排空备份执行alter_customer_service_knowledge_prepare_execution.sql。无anchor/DELETE/REBUILD/供应商重试不在计费仲裁保证内，不宣称exactly-once。
 
 - 客服INDEX prepare请求可选prepareAnchor；Spring首次发送前持久化context/operationId/fence到customer_service_knowledge_prepare_anchor，不保存proof/URL。Python确定性候选完整验收后，在新lease下重解析原文/核对规范行再复制向量；缺失/半写/损坏/身份漂移不自动重算，需新INDEX任务。缺表在publication模式启动拒绝，升级先停写排空备份并执行alter_customer_service_knowledge_prepare_anchor.sql；不新增GC、claim自动接管或计费exactly-once。

@@ -27,6 +27,30 @@ import static org.junit.jupiter.api.Assertions.*;
 /** 随机独立 schema 中使用真实 Mapper/事务；不改业务库，不调用模型或 Milvus。 */
 @EnabledIfEnvironmentVariable(named="AI_KNOWLEDGE_PUBLICATION_MYSQL_INTEGRATION",matches="true")
 class KnowledgePublicationMysqlIntegrationTest {
+    @Test void observationUsesOwnedTaskAndDoesNotWaitForExecutionRowLock() throws Exception {
+        isolated(f->{
+            var execution=f.prepare(1);
+            var cfgMapperField=KnowledgePublicationService.class.getDeclaredField("mapper");cfgMapperField.setAccessible(true);
+            // 从独立只读Mapper查询，不借助仲裁的FOR UPDATE读路径。
+            var target=((org.springframework.aop.framework.Advised)f.service).getTargetSource().getTarget();
+            var mapper=(KnowledgePublicationMapper)cfgMapperField.get(target);
+            var observer=new KnowledgePrepareObservationService(mapper,Clock.fixed(NOW,ZoneOffset.UTC));
+            assertEquals("NOT_REGISTERED",observer.observe(1,1).observationState());
+            assertThrows(com.yupi.yuaicodemother.exception.BusinessException.class,()->observer.observe(2,1));
+            f.service.registerPrepareAnchor(1,"owner",execution.lease(),execution.context());
+            f.service.arbitratePrepare(new PrepareExecutionRequest(execution.context(),execution.lease(),"a".repeat(32),"BEGIN",null));
+            try(var locked=KnowledgeRevisionMysqlSupport.connect()) {
+                locked.setCatalog(f.jdbc.queryForObject("SELECT DATABASE()",String.class));locked.setAutoCommit(false);
+                try(var statement=locked.createStatement()) {statement.executeQuery("SELECT taskId FROM customer_service_knowledge_prepare_execution WHERE taskId=1 FOR UPDATE").close();}
+                try(var pool=java.util.concurrent.Executors.newSingleThreadExecutor()) {
+                    var observation=pool.submit(()->observer.observe(1,1)).get(5,java.util.concurrent.TimeUnit.SECONDS);
+                    assertEquals("BUSY",observation.observationState());
+                    assertEquals(NOW.plusSeconds(300),observation.observationDeadline());
+                } finally {locked.rollback();}
+            }
+            assertEquals("STARTED",f.jdbc.queryForObject("SELECT status FROM customer_service_knowledge_prepare_execution WHERE taskId=1",String.class));
+        });
+    }
     @Test void grantedExecutorCannotCompleteAfterEpochRevocation() throws Exception {
         isolated(f->{
             var execution=f.prepare(1);f.service.registerPrepareAnchor(1,"owner",execution.lease(),execution.context());

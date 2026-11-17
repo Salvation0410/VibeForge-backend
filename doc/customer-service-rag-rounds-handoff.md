@@ -389,6 +389,16 @@ Python目标17通过；包含准备、恢复、故障和候选六文件的相关
 
 推荐管理员按文档/任务联合归属查询的单任务只读接口，查询量固定，只投影固定状态/原因与UTC观察时间/期限，不读receiptJson或凭据、不加FOR UPDATE、不写超时、不触发恢复。全库分页利于巡检但增加扫描/索引/一致性设计；仅人工SQL改动最少但容易误读UNKNOWN。AGENTS交付前检查要求多个生产选择先确认，因此接口尚未实现，收到选择后继续本轮实现及权限/边界验收。COMPLETE不代表已发布；无记录不证明未付费，UNKNOWN不授权接管。后续真实双服务丢确认/退出矩阵仍有缺口，GC须先证明引用保护；质量cap2/R2与人工标注继续独立轮次。
 
+### 第十轮续：单任务只读观测完成
+
+用户明确确认推荐单任务接口后实施。新增管理员GET `/api/admin/customer-service/knowledge/{id}/tasks/{taskId}/prepare-execution`，由独立KnowledgePrepareObservationService调用Mapper一次LEFT JOIN，以task主键及documentId核对归属。只查询taskId/status/observationDeadline，不获取receiptJson/executorId/operationId，无FOR UPDATE、无写入或模型调用，无新增schema。返回recordedState、observationState、固定reasonCode和UTC字符串observedAt/observationDeadline；无记录NOT_REGISTERED不证明未付费，完整登记COMPLETE不代表发布。未知状态归一INVALID/UNKNOWN，STARTED缺期限也明确无效。归属不符NOT_FOUND，非法ID参数错误，数据库故障传播而非伪装未登记。
+
+新增真实权限切面测试拒绝未登录/普通用户、允许管理员，严格六字段及UTC格式；状态期限等号边界、无写入、坏状态、无记录与数据库不可用覆盖。真实隔离MySQL连接锁住执行行，另一线程只读查询5秒内完成，证明没有行锁等待。首轮权限夹具重新when覆盖旧thenThrow触发未登录异常，改用doReturn后复验通过，未修改生产权限；本机脚本首次将既有字符串文档ID加1报类型错误，转换int后通过，无生产改动。日志保留tmp/round10-observation-tests.log及runtime.log。
+
+最终Java32项通过、0失败/错误/跳过（单元权限/观测4、MySQL17、子JVM5、发布边界6），22随机schema清理，tmp/round10-observation-final.log；Python运行行为未改，沿用本轮此前相关63项验收，不冒充完整全库回归。预检0未完成任务后重启Spring，新版已启用，Python持续健康。本机管理员观测、匿名拒绝、错归属与非法参数验收通过，tmp/round10-observation-runtime-final.log；历史任务均无新执行记录，生产BUSY/UNKNOWN/COMPLETE由隔离测试证明，不手工篡改正式库。完整原文/f32/活动身份核对通过，tmp/round10-observation-integrity.log，真实调用0。README/AGENTS同步，本轮新接口在Spring端，不改Python配置或运行说明，保留用户README既有格式变更。
+
+下一轮优先剩余跨服务故障矩阵：真实HTTP BEGIN已提交响应丢失、Python授权后/Embedding后硬退出、COMPLETE确认丢失、长期暂停及控制面失联。原因是当前子JVM持久事实、Python协作取消及客户端丢确认分别成立，仍缺这些组合端到端证明。采用随机schema/alias、固定发送屏障与持久计数，不增加自动接管、重算或真实模型预算；GC引用保护及答案质量独立推进。第十轮此前提交431fa7c，本次接口提交哈希见最终回复。
+
 ## 以后每轮必须使用的交接格式
 
 1. 本轮解决什么：原问题的具体触发场景、证据和目标。

@@ -33,6 +33,16 @@ public class CustomerServiceKnowledgeAdminController {
     private final CustomerServiceProperties properties;
 
     @org.springframework.beans.factory.annotation.Autowired
+    private com.yupi.yuaicodemother.service.KnowledgePrepareObservationService prepareObservation;
+
+    @GetMapping("/{id}/tasks/{taskId}/prepare-execution")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    public BaseResponse<com.yupi.yuaicodemother.model.vo.KnowledgePrepareObservationVO> prepareExecution(
+            @PathVariable long id, @PathVariable long taskId) {
+        return ResultUtils.success(prepareObservation.observe(id, taskId));
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
     private com.yupi.yuaicodemother.service.KnowledgePublicationBootstrapService publicationBootstrap;
 
     @PostMapping("/publications/bootstrap")

@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.yupi.yuaicodemother.mapper.KnowledgePublicationMapper">
+  <!-- 从任务主键定位并核对文档归属；不锁行，不读收据和执行身份。 -->
+  <select id="observePrepareExecution" resultType="com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePrepareObservationRow">
+    SELECT t.id AS taskId,e.status,e.observationDeadline
+    FROM customer_service_knowledge_etl_outbox t
+    LEFT JOIN customer_service_knowledge_prepare_execution e ON e.taskId=t.id
+    WHERE t.id=#{taskId} AND t.documentId=#{documentId}
+  </select>
   <select id="state" resultType="com.yupi.yuaicodemother.model.entity.KnowledgePublicationState">SELECT epoch,enabled,publicationId FROM customer_service_knowledge_publication_state WHERE id=1</select>
   <select id="lockState" resultType="com.yupi.yuaicodemother.model.entity.KnowledgePublicationState">SELECT epoch,enabled,publicationId FROM customer_service_knowledge_publication_state WHERE id=1 FOR UPDATE</select>
   <update id="advanceEpoch">UPDATE customer_service_knowledge_publication_state SET epoch=epoch+1 WHERE id=1</update>
