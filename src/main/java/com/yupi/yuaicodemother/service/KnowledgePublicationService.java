@@ -42,6 +42,8 @@ public class KnowledgePublicationService implements ApplicationRunner {
         this.coordinator=coordinator; this.properties=properties; this.clock=clock;
     }
     @Override public void run(ApplicationArguments args) {
+        // 恢复台账缺表时启动即拒绝，不能等到首次付费请求才发现升级不完整。
+        if(properties.isPublicationEnabled()) mapper.prepareAnchor(0);
         // 迁移前旧库可继续旧协议；已持久启用后，即使配置关闭也必须拒绝启动。
         try {
             KnowledgePublicationState state=mapper.state();
@@ -112,6 +114,30 @@ public class KnowledgePublicationService implements ApplicationRunner {
         persist(receipt,epoch);
         requireOne(tasks.finish(taskId,owner,"SUCCEEDED",null));
         return new PublicationFact(receipt.publicationId(),epoch,receipt);
+    }
+    /** 首次发送前登记无凭据身份；重试的当前租约不能覆盖未知的旧准备结果。 */
+    @Transactional
+    public PrepareAnchor registerPrepareAnchor(long taskId, String owner,
+            KnowledgeMutationCoordinator.Lease lease, PublicationContext context) {
+        var state=activeState();
+        var task=lockExecution(taskId,owner,lease);
+        if(!"INDEX".equals(task.getOperation()) || !context.publicationId().equals("task_"+taskId)
+                || state.getEpoch()!=context.baseEpoch() || !Objects.equals(source(state),context.sourceCollection())
+                || !expected(task).equals(context.documents())) throw failure("KNOWLEDGE_PREPARE_CONTEXT_CONFLICT");
+        String stored=mapper.prepareAnchor(taskId);
+        try {
+            if(stored==null) {
+                var anchor=new PrepareAnchor(context,lease.operationId(),lease.fence());
+                requireOne(mapper.insertPrepareAnchor(taskId,json.writeValueAsString(anchor)));
+                return anchor;
+            }
+            var anchor=json.readValue(stored,PrepareAnchor.class);
+            if(!anchor.context().equals(context) || anchor.fence()<1 || anchor.fence()>lease.fence()
+                    || anchor.operationId()==null || !anchor.operationId().matches("[A-Za-z0-9_-]{1,128}")
+                    || (anchor.fence()==lease.fence() && !anchor.operationId().equals(lease.operationId())))
+                throw failure("KNOWLEDGE_PREPARE_CONTEXT_CONFLICT");
+            return anchor;
+        } catch(JsonProcessingException invalid) {throw failure("KNOWLEDGE_PREPARE_ANCHOR_INVALID");}
     }
     @Transactional
     public ReadSnapshot snapshot() {

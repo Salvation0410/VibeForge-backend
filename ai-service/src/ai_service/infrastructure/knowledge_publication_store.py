@@ -324,10 +324,18 @@ class PublicationStore:
                 "schemaVersion": self.store._schema_version,
                 "embedding": [0.0] * self.settings.rag_embedding_dimension}
 
-    async def write(self, context, lease, documents, permit):
+    def candidate_name(self, context, operation_id, fence):
+        # 加域分隔符和完整context，防止跨任务、源版本及attempt混用；不包含凭据。
+        digest = hashlib.sha256(b"knowledge-prepare-anchor-v1\0" + _encoded(
+            {"context": context.model_dump(by_alias=True), "operationId": operation_id, "fence": fence})).hexdigest()[:32]
+        return self.store._alias[:210] + "_pub_" + digest
+
+    async def write(self, context, lease, documents, permit, *, name=None):
         if [document_identity(item) for item in documents] != context.documents:
             _fail()
-        name = self.store._alias[:210] + "_pub_" + uuid4().hex
+        name = name or self.store._alias[:210] + "_pub_" + uuid4().hex
+        if not self._name_valid(name):
+            _fail()
         if await self.store._call("has_collection", name):
             _fail("KNOWLEDGE_PUBLICATION_NAME_CONFLICT")
         rows = []

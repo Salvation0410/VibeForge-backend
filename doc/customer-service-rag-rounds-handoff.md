@@ -258,6 +258,41 @@ P1建议实现“可核验准备结果恢复”：Spring在发送前持久化att
 
 预定验收：首次完成丢响应后仅一次Embedding，新attempt仍拥有独立收据和唯一事实；epoch漂移、文档撤销/修改、模型变化、旧lease失效、结果缺失/未完成/损坏、重复请求及进程重启均不得绕过现有授权。查询失败不自动证明需要重算，不得通过换账本绕过调用预算。先定义允许重算或停止的规则再实现。P2自动GC需独立引用与隔离期设计，NO_OBSERVED_FACT不能作为删除授权；P3再用人工标注质量集评估cap2/R2，当前R1/denseTop8/cap1/final3保持。
 
+## 第七轮：可核验INDEX准备结果恢复（2026-11-17）
+
+### 原问题、方案与实现
+
+第六轮实测prepare候选完成后响应丢失，worker重试两次Embedding并生成两份INDEX候选；用户明确确认可核验恢复方案。本轮实现首次身份台账、完成证据读取及新lease向量复用。Spring发送前在epoch→task→lease锁序下登记首次context/operationId/fence到customer_service_knowledge_prepare_anchor，同任务不可覆盖；不保存proof、签名URL或向量，Python不连接MySQL。登记确认未知不得发送HTTP或写成执行失败。
+
+Python prepare可选prepareAnchor，INDEX首次候选名由规范context/operationId/fence域分隔hash确定，定位单个旧候选，不扫描全库。重试先验证新lease和HTTP权威上下文，再读取旧完成标记、完整manifest/块/f32向量/预算，核对旧attempt和全部文档身份。重新下载、hash校验、按当前配置解析目标原文；逐文本取原向量，再逐字段核对块/定位/规范行和整库hash。验收一致才复制为新attempt候选，产生当前operationId/fence收据，提交继续原MySQL事务仲裁。准备后HTTP再次核对context；最后仍有并发撤销窗口，由commit裁决。当前attempt已完成的重传完整验收后返回原收据。
+
+选择此方案可跨Python重启复用，并保留新租约隔离；只缓存同lease收据不能覆盖worker finally撤销后的下一执行。代价是新台账、原文重下载/解析、完整回读和整库复制；两次INDEX仍有两份候选。没有降低真实计费单价、保证供应商exactly-once或减少存储集合数量。旧客户端无anchor继续旧流程，DELETE/REBUILD不引入恢复缓存。
+
+### 边界与故障处理
+
+- 缺失、半写、损坏、模型/维度变化、context或文档身份漂移明确失败关闭，不自动切回真实Embedding。首次完成前退出可能已经付费而无证据，需新INDEX任务重算，不能认定免费失败。
+- anchor只定位旧证据，不能续旧lease或直接激活旧候选；新lease依旧必须当前。当前候选已存在但未完成不得覆盖；同名并发创建可能拒绝，不新增跨实例锁或任意重试。anchor首记录受Spring短事务保护。
+- epoch漂移登记拒绝，旧记录保留；数据库确认未知保留未知而不是执行失败。恢复错误沿既有有上限重试，重复恢复不调用Embedding；未新增生产任务自动接管或恢复调度。
+- 恢复不提供独立裸收据查询API：正式prepare入口在当前授权下定位并验收旧候选，然后返回新收据，避免未经当前lease的复用路径。没有GC，历史/失败候选与anchor继续保留。
+
+### 验证、迁移和交付状态
+
+Python新增9个边界测试，目标组45项通过；完整pytest **1645通过、24跳过、0失败**，compileall/uv lock通过，日志tmp/round7-python-target.log、round7-python-final.log/xml。覆盖同attempt重传、新Preparer对象恢复、旧结果缺失/半写/向量损坏/模型变化/定位变化及context形状拒绝。未将Fake或固定原文作为语义质量验收。
+
+Java最终目标81项通过，追加登记确认未知的worker测试复验37项通过，合计82项当前目标通过、0失败/错误/跳过；资源组含2项HTTP、9项隔离MySQL及2项子JVM，13个随机schema清理。日志tmp/round7-java-final.log、round7-java-worker-final.log及summary.json；干净编译成功，tmp/round7-java-compile.log。首次资源组另成功运行，tmp/round7-java-resources.log。
+
+HTTP场景首次prepare200后丢响应、原head保留、旧lease撤销，终止并重启Python，再由真实worker重试。旧anchor不变、新operationId/fence/集合独立、唯一事实为第二收据。两次prepare合计Fake Embedding **1次**（前轮2次），重启后0次、回答/真实供应商0次；候选仍3个（初始空+两次INDEX）。报告tmp/round7-prepare-report.json，前轮报告保留。没有强杀Spring claim接管、随机丢包、真实供应商或并发创建矩阵验收。
+
+正式环境检查0未完成任务后停止Spring；维护入口备份8张知识库表为私有JSON（含DDL/字段顺序/NULL/全部值）并保存SHA256，再只新增空anchor表，逐表核对已有结构和数据未变。记录tmp/round7-migration.log，备份tmp/knowledge-prepare-backup-94ffef9a-8e22-4d81-9d13-ddd47ed4ef0d。备份不是自动恢复工具，恢复需单独核查，不提交原文/凭据。新库init_database.sql同步，已有库执行alter_customer_service_knowledge_prepare_anchor.sql；publication模式缺表启动拒绝，旧模式不开恢复。
+
+最终已启动新版Spring/Python，本机只读完整核对成功：epoch=1、原head/publication/alias不变，11 ACTIVE/1 DISABLED，72块/11 manifest所有原字段与f32向量逐项一致，旧源未变，两端健康，真实模型/Embedding调用0。日志tmp/round7-runtime-final.log。本轮已部署恢复源码及空anchor表，没有执行正式INDEX/REBUILD/bootstrap。保留用户README两反引号及未跟踪取消计划，不混入提交。
+
+### 下一轮优先项、原因和验收
+
+P1补恢复并发/进程退出边界：首候选半写退出、同attempt并发、epoch改变与恢复写入交错、Spring登记确认未知后重启、替代claim拒绝旧执行。原因是本轮已证明完整候选可跨Python重启恢复，但半写和跨实例竞态主要是离线边界。使用随机schema/alias、发送/完成屏障和计数替身，验收绝不覆盖旧候选、不错误激活、不额外Embedding。首轮只补证据，不自动增加续跑或重算策略。
+
+P2设计人工可审核GC：本轮减少了Embedding但集合仍积累。先确定事实引用、在途读、未知prepare/commit及anchor引用的保护，再决定隔离期和删除重入流程；NO_OBSERVED_FACT不等于无引用。P3人工标注拒答/多证据质量评估及cap2/R2单变量对照；R1/denseTop8/cap1/final3仍保持。生产策略存在多个不同成本选择时再具体说明并确认，本轮已批准恢复方案无需重复授权。
+
 ## 以后每轮必须使用的交接格式
 
 1. 本轮解决什么：原问题的具体触发场景、证据和目标。

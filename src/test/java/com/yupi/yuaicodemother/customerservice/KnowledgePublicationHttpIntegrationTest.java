@@ -50,7 +50,9 @@ class KnowledgePublicationHttpIntegrationTest {
                     var report=JSON.readTree(Files.readString(directory.resolve("report.json")));
                     if(prepareMode) {
                         assertTrue(report.get("prepareResponseDropped").asBoolean());
-                        assertEquals(2,report.get("embeddingCalls").asInt());
+                        assertEquals(1,report.get("embeddingCalls").asInt());
+                        assertTrue(report.get("restartedPrepareRecovered").asBoolean());
+                        assertTrue(report.get("persistedAnchorUnchanged").asBoolean());
                         assertEquals(3,report.get("candidates").asInt());
                         assertTrue(report.get("oldLeaseRevoked").asBoolean());
                         assertTrue(report.get("attemptIdentityIsolated").asBoolean());
@@ -66,7 +68,7 @@ class KnowledgePublicationHttpIntegrationTest {
                     assertEquals(1,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_etl_outbox WHERE id=1 AND status='SUCCEEDED'"));
                     assertEquals(1,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_document WHERE id=1 AND indexedVersion=1 AND indexedEtlVersion=2"));
                     assertEquals(1,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_publication WHERE publicationId='task_1'"));
-                    Files.copy(directory.resolve("report.json"),Path.of(prepareMode?"tmp/round6-prepare-report.json":"tmp/round5-http-report.json"),StandardCopyOption.REPLACE_EXISTING);
+                    Files.copy(directory.resolve("report.json"),Path.of(prepareMode?"tmp/round7-prepare-report.json":"tmp/round7-http-report.json"),StandardCopyOption.REPLACE_EXISTING);
                 } finally { if(runner.isAlive()) {runner.destroyForcibly();runner.waitFor(10,TimeUnit.SECONDS);} }
             } finally {fixture=null;execution=null;worker=null;}
         });

@@ -88,14 +88,29 @@ def identity(item) -> DocumentIdentity:
     })
 
 
+class PrepareAnchor(PublicationModel):
+    """无凭据的首次准备身份；仅用于定位证据，不能代替当前租约。"""
+    context: PublicationContext
+    operation_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+    fence: int = Field(ge=1)
+
+
 class CandidateRequest(PublicationModel):
     context: PublicationContext
     mutation: Annotated[PublicationIndex | PublicationDelete | PublicationRebuild,
                         Field(discriminator="operation")]
+    prepare_anchor: PrepareAnchor | None = None
 
     @model_validator(mode="after")
     def consistent(self):
         documents, mutation = self.context.documents, self.mutation
+        anchor = self.prepare_anchor
+        if anchor is not None:
+            if (not isinstance(mutation, PublicationIndex) or anchor.context != self.context
+                    or not self.context.publication_id.startswith("task_")
+                    or anchor.fence > mutation.lease.fence
+                    or (anchor.operation_id == mutation.lease.operation_id) != (anchor.fence == mutation.lease.fence)):
+                raise ValueError("prepare anchor mismatch")
         if isinstance(mutation, PublicationIndex):
             if identity(mutation) not in documents:
                 raise ValueError("INDEX identity missing from desired documents")

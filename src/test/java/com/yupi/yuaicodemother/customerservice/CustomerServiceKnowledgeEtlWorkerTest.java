@@ -652,6 +652,16 @@ class CustomerServiceKnowledgeEtlWorkerTest {
         when(publication.findTaskFact(1)).thenReturn(new com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol.PublicationFact("task_1",8,KnowledgePublicationServiceTest.receipt(context)));
         worker.execute(task("INDEX"));verifyNoInteractions(ai,coordinator,finalizer);
     }
+    @Test
+    void unknownAnchorRegistrationNeverCallsPrepareOrWritesFailure() throws Exception {
+        var publication=configurePublication();
+        when(publication.registerPrepareAnchor(anyLong(),anyString(),any(),any()))
+            .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("test"));
+        worker.execute(task("INDEX"));
+        verify(ai,never()).preparePublication(any());
+        verify(outbox,never()).retry(anyLong(),anyString(),anyString(),anyInt(),any(),any());
+    }
+
     private com.yupi.yuaicodemother.service.KnowledgePublicationService configurePublication() throws Exception {
         props.setPublicationEnabled(true);
         var publication=mock(com.yupi.yuaicodemother.service.KnowledgePublicationService.class);

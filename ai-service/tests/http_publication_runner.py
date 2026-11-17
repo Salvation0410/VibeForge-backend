@@ -121,8 +121,20 @@ async def prepare_run(args):
             validation=(await c.post(f'http://127.0.0.1:{args.spring_port}/internal/customer-service/knowledge-mutation-leases:validate',
                 json=attempts[0][0]['mutation']['lease'])).json()
             assert validation['data']['verified'] is True and validation['data']['current'] is False
+            # 清空进程内状态后恢复，仅依赖Spring anchor和Milvus完成证据。
+            process.terminate();process.wait(10)
+            process=subprocess.Popen([sys.executable,__file__,'--serve','--prepare-mode','--alias',args.alias,'--proxy-port',str(args.spring_port),
+                '--python-port',str(port),'--report',str(args.report)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform=='win32' else 0);children.append(process)
+            for _ in range(100):
+                if process.poll() is not None:raise RuntimeError('PREPARE_RESTART_EXITED')
+                try:
+                    if (await c.get(f'http://127.0.0.1:{port}/health/live')).status_code==200:break
+                except httpx.HTTPError:pass
+                await asyncio.sleep(.1)
+            else:raise RuntimeError('PREPARE_RESTART_TIMEOUT')
             second=(await c.post(f'http://127.0.0.1:{args.spring_port}/test/worker',json={'port':proxy.server_port})).json();assert second['status']=='SUCCEEDED',second
-            counts=(await c.get(f'http://127.0.0.1:{port}/test/counts')).json();assert counts['embeddings']==2 and counts['model']==0,counts
+            counts=(await c.get(f'http://127.0.0.1:{port}/test/counts')).json();assert counts['embeddings']==0 and counts['model']==0,counts
             fact=await client.fact('task_1');assert fact.epoch==2
             names=[n for n in milvus.list_collections() if n.startswith(args.alias+'_pub_')]
             assert len(names)==3 and state['requests']==2 and not state['drop'],(names,state)
@@ -134,9 +146,11 @@ async def prepare_run(args):
             after=await client.snapshot();assert after.collection_name==second_receipt['candidateCollection']
             assert first_receipt['candidateCollection'] in names
             # 未确认首候选保留，但数据库只发布第二attempt；旧候选没有alias激活权。
-            args.report.write_text(json.dumps(dict(prepareResponseDropped=not state['drop'],embeddingCalls=counts['embeddings'],candidates=len(names),
+            assert attempts[0][0]['prepareAnchor']==attempts[1][0]['prepareAnchor']
+            args.report.write_text(json.dumps(dict(prepareResponseDropped=not state['drop'],embeddingCalls=1+counts['embeddings'],candidates=len(names),
                 prepareRequests=state['requests'],firstTaskState=first['status'],publishedEpoch=fact.epoch,paidCalls=0,
-                oldLeaseRevoked=True,attemptIdentityIsolated=True,publishedSecondReceipt=True,oldHeadPreserved=True),indent=2),encoding='utf8')
+                oldLeaseRevoked=True,attemptIdentityIsolated=True,publishedSecondReceipt=True,oldHeadPreserved=True,
+                restartedPrepareRecovered=True,persistedAnchorUnchanged=True),indent=2),encoding='utf8')
             await client.close()
     finally:
         for child in children:

@@ -27,6 +27,22 @@ import static org.junit.jupiter.api.Assertions.*;
 /** 随机独立 schema 中使用真实 Mapper/事务；不改业务库，不调用模型或 Milvus。 */
 @EnabledIfEnvironmentVariable(named="AI_KNOWLEDGE_PUBLICATION_MYSQL_INTEGRATION",matches="true")
 class KnowledgePublicationMysqlIntegrationTest {
+    @Test void prepareAnchorSurvivesLeaseChangeAndRejectsEpochDrift() throws Exception {
+        isolated(f->{
+            var first=f.prepare(1);
+            var anchor=f.service.registerPrepareAnchor(1,"owner",first.lease(),first.context());
+            assertEquals(anchor,f.service.registerPrepareAnchor(1,"owner",first.lease(),first.context()));
+            f.coordinator.revoke(first.lease());
+            var next=f.coordinator.acquire("document:1","next_attempt","INDEX","owner");
+            assertEquals(anchor,f.service.registerPrepareAnchor(1,"owner",next,first.context()));
+            assertEquals(1,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_prepare_anchor"));
+            f.service.beforeAdministrativeMutation();
+            var changed=f.service.prepare(1,"owner",next);
+            assertEquals("KNOWLEDGE_PREPARE_CONTEXT_CONFLICT",assertThrows(IllegalStateException.class,
+                ()->f.service.registerPrepareAnchor(1,"owner",next,changed)).getMessage());
+            assertEquals(1,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_prepare_anchor"));
+        });
+    }
     static final Instant NOW=Instant.parse("2030-01-01T00:00:00Z");
     static final String HASH="a".repeat(64);
     @Test void inventoryUsesImmutableEpochOrderAndBoundedProjection() throws Exception {
@@ -148,6 +164,7 @@ class KnowledgePublicationMysqlIntegrationTest {
                 admin.setCatalog(schema);assertEquals(schema,admin.getCatalog());
                 KnowledgeRevisionMysqlSupport.script(admin,Files.readString(Path.of("sql/alter_customer_service_knowledge.sql")));
                 KnowledgeRevisionMysqlSupport.script(admin,Files.readString(Path.of("sql/alter_customer_service_knowledge_publication.sql")));
+                KnowledgeRevisionMysqlSupport.script(admin,Files.readString(Path.of("sql/alter_customer_service_knowledge_prepare_anchor.sql")));
                 scenario.run(new Fixture(schema));
             } finally {
                 if(created) {

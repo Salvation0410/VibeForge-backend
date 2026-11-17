@@ -174,7 +174,17 @@ public class CustomerServiceKnowledgeEtlWorker {
                             document.contentHash(),document.indexedEtlVersion(),document.activationRevision())).toList();
             mutation=new CustomerServiceAiClient.RebuildRequest(properties.getCollectionAlias(),documents,rebuild.etlVersion(),lease);
         } else throw new IllegalStateException("KNOWLEDGE_TASK_OPERATION_INVALID");
-        var receipt=aiClient.preparePublication(new com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol.CandidateRequest(context,mutation));
+        // 登记确认必须先于HTTP发送；确认未知时禁止调用模型或覆盖首次身份。
+        com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol.PrepareAnchor anchor=null;
+        if(prepared instanceof PreparedIndex) {
+            try {anchor=publicationService.registerPrepareAnchor(task.getId(),owner,lease,context);}
+            catch(IllegalStateException rejected) {
+                if(rejected.getMessage()!=null && rejected.getMessage().startsWith("KNOWLEDGE_")) throw rejected;
+                throw new TaskFinalizationException(rejected);
+            }
+            catch(RuntimeException unknown) {throw new TaskFinalizationException(unknown);}
+        }
+        var receipt=aiClient.preparePublication(new com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol.CandidateRequest(context,mutation,anchor));
         try {
             publicationService.commit(task.getId(),owner,lease,context,receipt);
         } catch(IllegalStateException rejected) {

@@ -657,6 +657,10 @@ HTTP 回答入口只接受绑定本应用控制客户端的官方权威 RAG；�
 
 ### 发布候选容量观测
 
+第七轮实现INDEX准备结果恢复：Spring在发送前将首次context/operationId/fence写入不可覆盖的prepare_anchor表；prepare请求可选prepareAnchor字段不含proof或下载地址。Python按确定性私有候选名读取完成证据并全量核验，新lease重新下载解析目标原文，严格比较分块/定位/规范行及整库hash，再复制原向量到新attempt候选。当前attempt完整完成的重传返回同收据。缺失、半写、损坏、epoch/文档/模型漂移失败关闭，不自动重算Embedding；需重新计算时建立新INDEX任务。候选与anchor没有自动GC。
+
+现有B0b库升级前停写排空并备份，执行sql/alter_customer_service_knowledge_prepare_anchor.sql，然后统一切换Python/Spring；Spring publication模式缺表启动拒绝。新库init_database.sql已含表。隔离HTTP验收现已扩展为首次响应丢失后重启Python，核对两次prepare共一次Fake Embedding、新收据/候选独立及唯一事实。第六轮两次Embedding报告保留为优化前证据。本轮仍非真实供应商质量或自动任务接管验收。
+
 第五轮跨服务HTTP验收需显式 `AI_RAG_HTTP_INTEGRATION=true`，在根目录运行 `mvn test '-Dtest=KnowledgePublicationHttpIntegrationTest'`。测试专用Spring Web容器加载生产publication Controller/Service/Mapper并访问随机MySQL schema，独立Python进程加载正式app factory/权威RAG，使用随机Milvus alias、合成向量及计数模型。回环代理在commit成功后丢弃响应，以及在回答模型返回前切换snapshot为503；核对稳定ID事实确认、恢复实例回答、无答案/无引用及两个Python实例alias对账。
 
 第六轮在同一入口增加真实worker `poll()` → Python prepare-publication → Spring租约验证 → Milvus候选的隔离验收。测试下载器返回本地合成原文，计数Embedding替代供应商；代理在首次候选完成后丢弃prepare响应。检查任务PENDING、原head保留、旧lease撤销，随后显式推进重试时间再次poll，检查不同operationId/fence/候选、两次Embedding及唯一第二收据发布。初始空候选加两次INDEX共三个集合，finally按随机命名空间精确清理。

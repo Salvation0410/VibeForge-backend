@@ -23,7 +23,11 @@ public final class KnowledgePublicationProtocol {
     public record PublicationContext(String publicationId,
             @JsonSerialize(using=LeaseLongSerializer.class) long baseEpoch,
             String sourceCollection, List<DocumentIdentity> documents) { }
-    public record CandidateRequest(PublicationContext context, Object mutation) { }
+    public record PrepareAnchor(PublicationContext context, String operationId,
+            @JsonSerialize(using=LeaseLongSerializer.class) long fence) { }
+    public record CandidateRequest(PublicationContext context, Object mutation, PrepareAnchor prepareAnchor) {
+        public CandidateRequest(PublicationContext context, Object mutation) { this(context, mutation, null); }
+    }
     public record CandidateReceipt(String publicationId,
             @JsonSerialize(using=LeaseLongSerializer.class) long baseEpoch,
             String operationId, @JsonSerialize(using=LeaseLongSerializer.class) long fence,

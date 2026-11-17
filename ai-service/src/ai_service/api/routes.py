@@ -226,7 +226,11 @@ def register_routes(
         from ai_service.orchestration.knowledge_publication_boundary import validate_candidate_request
         try:
             await validate_candidate_request(body, request.app.state.knowledge_publication_client, request.app.state.settings)
-            return await preparer.prepare(body)
+            receipt = await preparer.prepare(body)
+            if body.prepare_anchor is not None:
+                # 在准备后再次拒绝漂移上下文；最终发布仍由Spring事务仲裁。
+                await validate_candidate_request(body, request.app.state.knowledge_publication_client, request.app.state.settings)
+            return receipt
         except Exception as error:
             return _stable_exception(error, 'KNOWLEDGE_PUBLICATION_FAILED')
 
