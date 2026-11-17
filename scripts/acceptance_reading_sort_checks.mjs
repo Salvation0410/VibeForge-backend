@@ -1,5 +1,5 @@
 /** 固定读书清单的排序验收；只操作隔离页面，不读取框架内部状态。 */
-export async function verifyReadingSort(document, { tick, record = () => {} }) {
+export async function verifyReadingSort(document, { tick, record = () => {}, addInput = null }) {
   const results = [], original = ['小王子', '人类简史', '三体'];
   const added = ['Z排序验收', 'A排序验收'];
   const label = e => e.textContent.replace(/\s/g, '');
@@ -20,8 +20,11 @@ export async function verifyReadingSort(document, { tick, record = () => {} }) {
   // 不先点击添加顺序：否则无法发现默认排序已经改变的实现。
   await click('全部'); check(matches(original), 'default-insertion');
   for (const title of added) {
-    const inputs = [...document.querySelectorAll('input')].filter(e => !['hidden', 'checkbox', 'radio'].includes(e.type));
-    check(inputs.length === 1 && !inputs[0].disabled, 'unique-input');
+    // 新增搜索框时由调用方明确提供添加输入，不按页面顺序猜测。
+    const inputs = addInput ? [addInput] : [...document.querySelectorAll('input')].filter(e => !['hidden', 'checkbox', 'radio'].includes(e.type));
+    check(inputs.length === 1 && inputs[0]?.tagName === 'INPUT'
+      && inputs[0].ownerDocument === document && inputs[0].isConnected
+      && !['hidden', 'checkbox', 'radio'].includes(inputs[0].type) && !inputs[0].disabled, 'unique-input');
     inputs[0].value = title; inputs[0].dispatchEvent(new document.defaultView.Event('input', { bubbles: true }));
     await tick(); await click('添加书籍');
   }

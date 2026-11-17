@@ -3,7 +3,7 @@
  * 在调用方提供的隔离文档中添加一本书并切换状态；不生成应用、不调用模型。
  * 记录固定检查名和计数，不收集页面正文、源码、Cookie 或错误原文。
  */
-export async function verifyReadingList(document, { tick, prefix = 'reading', record = () => {} }) {
+export async function verifyReadingList(document, { tick, prefix = 'reading', record = () => {}, addInput = null }) {
   const results = []
   const text = () => document.body.innerText
   const label = element => element.textContent.replace(/\s/g, '')
@@ -44,8 +44,11 @@ export async function verifyReadingList(document, { tick, prefix = 'reading', re
   check(text().includes('慢读书房') && ['小王子', '人类简史', '三体'].every(t => text().includes(t)), 'initial-books')
   check(unread().length === 3 && read().length === 0, 'initial-status')
   counts(3, 0, 'initial-counts')
-  const inputs = [...document.querySelectorAll('input')].filter(i => !['checkbox', 'radio', 'hidden'].includes(i.type))
-  check(inputs.length === 1 && !inputs[0].disabled, 'input')
+  // 新增搜索框时由调用方明确提供添加输入，不按页面顺序猜测。
+  const inputs = addInput ? [addInput] : [...document.querySelectorAll('input')].filter(i => !['checkbox', 'radio', 'hidden'].includes(i.type))
+  check(inputs.length === 1 && inputs[0]?.tagName === 'INPUT'
+      && inputs[0].ownerDocument === document && inputs[0].isConnected
+      && !['hidden', 'checkbox', 'radio'].includes(inputs[0].type) && !inputs[0].disabled, 'input')
   const input = inputs[0]
   const add = button('添加书籍', 'add-button')
   enter(input, '验收新书'); await tick(); add.click()

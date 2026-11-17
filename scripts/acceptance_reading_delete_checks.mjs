@@ -1,10 +1,10 @@
 /** 固定读书清单的增量删除验收，仅在同源隔离页面运行；会删除所有测试书籍。 */
 import { verifyReadingList } from './acceptance_reading_list_checks.mjs'
 
-export async function verifyReadingDeletion(document, { tick, prefix = 'delete', record = () => {} }) {
+export async function verifyReadingDeletion(document, { tick, prefix = 'delete', record = () => {}, addInput = null }) {
   const results = []
   const save = result => { results.push(result); record(result) }
-  await verifyReadingList(document, { tick, prefix: prefix + '-preserved', record: save })
+  await verifyReadingList(document, { tick, prefix: prefix + '-preserved', record: save, addInput })
   const text = () => document.body.innerText
   const label = e => e.textContent.replace(/\s/g, '')
   const buttons = name => [...document.querySelectorAll('button')].filter(b => label(b) === name)
@@ -61,8 +61,11 @@ export async function verifyReadingDeletion(document, { tick, prefix = 'delete',
   await remove('三体', 1, 0, 'third-delete')
   await remove('验收新书', 0, 0, 'last-delete')
   check(buttons('删除书籍').length === 0 && buttons('标记已读').length === 0, 'empty-list')
-  const inputs = [...document.querySelectorAll('input')].filter(i => !['checkbox', 'radio', 'hidden'].includes(i.type))
-  check(inputs.length === 1 && buttons('添加书籍').length === 1, 'empty-add-controls')
+  // 新增搜索框时由调用方明确提供添加输入，不按页面顺序猜测。
+  const inputs = addInput ? [addInput] : [...document.querySelectorAll('input')].filter(i => !['checkbox', 'radio', 'hidden'].includes(i.type))
+  check(inputs.length === 1 && inputs[0]?.tagName === 'INPUT'
+      && inputs[0].ownerDocument === document && inputs[0].isConnected
+      && !['hidden', 'checkbox', 'radio'].includes(inputs[0].type) && !inputs[0].disabled && buttons('添加书籍').length === 1, 'empty-add-controls')
   inputs[0].value = '删空后新书'; inputs[0].dispatchEvent(new document.defaultView.Event('input', { bubbles: true }))
   await tick(); buttons('添加书籍')[0].click(); await tick()
   check(text().includes('删空后新书'), 'readd'); counts(1, 0, 'readd-counts')

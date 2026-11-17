@@ -1,0 +1,68 @@
+<!doctype html><meta charset="UTF-8"><title>搜索探针夹具</title>
+<script type="module">
+import { verifyReadingSearch, readingSearchInputs } from '/acceptance_reading_search_checks.mjs'
+import { verifyReadingDeletion } from '/acceptance_reading_delete_checks.mjs'
+import { verifyReadingSort } from '/acceptance_reading_sort_checks.mjs'
+import { verifyReadingDuplicates } from '/acceptance_reading_duplicate_checks.mjs'
+const results = []
+// 手写夹具和故障仅验证探针拒绝能力，不是自然生成产物或平台修复。
+for (const fault of ['none', 'no-search', 'no-trim', 'filter-reset', 'visible-counts', 'sort-reset', 'clobber-query']) {
+  const frame = document.createElement('iframe'); document.body.append(frame)
+  const d = frame.contentDocument
+  const reset = () => {
+    d.body.innerHTML = '<h1>慢读书房</h1><div><input id="add-input"><button id="add">添加书籍</button></div><div><input id="search" type="search"></div><div id="filters"></div><p id="counts"></p><div id="books"></div>'
+    const books = ['小王子', '人类简史', '三体'].map(title => ({ title, read: false }))
+    let active = '全部', ascending = false
+    const render = () => {
+      const raw = d.querySelector('#search').value, query = fault === 'no-trim' ? raw : raw.trim()
+      let visible = books.filter(b => (active === '全部' || b.read === (active === '已读')) && (fault === 'no-search' || b.title.includes(query)))
+      if (ascending) visible = [...visible].sort((a, b) => a.title.localeCompare(b.title, 'zh-CN'))
+      const counted = fault === 'visible-counts' ? visible : books
+      d.querySelector('#counts').textContent = `共 ${counted.length} 本 · 已读 ${counted.filter(b => b.read).length} 本`
+      const list = d.querySelector('#books'); list.replaceChildren()
+      for (const book of visible) {
+        const card = d.createElement('section'), title = d.createElement('span'), status = d.createElement('button'), remove = d.createElement('button')
+        title.textContent = book.title; status.textContent = book.read ? '标记未读' : '标记已读'; remove.textContent = '删除书籍'
+        status.onclick = () => { book.read = !book.read; render() }
+        remove.onclick = () => { books.splice(books.indexOf(book), 1); render() }
+        card.append(title, status, remove); list.append(card)
+      }
+    }
+    for (const name of ['全部', '未读', '已读', '添加顺序', '书名升序']) {
+      const b = d.createElement('button'); b.textContent = name
+      b.onclick = () => {
+        if (name === '书名升序') ascending = true
+        else if (name === '添加顺序') ascending = false
+        else { active = name; if (fault === 'filter-reset') d.querySelector('#search').value = '' }
+        render()
+      }; d.querySelector('#filters').append(b)
+    }
+    d.querySelector('#search').oninput = () => { if (fault === 'sort-reset') ascending = false; render() }
+    d.querySelector('#add').onclick = () => {
+      const input = d.querySelector('#add-input')
+      if (input.value.trim()) { books.push({ title: input.value.trim(), read: false }); input.value = ''; if (fault === 'clobber-query') d.querySelector('#search').value = ''; render() }
+    }
+    render()
+  }
+  const checks = []; let error = null
+  const options = () => ({ tick: () => new Promise(r => setTimeout(r, 0)), record: r => checks.push(r), addInput: readingSearchInputs(d).addInput })
+  try {
+    if (fault === 'none') {
+      // 显式输入定位不接受其他文档或已脱离页面的元素，且不能退回任取第一个输入。
+      for (const input of [document.createElement('input'), d.createElement('input')]) {
+        reset(); let rejected = false
+        try { await verifyReadingSort(d, { ...options(), record: () => {}, addInput: input }) }
+        catch (e) { rejected = e.message === 'READING_SORT_FAILED:sort-unique-input' }
+        checks.push({ name: 'fixture-invalid-add-input', passed: rejected })
+        if (!rejected) throw new Error('FIXTURE_INVALID_INPUT_ACCEPTED')
+      }
+      reset(); await verifyReadingDeletion(d, options())
+      reset(); await verifyReadingSort(d, options()); await verifyReadingDuplicates(d, options())
+    }
+    reset(); await verifyReadingSearch(d, options())
+  } catch (e) { error = e.message }
+  results.push({ fault, error, checks }); frame.remove()
+}
+await fetch('/report', { method: 'POST', body: JSON.stringify(results) })
+document.body.textContent = '夹具完成'
+</script>

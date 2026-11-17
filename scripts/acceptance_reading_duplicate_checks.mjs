@@ -1,5 +1,5 @@
 /** 同名书籍固定隔离验收；会修改页面内存，不适用于任意应用或用户使用中的页面。 */
-export async function verifyReadingDuplicates(document, { tick, record = () => {} }) {
+export async function verifyReadingDuplicates(document, { tick, record = () => {}, addInput = null }) {
   const results = [], duplicate = '同名验收书', originals = ['小王子', '人类简史', '三体'];
   const label = e => e.textContent.replace(/\s/g, '');
   const buttons = name => [...document.querySelectorAll('button')].filter(e => label(e) === name);
@@ -45,9 +45,12 @@ export async function verifyReadingDuplicates(document, { tick, record = () => {
     found[0].click(); await tick();
   }
   async function add() {
-    const inputs = [...document.querySelectorAll('input')].filter(e => !['hidden', 'checkbox', 'radio'].includes(e.type));
+    // 新增搜索框时由调用方明确提供添加输入，不按页面顺序猜测。
+    const inputs = addInput ? [addInput] : [...document.querySelectorAll('input')].filter(e => !['hidden', 'checkbox', 'radio'].includes(e.type));
     const adds = buttons('添加书籍');
-    check(inputs.length === 1 && !inputs[0].disabled && adds.length === 1, 'add-controls');
+    check(inputs.length === 1 && inputs[0]?.tagName === 'INPUT'
+      && inputs[0].ownerDocument === document && inputs[0].isConnected
+      && !['hidden', 'checkbox', 'radio'].includes(inputs[0].type) && !inputs[0].disabled && adds.length === 1, 'add-controls');
     inputs[0].value = duplicate; inputs[0].dispatchEvent(new document.defaultView.Event('input', { bubbles: true }));
     await tick(); check(!adds[0].disabled, 'add-enabled'); adds[0].click(); await tick();
   }
