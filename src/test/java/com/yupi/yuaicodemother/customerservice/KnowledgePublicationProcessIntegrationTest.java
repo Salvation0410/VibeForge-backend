@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class KnowledgePublicationProcessIntegrationTest {
     @Test void exitBeforeCommitLeavesNoFactAndOriginalExecutionCanCommit() throws Exception { scenario("before"); }
     @Test void exitAfterCommitBeforeAcknowledgementRepeatsPersistedFact() throws Exception { scenario("after"); }
+    @Test void exitAfterAnchorRegistrationRetainsFirstIdentity() throws Exception { scenario("anchor"); }
 
     void scenario(String phase) throws Exception {
         new KnowledgePublicationMysqlIntegrationTest().isolated(f->{
@@ -33,6 +34,23 @@ class KnowledgePublicationProcessIntegrationTest {
                 var lease=json.treeToValue(saved.get("lease"),KnowledgeMutationCoordinator.Lease.class);
                 var context=json.treeToValue(saved.get("context"),PublicationContext.class);
                 var receipt=json.treeToValue(saved.get("receipt"),CandidateReceipt.class);
+                if(phase.equals("anchor")) {
+                    // 必须先证实子进程持久化，不能由父register补建后冒充退出恢复。
+                    assertEquals(1,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_prepare_anchor"));
+                    String stored=f.jdbc.queryForObject("SELECT anchorJson FROM customer_service_knowledge_prepare_anchor WHERE taskId=1",String.class);
+                    var persisted=json.readValue(stored,PrepareAnchor.class);
+                    assertEquals(lease.operationId(),persisted.operationId());
+                    var anchor=f.service.registerPrepareAnchor(1,"owner",lease,context);
+                    assertEquals(persisted,anchor);
+                    assertEquals(lease.operationId(),anchor.operationId());
+                    f.coordinator.revoke(lease);
+                    var next=f.coordinator.acquire("document:1","replacement_attempt","INDEX","owner");
+                    assertEquals(anchor,f.service.registerPrepareAnchor(1,"owner",next,context));
+                    assertEquals(1,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_prepare_anchor"));
+                    assertEquals(0,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_publication WHERE publicationId='task_1'"));
+                    assertEquals(1,f.scalar("SELECT epoch FROM customer_service_knowledge_publication_state WHERE id=1"));
+                    return;
+                }
                 boolean committed=phase.equals("after");
                 assertEquals(committed?1:0,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_publication WHERE publicationId='task_1'"));
                 assertEquals(committed?2:1,f.scalar("SELECT epoch FROM customer_service_knowledge_publication_state WHERE id=1"));
@@ -55,7 +73,7 @@ class KnowledgePublicationProcessIntegrationTest {
     public static class Child {
         public static void main(String[] args) throws Exception {
             if(args.length!=3 || !args[0].matches("rag_publication_it_[a-f0-9]{32}")
-                    || !(args[1].equals("before")||args[1].equals("after"))) throw new IllegalArgumentException("隔离参数错误");
+                    || !(args[1].equals("before")||args[1].equals("after")||args[1].equals("anchor"))) throw new IllegalArgumentException("隔离参数错误");
             Path target=Path.of(args[2]).toAbsolutePath().normalize();
             if(!target.startsWith(Path.of("tmp").toAbsolutePath().normalize())) throw new IllegalArgumentException("仅限tmp");
             var fixture=new KnowledgePublicationMysqlIntegrationTest.Fixture(args[0],false);
@@ -64,6 +82,7 @@ class KnowledgePublicationProcessIntegrationTest {
             saved.set("lease",json.valueToTree(execution.lease()));saved.set("context",json.valueToTree(execution.context()));
             saved.set("receipt",json.valueToTree(execution.receipt()));Files.writeString(target,json.writeValueAsString(saved));
             if(args[1].equals("after")) fixture.service.commit(1,"owner",execution.lease(),execution.context(),execution.receipt());
+            if(args[1].equals("anchor")) fixture.service.registerPrepareAnchor(1,"owner",execution.lease(),execution.context());
             // 模拟没有finally/回执的进程退出，parent重新连接持久库核对事实。
             Runtime.getRuntime().halt(77);
         }

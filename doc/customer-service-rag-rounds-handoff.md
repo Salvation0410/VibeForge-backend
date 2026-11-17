@@ -295,6 +295,40 @@ P1补恢复并发/进程退出边界：首候选半写退出、同attempt并发�
 
 P2设计人工可审核GC：本轮减少了Embedding但集合仍积累。先确定事实引用、在途读、未知prepare/commit及anchor引用的保护，再决定隔离期和删除重入流程；NO_OBSERVED_FACT不等于无引用。P3人工标注拒答/多证据质量评估及cap2/R2单变量对照；R1/denseTop8/cap1/final3仍保持。生产策略存在多个不同成本选择时再具体说明并确认，本轮已批准恢复方案无需重复授权。
 
+## 第八轮：恢复并发、半写退出与旧执行拒绝（2026-11-17）
+
+### 原问题、选择与实现
+
+第七轮证明完整候选可跨Python重启恢复，但半写进程退出和首次并发仍缺证据。本轮按用户授权优先补隔离验收，未修改生产策略。测试流程分别验证Milvus持久候选、Spring持久anchor和业务发布仲裁，不将这些独立测试称为完整HTTP并发矩阵。计划为docs/superpowers/plans/2026-11-17-rag-recovery-fault-matrix.md。
+
+Python用两个独立Preparer/Store与同一有效测试许可，Embedding入口屏障让两个首次请求均在集合创建前到达。第二请求等第一完成后继续写，确定性名称拒绝覆盖；完整重传返回第一收据且不新增调用。用非串行许可替代Fake默认scope锁，是为了暴露HTTP租约适配器只验权、不串行化同lease请求的真实边界；许可仍是测试替身，不验证Spring跨实例授权。
+
+真实随机Milvus子进程使用正式Preparer/PublicationStore，在首批块insert正常结束后os._exit(79)，跳过finally和完成标记。父进程独立读取持久集合，确认有块而无完成证据；以新attempt恢复必须KNOWLEDGE_PUBLICATION_INCOMPLETE，计数Embedding0，不覆盖旧行、不创建新attempt集合。父fixture登记确定性目标，清理前复核随机aliasHash/kind，再删除并检查不存在。使用合成文档和向量，不调用供应商。
+
+Java新增子JVManchor登记后Runtime.halt(77)：父连接再次取得同anchor，新lease仍返回首次身份，无task_1发布事实且head epoch1。MySQL替代claim测试显式更新隔离owner、撤旧lease并取得替代lease，旧登记/提交必须CLAIM_LOST，替代owner可以读取原anchor且自身PROCESSING状态不被旧执行改写。epoch变更后旧收据commit必须EPOCH_CONFLICT，不写事实/serving，anchor保留。此为明确构造已接管状态，不实现自动认领。
+
+### 发现、成本与不适用边界
+
+实测首次并发可以发生两次Fake Embedding，而后仅一份完成候选；再次重传调用数仍2。这证明确定性集合名只防覆盖，无法拦截创建前重复付费。第七轮普通顺序重试1次Embedding的成绩仍有效，两种触发不同，不能合并成计费exactly-once。名称冲突会失败，当前没有跨实例prepare执行锁。半写退出的父恢复Embedding0只表示恢复没再调用，不说明子进程退出前免费。
+
+本轮没有发现发布覆盖或旧claim越权缺陷，生产代码无修改、无新增schema或正式INDEX/REBUILD。没有在MySQL事务中途强杀，没有真实HTTP同lease并发、网络分区、进程长期暂停或claim自动接管；epoch用隔离数据库顺序交错，不宣称覆盖任意原子性。真实Milvus半写测试替代租约、不访问MySQL，与Java持久测试分开报告。
+
+### 验证与失败记录
+
+Java资源组14项通过（11项隔离MySQL、3项子JVM），0失败/错误/跳过，14个随机schema清理；父进程补强先直接读取anchor存在证据后再register，子JVM三项重新通过。日志tmp/round8-java-resources.log、round8-java-summary.json、round8-java-process-final.log，最终干净编译tmp/round8-java-compile-final.log成功。Python并发目标1项通过，真实Milvus子进程1项通过，元数据确认后精确清理；日志tmp/round8-python-target.log、round8-milvus-process.log。
+
+首次Python完整回归1645通过、25跳过、1失败：既有test_real_rag_diagnostic_preserves_timeout_and_degradation_after_drain的disconnect分支同时设置30ms timeout，返回CUSTOMER_SERVICE_TIMEOUT而不是预期取消。源码确认断连需等待模型entered，超时可在调度前先发生；该组单独3项复验通过，尚未稳定复现，不修改生产超时策略或删除失败证据。日志tmp/round8-python-final.log/xml、round8-timeout-recheck.log；完整复验另记，不用后续成功覆盖首次结果。
+
+最终完整Python复验1646通过、25跳过、0失败，日志tmp/round8-python-recheck.log/xml；compileall与uv lock检查通过。25跳过包括新增显式Milvus进程场景，实际资源结果由单独opt-in运行提供。首次失败及单项复验保留，不宣称竞争已修复。测试完成后恢复本轮管理的Python，Spring始终保持运行；生产源码和schema未变，不部署测试入口。
+
+正式库最终只读核对通过：两端健康，epoch=1、原publication/head/alias不变，11 ACTIVE/1 DISABLED，72块/11 manifest原字段及f32向量一致，旧源未变，模型/Embedding调用0；日志tmp/round8-runtime-final.log。保留用户README两反引号和未跟踪取消计划。本轮增加验收设施，不声称答案质量提升或自动恢复上线。
+
+### 下一轮建议、原因与验收
+
+P1针对首次并发重复付费设计跨实例prepare执行仲裁。推荐先做具体方案：独立持久attempt状态，只有执行所有者可以开始Embedding；同attempt其他请求读取COMPLETE或明确BUSY/UNKNOWN，不能超时后自动重算。执行超时和进程退出可能保留UNKNOWN，需要新INDEX或经审查的恢复；不得把锁超时等同于未调用供应商。代价是台账/所有者/状态维护与故障运维，收益是收窄本轮已证实的创建前重复调用窗口。
+
+另一方案限制为Spring同进程请求串行或保留当前冲突拒绝，改动较小，但无法涵盖多实例/重启重复请求。生产仲裁取舍需具体设计并按AGENTS.md确认后实施，不能直接套Redis TTL锁宣称exactly-once。预定验收同lease并发、跨实例、所有者退出/暂停、完成回执丢失、DB离线和epoch撤销，每次记录发送前持久事实和Fake调用数；不提高真实供应商预算。P2GC仍需引用保护，P3质量标注和cap2/R2继续独立验证。
+
 ## 以后每轮必须使用的交接格式
 
 1. 本轮解决什么：原问题的具体触发场景、证据和目标。

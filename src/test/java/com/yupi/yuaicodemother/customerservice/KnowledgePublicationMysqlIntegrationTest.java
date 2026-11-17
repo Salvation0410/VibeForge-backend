@@ -27,6 +27,37 @@ import static org.junit.jupiter.api.Assertions.*;
 /** 随机独立 schema 中使用真实 Mapper/事务；不改业务库，不调用模型或 Milvus。 */
 @EnabledIfEnvironmentVariable(named="AI_KNOWLEDGE_PUBLICATION_MYSQL_INTEGRATION",matches="true")
 class KnowledgePublicationMysqlIntegrationTest {
+    @Test void replacementClaimRejectsOldAnchorRegistrationAndCommit() throws Exception {
+        isolated(f->{
+            var first=f.prepare(1);
+            var anchor=f.service.registerPrepareAnchor(1,"owner",first.lease(),first.context());
+            // 显式模拟已由业务调度完成的claim替换，不自动认领过期任务。
+            f.jdbc.update("UPDATE customer_service_knowledge_etl_outbox SET processingOwner='replacement' WHERE id=1");
+            f.coordinator.revoke(first.lease());
+            var replacement=f.coordinator.acquire("document:1","new_claim_attempt","INDEX","replacement");
+            assertEquals("KNOWLEDGE_PUBLICATION_CLAIM_LOST",assertThrows(IllegalStateException.class,
+                ()->f.service.registerPrepareAnchor(1,"owner",first.lease(),first.context())).getMessage());
+            assertEquals("KNOWLEDGE_PUBLICATION_CLAIM_LOST",assertThrows(IllegalStateException.class,
+                ()->f.service.commit(1,"owner",first.lease(),first.context(),first.receipt())).getMessage());
+            assertEquals(anchor,f.service.registerPrepareAnchor(1,"replacement",replacement,first.context()));
+            assertEquals(0,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_publication WHERE publicationId='task_1'"));
+            assertEquals(1,f.scalar("SELECT epoch FROM customer_service_knowledge_publication_state WHERE id=1"));
+            assertEquals(1,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_etl_outbox WHERE processingOwner='replacement' AND status='PROCESSING'"));
+        });
+    }
+    @Test void epochChangedAfterCandidatePreparationRejectsOldCommit() throws Exception {
+        isolated(f->{
+            var first=f.prepare(1);
+            f.service.registerPrepareAnchor(1,"owner",first.lease(),first.context());
+            f.service.beforeAdministrativeMutation();
+            assertEquals("KNOWLEDGE_PUBLICATION_EPOCH_CONFLICT",assertThrows(IllegalStateException.class,
+                ()->f.service.commit(1,"owner",first.lease(),first.context(),first.receipt())).getMessage());
+            assertEquals(0,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_publication WHERE publicationId='task_1'"));
+            assertEquals(2,f.scalar("SELECT epoch FROM customer_service_knowledge_publication_state WHERE id=1"));
+            assertEquals(0,f.scalar("SELECT indexedVersion FROM customer_service_knowledge_document WHERE id=1"));
+            assertEquals(1,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_prepare_anchor"));
+        });
+    }
     @Test void prepareAnchorSurvivesLeaseChangeAndRejectsEpochDrift() throws Exception {
         isolated(f->{
             var first=f.prepare(1);
