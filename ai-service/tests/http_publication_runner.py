@@ -48,6 +48,7 @@ def serve(args):
     class Embeddings:
         calls=0
         async def embed_query(self,question): self.calls+=1;return [0.1,0.2,0.9]
+        async def embed_documents(self,texts,**kwargs):self.calls+=1;return [[0.1,0.2,0.9] for _ in texts]
     class Model(FakeModel):
         answer_calls=0
         async def answer_customer_service(self,question,contexts):
@@ -58,13 +59,96 @@ def serve(args):
             return CustomerServiceModelAnswer(True,'隔离有据答案',(contexts[0].chunk_id,))
     embeddings=Embeddings();model=Model()
     service=CustomerServiceRagService(s,embeddings,AuthoritativeKnowledgeStore(s,store,PublicationStore(s,store),control),FakeReranker(),model)
-    app=create_app(settings=s,model=model,tool_gateway=FakeToolGateway(),checkpoint=DisabledCheckpoint(),
+    if args.prepare_mode:
+        from test_knowledge_publication import Downloader
+        path=args.report.parent/'manual.txt'
+        app=create_app(settings=s,model=model,tool_gateway=FakeToolGateway(),checkpoint=DisabledCheckpoint(),
+            knowledge_downloader=Downloader(path),embedding_provider=embeddings,reranker=FakeReranker())
+    else:
+        app=create_app(settings=s,model=model,tool_gateway=FakeToolGateway(),checkpoint=DisabledCheckpoint(),
         knowledge_etl_service=object(),mutation_coordinator=object(),customer_service_rag_service=service,
         knowledge_publication_client=control,reranker=FakeReranker(),
         knowledge_publication_preparer=SimpleNamespace(publications=PublicationStore(s,store)))
     @app.get('/test/counts')
     def counts():return dict(embeddings=embeddings.calls,model=model.answer_calls)
     uvicorn.run(app,host='127.0.0.1',port=args.python_port,log_level='error')
+
+async def prepare_run(args):
+    assert args.alias.startswith('rag_http_it_') and len(args.alias)==44
+    s=settings(args.alias,args.spring_port);milvus=MilvusClient(uri=s.milvus_uri,timeout=20)
+    owned=OwnedClient(milvus,args.alias);store=MilvusKnowledgeStore(s,client_factory=lambda **_:owned,mutation_coordinator=LocalCoordinator())
+    children=[];proxy=None;state={'requests':0,'drop':True};attempts=[];port=free_port()
+    try:
+        context=PublicationContext(publication_id='bootstrap_'+'0'*32,base_epoch=0,source_collection=None,documents=[])
+        permit_lease=lease('collection:'+args.alias,operation='REBUILD')
+        async with store._mutation(permit_lease,scope=permit_lease.scope,operation='rebuild') as permit:
+            initial=await PublicationStore(s,store).write(context,permit_lease,[],permit)
+        (args.report.parent/'manual.txt').write_text('隔离知识说明',encoding='utf8')
+        async with httpx.AsyncClient(trust_env=False,timeout=45,headers={'Authorization':'Bearer '+TOKEN}) as c:
+            r=await c.post(f'http://127.0.0.1:{args.spring_port}/test/initialize',json=initial.model_dump(by_alias=True));r.raise_for_status()
+        process=subprocess.Popen([sys.executable,__file__,'--serve','--prepare-mode','--alias',args.alias,'--proxy-port',str(args.spring_port),
+            '--python-port',str(port),'--report',str(args.report)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform=='win32' else 0);children.append(process)
+        async with httpx.AsyncClient(trust_env=False,timeout=2) as c:
+            for _ in range(100):
+                if process.poll() is not None:raise RuntimeError('PREPARE_CHILD_EXITED')
+                try:
+                    if (await c.get(f'http://127.0.0.1:{port}/health/live')).status_code==200:break
+                except httpx.HTTPError:pass
+                await asyncio.sleep(.1)
+            else:raise RuntimeError('PREPARE_START_TIMEOUT')
+        class Proxy(BaseHTTPRequestHandler):
+            def log_message(self,*_):pass
+            def do_POST(self):
+                raw=self.rfile.read(int(self.headers.get('Content-Length','0')))
+                with httpx.Client(trust_env=False,timeout=35) as c:
+                    response=c.post(f'http://127.0.0.1:{port}'+self.path,content=raw,headers={'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json'})
+                if 'prepare-publication' in self.path:
+                    state['requests']+=1
+                    # 仅在内存核对完整身份；租约proof和下载地址不进入日志或报告。
+                    assert response.status_code==200, response.status_code
+                    attempts.append((json.loads(raw),response.json()))
+                    if state['drop'] and response.status_code==200:
+                        state['drop']=False;self.connection.shutdown(socket.SHUT_RDWR);self.connection.close();return
+                self.send_response(response.status_code);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(response.content)
+        proxy=ThreadingHTTPServer(('127.0.0.1',0),Proxy);threading.Thread(target=proxy.serve_forever,daemon=True).start()
+        async with httpx.AsyncClient(trust_env=False,timeout=60,headers={'Authorization':'Bearer '+TOKEN}) as c:
+            first=(await c.post(f'http://127.0.0.1:{args.spring_port}/test/worker',json={'port':proxy.server_port})).json()
+            assert first['status']=='PENDING' and first['retryCount']==1,first
+            counts=(await c.get(f'http://127.0.0.1:{port}/test/counts')).json();assert counts['embeddings']==1 and counts['model']==0,counts
+            client=SpringKnowledgePublicationClient(gateway_base_url=f'http://127.0.0.1:{args.spring_port}',bearer_token=TOKEN)
+            before=await client.snapshot();assert before.epoch==1 and before.collection_name==initial.candidate_collection
+            validation=(await c.post(f'http://127.0.0.1:{args.spring_port}/internal/customer-service/knowledge-mutation-leases:validate',
+                json=attempts[0][0]['mutation']['lease'])).json()
+            assert validation['data']['verified'] is True and validation['data']['current'] is False
+            second=(await c.post(f'http://127.0.0.1:{args.spring_port}/test/worker',json={'port':proxy.server_port})).json();assert second['status']=='SUCCEEDED',second
+            counts=(await c.get(f'http://127.0.0.1:{port}/test/counts')).json();assert counts['embeddings']==2 and counts['model']==0,counts
+            fact=await client.fact('task_1');assert fact.epoch==2
+            names=[n for n in milvus.list_collections() if n.startswith(args.alias+'_pub_')]
+            assert len(names)==3 and state['requests']==2 and not state['drop'],(names,state)
+            first_receipt,second_receipt=attempts[0][1],attempts[1][1]
+            assert first_receipt['operationId']!=second_receipt['operationId']
+            assert first_receipt['fence']<second_receipt['fence']
+            assert first_receipt['candidateCollection']!=second_receipt['candidateCollection']
+            assert fact.receipt.model_dump(by_alias=True)==second_receipt
+            after=await client.snapshot();assert after.collection_name==second_receipt['candidateCollection']
+            assert first_receipt['candidateCollection'] in names
+            # 未确认首候选保留，但数据库只发布第二attempt；旧候选没有alias激活权。
+            args.report.write_text(json.dumps(dict(prepareResponseDropped=not state['drop'],embeddingCalls=counts['embeddings'],candidates=len(names),
+                prepareRequests=state['requests'],firstTaskState=first['status'],publishedEpoch=fact.epoch,paidCalls=0,
+                oldLeaseRevoked=True,attemptIdentityIsolated=True,publishedSecondReceipt=True,oldHeadPreserved=True),indent=2),encoding='utf8')
+            await client.close()
+    finally:
+        for child in children:
+            if child.poll() is None:child.terminate();child.wait(10)
+        if proxy:proxy.shutdown();proxy.server_close()
+        try:
+            if args.alias in milvus.list_aliases().get('aliases',[]):milvus.drop_alias(args.alias)
+            for name in milvus.list_collections():
+                if name.startswith(args.alias+'_'):
+                    assert args.alias.startswith('rag_http_it_');milvus.drop_collection(name)
+            assert not any(n.startswith(args.alias+'_') for n in milvus.list_collections())
+        finally:await store.close()
 
 async def run(args):
     assert args.alias.startswith('rag_http_it_') and len(args.alias)==44
@@ -156,6 +240,8 @@ async def run(args):
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--alias',required=True);p.add_argument('--spring-port',type=int);p.add_argument('--report',type=Path)
+    p.add_argument('--prepare-mode',action='store_true')
     p.add_argument('--serve',action='store_true');p.add_argument('--proxy-port',type=int);p.add_argument('--python-port',type=int);args=p.parse_args()
     if args.serve:serve(args)
+    elif args.prepare_mode:asyncio.run(prepare_run(args))
     else:asyncio.run(run(args))

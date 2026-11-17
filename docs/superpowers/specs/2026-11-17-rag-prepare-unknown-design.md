@@ -1,0 +1,5 @@
+# 第六轮：prepare未知结果与worker重试验收
+
+按第五轮交接及优先级授权，扩展隔离HTTP设施：真实worker调用正式Python prepare-publication，Python使用真实Milvus与Spring租约验证、注入本地合成下载/Embedding。代理在候选完成后丢弃第一次prepare响应，记录调用与候选数。验证原head不变、任务失败/重试状态，第二次同任务不同attempt构建再发布的事实唯一性。
+
+本轮先建立成本和正确性证据，不新增prepare幂等缓存、复用未知收据、自动恢复或GC。重复Embedding/候选即使可观测也不代表应不经授权复用旧attempt。测试仅随机MySQL schema/alias、回环Web及test classpath控制器；生产源码不改。记录真实调用层次、未测接管/epoch交错及后续方案取舍。

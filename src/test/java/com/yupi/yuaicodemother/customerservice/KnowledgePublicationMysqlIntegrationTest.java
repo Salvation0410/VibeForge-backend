@@ -164,6 +164,7 @@ class KnowledgePublicationMysqlIntegrationTest {
         final KnowledgeMutationCoordinator coordinator;
         final KnowledgePublicationService service;
         final CustomerServiceKnowledgeEtlOutboxMapper tasks;
+        final CustomerServiceKnowledgeDocumentMapper documentMapper;
         final CustomerServiceProperties properties=new CustomerServiceProperties();
         Fixture(String schema) throws Exception {
             this(schema,true);
@@ -187,6 +188,7 @@ class KnowledgePublicationMysqlIntegrationTest {
             }
             var sessions=new SqlSessionTemplate(new SqlSessionFactoryBuilder().build(cfg));
             tasks=sessions.getMapper(CustomerServiceKnowledgeEtlOutboxMapper.class);
+            documentMapper=sessions.getMapper(CustomerServiceKnowledgeDocumentMapper.class);
             properties.setPublicationEnabled(true);
             var ai=new AiEngineProperties();ai.setToken("isolated-signing-secret");
             coordinator=transactional(new KnowledgeMutationCoordinator(sessions.getMapper(CustomerServiceKnowledgeMutationLeaseMapper.class),ai,properties,Clock.fixed(NOW,ZoneOffset.UTC)));

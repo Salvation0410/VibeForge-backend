@@ -226,6 +226,36 @@ Python compileall（含测试运行器）、完整pytest、uv lock检查通过�
 
 优先补真实worker到prepare-publication的全链路及未知准备响应：Python已经完成候选，但Java未收到收据时，任务保持何种状态、重试是否产生额外候选、当前epoch变化怎样拒绝旧尝试。原因是本轮确认的是数据库commit事实丢响应及读取故障，尚未覆盖付费/候选构建阶段的未知结果。使用隔离任务与可计数合成Embedding，把发送前屏障、完成后断开和claim/lease接管放进同一演练；逐项核对原head、候选数量、事实唯一及调用数。若据此需要新增候选准备幂等/恢复策略，应先给用户说明稳定ID、attempt隔离、费用和存储代价的方案，不直接推广生产行为。自动GC仍需独立无引用保护设计。
 
+## 第六轮：prepare响应未知与真实worker重试（2026-11-17）
+
+### 问题、选择与实现
+
+第五轮验证了commit落库后响应丢失，但没有覆盖Python已完成候选、Java未收到prepare收据的成本窗口。本轮按优先级扩展隔离验收设施，生产策略未改。真实worker的poll负责claim、租约、prepare和commit，测试事务finalizer及生产Controller/Mapper访问随机MySQL schema；独立FastAPI使用正式app factory/ETL/Preparer、真实Spring租约验证及Milvus。合成HTTPS签名地址由本地测试Downloader替代下载，计数Fake Embedding替代供应商。
+
+代理只在prepare返回200、候选已完成后断开首响应。worker按既有瞬态错误处理为PENDING、retryCount=1并撤销租约；测试核对原epoch=1空head未动，再显式推进nextRetryTime并再次poll。第二attempt使用不同operationId、更高fence和不同候选，成功提交task_1唯一事实并推进epoch=2。核对事实完整收据等于第二响应、head指向第二集合、首候选仍存在。初始空候选通过正式PublicationStore建立，但初始化许可为测试替身。
+
+选择先测再设计复用，原因是提交幂等不等于准备幂等，不能仅因publicationId相同跨lease直接发布。新断言明确旧proof仍可验真但current=false；不将首候选完成标记当作当前提交资格。关键文件为HTTP IntegrationTest、Mysql IntegrationTest夹具与http_publication_runner.py；控制入口仅test classpath、回环监听。
+
+### 边界、成本与失败记录
+
+实测两次prepare、两次Fake文档Embedding、零回答模型和零真实供应商调用；集合共三个（初始空集合+两次INDEX）。这证明同任务准备响应未知的重试存在重复计算和候选积累路径，不能据Fake调用次数推算真实费用或延迟。首尝试失败后旧lease已撤销，原head保留，最终数据库只发布第二收据。本轮未直接提交旧收据测试其拒绝，也未覆盖claim接管、并发epoch变更、prepare中途退出、定时调度和真正供应商。不能宣称自动任务恢复、准备缓存或GC已实现。
+
+首次执行在prepare前被INVALID_REQUEST拒绝：测试OSS替身使用HTTP地址，正式schema只接受HTTPS；修正合成地址后通过，没有放宽生产校验。失败日志为tmp/round6-prepare-test.log，修正复验为tmp/round6-prepare-test2.log。资源测试使用随机命名空间并finally清理、复核集合不存在；不删除正式历史候选。
+
+### 验证与交付状态
+
+最终Java目标80项通过、0失败/错误/跳过，包含2项HTTP、8项隔离MySQL及2项子JVM场景，12个随机schema清理；日志tmp/round6-java-combined.log和round6-java-summary.json。首次组合命令误用资源开关导致MySQL组跳过，随后以AI_KNOWLEDGE_PUBLICATION_MYSQL_INTEGRATION=true明确补跑并最终合并复验，不将跳过写成通过。干净编译成功，日志tmp/round6-java-compile.log。Python compileall（含运行器）、uv lock检查及完整pytest通过，1636 passed/24 skipped/0 failed，日志与JUnit为tmp/round6-python-final.log/xml。报告tmp/round6-prepare-report.json逐项记录首响应丢弃、两次Embedding、三个候选、旧lease撤销、attempt隔离和第二收据发布。
+
+停止本轮管理的Python释放GPU锁后运行完整回归，完成后重新启动。正式知识库只读完整核对通过：两端健康、epoch=1、原publication/head/alias不变，11 ACTIVE/1 DISABLED、72块/11 manifest原字段和f32向量逐项一致、旧源未变；日志tmp/round6-runtime-final.log。真实回答/Embedding调用均0。本轮无生产源码或数据库结构变动，无需部署测试接口；README新增验收说明，保留用户既有两反引号修改及未跟踪取消计划。
+
+### 下一轮方案与优先级
+
+P1建议实现“可核验准备结果恢复”：Spring在发送前持久化attempt身份，Python提供受认证、有界的准备结果查询；响应未知先按原attempt查询完成证据。重试取得新租约后，重新核对baseEpoch、源collection、文档内容/索引/激活身份、Embedding模型/维度及完整候选快照。满足条件时将已验收向量复制到新attempt私有候选并产生新收据，最终仍走原事务提交。旧候选和旧收据不直接获得新lease权限。目标减少重复Embedding，仍承担整库复制/回读与状态维护成本，需设计未完成/部分写入/查询故障的显式分支。
+
+另一方案继续每次新attempt重新构建，流程和隔离较简单，但保留重复计算/存储成本；只在同一有效lease重传缓存收据的方案实施较小，无法覆盖当前worker finally撤lease后的下一次执行。推荐可核验恢复，因为它直接对应本轮实际故障窗口；存在不同生产代价，实施前按AGENTS.md待用户确认。
+
+预定验收：首次完成丢响应后仅一次Embedding，新attempt仍拥有独立收据和唯一事实；epoch漂移、文档撤销/修改、模型变化、旧lease失效、结果缺失/未完成/损坏、重复请求及进程重启均不得绕过现有授权。查询失败不自动证明需要重算，不得通过换账本绕过调用预算。先定义允许重算或停止的规则再实现。P2自动GC需独立引用与隔离期设计，NO_OBSERVED_FACT不能作为删除授权；P3再用人工标注质量集评估cap2/R2，当前R1/denseTop8/cap1/final3保持。
+
 ## 以后每轮必须使用的交接格式
 
 1. 本轮解决什么：原问题的具体触发场景、证据和目标。
