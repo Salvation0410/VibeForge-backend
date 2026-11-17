@@ -220,6 +220,8 @@ Python compileall（含测试运行器）、完整pytest、uv lock检查通过�
 
 本机服务恢复后只读完整复验通过：两端健康，epoch=1/publication/head/alias不变，11 ACTIVE/1 DISABLED，72块与11 manifest原字段及f32向量逐项一致，旧源保留；日志 `tmp/round5-runtime-final.log`。本轮正式库没有INDEX/REBUILD/bootstrap或模型调用，不把合成HTTP答案当作自然语言质量评估。
 
+第五轮实现、测试、设计及交接提交为 `ea1deb9`；未混入另一任务生成验收脚本或用户既有README修改。
+
 ### 下一轮建议
 
 优先补真实worker到prepare-publication的全链路及未知准备响应：Python已经完成候选，但Java未收到收据时，任务保持何种状态、重试是否产生额外候选、当前epoch变化怎样拒绝旧尝试。原因是本轮确认的是数据库commit事实丢响应及读取故障，尚未覆盖付费/候选构建阶段的未知结果。使用隔离任务与可计数合成Embedding，把发送前屏障、完成后断开和claim/lease接管放进同一演练；逐项核对原head、候选数量、事实唯一及调用数。若据此需要新增候选准备幂等/恢复策略，应先给用户说明稳定ID、attempt隔离、费用和存储代价的方案，不直接推广生产行为。自动GC仍需独立无引用保护设计。
