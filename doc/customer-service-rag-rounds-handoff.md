@@ -287,6 +287,8 @@ HTTP场景首次prepare200后丢响应、原head保留、旧lease撤销，终止
 
 最终已启动新版Spring/Python，本机只读完整核对成功：epoch=1、原head/publication/alias不变，11 ACTIVE/1 DISABLED，72块/11 manifest所有原字段与f32向量逐项一致，旧源未变，两端健康，真实模型/Embedding调用0。日志tmp/round7-runtime-final.log。本轮已部署恢复源码及空anchor表，没有执行正式INDEX/REBUILD/bootstrap。保留用户README两反引号及未跟踪取消计划，不混入提交。
 
+第七轮设计提交bd12ba1；实现、测试、迁移及运行交接提交eb8386a（feat(rag): 恢复已验收准备结果并避免重试重复向量计算）。
+
 ### 下一轮优先项、原因和验收
 
 P1补恢复并发/进程退出边界：首候选半写退出、同attempt并发、epoch改变与恢复写入交错、Spring登记确认未知后重启、替代claim拒绝旧执行。原因是本轮已证明完整候选可跨Python重启恢复，但半写和跨实例竞态主要是离线边界。使用随机schema/alias、发送/完成屏障和计数替身，验收绝不覆盖旧候选、不错误激活、不额外Embedding。首轮只补证据，不自动增加续跑或重算策略。
