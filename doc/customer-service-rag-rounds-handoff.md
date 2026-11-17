@@ -186,6 +186,8 @@ Java目标测试含普通回归、7项ownership隔离MySQL、8项publication隔�
 
 最后启动Python后复验：首次健康请求早于8000监听建立而连接失败，服务就绪后重新验收成功，未为启动时序修改生产行为。两端健康、11 ACTIVE/1 DISABLED、0未完成任务、原head/epoch/alias和72块/11 manifest原字段及f32向量逐项一致，旧源不变；证据 `tmp/round4-runtime-final.log`、`tmp/b0b-runtime-verification.json`。默认元数据观测另运行成功，不下载向量，报告 `tmp/round4-capacity-metadata.json`；完整JSON测量4,601,857字节的报告不被默认模式的0测量覆盖。当前线上已载入只读inventory接口，Python CLI源码可直接运行，没有新增问答参数或收费调用。
 
+本轮实现/测试/运行交接提交为 `3e2bc53`，设计范围提交 `cf49361`。只提交本轮路径，保留README既有两反引号和用户未跟踪取消计划；另一任务Vue提示提交不属于本轮优化。
+
 ### 下一轮说明
 
 优先补完整隔离Spring/Python HTTP协作的故障矩阵：commit已落库但HTTP响应不可达、在途回答期间控制API故障、实例恢复后的稳定ID确认及多实例alias对账。原因是本轮子进程和真实资源分别验证了边界，但尚未将整套HTTP/worker调度串成同一演练。使用随机库/alias、固定合成向量和计数Fake模型，先定义发送前后屏障与可重复响应丢弃；不能通过改ID、切旧alias、重算向量或直接标成功完成恢复。预定逐项核对原事实/head/serving/task/回答来源，明确请求零重试和模型调用数。
