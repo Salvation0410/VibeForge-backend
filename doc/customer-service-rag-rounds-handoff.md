@@ -159,6 +159,39 @@ Spring以documentVersion记录不可变内容，以每文档etlVersion记录稳�
 
 **预定验收：** 所有故障都检查实际文档/索引/激活身份，未知提交不重复付费、不覆盖相同ID事实；停止写入后alias应收敛。容量报告不得输出原文、向量、下载URL或凭据。人工标注校准、多证据cap2与拒答质量评估留作后续独立变量，需有新证据再决定推广。
 
+## 第四轮：故障证据与只读候选容量（2026-11-17，已完成本机验收）
+
+### 问题、选择和实现
+
+上一轮已经上线权威发布，但真实进程退出后的持久状态和迟到alias恢复仍只有部分证据；整库候选积累也缺只读清单。本轮按用户确认设计实施隔离资源演练与手动观测，不引入自动恢复、GC或质量参数推广。仅进程内Mock不能验证进程直接退出；在业务库强杀/删除会影响当前服务，因此使用随机schema/alias和独立执行进程。设计与计划见 `docs/superpowers/specs/2026-11-16-rag-fault-capacity-design.md`、对应plans文件。
+
+Spring新增Bearer内部inventory分页，epoch游标使用既有唯一索引，单页最多100条、额外1条判hasMore，短事务持state锁返回当前模式/epoch/head和不可变事实身份。只投影publicationId/epoch/collectionName/createTime，不传完整receipt或文档名。Python严格核对数字类型、分页排序、唯一身份、游标及跨页控制状态，最多1000条事实；漂移、超限或API故障失败关闭。普通问答不查询此清单。
+
+`knowledge_capacity` CLI显式`--live`才执行只读Spring/Milvus请求，筛选当前alias命名空间和kind/aliasHash，区分CURRENT/HISTORICAL_FACT/NO_OBSERVED_FACT。默认仅看row_count与创建时间；`--measure-json`才有界下载行，复用iterator取消/关闭边界并用剩余JSON预算进一步限制scan。每集合沿原64MiB预算、累计成功测量256MiB；完整批次收到后核对，末批可超过剩余字节，不保证网络流量逐字节上限。超限结果为未知且后续不下载。CLI整体失败只输出固定码，不输出供应商异常、原文、向量、URL或凭据。
+
+### 故障触发、判断和边界
+
+- 子JVM使用真实生产Service/Mapper/事务及随机MySQL schema，在准备完成后提交前，或commit返回后回执前直接`Runtime.halt`退出。父进程独立连接核对fact/head/serving/task，提交前不得伪造成功；提交后确认丢失仍按原ID/原收据返回既有事实，原lease撤销也可确认，冲突收据不得覆盖。该测试不使用完整Spring Boot HTTP服务器、不在事务提交中途强杀、不证明生产执行自动认领或续跑。
+- 真实Milvus随机alias测试让独立Python进程迟到写回旧alias；具体新head检索保持原结果，随后按当前head对账恢复镜像。缺失具体目标和空白名单返回无答案/无来源，计数Fake query Embedding和回答模型均0调用。Fake仅替代控制/供应商，不冒充真实业务数据库联通或自然语言质量验收。
+- 容量观测读前后复核控制快照和候选名列表。complete仅表示本次观测完成且这些身份稳定；未核验任意候选完成标记、在途读、未知提交或运维绕过后的内容，NO_OBSERVED_FACT不能推导可删除。发现接口先返回集合名列表再筛选，候选1000上限不是服务器全部集合名的流式预算。
+- JSON序列化容量与Milvus磁盘/索引/副本容量不同，diskBytes始终null；年龄使用Hybrid Timestamp，非法/未知/未来值为null。观测createTime的数据库字符串不擅自转换时区。
+
+### 验证和运行证据
+
+第一次Python完整回归1634通过、24跳过、2个既有GPU所有权锁测试失败；两项单独重跑通过，检查时无残留Python进程，首次失败尚未稳定复现，不改锁策略掩盖结果。最终完整复验 **1636通过、24跳过、0失败**，compileall/uv lock检查通过；结果及JUnit在 `tmp/round4-python-final.log`、`tmp/round4-python-final.xml`。首次失败日志保留 `tmp/round4-python-full.log`，单项复验为 `tmp/round4-gpu-recheck.log`。期间工作区另有Vue提示任务改动，本轮不归因或提交其代码。
+
+Java目标测试含普通回归、7项ownership隔离MySQL、8项publication隔离MySQL及2项子JVM场景，执行成功且17个随机schema均清理；随后干净编译成功。执行日志 `tmp/round4-java-final.log`、`tmp/round4-java-compile.log`。第一组Python目标101项通过，含4项显式随机Milvus资源测试；后续新增分页/分类测试由完整回归覆盖。资源测试不调用真实回答/Embedding、不碰业务集合。
+
+本机已启动新版Spring并实际运行只读JSON容量观测：epoch仍1，当前publication不变，1个候选、84行（72块+11 manifest+1完成标记），成功序列化字节 **4,601,857**；完整观测、控制及候选列表稳定。与上一轮只统计原83业务行的数字不同；不是容量增长或磁盘占用结论。报告为 `tmp/round4-capacity-live.json`，不提交业务报告/日志/私有数据。本轮不新增schema、不运行INDEX/REBUILD/bootstrap或真实供应商调用。
+
+最后启动Python后复验：首次健康请求早于8000监听建立而连接失败，服务就绪后重新验收成功，未为启动时序修改生产行为。两端健康、11 ACTIVE/1 DISABLED、0未完成任务、原head/epoch/alias和72块/11 manifest原字段及f32向量逐项一致，旧源不变；证据 `tmp/round4-runtime-final.log`、`tmp/b0b-runtime-verification.json`。默认元数据观测另运行成功，不下载向量，报告 `tmp/round4-capacity-metadata.json`；完整JSON测量4,601,857字节的报告不被默认模式的0测量覆盖。当前线上已载入只读inventory接口，Python CLI源码可直接运行，没有新增问答参数或收费调用。
+
+### 下一轮说明
+
+优先补完整隔离Spring/Python HTTP协作的故障矩阵：commit已落库但HTTP响应不可达、在途回答期间控制API故障、实例恢复后的稳定ID确认及多实例alias对账。原因是本轮子进程和真实资源分别验证了边界，但尚未将整套HTTP/worker调度串成同一演练。使用随机库/alias、固定合成向量和计数Fake模型，先定义发送前后屏障与可重复响应丢弃；不能通过改ID、切旧alias、重算向量或直接标成功完成恢复。预定逐项核对原事实/head/serving/task/回答来源，明确请求零重试和模型调用数。
+
+自动GC继续等待无引用、未知提交及在途读保护设计；本轮容量报告仅为输入证据，不能直接将历史或无已观察事实集合删除。人工质量校准和cap2/R2推广仍作为独立质量轮次，不以版本测试或容量数字证明答案质量改进。
+
 ## 以后每轮必须使用的交接格式
 
 1. 本轮解决什么：原问题的具体触发场景、证据和目标。

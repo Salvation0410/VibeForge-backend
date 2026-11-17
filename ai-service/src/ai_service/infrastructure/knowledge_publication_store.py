@@ -116,7 +116,7 @@ class PublicationStore:
         if serialized_bytes > settings.rag_publication_max_bytes:
             _fail("KNOWLEDGE_PUBLICATION_BUDGET_EXCEEDED")
 
-    async def scan(self, collection, *, filter=""):
+    async def scan(self, collection, *, filter="", max_bytes=None):
         iterator = None
         primary_error = None
         rows = []
@@ -141,6 +141,9 @@ class PublicationStore:
                 if not batch:
                     break
                 rows.extend(batch)
+                # 只读容量观测可进一步收紧剩余字节预算，不改变生产默认快照预算。
+                if max_bytes is not None and sum(len(_encoded(row)) for row in rows)+max(len(rows)-1,0)+2 > max_bytes:
+                    _fail("KNOWLEDGE_PUBLICATION_BUDGET_EXCEEDED")
                 # 每批检查完整序列化大小，不能仅限制 content 或向量数量。
                 self.budget(rows)
                 if len(rows) > self.settings.rag_rebuild_max_chunks + self.settings.rag_rebuild_max_documents + 1:

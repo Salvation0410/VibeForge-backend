@@ -655,6 +655,18 @@ publication 读取使用权威具体 collection 和当前身份白名单，检�
 
 HTTP 回答入口只接受绑定本应用控制客户端的官方权威 RAG；注入的官方裸 store 服务直接拒绝。旧 Fake/兼容服务必须显式注入 `LegacyAnswerServiceGuard`，生产不会自动包装未知实现；该守卫只保证整个服务调用前后模式检查，不能证明任意自定义内部模型调用前已复核，并且禁止包装官方 RAG 或用于 publication 模式。
 
+### 发布候选容量观测
+
+手动运行 `uv run python -m ai_service.orchestration.knowledge_capacity --live --output ../tmp/knowledge-capacity.json`，默认只读取Spring发布事实分页及Milvus候选元数据。额外指定 `--measure-json` 才有界下载行并测量序列化JSON字节数；每集合沿用64MiB快照预算，总计256MiB，达上限后后续集合不再下载。报告不输出正文或向量，不调用Embedding/回答模型，不执行集合写入或删除。
+
+Spring新增Bearer内部 `GET /api/internal/customer-service/knowledge-publications/inventory?afterEpoch=0&limit=100`，每页最多100条不可变身份，分页过程中epoch/head必须一致。CLI最多观察1000条事实和1000个本命名空间候选，坏类型、分页漂移或预算超限明确失败；普通问答不调用该清单接口。
+
+报告区分CURRENT、HISTORICAL_FACT、NO_OBSERVED_FACT，以及缺失目标和观测失败。NO_OBSERVED_FACT不等于无在途/未知提交引用，任何结果都不证明可以删除；complete只表示本次观测完成且控制身份/集合名单稳定，不证明候选完成标记、全文正确性或原子快照。rowCount包含manifest和完成标记；年龄来自Milvus Hybrid Timestamp，未知/非法/未来值为null。serializedJsonBytes不是磁盘、索引、压缩或副本占用，diskBytes始终未知。
+
+字节预算在完整批次接收后核对，末批可能超过剩余预算；超限集合不计成功测量，停止后续下载。因此256MiB是成功累计JSON测量预算，不是网络流量的逐字节硬上限。Milvus集合发现接口先返回集合名列表再筛选，1000上限限制本命名空间候选数量，不宣称对服务器全部集合名返回做流式分页。
+
+真实故障测试显式设置 `AI_SERVICE_MILVUS_INTEGRATION=true` 后运行 `tests/test_knowledge_publication_milvus_integration.py`，使用随机alias和合成向量，新增独立进程迟到alias写/当前head对账、目标缺失及空白名单零付费调用。Java `AI_KNOWLEDGE_PUBLICATION_MYSQL_INTEGRATION=true` 的 `KnowledgePublicationProcessIntegrationTest` 使用子JVM和随机schema，在提交前或提交后回执前直接退出；它不是整套双Spring/Python实例的网络丢包演练。实际结果见逐轮交接。
+
 ### 有界证据与拒答候选实验
 
 ```powershell

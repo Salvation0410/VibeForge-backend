@@ -307,6 +307,8 @@ Spring 对外接口使用统一响应：
 
 正式 RAG 在模型前后复核请求快照，变化丢弃回答及引用且不自动重试模型，最后复核后仍有撤销竞态。普通读取不下载全库向量，完整向量回读用于构建/源复制/显式验收；publication 和失败候选尚无自动 GC。实际 f32 JSON 上限检查可能发生在 INDEX Embedding 之后，不宣称失败均免费。迁移、恢复和兼容边界见 `doc/customer-service-knowledge-publication-migration.md`，本轮真实部署状态只看逐轮交接，不将设计或隔离测试冒称在线验收。
 
+`knowledge_capacity --live`只读分页发布事实和本命名空间候选；`--measure-json`才下载有界行测JSON字节，每集合64MiB/总计256MiB，不代表磁盘占用。CURRENT/HISTORICAL_FACT/NO_OBSERVED_FACT均不构成删除授权或无引用证明；观测不核验任意在途读/未知提交。进程级MySQL测试使用随机schema和子JVM直接退出，Milvus故障测试使用随机alias和独立迟到写进程，不能据此宣称完整双服务网络故障演练通过。
+
 ## 测试策略
 
 Java 改动：

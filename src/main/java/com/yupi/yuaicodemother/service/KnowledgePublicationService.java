@@ -141,6 +141,19 @@ public class KnowledgePublicationService implements ApplicationRunner {
         if(taskId<1) throw failure("KNOWLEDGE_PUBLICATION_ID_INVALID");
         return factOrNull("task_"+taskId);
     }
+    @Transactional
+    public InventoryPage inventory(long afterEpoch, int limit) {
+        if(afterEpoch<0 || limit<1 || limit>100) throw failure("KNOWLEDGE_INVENTORY_ARGUMENT_INVALID");
+        // 与发布共享state锁，每页一致；跨页一致性由调用方比较epoch/head保证。
+        KnowledgePublicationState state=mapper.lockState();
+        if(state==null || (state.isEnabled() && !properties.isPublicationEnabled()))
+            throw failure("KNOWLEDGE_PUBLICATION_MODE_REQUIRED");
+        var rows=mapper.inventory(afterEpoch,limit+1);
+        boolean more=rows.size()>limit;
+        var entries=List.copyOf(rows.subList(0,Math.min(rows.size(),limit)));
+        long next=entries.isEmpty()?afterEpoch:entries.getLast().epoch();
+        return new InventoryPage(state.isEnabled(),state.getEpoch(),state.getPublicationId(),next,more,entries);
+    }
     public PublicationFact fact(String id) {
         if(id==null || !id.matches("(?:task_[0-9]+|bootstrap_[a-f0-9]{32})")) throw failure("KNOWLEDGE_PUBLICATION_ID_INVALID");
         return requiredFact(id);

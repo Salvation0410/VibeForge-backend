@@ -15,4 +15,6 @@ public interface KnowledgePublicationMapper {
     int supersedeAliases(@Param("id") String id);
     int acknowledgeAlias(@Param("id") String id, @Param("epoch") long epoch);
     long unfinishedTasks();
+    java.util.List<com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol.InventoryEntry> inventory(
+            @Param("afterEpoch") long afterEpoch, @Param("limit") int limit);
 }

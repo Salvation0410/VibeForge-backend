@@ -28,6 +28,12 @@ public class InternalKnowledgePublicationController {
         authenticate(authorization);
         return ResultUtils.success(publications.fact(publicationId));
     }
+    @GetMapping("/inventory")
+    public BaseResponse<InventoryPage> inventory(@RequestHeader(value="Authorization",required=false) String authorization,
+            @RequestParam(defaultValue="0") long afterEpoch, @RequestParam(defaultValue="100") int limit) {
+        authenticate(authorization);
+        return ResultUtils.success(publications.inventory(afterEpoch,limit));
+    }
     private void authenticate(String authorization) {
         String token=properties.getToken();
         if(token==null || token.isBlank() || authorization==null || !MessageDigest.isEqual(

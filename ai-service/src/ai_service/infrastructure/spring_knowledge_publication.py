@@ -7,7 +7,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
-from ai_service.api.knowledge_publication_schemas import ReadSnapshot, PublicationFact
+from ai_service.api.knowledge_publication_schemas import ReadSnapshot, PublicationFact, InventoryPage
 from ai_service.infrastructure.milvus_knowledge import MilvusKnowledgeError
 
 
@@ -62,6 +62,31 @@ class SpringKnowledgePublicationClient:
         if publication_enabled or snapshot.enabled:
             raise MilvusKnowledgeError('KNOWLEDGE_PUBLICATION_REQUIRED')
         return snapshot
+
+    async def inventory(self, *, max_entries=1000):
+        if type(max_entries) is not int or not 1 <= max_entries <= 1000:
+            raise ValueError('invalid inventory bound')
+        entries, cursor, control = [], 0, None
+        while True:
+            page = await self._get(f'inventory?afterEpoch={cursor}&limit=100', InventoryPage)
+            observed = (page.enabled, page.epoch, page.publication_id)
+            if control is not None and observed != control:
+                raise MilvusKnowledgeError('KNOWLEDGE_INVENTORY_CHANGED')
+            control = observed
+            epochs = [item.epoch for item in page.entries]
+            if (epochs != sorted(set(epochs)) or any(value <= cursor or value > page.epoch for value in epochs)
+                    or page.next_epoch != (epochs[-1] if epochs else cursor)
+                    or (page.has_more and not epochs)):
+                raise MilvusKnowledgeError('KNOWLEDGE_INVENTORY_INVALID')
+            entries.extend(page.entries)
+            if (len(entries) > max_entries or len({item.publication_id for item in entries}) != len(entries)
+                    or len({item.collection_name for item in entries}) != len(entries)):
+                raise MilvusKnowledgeError('KNOWLEDGE_INVENTORY_BUDGET_EXCEEDED')
+            if not page.has_more:
+                return control, entries
+            if len(entries) >= max_entries:
+                raise MilvusKnowledgeError('KNOWLEDGE_INVENTORY_BUDGET_EXCEEDED')
+            cursor = page.next_epoch
 
     async def ping(self):
         try:

@@ -59,6 +59,20 @@ class KnowledgePublicationServiceTest {
         assertEquals("KNOWLEDGE_PUBLICATION_CLAIM_LOST",assertThrows(IllegalStateException.class,()->service.prepare(2,"owner",lease)).getMessage());
         verifyNoInteractions(leases);
     }
+    @Test void inventoryBoundsAndExtraRowDoNotExposeReceipts() throws Exception {
+        assertThrows(IllegalStateException.class,()->service.inventory(-1,10));
+        assertThrows(IllegalStateException.class,()->service.inventory(0,101));
+        var first=new InventoryEntry("task_1",1,OLD,"2030-01-01 00:00:00");
+        var second=new InventoryEntry("task_2",2,NEW,"2030-01-01 00:00:01");
+        when(mapper.inventory(0,2)).thenReturn(List.of(first,second));
+        var page=service.inventory(0,1);
+        assertTrue(page.hasMore());assertEquals(1,page.nextEpoch());assertEquals(List.of(first),page.entries());
+        String encoded=new ObjectMapper().writeValueAsString(page);
+        assertFalse(encoded.contains("receipt"));assertFalse(encoded.contains("sha256"));
+        var root=new ObjectMapper().readTree(encoded);assertTrue(root.get("epoch").isIntegralNumber());
+        when(mapper.inventory(2,2)).thenReturn(List.of());
+        assertEquals(2,service.inventory(2,1).nextEpoch());
+    }
     @Test void rejectsExpiredClaimAndInvalidLease() {
         task.setProcessingDeadline(LocalDateTime.ofInstant(NOW,ZoneOffset.UTC));
         assertThrows(IllegalStateException.class,()->service.prepare(2,"owner",lease));

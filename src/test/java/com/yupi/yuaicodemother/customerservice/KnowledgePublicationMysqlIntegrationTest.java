@@ -29,6 +29,15 @@ import static org.junit.jupiter.api.Assertions.*;
 class KnowledgePublicationMysqlIntegrationTest {
     static final Instant NOW=Instant.parse("2030-01-01T00:00:00Z");
     static final String HASH="a".repeat(64);
+    @Test void inventoryUsesImmutableEpochOrderAndBoundedProjection() throws Exception {
+        isolated(f->{
+            var execution=f.prepare(1);f.service.commit(1,"owner",execution.lease,execution.context,execution.receipt);
+            var first=f.service.inventory(0,1);assertTrue(first.hasMore());assertEquals(1,first.nextEpoch());
+            var second=f.service.inventory(first.nextEpoch(),1);assertFalse(second.hasMore());assertEquals("task_1",second.entries().getFirst().publicationId());
+            assertEquals(2,second.nextEpoch());assertEquals(first.epoch(),second.epoch());
+            assertNotNull(second.entries().getFirst().createTime());assertEquals(execution.receipt.candidateCollection(),second.entries().getFirst().collectionName());
+        });
+    }
     @Test void bootstrapCommitsFirstFactAndRepeatsAfterLeaseRevocation() throws Exception {
         isolated(f->{
             f.jdbc.update("UPDATE customer_service_knowledge_publication_state SET enabled=0,epoch=0,publicationId=NULL WHERE id=1");
@@ -157,6 +166,9 @@ class KnowledgePublicationMysqlIntegrationTest {
         final CustomerServiceKnowledgeEtlOutboxMapper tasks;
         final CustomerServiceProperties properties=new CustomerServiceProperties();
         Fixture(String schema) throws Exception {
+            this(schema,true);
+        }
+        Fixture(String schema, boolean initialize) throws Exception {
             var source=new AbstractDataSource() {
                 @Override public Connection getConnection() throws SQLException {
                     Connection connection=null;
@@ -181,6 +193,7 @@ class KnowledgePublicationMysqlIntegrationTest {
             service=transactional(new KnowledgePublicationService(sessions.getMapper(KnowledgePublicationMapper.class),
                     sessions.getMapper(CustomerServiceKnowledgeDocumentMapper.class),tasks,sessions.getMapper(CustomerServiceKnowledgeMutationLeaseMapper.class),
                     coordinator,properties,Clock.fixed(NOW,ZoneOffset.UTC)));
+            if(!initialize) return;
             var initial=new CandidateReceipt("bootstrap_"+"0".repeat(32),0,"bootstrap",1,"customer_service_knowledge_pub_"+"0".repeat(32),HASH,"model-v1",3,List.of());
             jdbc.update("INSERT INTO customer_service_knowledge_publication(publicationId,epoch,collectionName,receiptJson) VALUES(?,1,?,?)",initial.publicationId(),initial.candidateCollection(),new ObjectMapper().writeValueAsString(initial));
             jdbc.update("UPDATE customer_service_knowledge_publication_state SET enabled=1,epoch=1,publicationId=? WHERE id=1",initial.publicationId());

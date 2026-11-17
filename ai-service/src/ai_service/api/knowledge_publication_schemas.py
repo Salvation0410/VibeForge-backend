@@ -177,3 +177,19 @@ class ReconcileResponse(PublicationModel):
     epoch: int = Field(ge=1)
     collection_name: CollectionName
     reconciled: bool
+
+
+class InventoryEntry(PublicationModel):
+    publication_id: PublicationId
+    epoch: int = Field(ge=1)
+    collection_name: CollectionName
+    create_time: str = Field(pattern=r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
+
+
+class InventoryPage(PublicationModel):
+    enabled: bool
+    epoch: int = Field(ge=0)
+    publication_id: PublicationId | None
+    next_epoch: int = Field(ge=0)
+    has_more: bool
+    entries: list[InventoryEntry] = Field(max_length=100)

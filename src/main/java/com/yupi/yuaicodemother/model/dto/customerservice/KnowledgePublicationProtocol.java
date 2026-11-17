@@ -36,4 +36,10 @@ public final class KnowledgePublicationProtocol {
             @JsonSerialize(using=LeaseLongSerializer.class) long epoch) { }
     public record PublicationFact(String publicationId,
             @JsonSerialize(using=LeaseLongSerializer.class) long epoch, CandidateReceipt receipt) { }
+    public record InventoryEntry(String publicationId,
+            @JsonSerialize(using=LeaseLongSerializer.class) long epoch, String collectionName, String createTime) { }
+    public record InventoryPage(boolean enabled,
+            @JsonSerialize(using=LeaseLongSerializer.class) long epoch, String publicationId,
+            @JsonSerialize(using=LeaseLongSerializer.class) long nextEpoch, boolean hasMore,
+            List<InventoryEntry> entries) { }
 }
