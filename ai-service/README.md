@@ -657,6 +657,10 @@ HTTP 回答入口只接受绑定本应用控制客户端的官方权威 RAG；�
 
 ### 发布候选容量观测
 
+第五轮跨服务HTTP验收需显式 `AI_RAG_HTTP_INTEGRATION=true`，在根目录运行 `mvn test '-Dtest=KnowledgePublicationHttpIntegrationTest'`。测试专用Spring Web容器加载生产publication Controller/Service/Mapper并访问随机MySQL schema，独立Python进程加载正式app factory/权威RAG，使用随机Milvus alias、合成向量及计数模型。回环代理在commit成功后丢弃响应，以及在回答模型返回前切换snapshot为503；核对稳定ID事实确认、恢复实例回答、无答案/无引用及两个Python实例alias对账。
+
+测试控制接口仅在test classpath，Web绑定回环地址，不部署到业务服务；Python不访问MySQL。它不包含生产worker定时认领、Python prepare下载Embedding、事务中途强杀、随机网络丢包或真实供应商；显式第二次commit为同收据确认，不是自动付费重试。默认Java测试跳过，运行结果和未测项见逐轮交接。
+
 手动运行 `uv run python -m ai_service.orchestration.knowledge_capacity --live --output ../tmp/knowledge-capacity.json`，默认只读取Spring发布事实分页及Milvus候选元数据。额外指定 `--measure-json` 才有界下载行并测量序列化JSON字节数；每集合沿用64MiB快照预算，总计256MiB，达上限后后续集合不再下载。报告不输出正文或向量，不调用Embedding/回答模型，不执行集合写入或删除。
 
 Spring新增Bearer内部 `GET /api/internal/customer-service/knowledge-publications/inventory?afterEpoch=0&limit=100`，每页最多100条不可变身份，分页过程中epoch/head必须一致。CLI最多观察1000条事实和1000个本命名空间候选，坏类型、分页漂移或预算超限明确失败；普通问答不调用该清单接口。

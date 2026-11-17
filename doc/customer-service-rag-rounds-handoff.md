@@ -194,6 +194,36 @@ Java目标测试含普通回归、7项ownership隔离MySQL、8项publication隔�
 
 自动GC继续等待无引用、未知提交及在途读保护设计；本轮容量报告仅为输入证据，不能直接将历史或无已观察事实集合删除。人工质量校准和cap2/R2推广仍作为独立质量轮次，不以版本测试或容量数字证明答案质量改进。
 
+## 第五轮：跨服务HTTP故障验收（2026-11-17，已完成隔离验收）
+
+### 原问题、方案与实现
+
+第四轮的子JVM和真实Milvus测试分别通过，但真实HTTP客户端、生产Spring控制器及FastAPI app装配尚未串成同一故障验收。本轮采用测试专用Spring Web容器加载生产Controller/Service/Mapper、真实随机MySQL schema，以及独立FastAPI进程连接随机Milvus集合；Java仍独占MySQL，Python只通过HTTP控制面访问事实。回环代理在明确发送点丢弃commit响应，并按模型内测试屏障将snapshot响应改为503，不在正式业务库或网络上注入故障。
+
+固定合成向量和计数Fake模型避免供应商费用、输出不确定及GPU竞争；Disabled checkpoint不代表生产checkpoint恢复验收。测试专用prepare/context/commit/revoke接口只存在test classpath，绑定回环，不添加正式API或生产开关。测试运行入口是 `AI_RAG_HTTP_INTEGRATION=true` 的 `KnowledgePublicationHttpIntegrationTest`，Python运行器为 `ai-service/tests/http_publication_runner.py`。
+
+### 场景、判断和边界
+
+1. Java真实发布事务成功返回后，代理关闭HTTP连接，不发送响应；Python实际httpx报告协议错误，然后用生产Spring客户端按task_1查询持久事实。撤销原lease后显式再次提交同收据仍返回原事实，数据库只存在一条task_1事实，head/serving/task一致。显式第二次请求用于确认，不宣传自动重试或付费重算。
+2. 真实FastAPI回答已完成检索及模型调用时，测试模型切换控制代理；模型返回后snapshot实际503。HTTP回答必须无答案、无来源，模型与query Embedding各1次，失败snapshot应仅1次，不自动重试。真实供应商调用为0。
+3. 终止该Python实例，恢复控制响应后启动新实例，重新回答并确认来源；另启第二实例分别调用正式alias reconcile，目标均收敛到权威collection。此恢复是运维重启读取，不是任务认领、checkpoint自动续跑或SSE重连。
+
+完整业务Spring profile、生产worker调度/任务接管、Python prepare下载/Embedding、事务中途强杀、随机网络丢包及模型语义质量仍不在本轮。候选完成数据用正式PublicationStore写入并验收，但构建许可为测试进程内许可，不冒充完整Spring prepare许可链路。production源码未改变，本轮是新增测试证据，不能声称降低实际答案错误率或已上线自动恢复。
+
+### 失败及修复记录
+
+首轮测试容器全量自动配置加载Legacy RedisEmbeddingStore，缺业务Redis配置导致启动失败；收窄为Web/JSON自动配置。第二轮合成文档file_type未用内部小写规范，被原严格回读拒绝，修正测试数据。第三轮注入的RAG缺候选存储preparer依赖，对账入口明确拒绝；补齐测试装配而非放宽正式入口。第四轮主流程通过后增加snapshot故障请求计数和双实例对账，最终复验单独记录。失败日志保留 `tmp/round5-http-test.log` 至 `round5-http-test4.log`，不删除失败证据。
+
+最终Java目标 **27通过、0失败/错误/跳过**，含8项隔离publication MySQL、2项子JVM和1项跨服务真实HTTP/Milvus场景，11个随机schema均清理；干净编译通过。日志 `tmp/round5-java-final.log`、`tmp/round5-java-summary.json`、`tmp/round5-java-compile.log`。跨服务报告 `tmp/round5-http-report.json`：commit请求2次（丢响应与显式确认）、故障模型/query Embedding各1次、失败snapshot1次、自动付费重试0、真实供应商调用0，恢复实例确认及双实例mirror收敛成立。随机Milvus集合和alias均由运行器finally精确清理并复核不存在。
+
+Python compileall（含测试运行器）、完整pytest、uv lock检查通过：**1636通过、24跳过、0失败**，日志/JUnit为 `tmp/round5-python-final.log`、`tmp/round5-python-final.xml`。常规Python回归不默认执行跨服务资源测试；上述资源结果来自显式Java入口。测试前停止本轮管理的Python释放GPU锁，验收后离线缓存模式重新启动。生产源码和数据库结构无改动，无需部署测试控制器；本轮只增加可重复验收设施和文档，保留用户README两反引号、取消计划及另一任务阅读验收脚本。
+
+本机服务恢复后只读完整复验通过：两端健康，epoch=1/publication/head/alias不变，11 ACTIVE/1 DISABLED，72块与11 manifest原字段及f32向量逐项一致，旧源保留；日志 `tmp/round5-runtime-final.log`。本轮正式库没有INDEX/REBUILD/bootstrap或模型调用，不把合成HTTP答案当作自然语言质量评估。
+
+### 下一轮建议
+
+优先补真实worker到prepare-publication的全链路及未知准备响应：Python已经完成候选，但Java未收到收据时，任务保持何种状态、重试是否产生额外候选、当前epoch变化怎样拒绝旧尝试。原因是本轮确认的是数据库commit事实丢响应及读取故障，尚未覆盖付费/候选构建阶段的未知结果。使用隔离任务与可计数合成Embedding，把发送前屏障、完成后断开和claim/lease接管放进同一演练；逐项核对原head、候选数量、事实唯一及调用数。若据此需要新增候选准备幂等/恢复策略，应先给用户说明稳定ID、attempt隔离、费用和存储代价的方案，不直接推广生产行为。自动GC仍需独立无引用保护设计。
+
 ## 以后每轮必须使用的交接格式
 
 1. 本轮解决什么：原问题的具体触发场景、证据和目标。
