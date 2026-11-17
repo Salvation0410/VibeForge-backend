@@ -27,6 +27,28 @@ import static org.junit.jupiter.api.Assertions.*;
 /** 随机独立 schema 中使用真实 Mapper/事务；不改业务库，不调用模型或 Milvus。 */
 @EnabledIfEnvironmentVariable(named="AI_KNOWLEDGE_PUBLICATION_MYSQL_INTEGRATION",matches="true")
 class KnowledgePublicationMysqlIntegrationTest {
+    @Test void grantedExecutorCannotCompleteAfterEpochRevocation() throws Exception {
+        isolated(f->{
+            var execution=f.prepare(1);f.service.registerPrepareAnchor(1,"owner",execution.lease(),execution.context());
+            assertTrue(f.service.arbitratePrepare(new PrepareExecutionRequest(execution.context(),execution.lease(),"a".repeat(32),"BEGIN",null)).granted());
+            f.service.beforeAdministrativeMutation();
+            assertEquals("KNOWLEDGE_PREPARE_CONTEXT_CONFLICT",assertThrows(IllegalStateException.class,()->
+                    f.service.arbitratePrepare(new PrepareExecutionRequest(execution.context(),execution.lease(),"a".repeat(32),"COMPLETE",execution.receipt()))).getMessage());
+            assertEquals("STARTED",f.jdbc.queryForObject("SELECT status FROM customer_service_knowledge_prepare_execution WHERE taskId=1",String.class));
+            assertEquals(0,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_publication WHERE publicationId='task_1'"));
+        });
+    }
+    @Test void grantedExecutorCannotCompleteAfterLeaseRevocation() throws Exception {
+        isolated(f->{
+            var execution=f.prepare(1);f.service.registerPrepareAnchor(1,"owner",execution.lease(),execution.context());
+            assertTrue(f.service.arbitratePrepare(new PrepareExecutionRequest(execution.context(),execution.lease(),"a".repeat(32),"BEGIN",null)).granted());
+            f.coordinator.revoke(execution.lease());
+            assertEquals("KNOWLEDGE_PUBLICATION_LEASE_INVALID",assertThrows(IllegalStateException.class,()->
+                    f.service.arbitratePrepare(new PrepareExecutionRequest(execution.context(),execution.lease(),"a".repeat(32),"COMPLETE",execution.receipt()))).getMessage());
+            assertEquals("STARTED",f.jdbc.queryForObject("SELECT status FROM customer_service_knowledge_prepare_execution WHERE taskId=1",String.class));
+            assertEquals(0,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_publication WHERE publicationId='task_1'"));
+        });
+    }
     @Test void preparationExecutionNeverRegrantsAndCompletesIdempotently() throws Exception {
         isolated(f->{
             var execution=f.prepare(1);

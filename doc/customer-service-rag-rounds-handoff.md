@@ -367,6 +367,28 @@ Java最终目标88项通过、0失败/错误/跳过，含14项隔离MySQL、3项
 
 GC继续等待事实/anchor/执行台账与在途读引用保护；质量cap2/R2和人工标注仍独立轮次。既有断连测试30ms竞争未改，本轮完整回归通过不能证明竞争已消失。
 
+## 第十轮：准备仲裁退出与确认丢失验收（2026-11-17，观测接口待确认）
+
+### 问题、原因与本轮范围
+
+第九轮只授一次资格，但仍缺授权/完成提交后进程直接退出的持久事实证据。用户授权继续下一轮，本轮先补交接中已提出的故障验收；新增管理员只读接口有单任务查询、全库分页、仅人工查询三种成本选择，已提交具体设计并通过异步问题等待确认，当前没有修改生产接口。设计与计划为docs/superpowers/specs/2026-11-17-rag-prepare-observation-design.md和plans/2026-11-17-rag-prepare-observation.md。
+
+### 怎么验证与边界处理
+
+子JVM复用真实事务，在BEGIN或COMPLETE成功返回后、外部确认前halt(77)。父独立连接先直接核对持久行，再请求：BEGIN退出保留STARTED，重传BUSY；人为推进观察期限得到UNKNOWN，持久行仍STARTED；有效原lease下原executor仍可完成并幂等。COMPLETE退出后父先核对原收据，再幂等完成与BEGIN不重授。两者都没有发布事实，epoch保留1。新增MySQL测试先授资格，再撤epoch或lease，COMPLETE拒绝且STARTED保留、无发布。
+
+Python新增7项离线场景：授权替身先保存再丢确认；下载/Embedding有界Event屏障下取消；Embedding返回后候选构建异常；完成替身先存收据再丢确认；付费前epoch失效；下载期间撤lease。失联不发额外UNKNOWN。未完成候选同attempt不重算，新attempt缺原结果失败；完整候选在新对象/新attempt恢复零新增调用。计数仅Fake，Java子JVM与Python离线各自报告，不冒称完整HTTP网络分区、真实Python硬退出或供应商计费exactly-once。长期暂停只模拟观察到期后的原执行，不是实际暂停进程；控制面异常仍由离线客户端原测试覆盖。
+
+### 本轮验证与交付状态
+
+Python目标17通过；包含准备、恢复、故障和候选六文件的相关回归63通过、0失败/错误/跳过，日志tmp/round10-python-target.log/xml与round10-python-final.log/xml；新增文件compileall及uv lock通过。Java最终MySQL16、子JVM5共21通过、0失败/错误/跳过，21随机schema清理，tmp/round10-java-resources-final.log。首次Java命令的wrapper调用未找到，改用本机mvn执行成功，无生产修复。未重新运行完整Python基线或HTTP矩阵；没有用第九轮1656成绩作本轮结果。
+
+正式只读完整核对成功，tmp/round10-runtime-final.log：两端健康，epoch1、原publication/head/alias不变，11 ACTIVE/1 DISABLED，72块/11manifest全部原字段和f32一致，旧源未变，模型/Embedding调用0。本轮无schema迁移、INDEX/REBUILD/GC或服务部署，测试入口仅测试classpath。保留用户README两反引号和取消计划。必要差异检查后提交本轮验收、设计、计划与交接；提交哈希在本轮最终回复提供。
+
+### 待确认与下一步
+
+推荐管理员按文档/任务联合归属查询的单任务只读接口，查询量固定，只投影固定状态/原因与UTC观察时间/期限，不读receiptJson或凭据、不加FOR UPDATE、不写超时、不触发恢复。全库分页利于巡检但增加扫描/索引/一致性设计；仅人工SQL改动最少但容易误读UNKNOWN。AGENTS交付前检查要求多个生产选择先确认，因此接口尚未实现，收到选择后继续本轮实现及权限/边界验收。COMPLETE不代表已发布；无记录不证明未付费，UNKNOWN不授权接管。后续真实双服务丢确认/退出矩阵仍有缺口，GC须先证明引用保护；质量cap2/R2与人工标注继续独立轮次。
+
 ## 以后每轮必须使用的交接格式
 
 1. 本轮解决什么：原问题的具体触发场景、证据和目标。

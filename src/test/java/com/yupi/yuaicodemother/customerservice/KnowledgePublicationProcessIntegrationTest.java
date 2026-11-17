@@ -15,6 +15,8 @@ class KnowledgePublicationProcessIntegrationTest {
     @Test void exitBeforeCommitLeavesNoFactAndOriginalExecutionCanCommit() throws Exception { scenario("before"); }
     @Test void exitAfterCommitBeforeAcknowledgementRepeatsPersistedFact() throws Exception { scenario("after"); }
     @Test void exitAfterAnchorRegistrationRetainsFirstIdentity() throws Exception { scenario("anchor"); }
+    @Test void exitAfterPrepareGrantBeforeAcknowledgementNeverGrantsAgain() throws Exception { scenario("prepare-begin"); }
+    @Test void exitAfterPrepareCompletionBeforeAcknowledgementRetainsReceipt() throws Exception { scenario("prepare-complete"); }
 
     void scenario(String phase) throws Exception {
         new KnowledgePublicationMysqlIntegrationTest().isolated(f->{
@@ -34,6 +36,30 @@ class KnowledgePublicationProcessIntegrationTest {
                 var lease=json.treeToValue(saved.get("lease"),KnowledgeMutationCoordinator.Lease.class);
                 var context=json.treeToValue(saved.get("context"),PublicationContext.class);
                 var receipt=json.treeToValue(saved.get("receipt"),CandidateReceipt.class);
+                if(phase.startsWith("prepare-")) {
+                    // 先直接读取持久事实，避免父进程请求补建记录后误称退出恢复。
+                    assertEquals(1,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_prepare_execution WHERE taskId=1"));
+                    boolean complete=phase.equals("prepare-complete");
+                    String persisted=f.jdbc.queryForObject("SELECT status FROM customer_service_knowledge_prepare_execution WHERE taskId=1",String.class);
+                    assertEquals(complete?"COMPLETE":"STARTED",persisted);
+                    var begin=new PrepareExecutionRequest(context,lease,"a".repeat(32),"BEGIN",null);
+                    assertEquals(new PrepareExecutionResult(false,complete?"COMPLETE":"BUSY"),f.service.arbitratePrepare(begin));
+                    if(!complete) {
+                        f.jdbc.update("UPDATE customer_service_knowledge_prepare_execution SET observationDeadline='2029-01-01' WHERE taskId=1");
+                        assertEquals(new PrepareExecutionResult(false,"UNKNOWN"),f.service.arbitratePrepare(begin));
+                        assertEquals("STARTED",f.jdbc.queryForObject("SELECT status FROM customer_service_knowledge_prepare_execution WHERE taskId=1",String.class));
+                    } else {
+                        String stored=f.jdbc.queryForObject("SELECT receiptJson FROM customer_service_knowledge_prepare_execution WHERE taskId=1",String.class);
+                        assertEquals(receipt,json.readValue(stored,CandidateReceipt.class));
+                    }
+                    // 观察过期并不剥夺原执行者；有效原租约下完成可幂等登记。
+                    var finish=new PrepareExecutionRequest(context,lease,"a".repeat(32),"COMPLETE",receipt);
+                    assertEquals(new PrepareExecutionResult(false,"COMPLETE"),f.service.arbitratePrepare(finish));
+                    assertEquals(new PrepareExecutionResult(false,"COMPLETE"),f.service.arbitratePrepare(finish));
+                    assertEquals(0,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_publication WHERE publicationId='task_1'"));
+                    assertEquals(1,f.scalar("SELECT epoch FROM customer_service_knowledge_publication_state WHERE id=1"));
+                    return;
+                }
                 if(phase.equals("anchor")) {
                     // 必须先证实子进程持久化，不能由父register补建后冒充退出恢复。
                     assertEquals(1,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_prepare_anchor"));
@@ -73,7 +99,7 @@ class KnowledgePublicationProcessIntegrationTest {
     public static class Child {
         public static void main(String[] args) throws Exception {
             if(args.length!=3 || !args[0].matches("rag_publication_it_[a-f0-9]{32}")
-                    || !(args[1].equals("before")||args[1].equals("after")||args[1].equals("anchor"))) throw new IllegalArgumentException("隔离参数错误");
+                    || !java.util.Set.of("before","after","anchor","prepare-begin","prepare-complete").contains(args[1])) throw new IllegalArgumentException("隔离参数错误");
             Path target=Path.of(args[2]).toAbsolutePath().normalize();
             if(!target.startsWith(Path.of("tmp").toAbsolutePath().normalize())) throw new IllegalArgumentException("仅限tmp");
             var fixture=new KnowledgePublicationMysqlIntegrationTest.Fixture(args[0],false);
@@ -83,6 +109,13 @@ class KnowledgePublicationProcessIntegrationTest {
             saved.set("receipt",json.valueToTree(execution.receipt()));Files.writeString(target,json.writeValueAsString(saved));
             if(args[1].equals("after")) fixture.service.commit(1,"owner",execution.lease(),execution.context(),execution.receipt());
             if(args[1].equals("anchor")) fixture.service.registerPrepareAnchor(1,"owner",execution.lease(),execution.context());
+            if(args[1].startsWith("prepare-")) {
+                fixture.service.registerPrepareAnchor(1,"owner",execution.lease(),execution.context());
+                var begin=new PrepareExecutionRequest(execution.context(),execution.lease(),"a".repeat(32),"BEGIN",null);
+                if(!fixture.service.arbitratePrepare(begin).granted()) throw new IllegalStateException("未到达首次授权");
+                if(args[1].equals("prepare-complete")) fixture.service.arbitratePrepare(new PrepareExecutionRequest(
+                        execution.context(),execution.lease(),"a".repeat(32),"COMPLETE",execution.receipt()));
+            }
             // 模拟没有finally/回执的进程退出，parent重新连接持久库核对事实。
             Runtime.getRuntime().halt(77);
         }
