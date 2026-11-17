@@ -248,6 +248,8 @@ Python compileall（含测试运行器）、完整pytest、uv lock检查通过�
 
 停止本轮管理的Python释放GPU锁后运行完整回归，完成后重新启动。正式知识库只读完整核对通过：两端健康、epoch=1、原publication/head/alias不变，11 ACTIVE/1 DISABLED、72块/11 manifest原字段和f32向量逐项一致、旧源未变；日志tmp/round6-runtime-final.log。真实回答/Embedding调用均0。本轮无生产源码或数据库结构变动，无需部署测试接口；README新增验收说明，保留用户既有两反引号修改及未跟踪取消计划。
 
+第六轮测试、方案和交接提交为 `c14d8ad`（test(rag): 验证准备响应丢失后的真实任务重试与重复成本）。
+
 ### 下一轮方案与优先级
 
 P1建议实现“可核验准备结果恢复”：Spring在发送前持久化attempt身份，Python提供受认证、有界的准备结果查询；响应未知先按原attempt查询完成证据。重试取得新租约后，重新核对baseEpoch、源collection、文档内容/索引/激活身份、Embedding模型/维度及完整候选快照。满足条件时将已验收向量复制到新attempt私有候选并产生新收据，最终仍走原事务提交。旧候选和旧收据不直接获得新lease权限。目标减少重复Embedding，仍承担整库复制/回读与状态维护成本，需设计未完成/部分写入/查询故障的显式分支。
