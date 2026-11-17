@@ -17,6 +17,11 @@ public interface KnowledgePublicationMapper {
     long unfinishedTasks();
     String prepareAnchor(@Param("taskId") long taskId);
     int insertPrepareAnchor(@Param("taskId") long taskId, @Param("json") String json);
+    com.yupi.yuaicodemother.model.entity.KnowledgePrepareExecution prepareExecution(@Param("taskId") long taskId);
+    int insertPrepareExecution(@Param("taskId") long taskId, @Param("operationId") String operationId,
+            @Param("fence") long fence, @Param("executorId") String executorId,
+            @Param("deadline") java.time.LocalDateTime deadline);
+    int finishPrepareExecution(@Param("taskId") long taskId, @Param("status") String status, @Param("json") String json);
     java.util.List<com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol.InventoryEntry> inventory(
             @Param("afterEpoch") long afterEpoch, @Param("limit") int limit);
 }

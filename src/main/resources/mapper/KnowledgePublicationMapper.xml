@@ -14,6 +14,9 @@
   <!-- 持有epoch/task/lease锁后登记首次尝试；后续不能覆盖未知准备事实。 -->
   <select id="prepareAnchor" resultType="string">SELECT anchorJson FROM customer_service_knowledge_prepare_anchor WHERE taskId=#{taskId}</select>
   <insert id="insertPrepareAnchor">INSERT INTO customer_service_knowledge_prepare_anchor(taskId,anchorJson) VALUES(#{taskId},#{json})</insert>
+  <select id="prepareExecution" resultType="com.yupi.yuaicodemother.model.entity.KnowledgePrepareExecution">SELECT taskId,operationId,fence,executorId,status,observationDeadline,receiptJson FROM customer_service_knowledge_prepare_execution WHERE taskId=#{taskId} FOR UPDATE</select>
+  <insert id="insertPrepareExecution">INSERT INTO customer_service_knowledge_prepare_execution(taskId,operationId,fence,executorId,status,observationDeadline) VALUES(#{taskId},#{operationId},#{fence},#{executorId},'STARTED',#{deadline})</insert>
+  <update id="finishPrepareExecution">UPDATE customer_service_knowledge_prepare_execution SET status=#{status},receiptJson=#{json} WHERE taskId=#{taskId}</update>
   <!-- 只投影不可变身份；不将完整收据和文档正文交给容量观测。 -->
   <select id="inventory" resultType="com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationProtocol$InventoryEntry">
     SELECT publicationId,epoch,collectionName,DATE_FORMAT(createTime,'%Y-%m-%d %H:%i:%s') AS createTime

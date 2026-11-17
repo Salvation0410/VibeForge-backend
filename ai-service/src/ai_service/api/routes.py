@@ -226,6 +226,8 @@ def register_routes(
         from ai_service.orchestration.knowledge_publication_boundary import validate_candidate_request
         try:
             await validate_candidate_request(body, request.app.state.knowledge_publication_client, request.app.state.settings)
+            if body.prepare_anchor is not None and getattr(preparer, 'arbitration', None) is None:
+                return _stable_error('KNOWLEDGE_PREPARE_ARBITRATION_UNAVAILABLE')
             receipt = await preparer.prepare(body)
             if body.prepare_anchor is not None:
                 # 在准备后再次拒绝漂移上下文；最终发布仍由Spring事务仲裁。

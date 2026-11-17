@@ -22,6 +22,13 @@ public class InternalKnowledgePublicationController {
         authenticate(authorization);
         return ResultUtils.success(publications.snapshot());
     }
+    @PostMapping("/prepare-execution")
+    public BaseResponse<PrepareExecutionResult> prepareExecution(
+            @RequestHeader(value="Authorization",required=false) String authorization,
+            @RequestBody PrepareExecutionRequest request) {
+        authenticate(authorization);
+        return ResultUtils.success(publications.arbitratePrepare(request));
+    }
     @GetMapping("/{publicationId}")
     public BaseResponse<PublicationFact> fact(@RequestHeader(value="Authorization",required=false) String authorization,
             @PathVariable String publicationId) {

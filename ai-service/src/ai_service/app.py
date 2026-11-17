@@ -228,7 +228,7 @@ def create_app(
                     if config.rag_publication_enabled:
                         app.state.knowledge_publication_preparer = knowledge_publication_preparer or KnowledgePublicationPreparer(
                             config, downloader, embeddings, store,
-                            semaphore=app.state.knowledge_etl_service._semaphore)
+                            semaphore=app.state.knowledge_etl_service._semaphore, arbitration=publication_client)
                     authoritative_store = AuthoritativeKnowledgeStore(
                         config, store,
                         app.state.knowledge_publication_preparer.publications

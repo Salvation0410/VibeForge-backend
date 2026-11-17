@@ -356,6 +356,8 @@ npm run build-only
 
 ## 交付前检查
 
+- INDEX+prepareAnchor首次计算经Spring/MySQL prepare_execution仲裁；每个Python请求随机executorId，BEGIN只首次granted=true，同executor重传不重授。300秒仅观察UNKNOWN、不接管；完整Milvus候选恢复仍验收并受当前lease/epoch约束。正式入口无仲裁失败，缺表启动拒绝；升级停写排空备份执行alter_customer_service_knowledge_prepare_execution.sql。无anchor/DELETE/REBUILD/供应商重试不在计费仲裁保证内，不宣称exactly-once。
+
 - 客服INDEX prepare请求可选prepareAnchor；Spring首次发送前持久化context/operationId/fence到customer_service_knowledge_prepare_anchor，不保存proof/URL。Python确定性候选完整验收后，在新lease下重解析原文/核对规范行再复制向量；缺失/半写/损坏/身份漂移不自动重算，需新INDEX任务。缺表在publication模式启动拒绝，升级先停写排空备份并执行alter_customer_service_knowledge_prepare_anchor.sql；不新增GC、claim自动接管或计费exactly-once。
 
 - 每轮优化结束必须用文字向用户说明本轮改动、优化原因、原问题的具体触发场景、验证与限制，以及下一轮建议、原因和仍可能失败的场景；同时更新真实验收交接文档，不能只交付哈希或链接。

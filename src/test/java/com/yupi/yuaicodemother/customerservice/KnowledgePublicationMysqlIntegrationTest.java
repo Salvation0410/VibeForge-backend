@@ -27,6 +27,57 @@ import static org.junit.jupiter.api.Assertions.*;
 /** 随机独立 schema 中使用真实 Mapper/事务；不改业务库，不调用模型或 Milvus。 */
 @EnabledIfEnvironmentVariable(named="AI_KNOWLEDGE_PUBLICATION_MYSQL_INTEGRATION",matches="true")
 class KnowledgePublicationMysqlIntegrationTest {
+    @Test void preparationExecutionNeverRegrantsAndCompletesIdempotently() throws Exception {
+        isolated(f->{
+            var execution=f.prepare(1);
+            f.service.registerPrepareAnchor(1,"owner",execution.lease(),execution.context());
+            var begin=new PrepareExecutionRequest(execution.context(),execution.lease(),"a".repeat(32),"BEGIN",null);
+            assertEquals(new PrepareExecutionResult(true,"STARTED"),f.service.arbitratePrepare(begin));
+            assertEquals(new PrepareExecutionResult(false,"BUSY"),f.service.arbitratePrepare(begin));
+            var other=new PrepareExecutionRequest(execution.context(),execution.lease(),"b".repeat(32),"BEGIN",null);
+            assertEquals(new PrepareExecutionResult(false,"BUSY"),f.service.arbitratePrepare(other));
+            f.jdbc.update("UPDATE customer_service_knowledge_prepare_execution SET observationDeadline='2029-01-01' WHERE taskId=1");
+            assertEquals(new PrepareExecutionResult(false,"UNKNOWN"),f.service.arbitratePrepare(other));
+            var finish=new PrepareExecutionRequest(execution.context(),execution.lease(),"a".repeat(32),"COMPLETE",execution.receipt());
+            assertEquals(new PrepareExecutionResult(false,"COMPLETE"),f.service.arbitratePrepare(finish));
+            assertEquals(new PrepareExecutionResult(false,"COMPLETE"),f.service.arbitratePrepare(finish));
+            assertEquals(new PrepareExecutionResult(false,"COMPLETE"),f.service.arbitratePrepare(other));
+            assertEquals(1,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_prepare_execution"));
+            var wrong=new PrepareExecutionRequest(execution.context(),execution.lease(),"b".repeat(32),"COMPLETE",execution.receipt());
+            assertEquals("KNOWLEDGE_PREPARE_EXECUTOR_CONFLICT",assertThrows(IllegalStateException.class,
+                ()->f.service.arbitratePrepare(wrong)).getMessage());
+        });
+    }
+    @Test void preparationExecutionConcurrentRequestsHaveOnlyOneGrant() throws Exception {
+        isolated(f->{
+            var execution=f.prepare(1);f.service.registerPrepareAnchor(1,"owner",execution.lease(),execution.context());
+            var pool=java.util.concurrent.Executors.newFixedThreadPool(2);
+            var ready=new java.util.concurrent.CountDownLatch(2);var start=new java.util.concurrent.CountDownLatch(1);
+            try {
+                var futures=new ArrayList<java.util.concurrent.Future<PrepareExecutionResult>>();
+                for(String executor:List.of("a".repeat(32),"b".repeat(32))) futures.add(pool.submit(()->{
+                    ready.countDown();assertTrue(start.await(5,java.util.concurrent.TimeUnit.SECONDS));
+                    return f.service.arbitratePrepare(new PrepareExecutionRequest(execution.context(),execution.lease(),executor,"BEGIN",null));
+                }));
+                assertTrue(ready.await(5,java.util.concurrent.TimeUnit.SECONDS));start.countDown();
+                int grants=0;for(var future:futures) if(future.get(10,java.util.concurrent.TimeUnit.SECONDS).granted()) grants++;
+                assertEquals(1,grants);assertEquals(1,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_prepare_execution"));
+            } finally {start.countDown();pool.shutdownNow();}
+        });
+    }
+    @Test void preparationExecutionRejectsEpochAndRevokedLease() throws Exception {
+        isolated(f->{
+            var execution=f.prepare(1);f.service.registerPrepareAnchor(1,"owner",execution.lease(),execution.context());
+            var begin=new PrepareExecutionRequest(execution.context(),execution.lease(),"a".repeat(32),"BEGIN",null);
+            f.service.beforeAdministrativeMutation();
+            assertEquals("KNOWLEDGE_PREPARE_CONTEXT_CONFLICT",assertThrows(IllegalStateException.class,
+                ()->f.service.arbitratePrepare(begin)).getMessage());
+            assertEquals(0,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_prepare_execution"));
+            f.coordinator.revoke(execution.lease());
+            assertEquals("KNOWLEDGE_PUBLICATION_LEASE_INVALID",assertThrows(IllegalStateException.class,
+                ()->f.service.arbitratePrepare(begin)).getMessage());
+        });
+    }
     @Test void replacementClaimRejectsOldAnchorRegistrationAndCommit() throws Exception {
         isolated(f->{
             var first=f.prepare(1);
@@ -196,6 +247,7 @@ class KnowledgePublicationMysqlIntegrationTest {
                 KnowledgeRevisionMysqlSupport.script(admin,Files.readString(Path.of("sql/alter_customer_service_knowledge.sql")));
                 KnowledgeRevisionMysqlSupport.script(admin,Files.readString(Path.of("sql/alter_customer_service_knowledge_publication.sql")));
                 KnowledgeRevisionMysqlSupport.script(admin,Files.readString(Path.of("sql/alter_customer_service_knowledge_prepare_anchor.sql")));
+                KnowledgeRevisionMysqlSupport.script(admin,Files.readString(Path.of("sql/alter_customer_service_knowledge_prepare_execution.sql")));
                 scenario.run(new Fixture(schema));
             } finally {
                 if(created) {

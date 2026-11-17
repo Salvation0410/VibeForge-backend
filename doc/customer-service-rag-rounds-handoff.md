@@ -222,6 +222,8 @@ Python compileall（含测试运行器）、完整pytest、uv lock检查通过�
 
 第五轮实现、测试、设计及交接提交为 `ea1deb9`；未混入另一任务生成验收脚本或用户既有README修改。
 
+最终已启动新版两端服务，正式只读核对通过：epoch=1、原publication/head/alias不变，11 ACTIVE/1 DISABLED，72块/11 manifest原字段和f32向量逐项一致，旧源未变，两端健康，真实回答/Embedding0；日志tmp/round9-runtime-final.log。本轮已部署仲裁源码和空执行表，不执行正式INDEX/REBUILD/bootstrap，保留用户README两反引号和未跟踪取消计划。
+
 ### 下一轮建议
 
 优先补真实worker到prepare-publication的全链路及未知准备响应：Python已经完成候选，但Java未收到收据时，任务保持何种状态、重试是否产生额外候选、当前epoch变化怎样拒绝旧尝试。原因是本轮确认的是数据库commit事实丢响应及读取故障，尚未覆盖付费/候选构建阶段的未知结果。使用隔离任务与可计数合成Embedding，把发送前屏障、完成后断开和claim/lease接管放进同一演练；逐项核对原head、候选数量、事实唯一及调用数。若据此需要新增候选准备幂等/恢复策略，应先给用户说明稳定ID、attempt隔离、费用和存储代价的方案，不直接推广生产行为。自动GC仍需独立无引用保护设计。
@@ -330,6 +332,38 @@ Java资源组14项通过（11项隔离MySQL、3项子JVM），0失败/错误/跳
 P1针对首次并发重复付费设计跨实例prepare执行仲裁。推荐先做具体方案：独立持久attempt状态，只有执行所有者可以开始Embedding；同attempt其他请求读取COMPLETE或明确BUSY/UNKNOWN，不能超时后自动重算。执行超时和进程退出可能保留UNKNOWN，需要新INDEX或经审查的恢复；不得把锁超时等同于未调用供应商。代价是台账/所有者/状态维护与故障运维，收益是收窄本轮已证实的创建前重复调用窗口。
 
 另一方案限制为Spring同进程请求串行或保留当前冲突拒绝，改动较小，但无法涵盖多实例/重启重复请求。生产仲裁取舍需具体设计并按AGENTS.md确认后实施，不能直接套Redis TTL锁宣称exactly-once。预定验收同lease并发、跨实例、所有者退出/暂停、完成回执丢失、DB离线和epoch撤销，每次记录发送前持久事实和Fake调用数；不提高真实供应商预算。P2GC仍需引用保护，P3质量标注和cap2/R2继续独立验证。
+
+## 第九轮：持久首次准备执行仲裁（2026-11-17）
+
+### 原问题、选择和实现
+
+用户选择方案5。第八轮证实两个首次prepare可在集合创建前各自Embedding，确定性名称只防覆盖。本轮Spring新增customer_service_knowledge_prepare_execution，以taskId唯一记录首次operationId/fence、随机executorId、STARTED/UNKNOWN/COMPLETE、观察期限和可选收据，不存proof/URL/正文/向量。BEGIN在epoch→task→lease短事务核对业务context、首次anchor、有效claim/lease后只首次返回granted=true；所有重复请求包括同executor均不重授，STARTED期限内BUSY、固定300秒后观察UNKNOWN。Python不连接MySQL。
+
+Python正式app装配Spring仲裁客户端，anchor INDEX缺装配明确失败。首次候选不存在且非恢复时申请一次资格；响应异常不重发、不Embedding。进入付费前再次复核lease/epoch，下载解析期间撤销也能阻止后续调用。候选完整验收后原executor登记COMPLETE；同完整收据幂等，不同executor拒绝。实际异常/cancel不额外发送收尾RPC，保留STARTED直至观察未知，接口允许原executor显式报UNKNOWN。资格不因期限、断连或状态未知再次授予。
+
+完整Milvus候选仍优先经过原回读验收并恢复，新lease复制向量和原提交仲裁保持；执行台账不是发布授权。COMPLETE只是可信Python登记的结果，不能代替Milvus完整验收。收据保存前检查64KiB；控制HTTP有界读取、严格schema，不随故障重发BEGIN。主要模块为KnowledgePublicationService/Mapper/Controller、SpringKnowledgePublicationClient、KnowledgePublicationPreparer与app装配；设计6bb6ba2。
+
+### 取舍、边界与限制
+
+收益是同一准备身份首次多实例争用只授予一执行者；代价是授权后崩溃且无完整候选时可能停住，即使尚未付费也不自动重算。UNKNOWN不等于失败或可接管，不新增执行恢复调度。记录不是供应商计费exactly-once：无anchor旧请求、DELETE/REBUILD、直接未装配离线Preparer、供应商内部重试及人为新INDEX任务都不在保证内。候选恢复仍会复制新集合，没有GC。
+
+300秒只是固定观察期限，未新增心跳；期限内原executor完成可以登记，期限后也不自动剥夺其已授资格，当前lease/epoch依然决定可否登记或发布。已授资格到实际外部发送仍有撤销窗口，再复核不构成跨资源原子事务。资格请求确认丢失不通过重新BEGIN取granted；无完整候选时旧执行保留未知。长期暂停/网络分区/事务中途退出等完整进程矩阵尚未执行。
+
+### 验证、失败记录与部署
+
+Python新增10项仲裁及客户端测试；最终完整1656通过、25跳过、0失败，compileall/uv lock通过，日志tmp/round9-python-final.log/xml。覆盖BEGIN响应断连/503/超限/错误grant/status只请求一次，未授予零Embedding；独立Preparer共享资格只一次Embedding、完整重传复用。付费前权威复核的离线并发夹具使用AsyncMock，实际HTTP资源单独覆盖。最初客户端命令误在根目录执行无pytest环境，随后在ai-service正确运行通过，未因环境问题改代码。
+
+Java最终目标88项通过、0失败/错误/跳过，含14项隔离MySQL、3项子JVM、2项HTTP；19个随机schema清理，日志tmp/round9-java-final.log、summary.json。覆盖MySQL双线程BEGIN仅一个grant、同executor重传不重授、观察过期UNKNOWN、完成重复幂等、其他executor拒绝、epoch/撤lease拒绝。尚无真实完成登记响应丢失或授权事务中途强杀；客户端断连测试不冒充该矩阵。干净编译日志tmp/round9-java-compile.log。
+
+隔离HTTP runner启动两个独立Python app进程，代理同时向二者发送同一当前lease/anchor请求；计数合计Embedding1次，一个200另一个503/KNOWLEDGE_PREPARE_BUSY。丢弃成功prepare响应，worker保持PENDING/原head；重启主实例、新attempt恢复后0新增Embedding，最终唯一第二收据事实。报告tmp/round9-prepare-report.json，候选仍3个，真实供应商/回答0。原commit丢响应和读取故障HTTP场景亦通过。新增付费前复核后重新执行最终HTTP而非沿用首轮证据。
+
+正式库预检0未完成任务后停止Spring、备份九张知识表（包括anchor）为私有JSON并保存hash，只新增空执行台账，迁移后逐表结构与数据一致。迁移记录tmp/round9-migration.log，备份tmp/knowledge-execution-backup-04db2b22-79db-4da0-a933-cd97792ef22e。新表SQL及init同步，publication模式缺表启动拒绝。备份不提交，不是自动恢复工具。Python完整回归前停止管理实例释放GPU锁，完成已重启；Spring待编译完成后恢复。
+
+### 下一轮建议
+
+优先补持久仲裁故障矩阵与只读状态观测：BEGIN已提交但响应丢失、执行者在授权后/Embedding后退出、COMPLETE登记响应丢失、长暂停后恢复、epoch撤销和控制面不可用。原因是本轮已有并发成功与客户端异常证据，尚缺这些发送点的完整跨服务退出矩阵；UNKNOWN需可解释观测，不能人工盲目新建任务。建议随机schema/alias屏障及计数替身，新增管理员只读执行状态/固定原因/时间投影，不输出原文/proof/URL；先只观察，不自动接管/重算。涉及生产观测新接口可在明确设计后实施，恢复选择不同需另确认。
+
+GC继续等待事实/anchor/执行台账与在途读引用保护；质量cap2/R2和人工标注仍独立轮次。既有断连测试30ms竞争未改，本轮完整回归通过不能证明竞争已消失。
 
 ## 以后每轮必须使用的交接格式
 

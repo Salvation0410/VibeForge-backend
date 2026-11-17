@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+from uuid import uuid4
 
-from ai_service.api.knowledge_publication_schemas import CandidateRequest
+from ai_service.api.knowledge_publication_schemas import CandidateRequest, PrepareExecutionRequest
 from ai_service.infrastructure.knowledge_publication_store import PublicationStore, document_identity, snapshot_hash
 from ai_service.infrastructure.milvus_knowledge import KnowledgeMutationLease, MilvusKnowledgeError
 from ai_service.orchestration.document_etl import KnowledgeEtlService
@@ -65,12 +66,26 @@ class _RecoveredEmbeddings:
         return [chunk.embedding for chunk in self.document.chunks]
 
 
+class _GrantedEmbeddings:
+    """下载解析期间可能失去lease/epoch，首次付费前再验权；不自动重发资格。"""
+    def __init__(self, provider, permit, arbitration, request, settings):
+        self.provider, self.permit, self.arbitration = provider, permit, arbitration
+        self.request, self.settings = request, settings
+
+    async def embed_documents(self, texts, *, max_elements):
+        from ai_service.orchestration.knowledge_publication_boundary import validate_candidate_request
+        await self.permit.assert_current()
+        await validate_candidate_request(self.request, self.arbitration, self.settings)
+        return await self.provider.embed_documents(texts, max_elements=max_elements)
+
+
 class KnowledgePublicationPreparer:
-    def __init__(self, settings, downloader, embeddings, store, semaphore=None):
+    def __init__(self, settings, downloader, embeddings, store, semaphore=None, arbitration=None):
         self.settings = settings
         self.store = store
         self.publications = PublicationStore(settings, store)
         self.downloader, self.embeddings = downloader, embeddings
+        self.arbitration = arbitration
         self.semaphore = semaphore if semaphore is not None else asyncio.Semaphore(settings.rag_etl_max_concurrency)
 
     async def prepare(self, request: CandidateRequest):
@@ -101,6 +116,13 @@ class KnowledgePublicationPreparer:
                             raise MilvusKnowledgeError("KNOWLEDGE_PREPARE_RESULT_MISSING")
                         _, recovered = await self._verified_attempt(context, anchor.operation_id, anchor.fence, old_name)
                 documents = {}
+                executor_id = None
+                if anchor is not None and recovered is None and self.arbitration is not None:
+                    executor_id = uuid4().hex
+                    result = await self.arbitration.arbitrate_prepare(PrepareExecutionRequest(
+                        context=context, lease=mutation.lease, executor_id=executor_id, status="BEGIN"))
+                    if not result.granted:
+                        raise MilvusKnowledgeError("KNOWLEDGE_PREPARE_" + result.status)
                 for item in context.documents:
                     if mutation.operation == "INDEX" and item.document_id == mutation.document_id:
                         continue
@@ -109,6 +131,8 @@ class KnowledgePublicationPreparer:
                 capture = _Capture()
                 retained = [row for document in documents.values() for row in self.publications.rows(document, 1)]
                 embeddings = _EmbeddingBudget(self.embeddings, self.publications, retained)
+                if executor_id is not None:
+                    embeddings = _GrantedEmbeddings(embeddings, permit, self.arbitration, request, self.settings)
                 original = None
                 if recovered is not None:
                     target = next(item for item in context.documents if item.document_id == mutation.document_id)
@@ -146,10 +170,15 @@ class KnowledgePublicationPreparer:
                     current_rows = [row for item in context.documents for row in self.publications.rows(documents[item.document_id], 1)]
                     if snapshot_hash(current_rows) != snapshot_hash(recovered):
                         raise MilvusKnowledgeError("KNOWLEDGE_VERSION_CONFLICT")
-                return await self.publications.write(
+                receipt = await self.publications.write(
                     context, lease, [documents[item.document_id] for item in context.documents], permit,
                     name=candidate_name,
                 )
+                if executor_id is not None:
+                    await self.arbitration.arbitrate_prepare(PrepareExecutionRequest(
+                        context=context, lease=mutation.lease, executor_id=executor_id,
+                        status="COMPLETE", receipt=receipt))
+                return receipt
 
     async def _verified_attempt(self, context, operation_id, fence, name):
         receipt, rows = await self.publications.completed(name)

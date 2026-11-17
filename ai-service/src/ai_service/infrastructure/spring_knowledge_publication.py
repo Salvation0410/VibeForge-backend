@@ -7,7 +7,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
-from ai_service.api.knowledge_publication_schemas import ReadSnapshot, PublicationFact, InventoryPage
+from ai_service.api.knowledge_publication_schemas import ReadSnapshot, PublicationFact, InventoryPage, PrepareExecutionResult
 from ai_service.infrastructure.milvus_knowledge import MilvusKnowledgeError
 
 
@@ -23,9 +23,9 @@ class SpringKnowledgePublicationClient:
             transport=transport, timeout=httpx.Timeout(timeout_seconds), trust_env=False,
             follow_redirects=False)
 
-    async def _get(self, suffix, schema):
+    async def _request(self, method, suffix, schema, body=None):
         try:
-            async with self._client.stream('GET', self._url + '/' + suffix) as response:
+            async with self._client.stream(method, self._url + '/' + suffix, **({'json': body} if body is not None else {})) as response:
                 response.raise_for_status()
                 declared = response.headers.get('content-length')
                 if declared is not None and (not re.fullmatch(r'[0-9]+', declared)
@@ -45,6 +45,17 @@ class SpringKnowledgePublicationClient:
             return schema.model_validate(payload['data'], by_alias=True, by_name=False)
         except Exception:
             raise MilvusKnowledgeError('KNOWLEDGE_PUBLICATION_UNAVAILABLE') from None
+
+    async def _get(self, suffix, schema):
+        return await self._request('GET', suffix, schema)
+
+    async def arbitrate_prepare(self, request):
+        result = await self._request('POST', 'prepare-execution', PrepareExecutionResult,
+                                     request.model_dump(by_alias=True))
+        if (result.granted != (result.status == 'STARTED')
+                or (request.status != 'BEGIN' and result.granted)):
+            raise MilvusKnowledgeError('KNOWLEDGE_PREPARE_EXECUTION_INVALID')
+        return result
 
     async def snapshot(self):
         return await self._get('snapshot', ReadSnapshot)

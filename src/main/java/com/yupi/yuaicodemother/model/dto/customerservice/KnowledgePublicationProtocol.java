@@ -25,6 +25,10 @@ public final class KnowledgePublicationProtocol {
             String sourceCollection, List<DocumentIdentity> documents) { }
     public record PrepareAnchor(PublicationContext context, String operationId,
             @JsonSerialize(using=LeaseLongSerializer.class) long fence) { }
+    public record PrepareExecutionRequest(PublicationContext context,
+            com.yupi.yuaicodemother.service.KnowledgeMutationCoordinator.Lease lease,
+            String executorId, String status, CandidateReceipt receipt) { }
+    public record PrepareExecutionResult(boolean granted, String status) { }
     public record CandidateRequest(PublicationContext context, Object mutation, PrepareAnchor prepareAnchor) {
         public CandidateRequest(PublicationContext context, Object mutation) { this(context, mutation, null); }
     }

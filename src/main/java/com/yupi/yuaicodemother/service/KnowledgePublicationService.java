@@ -44,6 +44,7 @@ public class KnowledgePublicationService implements ApplicationRunner {
     @Override public void run(ApplicationArguments args) {
         // 恢复台账缺表时启动即拒绝，不能等到首次付费请求才发现升级不完整。
         if(properties.isPublicationEnabled()) mapper.prepareAnchor(0);
+        if(properties.isPublicationEnabled()) mapper.prepareExecution(0);
         // 迁移前旧库可继续旧协议；已持久启用后，即使配置关闭也必须拒绝启动。
         try {
             KnowledgePublicationState state=mapper.state();
@@ -138,6 +139,61 @@ public class KnowledgePublicationService implements ApplicationRunner {
                 throw failure("KNOWLEDGE_PREPARE_CONTEXT_CONFLICT");
             return anchor;
         } catch(JsonProcessingException invalid) {throw failure("KNOWLEDGE_PREPARE_ANCHOR_INVALID");}
+    }
+    /** 一次资格授予必须先于付费；同executor重传也不能再次获准执行。 */
+    @Transactional
+    public PrepareExecutionResult arbitratePrepare(PrepareExecutionRequest request) {
+        if(request==null || request.context()==null || request.lease()==null
+                || request.executorId()==null || !request.executorId().matches("[a-f0-9]{32}")
+                || !Set.of("BEGIN","UNKNOWN","COMPLETE").contains(request.status()==null?"":request.status())
+                || !request.context().publicationId().matches("task_[1-9][0-9]*"))
+            throw failure("KNOWLEDGE_PREPARE_EXECUTION_INVALID");
+        var state=activeState();
+        long id=Long.parseLong(request.context().publicationId().substring(5));
+        var task=tasks.lockTask(id);
+        if(task==null) throw failure("KNOWLEDGE_PUBLICATION_CLAIM_LOST");
+        lockExecution(id,task.getProcessingOwner(),request.lease());
+        var context=request.context();var lease=request.lease();
+        if(!"INDEX".equals(task.getOperation()) || state.getEpoch()!=context.baseEpoch()
+                || !Objects.equals(source(state),context.sourceCollection()) || !expected(task).equals(context.documents()))
+            throw failure("KNOWLEDGE_PREPARE_CONTEXT_CONFLICT");
+        try {
+            String stored=mapper.prepareAnchor(id);
+            if(stored==null) throw failure("KNOWLEDGE_PREPARE_ANCHOR_INVALID");
+            var anchor=json.readValue(stored,PrepareAnchor.class);
+            if(!anchor.context().equals(context) || !anchor.operationId().equals(lease.operationId()) || anchor.fence()!=lease.fence())
+                throw failure("KNOWLEDGE_PREPARE_EXECUTION_IDENTITY_CONFLICT");
+            var execution=mapper.prepareExecution(id);
+            if(execution!=null && (!lease.operationId().equals(execution.getOperationId()) || execution.getFence()!=lease.fence()))
+                throw failure("KNOWLEDGE_PREPARE_EXECUTION_IDENTITY_CONFLICT");
+            if(request.status().equals("BEGIN")) {
+                if(request.receipt()!=null) throw failure("KNOWLEDGE_PREPARE_EXECUTION_INVALID");
+                if(execution==null) {
+                    requireOne(mapper.insertPrepareExecution(id,lease.operationId(),lease.fence(),request.executorId(),
+                            LocalDateTime.ofInstant(clock.instant().plusSeconds(300),ZoneOffset.UTC)));
+                    return new PrepareExecutionResult(true,"STARTED");
+                }
+                String status=execution.getStatus();
+                if(status.equals("STARTED")) status=execution.getObservationDeadline().isAfter(LocalDateTime.ofInstant(clock.instant(),ZoneOffset.UTC))?"BUSY":"UNKNOWN";
+                if(!Set.of("BUSY","UNKNOWN","COMPLETE").contains(status)) throw failure("KNOWLEDGE_PREPARE_EXECUTION_INVALID");
+                return new PrepareExecutionResult(false,status);
+            }
+            if(execution==null || !request.executorId().equals(execution.getExecutorId())
+                    || execution.getFence()!=lease.fence() || !lease.operationId().equals(execution.getOperationId()))
+                throw failure("KNOWLEDGE_PREPARE_EXECUTOR_CONFLICT");
+            if(request.status().equals("UNKNOWN")) {
+                if(request.receipt()!=null) throw failure("KNOWLEDGE_PREPARE_EXECUTION_INVALID");
+                if(!execution.getStatus().equals("COMPLETE")) requireOne(mapper.finishPrepareExecution(id,"UNKNOWN",null));
+                return new PrepareExecutionResult(false,execution.getStatus().equals("COMPLETE")?"COMPLETE":"UNKNOWN");
+            }
+            validateReceipt(context,request.receipt(),lease);
+            if(json.writeValueAsBytes(request.receipt()).length>64*1024) throw failure("KNOWLEDGE_PUBLICATION_RECEIPT_INVALID");
+            if(execution.getStatus().equals("COMPLETE")) {
+                if(!json.readValue(execution.getReceiptJson(),CandidateReceipt.class).equals(request.receipt()))
+                    throw failure("KNOWLEDGE_PREPARE_RECEIPT_CONFLICT");
+            } else requireOne(mapper.finishPrepareExecution(id,"COMPLETE",json.writeValueAsString(request.receipt())));
+            return new PrepareExecutionResult(false,"COMPLETE");
+        } catch(JsonProcessingException invalid) {throw failure("KNOWLEDGE_PREPARE_EXECUTION_INVALID");}
     }
     @Transactional
     public ReadSnapshot snapshot() {

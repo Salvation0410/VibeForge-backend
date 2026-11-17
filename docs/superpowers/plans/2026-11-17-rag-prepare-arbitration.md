@@ -1,7 +1,7 @@
 # 第九轮持久prepare仲裁执行计划
 
-- [ ] 新SQL/实体/Mapper，Service短事务begin/finish，Controller认证接口和严格协议，缺表启动拒绝。
-- [ ] Python客户端有界POST；Preparer在首次构建前begin、写入后finish，异常/cancel不自动重授，完整候选继续恢复；正式装配仲裁。
-- [ ] MySQL资格并发/重复/期限/身份/完成测试；Python并发资格和HTTP失败边界；双Python HTTP合计1次Embedding和重启恢复。
-- [ ] Java目标资源与干净编译，Pythoncompileall/完整pytest/lock；正式停写排空备份加表、两端启动并只读验证。
-- [ ] README/AGENTS/逐轮交接记录状态、失败与未测边界、成本和下一轮；中文Git仅提交本轮修改。
+- [x] SQL/实体/Mapper、短事务begin/finish、认证接口和缺表启动拒绝完成。
+- [x] Python有界POST/首次仲裁/完成登记、付费前lease/epoch复核及正式装配完成；异常保留资格。
+- [x] MySQL并发/重复/期限/身份测试和双Python HTTP1次Embedding/重启恢复通过。
+- [x] Java88目标及干净编译、Python1656通过/25跳过和compileall/lock；正式九表备份加表、服务及原字段/f32核对通过。
+- [x] README/AGENTS/交接已同步，中文提交仅本轮路径。

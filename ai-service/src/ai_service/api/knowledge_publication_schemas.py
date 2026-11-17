@@ -95,6 +95,19 @@ class PrepareAnchor(PublicationModel):
     fence: int = Field(ge=1)
 
 
+class PrepareExecutionRequest(PublicationModel):
+    context: PublicationContext
+    lease: PublicationLease
+    executor_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    status: Literal["BEGIN", "UNKNOWN", "COMPLETE"]
+    receipt: CandidateReceipt | None = None
+
+
+class PrepareExecutionResult(PublicationModel):
+    granted: bool
+    status: Literal["STARTED", "BUSY", "UNKNOWN", "COMPLETE"]
+
+
 class CandidateRequest(PublicationModel):
     context: PublicationContext
     mutation: Annotated[PublicationIndex | PublicationDelete | PublicationRebuild,

@@ -48,7 +48,10 @@ def serve(args):
     class Embeddings:
         calls=0
         async def embed_query(self,question): self.calls+=1;return [0.1,0.2,0.9]
-        async def embed_documents(self,texts,**kwargs):self.calls+=1;return [[0.1,0.2,0.9] for _ in texts]
+        async def embed_documents(self,texts,**kwargs):
+            self.calls+=1
+            if args.prepare_mode:await asyncio.sleep(.5)
+            return [[0.1,0.2,0.9] for _ in texts]
     class Model(FakeModel):
         answer_calls=0
         async def answer_customer_service(self,question,contexts):
@@ -97,12 +100,35 @@ async def prepare_run(args):
                 except httpx.HTTPError:pass
                 await asyncio.sleep(.1)
             else:raise RuntimeError('PREPARE_START_TIMEOUT')
+        mirror_port=free_port()
+        mirror=subprocess.Popen([sys.executable,__file__,'--serve','--prepare-mode','--alias',args.alias,'--proxy-port',str(args.spring_port),
+            '--python-port',str(mirror_port),'--report',str(args.report)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform=='win32' else 0);children.append(mirror)
+        async with httpx.AsyncClient(trust_env=False,timeout=2) as c:
+            for _ in range(100):
+                if mirror.poll() is not None:raise RuntimeError('PREPARE_MIRROR_EXITED')
+                try:
+                    if (await c.get(f'http://127.0.0.1:{mirror_port}/health/live')).status_code==200:break
+                except httpx.HTTPError:pass
+                await asyncio.sleep(.1)
+            else:raise RuntimeError('PREPARE_MIRROR_TIMEOUT')
         class Proxy(BaseHTTPRequestHandler):
             def log_message(self,*_):pass
             def do_POST(self):
                 raw=self.rfile.read(int(self.headers.get('Content-Length','0')))
-                with httpx.Client(trust_env=False,timeout=35) as c:
-                    response=c.post(f'http://127.0.0.1:{port}'+self.path,content=raw,headers={'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json'})
+                def forward(target):
+                    with httpx.Client(trust_env=False,timeout=35) as c:
+                        return c.post(f'http://127.0.0.1:{target}'+self.path,content=raw,headers={'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json'})
+                if state['drop']:
+                    from concurrent.futures import ThreadPoolExecutor
+                    with ThreadPoolExecutor(max_workers=2) as pool:
+                        responses=list(pool.map(forward,[port,mirror_port]))
+                    assert sorted(r.status_code for r in responses)==[200,503]
+                    rejected=next(r for r in responses if r.status_code==503)
+                    assert rejected.json()['error']['code']=='KNOWLEDGE_PREPARE_BUSY'
+                    state['concurrentRejected']=True
+                    response=next(r for r in responses if r.status_code==200)
+                else:response=forward(port)
                 if 'prepare-publication' in self.path:
                     state['requests']+=1
                     # 仅在内存核对完整身份；租约proof和下载地址不进入日志或报告。
@@ -115,7 +141,9 @@ async def prepare_run(args):
         async with httpx.AsyncClient(trust_env=False,timeout=60,headers={'Authorization':'Bearer '+TOKEN}) as c:
             first=(await c.post(f'http://127.0.0.1:{args.spring_port}/test/worker',json={'port':proxy.server_port})).json()
             assert first['status']=='PENDING' and first['retryCount']==1,first
-            counts=(await c.get(f'http://127.0.0.1:{port}/test/counts')).json();assert counts['embeddings']==1 and counts['model']==0,counts
+            counts=(await c.get(f'http://127.0.0.1:{port}/test/counts')).json()
+            mirror_counts=(await c.get(f'http://127.0.0.1:{mirror_port}/test/counts')).json()
+            assert counts['embeddings']+mirror_counts['embeddings']==1 and counts['model']==mirror_counts['model']==0
             client=SpringKnowledgePublicationClient(gateway_base_url=f'http://127.0.0.1:{args.spring_port}',bearer_token=TOKEN)
             before=await client.snapshot();assert before.epoch==1 and before.collection_name==initial.candidate_collection
             validation=(await c.post(f'http://127.0.0.1:{args.spring_port}/internal/customer-service/knowledge-mutation-leases:validate',
@@ -150,7 +178,7 @@ async def prepare_run(args):
             args.report.write_text(json.dumps(dict(prepareResponseDropped=not state['drop'],embeddingCalls=1+counts['embeddings'],candidates=len(names),
                 prepareRequests=state['requests'],firstTaskState=first['status'],publishedEpoch=fact.epoch,paidCalls=0,
                 oldLeaseRevoked=True,attemptIdentityIsolated=True,publishedSecondReceipt=True,oldHeadPreserved=True,
-                restartedPrepareRecovered=True,persistedAnchorUnchanged=True),indent=2),encoding='utf8')
+                restartedPrepareRecovered=True,persistedAnchorUnchanged=True,concurrentPrepareRejected=state['concurrentRejected']),indent=2),encoding='utf8')
             await client.close()
     finally:
         for child in children:
