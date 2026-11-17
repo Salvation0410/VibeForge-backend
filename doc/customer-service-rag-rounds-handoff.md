@@ -323,6 +323,8 @@ Java资源组14项通过（11项隔离MySQL、3项子JVM），0失败/错误/跳
 
 正式库最终只读核对通过：两端健康，epoch=1、原publication/head/alias不变，11 ACTIVE/1 DISABLED，72块/11 manifest原字段及f32向量一致，旧源未变，模型/Embedding调用0；日志tmp/round8-runtime-final.log。保留用户README两反引号和未跟踪取消计划。本轮增加验收设施，不声称答案质量提升或自动恢复上线。
 
+第八轮验收设施、计划、运行证据及交接提交82ff0f6（test(rag): 补恢复并发半写退出及旧执行拒绝验收）。
+
 ### 下一轮建议、原因与验收
 
 P1针对首次并发重复付费设计跨实例prepare执行仲裁。推荐先做具体方案：独立持久attempt状态，只有执行所有者可以开始Embedding；同attempt其他请求读取COMPLETE或明确BUSY/UNKNOWN，不能超时后自动重算。执行超时和进程退出可能保留UNKNOWN，需要新INDEX或经审查的恢复；不得把锁超时等同于未调用供应商。代价是台账/所有者/状态维护与故障运维，收益是收窄本轮已证实的创建前重复调用窗口。
