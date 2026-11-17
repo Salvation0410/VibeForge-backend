@@ -70,6 +70,45 @@ async def test_vue_initial_messages_require_one_json_without_retry_feedback(mode
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mode,exists", [("generate", False), ("generate", True), ("repair", True)])
+async def test_vue_existing_project_read_scope_in_actual_messages(mode, exists):
+    from copy import deepcopy
+
+    model = model_with_response(
+        '{"content":"读取受影响的依赖","toolCalls":['
+        '{"name":"file_read","arguments":{"relativeFilePath":"src/Dependency.vue"}}]}'
+    )
+    context = {"prompt": "增加排序，保留原功能", "codeGenType": "VUE_PROJECT",
+               "currentArtifact": {"exists": exists, "entries": ["src/App.vue"]},
+               "toolResults": [{"toolCallId": "read:1", "tool": "file_read",
+                                "arguments": {"relativeFilePath": "src/App.vue"},
+                                "result": {"content": "当前完整源码"}}]}
+    original = deepcopy(context)
+    if mode == "repair":
+        turn = await model.repair("当前源码快照", context)
+    else:
+        turn = await model.generate("VUE_PROJECT", context)
+    system, human = model._client.messages
+    # 共用提示限定首次创建与增量修改，并保留必要读取；不以提示测试冒充成本下降。
+    assert "若已有最新完整的 file_read 结果，直接使用该结果" in system.content
+    assert "被后续写入替代或被明确省略" in system.content
+    assert "已有且未修改的依赖无需重新写入" in system.content
+    assert "已有工程修改只需写入本次新增或修改的文件，不重建首次文件计划" in system.content
+    assert "必须写入所有必要入口和本地 import 目标" in system.content
+    assert "仅核对本次受影响的导入、props、事件与共享样式" in system.content
+    assert "返回空 toolCalls，交由平台执行构建和质量审查" in system.content
+    assert "没有构建结果时不要声称已构建或已验收" in system.content
+    payload = json.loads(human.content)
+    assert payload["prompt"] == original["prompt"]
+    assert payload["currentArtifact"] == original["currentArtifact"]
+    assert payload["toolResults"] == original["toolResults"]
+    assert context == original
+    assert turn.vue_output_invalid is False
+    assert len(turn.tool_calls) == 1
+    assert turn.tool_calls[0].name == "file_read"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["generate", "repair", "review"])
 async def test_vue_long_tool_history_fits_real_message_budget_without_changing_context(mode):
     from copy import deepcopy
