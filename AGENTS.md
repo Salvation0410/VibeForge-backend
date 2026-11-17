@@ -356,6 +356,8 @@ npm run build-only
 
 ## 交付前检查
 
+- 准备跨服务故障设施 `ai-service/tests/prepare_http_fault_runner.py` 只用于随机schema/alias：真实HTTP BEGIN/COMPLETE成功后丢响应、Python授权后/Embedding返回后os._exit(79)，重启核对不新增Fake调用及原head。测试计数非供应商计费；不部署测试路由、不据此声称长期暂停、事务中途退出或自动恢复已实现。
+
 - 管理员GET `/api/admin/customer-service/knowledge/{id}/tasks/{taskId}/prepare-execution`按任务主键及文档归属无锁查询，只投影状态、固定原因与UTC观察时间/期限，不读receiptJson/执行身份、不改记录或触发恢复。COMPLETE只代表登记完成；UNKNOWN不授权接管；NOT_REGISTERED不证明未计费。数据库不可用返回错误，不能伪装无记录；损坏状态投影INVALID/UNKNOWN。
 
 - INDEX+prepareAnchor首次计算经Spring/MySQL prepare_execution仲裁；每个Python请求随机executorId，BEGIN只首次granted=true，同executor重传不重授。300秒仅观察UNKNOWN、不接管；完整Milvus候选恢复仍验收并受当前lease/epoch约束。正式入口无仲裁失败，缺表启动拒绝；升级停写排空备份执行alter_customer_service_knowledge_prepare_execution.sql。无anchor/DELETE/REBUILD/供应商重试不在计费仲裁保证内，不宣称exactly-once。

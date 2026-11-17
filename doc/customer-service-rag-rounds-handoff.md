@@ -399,6 +399,26 @@ Python目标17通过；包含准备、恢复、故障和候选六文件的相关
 
 下一轮优先剩余跨服务故障矩阵：真实HTTP BEGIN已提交响应丢失、Python授权后/Embedding后硬退出、COMPLETE确认丢失、长期暂停及控制面失联。原因是当前子JVM持久事实、Python协作取消及客户端丢确认分别成立，仍缺这些组合端到端证明。采用随机schema/alias、固定发送屏障与持久计数，不增加自动接管、重算或真实模型预算；GC引用保护及答案质量独立推进。第十轮此前提交431fa7c，本次接口提交哈希见最终回复。
 
+## 第十一轮：跨服务准备丢确认与Python硬退出（2026-11-17）
+
+### 原问题、选择与实现
+
+用户授权继续第十轮建议。此前MySQL子JVM持久事实、Python协作取消与客户端丢确认分开验证，缺少组合端到端证据。本轮新增prepare_http_fault_runner.py和Java四项显式HTTP场景；不修改生产计算/恢复策略或schema。正式Spring Controller/Service/Mapper连接随机schema，独立Python app使用正式装配及租约客户端、真实Milvus随机alias，下载器返回合成原文，Embedding使用三维计数替身。相较继续离线测试，成本为跨进程启动与真实资源回读，收益是核对HTTP确认与持久事实的组合。
+
+BEGIN/COMPLETE代理在正式事务返回成功后丢弃socket响应；BEGIN只发一次，重启后的另一请求可以查询但不得获准，累计BEGIN2且调用0。COMPLETE首次登记成功但Python收到异常，完整候选已存在，重启请求回读返回原收据，BEGIN1/COMPLETE1、总调用1且无额外登记。下载入口位于授资格后，os._exit(79)模拟授权后硬退出；PublicationStore.write入口位于Embedding返回后，测试进程替换该入口直接退出。退出码79必须明确核对；发送前计数文件flush/fsync，退出后父读取，授权退出0、Embedding后退出1。两者重启同attempt返回BUSY，没有候选、没有新调用。
+
+### 边界与验证
+
+四场景原head/epoch1保留，未写task_1发布事实。STARTED不因退出变为可接管；COMPLETE只登记收据不激活。每例随机schema/alias精确清理，测试路由只存在测试classpath/回环容器。此为真实HTTP/MySQL/Milvus加Fake供应商，不代表真实计费exactly-once或答案质量；计数是测试预占，不是供应商账单。不包括Spring事务中途退出、长暂停、网络分区、控制面长期离线、自动任务认领、供应商内部重试、新attempt人工重算。
+
+首场景URL错用斜杠返回404未进入注入点，修正为正式knowledge:prepare-publication后复验；首矩阵2通过2失败，硬退出在Windows表现httpx.ReadError，原夹具只接受RemoteProtocolError，补接受读取断连仍严格核对退出码与持久事实，非生产改动。失败日志tmp/round11-begin-test.log与round11-http-tests.log及随机runner.log保留。最终四项HTTP全通过、0失败/错误/跳过，四随机schema及所有本例候选清理；日志tmp/round11-http-final.log，报告tmp/round11-begin-loss.json、exit-grant.json、exit-embedding.json、complete-loss.json。Python相关四文件26通过0失败/错误/跳过，tmp/round11-python.log/xml；新增脚本compileall/uv lock通过，Java干净编译另记录tmp/round11-compile.log。未重跑完整Python或原两项HTTP，不把旧成绩写成本轮。
+
+正式只读完整核对通过，tmp/round11-runtime.log：两端健康、epoch1、原publication/head/alias及11ACTIVE/1DISABLED一致，72块/11manifest全部原字段/f32一致，旧源未变，真实聊天/Embedding0。生产源码和schema不改，无部署/INDEX/REBUILD/GC。保留用户README格式及取消计划，中文提交哈希见最终交付回复。
+
+### 下一轮建议
+
+优先补有界长期暂停/控制面失联矩阵：真实执行在授资格后暂停，观测过期不重新授权，恢复后当前lease/epoch有效才可继续；期限后撤销应拒绝完成/发布。控制面离线分别注入付费前和付费后，记录已发送调用与候选完整性，不能把失败等同未付费。这些边界比自动接管更优先，因为本轮只证明退出/重启，没有证明活执行者暂停时的交错。可沿用测试设施，先补证据不自动重算；人工恢复策略与GC仍需引用保护和具体方案确认，质量标注/cap2/R2独立推进。
+
 ## 以后每轮必须使用的交接格式
 
 1. 本轮解决什么：原问题的具体触发场景、证据和目标。

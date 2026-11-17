@@ -23,6 +23,35 @@ class KnowledgePublicationHttpIntegrationTest {
     static KnowledgePublicationMysqlIntegrationTest.Execution execution;
     static final ObjectMapper JSON=new ObjectMapper();
     static com.yupi.yuaicodemother.worker.CustomerServiceKnowledgeEtlWorker worker;
+    @Test void beginAcknowledgementLoss() throws Exception { runFault("begin-loss"); }
+    @Test void executorExitsAfterGrant() throws Exception { runFault("exit-grant"); }
+    @Test void executorExitsAfterEmbedding() throws Exception { runFault("exit-embedding"); }
+    @Test void completionAcknowledgementLoss() throws Exception { runFault("complete-loss"); }
+    void runFault(String fault) throws Exception {
+        new KnowledgePublicationMysqlIntegrationTest().isolated(f->{
+            fixture=f;execution=f.prepare(1);
+            String alias="rag_http_it_"+java.util.UUID.randomUUID().toString().replace("-","");f.properties.setCollectionAlias(alias);
+            Path directory=Files.createTempDirectory(Path.of("tmp"),"rag-prepare-fault-").toAbsolutePath();
+            SpringApplication application=new SpringApplication(Web.class);
+            application.setDefaultProperties(Map.of("server.port","0","server.address","127.0.0.1","spring.config.location","optional:classpath:/rag-http-test-empty.properties",
+                    "spring.main.banner-mode","off","spring.autoconfigure.exclude",
+                    "org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration,org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration,org.springframework.boot.autoconfigure.session.SessionAutoConfiguration"));
+            try(var context=(ServletWebServerApplicationContext)application.run()) {
+                Process runner=new ProcessBuilder("uv","run","python","tests/prepare_http_fault_runner.py","--spring-port",String.valueOf(context.getWebServer().getPort()),
+                        "--alias",alias,"--fault",fault,"--report",directory.resolve("report.json").toString())
+                        .directory(Path.of("ai-service").toFile()).redirectErrorStream(true).redirectOutput(directory.resolve("runner.log").toFile()).start();
+                try {
+                    assertTrue(runner.waitFor(120,TimeUnit.SECONDS));assertEquals(0,runner.exitValue(),directory.resolve("runner.log").toString());
+                    var report=JSON.readTree(Files.readString(directory.resolve("report.json")));
+                    assertTrue(report.get("oldHeadPreserved").asBoolean());assertTrue(report.get("noAdditionalEmbedding").asBoolean());
+                    assertEquals(fault.equals("begin-loss")||fault.equals("exit-grant")?0:1,report.get("embeddingCalls").asInt());
+                    assertEquals(fault.equals("complete-loss")?"COMPLETE":"STARTED",f.jdbc.queryForObject("SELECT status FROM customer_service_knowledge_prepare_execution WHERE taskId=1",String.class));
+                    assertEquals(0,f.scalar("SELECT COUNT(*) FROM customer_service_knowledge_publication WHERE publicationId='task_1'"));
+                    Files.copy(directory.resolve("report.json"),Path.of("tmp/round11-"+fault+".json"),StandardCopyOption.REPLACE_EXISTING);
+                } finally {if(runner.isAlive()){runner.destroyForcibly();runner.waitFor(10,TimeUnit.SECONDS);}}
+            } finally {fixture=null;execution=null;}
+        });
+    }
     @Test void prepareResponseLossRetriesWithoutPublishingUnknownCandidate() throws Exception { runScenario(true); }
     @Test void socketHttpFaultMatrixWithPersistentAuthority() throws Exception {
         runScenario(false);
@@ -97,6 +126,27 @@ class KnowledgePublicationHttpIntegrationTest {
     static class Harness {
         // 仅测试classpath/回环容器中存在；不增加任何正式管理入口。
         @GetMapping("/context") Object context() {return execution.context();}
+        @GetMapping("/prepare-request") Object prepareRequest() {
+            var anchor=fixture.service.registerPrepareAnchor(1,"owner",execution.lease(),execution.context());
+            var d=execution.context().documents().getFirst();
+            var mutation=new java.util.HashMap<String,Object>();
+            mutation.put("operation","INDEX");mutation.put("documentId",d.documentId());mutation.put("documentVersion",d.documentVersion());
+            mutation.put("indexRevision",d.indexRevision());mutation.put("activationRevision",d.activationRevision());mutation.put("etlVersion",String.valueOf(d.indexRevision()));
+            mutation.put("sha256",d.sha256());mutation.put("fileName",d.fileName());mutation.put("fileType",d.fileType());
+            mutation.put("signedUrl","https://synthetic.invalid/manual.txt");mutation.put("lease",execution.lease());
+            return new CandidateRequest(execution.context(),mutation,anchor);
+        }
+        @GetMapping("/execution-observation") Object executionObservation() {
+            return fixture.jdbc.queryForMap("SELECT status,receiptJson IS NOT NULL AS hasReceipt FROM customer_service_knowledge_prepare_execution WHERE taskId=1");
+        }
+        @PostMapping("/fault-initialize") Object faultInitialize(@RequestBody CandidateReceipt receipt) throws Exception {
+            fixture.jdbc.update("UPDATE customer_service_knowledge_publication SET collectionName=?,receiptJson=? WHERE epoch=1",receipt.candidateCollection(),JSON.writeValueAsString(receipt));
+            String hash=java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest("隔离知识说明".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            fixture.jdbc.update("UPDATE customer_service_knowledge_document SET contentHash=? WHERE id=1",hash);
+            fixture.jdbc.update("UPDATE customer_service_knowledge_content_revision SET contentHash=? WHERE documentId=1",hash);
+            execution=new KnowledgePublicationMysqlIntegrationTest.Execution(execution.lease(),fixture.service.prepare(1,"owner",execution.lease()),execution.receipt());
+            return Map.of("initialized",true);
+        }
         @GetMapping("/lease-identity") Object leaseIdentity() {return Map.of("operationId",execution.lease().operationId(),"fence",execution.lease().fence());}
         @PostMapping("/commit") Object commit(@RequestBody CandidateReceipt receipt) {
             return fixture.service.commit(1,"owner",execution.lease(),execution.context(),receipt);
