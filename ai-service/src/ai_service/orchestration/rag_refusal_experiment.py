@@ -258,6 +258,9 @@ async def run_live(data: dict, historical: dict, output: Path, *, rounds: int, m
     from langsmith import tracing_context
     from ai_service.config import Settings
     cfg = Settings(_env_file=ROOT / 'ai-service/.env')
+    # 此实验直接使用冻结提示和 SDK，必须在创建客户端前拒绝非文本模式。
+    if cfg.rag_answer_response_format != 'text':
+        raise ValueError('RAG_EVAL_UNSUPPORTED_BASELINE_CONFIG')
     client = ChatOpenAI(api_key=cfg.model_api_key, base_url=cfg.model_base_url,
                         model=cfg.model_name, temperature=cfg.model_temperature,
                         max_tokens=cfg.model_max_tokens, max_retries=0,

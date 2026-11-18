@@ -60,6 +60,7 @@ def settings_manifest(cfg):
 def check_settings(cfg, original):
     current = settings_manifest(cfg)
     if (not cfg.rag_publication_enabled or cfg.rag_document_chunk_limit != 1
+            or cfg.rag_answer_response_format != 'text'
             or current != {key: original.get(key) for key in current}
             or cfg.rag_retrieval_top_k != 8 or cfg.rag_final_top_k != 3
             or cfg.rag_min_rerank_score is not None or cfg.rag_prompt_max_bytes != 16384
