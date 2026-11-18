@@ -77,7 +77,9 @@ async def run_live(data: dict, chunks: list[dict], output: Path, *, max_chat: in
     )
 
     cfg = Settings(_env_file=ROOT / 'ai-service/.env')
+    # 此入口的基线固定为单文档单块，不能继承正式服务的可选配额。
     if (cfg.rag_retrieval_top_k != 8 or cfg.rag_final_top_k != 3
+            or cfg.rag_document_chunk_limit != 1
             or cfg.rag_min_rerank_score is not None
             or cfg.rag_reranker_provider != 'local_cross_encoder'):
         raise ValueError('RAG_EVAL_UNSUPPORTED_BASELINE_CONFIG')

@@ -497,6 +497,113 @@ async def test_final_top_k_applies_to_documents_after_duplicates():
     assert [item.chunk_id for item in model.calls[0][1]] == ['c1', 'c2']
 
 
+def test_document_chunk_limit_keeps_legacy_two_argument_selection_compatible():
+    from ai_service.orchestration.customer_service_rag import _select_documents
+
+    rows = [RerankedChunk(chunk(key, doc), .8) for key, doc in
+            [('a1', 'a'), ('a2', 'a'), ('b1', 'b'), ('c1', 'c'), ('c2', 'c')]]
+    selected, drops = _select_documents(rows, 2)
+    assert [item.chunk.chunk_id for item in selected] == ['a1', 'b1']
+    assert drops == {'a2': 'duplicate_document', 'c1': 'top_k', 'c2': 'duplicate_document'}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('final_top_k,expected', [(2, ['a1', 'a2']), (5, ['a1', 'a2', 'b1'])])
+async def test_document_chunk_limit_two_preserves_ties_caps_third_and_total(final_top_k, expected):
+    from ai_service.orchestration.customer_service_trace import CustomerServiceRagTrace
+
+    hits = [chunk(key, doc) for key, doc in
+            [('a1', 'a'), ('a2', 'a'), ('a3', 'a'), ('b1', 'b'), ('c1', 'c')]]
+    model = FakeAnswerModel(CustomerServiceModelAnswer(True, 'answer', tuple(reversed(expected))))
+    config = settings(rag_document_chunk_limit=2, rag_final_top_k=final_top_k)
+    trace = CustomerServiceRagTrace('eval-cap2', config)
+    candidate = CustomerServiceRagService(config, FakeEmbeddings(), FakeStore(hits), FakeReranker(), model)
+    result = await candidate.answer('q', trace=trace)
+    assert result.answered
+    assert [item.chunk_id for item in model.calls[0][1]] == expected
+    assert [item.chunk_id for item in result.sources] == list(reversed(expected))
+    selected = {item['chunkId']: item for item in trace.snapshot()['selected']}
+    assert selected['a3']['dropReason'] == 'document_chunk_limit'
+    assert selected['c1']['dropReason'] == 'top_k'
+
+
+@pytest.mark.asyncio
+async def test_document_chunk_limit_is_captured_when_service_is_created():
+    config = settings(rag_document_chunk_limit=2)
+    model = FakeAnswerModel(CustomerServiceModelAnswer(True, 'answer', ('a2', 'a1')))
+    candidate = CustomerServiceRagService(config, FakeEmbeddings(),
+        FakeStore([chunk('a1', 'a'), chunk('a2', 'a')]), FakeReranker(), model)
+    config.rag_document_chunk_limit = 1
+    result = await candidate.answer('q')
+    assert result.answered
+    assert [item.chunk_id for item in model.calls[0][1]] == ['a1', 'a2']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('disabled', [False, True])
+async def test_document_chunk_limit_two_applies_to_disabled_and_degraded_raw_order(disabled):
+    hits = [chunk('a1', 'a', score=.1), chunk('a2', 'a', score=.99),
+            chunk('a3', 'a', score=.98), chunk('b1', 'b', score=.9)]
+    reranker = FakeReranker(error=RuntimeError('private'))
+    model = FakeAnswerModel(CustomerServiceModelAnswer(True, 'answer', ('a2', 'a1', 'b1')))
+    result = await service(chunks=hits, reranker=reranker, model=model,
+        rag_document_chunk_limit=2,
+        rag_reranker_provider='disabled' if disabled else 'local_cross_encoder').answer('q')
+    assert result.answered and result.degraded is not disabled
+    assert [item.chunk_id for item in model.calls[0][1]] == ['a1', 'a2', 'b1']
+    assert len(reranker.calls) == (0 if disabled else 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('degraded', [False, True])
+async def test_document_chunk_limit_two_keeps_threshold_fail_closed(degraded):
+    model = FakeAnswerModel()
+    result = await service(chunks=[chunk('a1', 'a'), chunk('a2', 'a')], model=model,
+        rag_document_chunk_limit=2, rag_min_rerank_score=.9,
+        reranker=FakeReranker(error=RuntimeError('private') if degraded else None)).answer('q')
+    assert not result.answered and result.answer == NO_ANSWER_TEXT
+    assert result.degraded is degraded and model.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('max_bytes', [1024, 16_384])
+async def test_document_chunk_limit_two_keeps_character_and_actual_json_byte_budgets(max_bytes):
+    from ai_service.prompts.customer_service import customer_service_user_prompt
+
+    model = FakeAnswerModel(CustomerServiceModelAnswer(True, 'answer', ('a1',)))
+    content = '中"\\🙂' * 1000
+    result = await service(chunks=[chunk('a1', 'a', content=content),
+        chunk('a2', 'a', content=content), chunk('b1', 'b', content=content)], model=model,
+        rag_document_chunk_limit=2, rag_prompt_max_bytes=max_bytes).answer('q')
+    assert result.answered
+    contexts = model.calls[0][1]
+    assert all(len(item.content) <= 1200 for item in contexts)
+    assert sum(len(item.content) for item in contexts) <= 3000
+    assert len(customer_service_user_prompt('q', contexts, max_bytes=max_bytes).encode('utf-8')) <= max_bytes
+    if max_bytes == 16_384:
+        assert [item.chunk_id for item in contexts] == ['a1', 'a2', 'b1']
+        assert [len(item.content) for item in contexts] == [1200, 1200, 600]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('citations', [('a2', 'a2'), ('a2', 'unknown')])
+async def test_document_chunk_limit_two_still_rejects_duplicate_or_unknown_citations(citations):
+    result = await service(chunks=[chunk('a1', 'a'), chunk('a2', 'a')], rag_document_chunk_limit=2,
+        model=FakeAnswerModel(CustomerServiceModelAnswer(True, 'answer', citations))).answer('q')
+    assert not result.answered and result.answer == SYSTEM_FALLBACK_TEXT and result.sources == ()
+
+
+@pytest.mark.asyncio
+async def test_document_chunk_limit_two_does_not_revive_stale_inactive_or_duplicate_chunks():
+    model = FakeAnswerModel(CustomerServiceModelAnswer(True, 'answer', ('a2', 'a1', 'b1')))
+    result = await service(chunks=[chunk('old', 'a', version=1), chunk('inactive', 'a', active=False),
+        chunk('a1', 'a'), chunk('a1', 'other'), chunk('a2', 'a'), chunk('b1', 'b')],
+        model=model, rag_document_chunk_limit=2).answer('q')
+    assert result.answered
+    assert [item.chunk_id for item in model.calls[0][1]] == ['a1', 'a2', 'b1']
+    assert [(item.document_id, item.document_version) for item in result.sources] == [('a', 2), ('a', 2), ('b', 2)]
+
+
 def test_enabled_app_assembles_answer_service_from_shared_dependencies(
     app_factory, settings,
 ):

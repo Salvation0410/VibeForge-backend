@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AliasChoices, Field, HttpUrl, model_validator
+from pydantic import AliasChoices, Field, HttpUrl, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -109,6 +109,8 @@ class Settings(BaseSettings):
     rag_chunk_overlap: int = Field(default=150, ge=0, le=99999)
     rag_retrieval_top_k: int = Field(default=8, ge=1, le=100)
     rag_final_top_k: int = Field(default=3, ge=1, le=100)
+    # 默认沿用单文档单块；仅显式配置 2 放宽，重启后可回退到 1。
+    rag_document_chunk_limit: int = Field(default=1, ge=1, le=2)
     rag_min_rerank_score: float | None = Field(default=None, allow_inf_nan=False)
     rag_answer_timeout_seconds: float = Field(default=60.0, gt=0, le=300)
     rag_prompt_max_bytes: int = Field(default=16_384, ge=1024, le=1_000_000)
@@ -129,6 +131,16 @@ class Settings(BaseSettings):
     rag_download_max_bytes: int = Field(default=20971520, ge=1, le=104857600)
     rag_download_connect_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
     rag_download_read_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+
+    @field_validator("rag_document_chunk_limit", mode="before")
+    @classmethod
+    def validate_document_chunk_limit(cls, value: object) -> int:
+        # 环境变量以字符串传入；拒绝布尔、浮点及隐式整数转换，避免误启用配额。
+        if isinstance(value, str) and value in {"1", "2"}:
+            return int(value)
+        if type(value) is not int or value not in {1, 2}:
+            raise ValueError("rag_document_chunk_limit must be 1 or 2")
+        return value
 
     @model_validator(mode="after")
     def validate_input_budget(self) -> "Settings":

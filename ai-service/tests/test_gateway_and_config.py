@@ -775,6 +775,21 @@ def _rag_settings(**overrides):
     )
 
 
+def test_document_chunk_limit_defaults_and_environment_rollback(monkeypatch):
+    monkeypatch.delenv("AI_SERVICE_RAG_DOCUMENT_CHUNK_LIMIT", raising=False)
+    assert _rag_settings().rag_document_chunk_limit == 1
+    monkeypatch.setenv("AI_SERVICE_RAG_DOCUMENT_CHUNK_LIMIT", "2")
+    assert _rag_settings().rag_document_chunk_limit == 2
+    monkeypatch.setenv("AI_SERVICE_RAG_DOCUMENT_CHUNK_LIMIT", "1")
+    assert _rag_settings().rag_document_chunk_limit == 1
+
+
+@pytest.mark.parametrize("value", [0, 3, -1, True, False, 1.0, 1.5, "1.0", "true", "3", ""])
+def test_document_chunk_limit_rejects_non_integer_or_unsupported_values(value):
+    with pytest.raises(ValidationError, match="rag_document_chunk_limit"):
+        _rag_settings(rag_document_chunk_limit=value)
+
+
 def test_customer_service_rag_defaults_are_disabled_and_bounded(monkeypatch):
     for name in (
         "AI_SERVICE_CUSTOMER_SERVICE_RAG_ENABLED",

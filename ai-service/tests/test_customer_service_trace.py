@@ -17,6 +17,17 @@ def test_diagnostics_requires_switch_and_nonempty_matching_prefix():
     assert create_trace('eval-1', config) is not None
 
 
+@pytest.mark.parametrize('limit', [1, 2])
+def test_trace_config_fingerprint_captures_document_chunk_limit_without_content(limit):
+    config = settings(rag_document_chunk_limit=limit)
+    trace = CustomerServiceRagTrace('eval-cap', config)
+    config.rag_document_chunk_limit = 3 - limit
+    data = trace.snapshot()
+    assert data['configFingerprint']['documentChunkLimit'] == limit
+    assert data['configFingerprint']['finalTopK'] == 3
+    assert 'content' not in json.dumps(data)
+
+
 @pytest.mark.asyncio
 async def test_trace_is_bounded_private_and_answer_strategy_unchanged():
     trace = CustomerServiceRagTrace('eval-\n"injected', settings())

@@ -37,6 +37,7 @@ class CustomerServiceRagTrace:
             'configFingerprint': {
                 'retrievalTopK': settings.rag_retrieval_top_k,
                 'finalTopK': min(settings.rag_final_top_k, 3),
+                'documentChunkLimit': settings.rag_document_chunk_limit,
                 'minRerankScore': settings.rag_min_rerank_score,
                 'promptMaxBytes': settings.rag_prompt_max_bytes,
                 'maxContextChars': 1200, 'maxTotalContextChars': 3000,
@@ -78,7 +79,7 @@ class CustomerServiceRagTrace:
             if kept_ids is not None:
                 record['kept'] = getattr(chunk, 'chunk_id', None) in kept_ids
                 if not record['kept']:
-                    # 选择阶段需区分同文档重复与名额用尽；其他阶段沿用统一原因。
+                    # 选择阶段区分文档配额与总名额用尽；其他阶段沿用统一原因。
                     record['dropReason'] = (drop_reasons or {}).get(getattr(chunk, 'chunk_id', None), drop_reason)
             records.append(record)
         self._data[stage] = records

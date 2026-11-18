@@ -347,6 +347,7 @@ def _local_model_manifest(settings):
 def check_settings(cfg):
     if (not cfg.rag_publication_enabled or cfg.rag_retrieval_top_k != 8
             or cfg.rag_final_top_k != 3 or cfg.rag_min_rerank_score is not None
+            or cfg.rag_document_chunk_limit != 1
             or cfg.rag_reranker_provider != 'local_cross_encoder'
             or cfg.rag_embedding_dimension != 3072
             or cfg.rag_embedding_model != 'openai:text-embedding-3-large'
@@ -374,6 +375,7 @@ async def run_live(output, mapping_path):
     load_special()
     mapping = load_mapping(mapping_path, rubric)
     cfg = Settings(_env_file=ROOT / 'ai-service/.env')
+    # 固定实验只有单文档单块授权，必须在资源或账本初始化之前拒绝变更。
     check_settings(cfg)
     output = Path(output).resolve()
     if not output.is_relative_to((ROOT / 'tmp').resolve()) or output.exists():

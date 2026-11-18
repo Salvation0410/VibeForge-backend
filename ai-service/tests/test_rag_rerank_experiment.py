@@ -31,6 +31,44 @@ def cfg(**overrides):
                     rag_embedding_dimension=2, **overrides)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('experiment', ['rerank', 'snapshot'])
+async def test_fixed_cap_one_live_experiments_reject_cap_two_before_resources(experiment, tmp_path, monkeypatch):
+    import ai_service.config as config
+    import ai_service.models.reranker as providers
+    import openai
+    from ai_service.orchestration import rag_rerank_experiment, rag_snapshot_experiment
+
+    config_value = Settings(_env_file=None, customer_service_rag_enabled=False,
+                            rag_publication_enabled=True, rag_document_chunk_limit=2)
+    monkeypatch.setattr(config, 'Settings', lambda **kwargs: config_value)
+    touched = []
+    def forbidden(*args, **kwargs):
+        touched.append('resource-or-authorization')
+        raise AssertionError('配置拒绝前不得初始化资源或账本')
+    monkeypatch.setattr(openai, 'AsyncOpenAI', forbidden)
+    monkeypatch.setattr(providers.LocalCrossEncoderReranker, 'create', forbidden)
+    output = tmp_path / 'must-not-create'
+    if experiment == 'rerank':
+        runner = rag_rerank_experiment
+        monkeypatch.setattr(runner, 'load_rubric', lambda: {})
+        monkeypatch.setattr(runner, 'load_special', lambda: {})
+        monkeypatch.setattr(runner, 'load_mapping', lambda *args: {})
+        monkeypatch.setattr(runner, 'source_manifest', forbidden)
+        monkeypatch.setattr(runner, '_local_model_manifest', forbidden)
+        monkeypatch.setattr(runner, 'publication_client', forbidden)
+        monkeypatch.setattr(runner, 'AuthorizationBudget', forbidden)
+        with pytest.raises(ValueError, match='RAG_RERANK_UNSUPPORTED_BASELINE_SETTINGS'):
+            await runner.run_live(output, tmp_path / 'mapping.json')
+    else:
+        runner = rag_snapshot_experiment
+        monkeypatch.setattr(runner, 'CallBudget', forbidden)
+        with pytest.raises(ValueError, match='RAG_EVAL_UNSUPPORTED_BASELINE_CONFIG'):
+            await runner.run_live({'entries': [{'id': 'q'}]}, [], output, max_chat=2, judge=False)
+    assert touched == []
+    assert not output.exists()
+
+
 def chunk(key, doc, content='正文', score=.8):
     return RetrievedChunk(key, doc, 1, 0, content, doc + '.md', 'md', '小节',
                           'content-hash', 1 - score, score, True, 1)

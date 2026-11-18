@@ -69,6 +69,7 @@ class CustomerServiceRagService:
         self._embedding_dimension = settings.rag_embedding_dimension
         self._retrieval_top_k = settings.rag_retrieval_top_k
         self._final_top_k = min(settings.rag_final_top_k, MAX_CONTEXTS)
+        self._document_chunk_limit = settings.rag_document_chunk_limit
         self._min_rerank_score = settings.rag_min_rerank_score
         self._reranker_disabled = settings.rag_reranker_provider == "disabled"
         self._prompt_max_bytes = settings.rag_prompt_max_bytes
@@ -204,7 +205,9 @@ class CustomerServiceRagService:
                 return refused('THRESHOLD_EMPTY')
 
         with stage('selection'):
-            selected, selection_drops = _select_documents(ranked, self._final_top_k)
+            selected, selection_drops = _select_documents(
+                ranked, self._final_top_k, per_document_limit=self._document_chunk_limit,
+            )
         if trace:
             with stage('thresholding'):
                 trace.record('thresholded', before_threshold, score_source=score_source, kept_ids={item.chunk.chunk_id for item in ranked}, drop_reason='below_threshold')
@@ -366,21 +369,28 @@ def _validate_ranked(
 
 
 def _select_documents(
-    ranked: list[RerankedChunk], limit: int,
+    ranked: list[RerankedChunk], limit: int, *, per_document_limit: int = 1,
 ) -> tuple[list[RerankedChunk], dict[str, str]]:
-    # 阈值后才按文档选择最高分块，重复块不占名额，后续文档可以补位。
+    # 阈值后按稳定重排顺序分配块名额；文档配额不放宽总上下文上限。
     selected: list[RerankedChunk] = []
-    seen_documents: set[str] = set()
+    document_counts: dict[str, int] = {}
     drops: dict[str, str] = {}
     for item in ranked:
-        if item.chunk.document_id in seen_documents:
-            drops[item.chunk.chunk_id] = 'duplicate_document'
+        document_id = item.chunk.document_id
+        count = document_counts.get(document_id, 0)
+        if count >= per_document_limit:
+            drops[item.chunk.chunk_id] = (
+                'duplicate_document' if per_document_limit == 1 else 'document_chunk_limit'
+            )
             continue
-        seen_documents.add(item.chunk.document_id)
-        if len(selected) >= limit:
+        if len(selected) >= min(limit, MAX_CONTEXTS):
             drops[item.chunk.chunk_id] = 'top_k'
+            # 单块模式保留旧诊断：满额后首次见到的文档，其后续块仍记为重复文档。
+            if per_document_limit == 1:
+                document_counts[document_id] = 1
             continue
         selected.append(item)
+        document_counts[document_id] = count + 1
     return selected, drops
 
 
