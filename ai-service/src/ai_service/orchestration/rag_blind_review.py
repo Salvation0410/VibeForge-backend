@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from dataclasses import dataclass
 import math
 from pathlib import Path
 import random
@@ -19,6 +20,31 @@ from ai_service.orchestration.rag_rerank_contracts import (
 
 CATEGORIES = ('not_recalled', 'ranking_truncation', 'quota_or_budget_loss',
               'evidence_present_generation_error', 'annotation_dispute')
+
+
+@dataclass(frozen=True)
+class Study:
+    study_id: str
+    arms: tuple[str, str]
+    analysis_schema: str
+    paired_keys: tuple[str, str, str]
+    timing_meaning: str
+
+
+# 研究与实验臂成对冻结，不能将两组白名单取并集后接受交叉报告。
+_STUDIES = {study.study_id: study for study in (
+    Study(STUDY_ID, ARMS, 'rag-rerank-analysis/v1', ('offOnly', 'onOnly', 'onMinusOff'),
+          '共享检索/BGE准备与回答耗时分账，不是两次在线E2E'),
+    Study('rag-cap-20261118-answer-round-v1', ('cap1', 'cap2'), 'rag-cap-analysis/v1',
+          ('cap1Only', 'cap2Only', 'cap2MinusCap1'),
+          '历史候选与BGE结果回放；仅统计本轮新回答耗时，未计当前检索/BGE耗时，不是在线E2E'),
+)}
+
+
+def _study(study_id):
+    if not isinstance(study_id, str) or study_id not in _STUDIES:
+        fail('STUDY_INVALID')
+    return _STUDIES[study_id]
 
 
 class Strict(BaseModel):
@@ -72,7 +98,7 @@ class Reviewer(Strict):
 
 class Reviews(Strict):
     schemaVersion: Literal['rag-blind-reviews/v1']
-    studyId: Literal['rag-rerank-20261118-first-round-v1']
+    studyId: Literal['rag-rerank-20261118-first-round-v1', 'rag-cap-20261118-answer-round-v1']
     publicPackageSha256: str
     reviewer: Reviewer
     reviews: list[CardReview]
@@ -83,9 +109,10 @@ def result_key(record):
 
 
 def validate_results(report, rubric):
-    expected = {e['id'] + ':' + arm for e in rubric['entries'] for arm in ARMS}
+    study = _study(report.get('studyId'))
+    expected = {e['id'] + ':' + arm for e in rubric['entries'] for arm in study.arms}
     records = report.get('results', [])
-    if (report.get('studyId') != STUDY_ID or len(records) != 180
+    if (len(records) != 180
             or len({result_key(r) for r in records}) != 180
             or {result_key(r) for r in records} != expected
             or report.get('rubricSha256') != fingerprint(rubric)):
@@ -117,6 +144,7 @@ def export_blind(report, output, rubric=None):
     """公共包使用白名单投影；seed、执行顺序、分数和 arm 仅留私有映射。"""
     rubric = rubric or load_rubric()
     lookup = validate_results(report, rubric)
+    study = _study(report['studyId'])
     output = Path(output).resolve()
     from ai_service.orchestration.rag_rerank_contracts import ROOT
     if not output.is_relative_to((ROOT / 'tmp').resolve()) or output.exists():
@@ -155,7 +183,7 @@ def export_blind(report, output, rubric=None):
             'claims': [], 'claimsComplete': None, 'citations': [], 'answerRelevance': None,
             'factualError': None, 'safetyViolation': None, 'annotationDispute': None,
             'failureCategories': [], 'notes': ''})
-    public = {'schemaVersion': 'rag-blind-package/v1', 'studyId': STUDY_ID,
+    public = {'schemaVersion': 'rag-blind-package/v1', 'studyId': study.study_id,
         'rubricStatus': 'agent-source-reviewed-human-pending', 'humanGold': False,
         'instructions': ['全部卡片均需保留；故障不能算正确拒答。',
             '逐事实、逐断言与逐引用核对，等价表达及精确引文不等于人工 gold。',
@@ -166,10 +194,10 @@ def export_blind(report, output, rubric=None):
     digest = fingerprint(public)
     write_json(output / 'cards.json', public)
     write_json(output / 'private-mapping.json', {'schemaVersion': 'rag-blind-private/v1',
-        'studyId': STUDY_ID, 'publicPackageSha256': digest, 'reportSha256': fingerprint(report),
+        'studyId': study.study_id, 'publicPackageSha256': digest, 'reportSha256': fingerprint(report),
         'shuffleSeed': seed, 'mapping': mapping})
     write_json(output / 'reviews-template.json', {'schemaVersion': 'rag-blind-reviews/v1',
-        'studyId': STUDY_ID, 'publicPackageSha256': digest,
+        'studyId': study.study_id, 'publicPackageSha256': digest,
         'reviewer': {'name': '请填写实际评审人', 'role': 'human'}, 'reviews': template})
     lines = ['# 匿名答案审阅包', '', '全部 180 份按匿名随机顺序展示，评审结果填写 reviews-template.json。',
              '私有映射不得交给盲审人；人工未填时保持 pending。', '']
@@ -184,6 +212,9 @@ def export_blind(report, output, rubric=None):
 def validate_reviews(raw, public):
     """只验证可追踪性和结构；人类填写 role 仍是身份声明，不是身份认证。"""
     reviews = Reviews.model_validate(raw)
+    study = _study(public.get('studyId'))
+    if reviews.studyId != study.study_id:
+        fail('REVIEW_STUDY_INVALID')
     if (not reviews.reviewer.name.strip() or
             (any(r.status == 'complete' for r in reviews.reviews)
              and reviews.reviewer.name == '请填写实际评审人')):
@@ -262,17 +293,18 @@ def validate_reviews(raw, public):
     return reviews
 
 
-def paired_statistics(off, on, *, seed=20261118, draws=10000):
+def paired_statistics(off, on, *, seed=20261118, draws=10000, study_id=STUDY_ID):
     """以题为重采样单位，同一题的两组始终一起抽取。"""
+    first_only, second_only, delta_key = _study(study_id).paired_keys
     if len(off) != len(on) or not off or any(type(v) is not bool for v in off + on):
         fail('PAIRED_INPUT_INVALID')
-    table = Counter(('bothPass' if a and b else 'offOnly' if a else 'onOnly' if b else 'bothFail')
+    table = Counter(('bothPass' if a and b else first_only if a else second_only if b else 'bothFail')
                     for a, b in zip(off, on, strict=True))
     deltas = [int(b) - int(a) for a, b in zip(off, on, strict=True)]
     rng = random.Random(seed)
     samples = sorted(sum(rng.choices(deltas, k=len(deltas))) / len(deltas) for _ in range(draws))
-    return {'questionPairs': len(off), **{k: table[k] for k in ('bothPass', 'offOnly', 'onOnly', 'bothFail')},
-            'onMinusOff': sum(deltas) / len(deltas), 'bootstrap95':
+    return {'questionPairs': len(off), **{k: table[k] for k in ('bothPass', first_only, second_only, 'bothFail')},
+            delta_key: sum(deltas) / len(deltas), 'bootstrap95':
             [samples[math.floor(.025 * (draws - 1))], samples[math.ceil(.975 * (draws - 1))]],
             'bootstrapSeed': seed, 'bootstrapDraws': draws}
 
@@ -301,7 +333,10 @@ def _tokens(usages):
 def summarize(report, public, private, reviews, rubric=None):
     rubric = rubric or load_rubric()
     lookup = validate_results(report, rubric)
-    if (private.get('studyId') != STUDY_ID or private.get('reportSha256') != fingerprint(report)
+    study = _study(report['studyId'])
+    # 摘要允许重新计算，因此研究身份必须独立于内容摘要逐层核对。
+    if (public.get('studyId') != study.study_id or private.get('studyId') != study.study_id
+            or private.get('reportSha256') != fingerprint(report)
             or private.get('publicPackageSha256') != fingerprint(public)
             or set(private['mapping']) != {c['blindId'] for c in public['cards']}
             or {m['id'] + ':' + m['arm'] for m in private['mapping'].values()} != set(lookup)):
@@ -310,18 +345,19 @@ def summarize(report, public, private, reviews, rubric=None):
     cards = {c['blindId']: c for c in public['cards']}
     by_key = {result_key(private['mapping'][r.blindId]): (cards[r.blindId], r) for r in parsed.reviews}
     complete = all(r.status == 'complete' for r in parsed.reviews)
-    result = {'schemaVersion': 'rag-rerank-analysis/v1', 'studyId': STUDY_ID,
+    result = {'schemaVersion': study.analysis_schema, 'studyId': study.study_id,
               'reviewer': parsed.reviewer.model_dump(), 'humanReview':
               'complete' if complete and parsed.reviewer.role == 'human' else 'pending',
               'qualityStatus': 'complete' if complete else 'pending',
               'generalization': '反复使用的90题开发回归集，非独立盲测泛化成绩',
               'arms': {}, 'paired': None, 'humanOverallQualityImprovement': None}
-    retrieval = list(report.get('retrieval', {}).values())
+    # 配额实验只回放历史候选；旧准备耗时不能冒充本轮新发生的检索或 BGE 工作。
+    retrieval = list(report.get('retrieval', {}).values()) if study.study_id == STUDY_ID else []
     result.update(callsReserved=report.get('callsReserved'), embeddingUsage=report.get('embeddingUsage', []),
         sharedRetrievalLatencyMs=_latencies(r.get('sharedRetrievalLatencyMs') for r in retrieval),
         realBgeLatencyMs=_latencies(r.get('realBgeLatencyMs') for r in retrieval),
-        timingMeaning='共享检索/BGE准备与回答耗时分账，不是两次在线E2E', monetaryCost=None)
-    for arm in ARMS:
+        timingMeaning=study.timing_meaning, monetaryCost=None)
+    for arm in study.arms:
         pairs = [by_key[e['id'] + ':' + arm] for e in rubric['entries']]
         done = [(c, r) for c, r in pairs if r.status == 'complete']
         public_facts = [f for c, r in done if c['expectedAnswerable'] for f in r.facts]
@@ -352,10 +388,10 @@ def summarize(report, public, private, reviews, rubric=None):
             'answerLatencyMs': _latencies(r.get('answerLatencyMs') for r in rows)}
         result['arms'][arm] = metrics
     if complete:
-        outcomes = {arm: [_passed(*by_key[e['id'] + ':' + arm]) for e in rubric['entries']] for arm in ARMS}
-        result['paired'] = paired_statistics(outcomes[ARMS[0]], outcomes[ARMS[1]])
+        outcomes = {arm: [_passed(*by_key[e['id'] + ':' + arm]) for e in rubric['entries']] for arm in study.arms}
+        result['paired'] = paired_statistics(outcomes[study.arms[0]], outcomes[study.arms[1]], study_id=study.study_id)
         if parsed.reviewer.role == 'human':
-            result['humanOverallQualityImprovement'] = result['paired']['onMinusOff']
+            result['humanOverallQualityImprovement'] = result['paired'][study.paired_keys[2]]
     return result
 
 
