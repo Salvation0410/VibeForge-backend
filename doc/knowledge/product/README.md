@@ -189,3 +189,13 @@ cap2 改变 65 题选块，审后新增完整支持 10 项，本集未观察到�
 本轮正式 `CustomerServiceRagService` 用冻结候选/BGE 顺序及 Fake Answer Model 回放，cap1/cap2 各 90 组上下文与第十三轮逐字一致，180 组逆序引用身份全部匹配；**180 次为 Fake 调用，不是新真实答案**。Python 完整 1753 通过/25 跳过，Java 干净编译及最终 36 项本地 HTTP Client/Service 测试通过（本轮新增 16 项，初版 31 项证据保留），前端新增 4 项及相关纯函数合计 48 项通过，类型检查和构建通过。前端测试使用保留三项用户原有修改的工作树；未执行真实 Spring/Python 联调或浏览器验收。临时回放首试的 Windows asyncio 本机通道审计问题及修正日志单列保留。
 
 新增真实聊天、Embedding、BGE 推理、INDEX 和生产写入均为 0；原授权账本、历史报告和用户既有修改均保持。上段第十三轮的证据覆盖收益仍属历史代理判断，本轮不产生新答案质量成绩。cap2 仍可能挤掉跨文档依据，下一轮需要单列真实回答额度验证；人工验收及支付新口径语料发布继续待办。配置、失败记录、三端覆盖边界与提交见[第十四轮交接](../../customer-service-rag-rounds-handoff.md)，脱敏结果见[配额开关验证](evaluation/results/cap-rollout-20261118-v1.json)。
+
+### 2026-11-18 第十五轮：固定输入答案对照设施
+
+新增 `ai_service.orchestration.rag_cap_experiment`，复用首轮历史冻结输入及正式 RAG，只比较 cap1/cap2。默认离线核对，`--prepare --output <新的tmp目录>` 生成计划与 `decision=pending` 请求；计划绑定实际两组上下文、输入、配置、提示和关键实现摘要。新 study 为 `rag-cap-20261118-answer-round-v1`，真实运行需单独明确确认最多 180 次新回答（两组各 90），不增加 Embedding、BGE 或 INDEX。旧授权已耗尽，新工具和 pending 文件本身不授予调用额度。
+
+两组重新回答可减少复用旧 cap1 答案带来的模型时间差；保持历史候选和 BGE 排序可避免新增召回变量。实验不查询当前权威 publication，不声称当前活动快照复核或在线 E2E。正式 `.env`、生产 cap1 和旧账本保持；支付新口径仍单独登记，未发布新语料，不改变本次冻结标注。
+
+盲审工具按固定 study 分别接受重排两组或 cap 两组，拒绝跨实验的报告、包、映射和评审；新统计明确使用 `cap2MinusCap1`，旧键保持兼容。全 180 匿名卡包括故障/未运行，pending 不产生改善结论；代理初审和人工验收始终分开。调用边界和命令见 [AI 服务说明](../../../ai-service/README.md)，本轮验证、失败记录及待办见[第十五轮交接](../../customer-service-rag-rounds-handoff.md)。
+
+本轮最终 Python 全套 **1889 通过/25 跳过**，compileall 与依赖锁检查通过。固定输入经完整新运行器完成 **180 次 Fake SDK 发送**，上下文、预占及引用来源匹配，网络尝试为 0；180 卡严格导入后仍全部 pending，不产生新答案质量成绩。规格审查发现的模型前故障停止、全 72 块身份、直接依赖摘要及来源嵌套匿名泄露均已补回归；测试夹具与历史换行字节锁分离但保留真实冻结保护。原红测/初验与修正记录分别保留，脱敏结果见[设施验收](evaluation/results/cap-answer-facility-20261118-v1.json)。新增真实聊天、Embedding、BGE、INDEX、生产写入均为 0，新额度待确认，人工验收按用户安排保留待办。

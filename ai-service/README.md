@@ -720,3 +720,28 @@ uv run python -m ai_service.orchestration.rag_blind_review --report ../tmp/rag-v
 评测只构造一个零重试回答客户端。最终报告写盘与各资源关闭分别尝试，以固定标签记录 `reportSaveFailures` / `cleanupErrors`；单项失败仍尝试其余清理，原始取消继续传播。关闭失败不等于已强制清理资源。本地供应商地址与凭据应在启用唯一授权前检查，不以付费请求探测配置。
 
 匿名包包含全部答案、实际最终 contexts、逐事实及逐引用审阅模板，私有映射独立保存，不交给盲审者。事实等价表达和整段标注引文存活只作审阅辅助，不是关键词评分或语义事实覆盖证明。断言支持必须来自该答案的实际 contexts。`rag_blind_review` 严格核对完整 ID、答案摘录和支持摘录，按题配对统计；`role=agent` 的全量初审始终保留 `humanReview=pending`，无法代替实际人工产品验收。90 题是反复使用的开发回归集，不能称独立泛化盲测。原始报告、向量、答案及盲审材料仅保存在忽略目录 `tmp/`；运行记录与未测范围见[逐轮交接](../doc/customer-service-rag-rounds-handoff.md)。
+
+### 固定输入的 cap1/cap2 回答对照
+
+`rag_cap_experiment` 是独立的配额实验入口，默认离线。它固定读取第十二轮历史真实报告、11 文档/72 块语料、90 题查询向量、实际 Top8 候选及 BGE 顺序；用正式 RAG 的过滤、选择和预算计算 cap1/cap2 各 90 组上下文，并与第十三轮记录逐字核对。两组均开启冻结重排，仅单文档配额为 1/2，最终仍最多三块。它不访问当前 Spring/MySQL/Milvus，不复核当前权威快照，也不重新运行 Embedding、BGE 或 INDEX。
+
+```powershell
+# 在 ai-service 执行：默认只读校验，不创建 SDK、输出或正式授权账本。
+uv run python -m ai_service.orchestration.rag_cap_experiment
+# output 必须是 tmp 下的新目录；只创建 plan.json 和 decision=pending 的请求。
+uv run python -m ai_service.orchestration.rag_cap_experiment --prepare --output ../tmp/rag-cap-answer-20261118/prepared
+```
+
+新 study 固定为 `rag-cap-20261118-answer-round-v1`，独立锚点为 `tmp/rag-cap-answer-20261118/cap-authorization.jsonl`。历史重排授权已经耗尽，不得删除、覆盖或换目录绕过。准备请求绑定最终上下文、模型参数、提示、输入和关键实现文件摘要，以及新输出位置；代码或输入变化后须重新准备并重新确认。HEAD 和无关文档修改只作诊断。支付澄清单独绑定，不更新冻结语料或标注，不能把后置口径混入配额收益。
+
+只有用户明确确认新额度后，才可复制请求形成 `decision=approved` 的批准文件，再执行下列命令。软件严格校验 study、计划指纹、输出及整数 180，拒绝额外字段与布尔额度；批准文件的结构校验不能认证批准人。未经明确确认不得创建正式锚点或执行 live。
+
+```powershell
+uv run python -m ai_service.orchestration.rag_cap_experiment --live --plan ../tmp/rag-cap-answer-20261118/prepared/plan.json --approval ../tmp/rag-cap-answer-20261118/approved.json
+```
+
+上限为两组各 90、合计 180 次新回答，新增 Embedding/BGE/INDEX 为零。独立 chat 账本在每次发送前 flush/fsync 预占；未知/重复 key、超过额度、已有锚点和持久化不确定均拒绝。失败、取消、进程退出不退款，没有自动重试或续跑。实际完整问题和上下文在底层预算/发送前再次核对；单并发、题内交替组别，三次连续供应商故障停止，全部 180 个占位、错误及未运行保留。报告保存实际消息、原始响应、usage、结束原因和耗时；这些内容仅留本机忽略目录。报告写盘或一个 closer 失败仍尝试关闭其他资源，不保证故障资源已经强制关闭。
+
+盲审入口沿用 `rag_blind_review`：旧 study 仅接受 `rerank_off/rerank_on`，新 study 仅接受 `cap1/cap2`，报告、公共包、私有映射和评审须属于同一 study。新分析使用 `cap1Only`、`cap2Only` 和 `cap2MinusCap1`；旧分析键保持兼容。匿名卡不携带组别、配额、分数、usage 或耗时，全部 180 项包括故障仍保留。待审模板不产生提升值，代理审阅始终保持人工验收待办。
+
+来源仅投影正式六项公开标量元数据，拒绝对象/数组、错误类型及长度/版本越界；额外诊断不进入卡片 JSON/Markdown，旧 `chunk_id` 单字段材料仍兼容。第十五轮最终 Python 全套 1889 通过/25 跳过，完整运行器 180 次 Fake SDK 与匿名包 pending 导入通过；新增真实调用为零，不能据此声称新答案质量已通过。原失败、修正、离线边界及具体新额度请求见[第十五轮交接](../doc/customer-service-rag-rounds-handoff.md)。

@@ -1,0 +1,263 @@
+{
+  "schemaVersion": "rag-cap-answer-facility-result/v1",
+  "date": "2026-11-18",
+  "round": 15,
+  "scope": "offline-fixed-input-answer-experiment-facility",
+  "studyId": "rag-cap-20261118-answer-round-v1",
+  "historicalInputs": {
+    "sourceRound": 12,
+    "contextReplayRound": 13,
+    "sourceReportCanonicalSha256": "ad21903b50000f50d077af1c93b137e77bff1da6ca47d4ca04617f8c33781ee1",
+    "sourceReplayCanonicalSha256": "0acd669af2f70ea03035341fb410b7413808b9908b4473c318aad44d8d9fcbca",
+    "documents": 11,
+    "canonicalChunks": 72,
+    "questions": 90,
+    "newHistoricalQualityScore": false
+  },
+  "implementationCommits": {
+    "designAndPlan": "1774489",
+    "runner": "0636fb2",
+    "runnerSpecFix": "286d073",
+    "runnerTestQualityFix": "6fa3ae1",
+    "blind": "237f3c7",
+    "blindSourceProjectionFix": "ef32591"
+  },
+  "verification": {
+    "baseline": {
+      "tests": 63,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 63
+    },
+    "runnerRed": {
+      "tests": 2,
+      "failures": 2,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 0
+    },
+    "runnerInitialTestExpectationFailure": {
+      "tests": 62,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 61
+    },
+    "runnerInitialGreen": {
+      "tests": 89,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 89
+    },
+    "runnerSpecRed": {
+      "tests": 9,
+      "failures": 9,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 0
+    },
+    "runnerSpecGreen": {
+      "tests": 98,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 98
+    },
+    "runnerQualityRed": {
+      "tests": 4,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 3
+    },
+    "runnerFinalGreen": {
+      "tests": 101,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 101
+    },
+    "blindRed": {
+      "tests": 64,
+      "failures": 5,
+      "errors": 19,
+      "skipped": 0,
+      "passed": 40
+    },
+    "blindInitialGreen": {
+      "tests": 64,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 64
+    },
+    "blindSourceRed": {
+      "tests": 98,
+      "failures": 30,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 68
+    },
+    "blindFinalGreen": {
+      "tests": 98,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 98
+    },
+    "pythonFullInitial": {
+      "tests": 1880,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 25,
+      "passed": 1855
+    },
+    "pythonFullFinal": {
+      "tests": 1914,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 25,
+      "passed": 1889
+    },
+    "pythonCompileallExitCode": 0,
+    "uvLockCheckExitCode": 0
+  },
+  "offlineRunner": {
+    "schemaVersion": "rag-cap-answer-offline-acceptance/v1",
+    "planSha256": "4d317b27b966590c7c57110980603d269a85ecf2db0f73056e3f57428d9fe7f0",
+    "reportSha256": "91af3466b4f9345d14ad0648eec6933b2881dc66f54aafe04496fd258662d318",
+    "fakeSdkSends": 180,
+    "contextsExactMatches": 180,
+    "reversedCitationMatches": 180,
+    "callsByArm": {
+      "cap1": 90,
+      "cap2": 90
+    },
+    "clientClosures": [
+      "async",
+      "sync"
+    ],
+    "networkAttempts": [],
+    "networkAuditScope": "after Windows local asyncio loop initialization; imports and complete experiment",
+    "newRealChatCalls": 0,
+    "newEmbeddingCalls": 0,
+    "newBgeInferenceCalls": 0,
+    "productionWrites": 0,
+    "formalAuthorizationAbsent": true,
+    "answerQualityTested": false,
+    "humanReview": "pending"
+  },
+  "offlineBlindImport": {
+    "schemaVersion": "rag-cap-answer-offline-blind-acceptance/v1",
+    "fakeReportSha256": "91af3466b4f9345d14ad0648eec6933b2881dc66f54aafe04496fd258662d318",
+    "publicPackageSha256": "f95b5b323e921a1efc9c422b605472ae55387e10ec9565f3bcbb18055431e0db",
+    "blindCards": 180,
+    "pendingReviews": 180,
+    "analysisSchema": "rag-cap-analysis/v1",
+    "qualityStatus": "pending",
+    "humanReview": "pending",
+    "paired": null,
+    "humanOverallQualityImprovement": null,
+    "sourceIdentityGroupsValidated": 180,
+    "networkAttempts": [],
+    "newRealChatCalls": 0,
+    "formalAuthorizationAbsent": true,
+    "answerQualityTested": false
+  },
+  "runtimeBoundary": {
+    "defaultOffline": true,
+    "prepareDecision": "pending",
+    "maxProposedNewChatCalls": 180,
+    "proposedCallsPerArm": 90,
+    "newRealChatCalls": 0,
+    "newEmbeddingCalls": 0,
+    "newBgeInferenceCalls": 0,
+    "newIndexCalls": 0,
+    "productionWrites": 0,
+    "realEnvChanged": false,
+    "cap2Deployed": false,
+    "currentAuthoritativeSnapshotChecked": false,
+    "onlineE2ETested": false,
+    "automaticRetries": 0,
+    "automaticResume": false,
+    "failureOrCancellationRefunds": false,
+    "formalAuthorizationAnchorAbsent": true,
+    "newRealBudgetApproval": "pending"
+  },
+  "reviewHardening": [
+    "stop on a formal-service error before provider invocation",
+    "bind final prompt exports and context-budget helper source files",
+    "validate all 72 canonical chunk identities including unreturned rows",
+    "isolate new synthetic test fixture from historical CRLF freeze while retaining real loader",
+    "independent question/context/sticky guard tests kill three in-memory mutants",
+    "project public source scalar metadata and reject nested private-field pollution"
+  ],
+  "facilitySetupNotes": [
+    "initial log redirection path failed before pytest; corrected without application changes",
+    "control script initially decoded Git UTF-8 with Windows GBK; explicit UTF-8 fixed the local check"
+  ],
+  "preservationControls": {
+    "protectedFilesOtherThanReadme": 9,
+    "allByteHashesUnchanged": true,
+    "originalReadmeUserHunkPreserved": true,
+    "formalAuthorizationAnchorAbsent": true
+  },
+  "humanReview": "pending-by-user-request",
+  "answerQualityTested": false,
+  "paymentCorpusPublication": "separate-pending-candidate",
+  "agentSpecReviews": "passed",
+  "agentQualityReviews": "passed",
+  "finalIndependentReview": "passed",
+  "platformVerification": "Windows; LF-semantic fixture probes, no actual Linux full-suite run",
+  "javaAndFrontendRerun": false,
+  "warnings": [
+    "two existing Python dependency deprecations"
+  ],
+  "localEvidenceByteSha256": {
+    "final-controls.json": "d8d4c3897d7804d4cc476ef3a974fe3d14989710d5825199115c12f6a6381687",
+    "offline-blind-acceptance-final.json": "48d3ab0b4ecd56f5295cf978832017ccfd4ca11f99c2eafcf0b6e371686afce1",
+    "offline-runner-acceptance.json": "491465d3f045f6a25a47b7ef3056558bf47cccd511578b5e7370235549446087",
+    "tool-validation/baseline.xml": "f6c5b8a92b90317ad16ff9b8231486c5fe47e8ef6e07cd1b41c43df2fd79a4f4",
+    "tool-validation/blind-quality-probes.json": "e481696afe742e40b19792b5997eefda9b35d52e75ca426b92df8460e33fea76",
+    "tool-validation/blind-quality-review.txt": "52fd3e3570255648bcedffe4c5c0c0fa315b1c2677a3357898b29b2f298998fa",
+    "tool-validation/blind-quality-tests.xml": "5d0d46afb7c802fbcf6b803681fc6828469f63f82ffd9a1e50bf1d471bed3022",
+    "tool-validation/blind-red.xml": "9c34f5b5e7c58edb98fe59f2984ef0815726c18f9d4db8ace9103a4c762ebd06",
+    "tool-validation/blind-spec-cap-tests.xml": "69dda18b2b2ce61eb87fe31c207025762e0c56eb60a6b953a2efd635122e5711",
+    "tool-validation/blind-spec-fix-red.xml": "624098fed7b6ffe420cedbc84ffedc773ba13cad5b293a0c5d4bf1d3d08e000c",
+    "tool-validation/blind-spec-fix.xml": "4d3d7c3b8d73b26038f9b3660d1a6916ee077ee6095c029912dcfdc764dc77b1",
+    "tool-validation/blind-spec-rereview-source-probe.json": "26239e28c0c54069dbbca6068c868db6eba11f8f683e8ed4d127b4d1368512f4",
+    "tool-validation/blind-spec-rereview-tests.xml": "e048d20dce92760571c085662ff965ad873d4bf8ff676c14b07987de46a3357d",
+    "tool-validation/blind-spec-rereview.txt": "b3c613e3c41de0bf2b278bf5b3cce13eeb3b3c8322cdd2daf952ba825af4f71e",
+    "tool-validation/blind-spec-review.txt": "ebfd037fbccfb93e1dbb27e59214e1b0059a2fcdbe3c4a97bba952edc14c5f53",
+    "tool-validation/blind-spec-source-probe.json": "5501487c3af9fc8eb6f32f9a67899a956bc9cbc9ce0c275d3853bbd8090ae3d9",
+    "tool-validation/blind-spec-tests.xml": "ec807c39ebcf6cd31358955638c55315154c329cc06cb65cca84e6cce838a0b0",
+    "tool-validation/blind.xml": "035e36935ba75c043ec4ec0151190f4f37c8e8106c29fcb9508f1baca83fec7e",
+    "tool-validation/final-review.txt": "461b67c4afa8d2afdf169005fdededca3740c81598984f1da252623ff9220f5e",
+    "tool-validation/python-full-final.xml": "41eb1f0efcd894457a87ba14e5e698109462da8e0869fcb172406967feaae92a",
+    "tool-validation/python-full.xml": "e50297269ef7ba33013e05dc6658f40e6bd2b14948b4bed1a9be69383f00da6f",
+    "tool-validation/runner-initial.xml": "d390ad6bd41056230b0f93094426a0b9a6eb55e4dc1dbb447df9d5effee76b3f",
+    "tool-validation/runner-quality-fix-red.xml": "af22b8bfa43c0b7348484a6483a43403ec5648e9bbe33c69deae9f3c9f750e2a",
+    "tool-validation/runner-quality-fix.xml": "59bd2a33cd30fa2a376956c2bf0d1242315995a070125c8f54fb1be05e5eedf7",
+    "tool-validation/runner-quality-guard-probe.json": "99ecaad8abd3434108dcee2a77b2cc1467c0a4898e4e2f08dfaf56adcdf04577",
+    "tool-validation/runner-quality-line-ending-probe.json": "9dce5b68839dc7d2308773bb16e8aa25774c41cb5b649eadeb58887ec0ac4527",
+    "tool-validation/runner-quality-rereview-probes.json": "0701becf11f87492921071023914403556fa74b23fa0d3da73710e89eb7997f3",
+    "tool-validation/runner-quality-rereview-tests.xml": "041e233bb16caf6d8bba9dfb65a27b035bb27fb3c263da29120ee10ccc87f9f5",
+    "tool-validation/runner-quality-rereview.txt": "3075fd93b9cd00c3ef6416f12b63d62edee388e14ca1b766677894b7eab50d19",
+    "tool-validation/runner-quality-review.txt": "f1c03f2d9db3e0fd7c5d5efa130a29fd6c2645bd497c1fec9b0c6ae2a4bcf508",
+    "tool-validation/runner-quality-tests.xml": "62edb6614a634ddb3c20d4a0531bc778722a5145f85f42c7500e13f245fbb022",
+    "tool-validation/runner-red.xml": "4b2728c70123ca2698290874cc7bca819d108bfd267b4d649146eb909c1fcbba",
+    "tool-validation/runner-spec-fix-corpus.xml": "e9849cf9d232a6ab617bd73091b0e23ad73cd19b6bfc34321b7c2f85668aa525",
+    "tool-validation/runner-spec-fix-manifest.xml": "5b6719bd27aba2102bb430619487983bb81963e2d595e14dddf745405b06e03b",
+    "tool-validation/runner-spec-fix-red-all.xml": "4981429dd4f36243467118bdfef0788f7b5cb385ee1f7997088484fa38c94879",
+    "tool-validation/runner-spec-fix-red.xml": "5ec2e556739446f7ee55aa2b255382aa9d3413887e7b6e9b77f5fbfeb5b57337",
+    "tool-validation/runner-spec-fix-stop.xml": "95d2ffa29f00e2ae38e9a92234c940e86abb863008131397d28a1f77f2f0a597",
+    "tool-validation/runner-spec-fix.xml": "47d221242d6199cb33606a0df7c957aa58151ccd32a1b6be31a1b94620af90eb",
+    "tool-validation/runner-spec-rereview-tests.xml": "f1dde25115769440d905ecaca7d46a1d5f7c2457be853e01941f52423c1baa88",
+    "tool-validation/runner-spec-rereview.txt": "4df4b8795c198f6ed7ebf0d5467ad5745723011739fb4736ce189c235fe48550",
+    "tool-validation/runner-spec-review-tests.xml": "4dd17c781b34a9709949ed58415d7a5e4fe0052aec2752c52e374d9f24ddc3de",
+    "tool-validation/runner-spec-review.txt": "6e195f86349bede9ad2c92b8ff81b1d717b26663410606329be60496191f650a",
+    "tool-validation/runner.xml": "b5f4f09ba54f5d8bb006fd5c740ebc8976dcdce4b76d92bad11ce371903fce6f"
+  }
+}
