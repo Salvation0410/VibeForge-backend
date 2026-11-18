@@ -227,7 +227,8 @@ async def execute_answers(report, rubric, settings, prepared, vectors, model, sa
 
 
 async def _finish_run(report, save, *, budget=None, resources=(), model=None,
-                      gpu_owner=None, original_cancel=None):
+                      gpu_owner=None, original_cancel=None,
+                      save_failure_code='RAG_RERANK_REPORT_SAVE_FAILED'):
     """报告写盘与逐项清理解耦；这里只保证尝试，不宣称失败资源已强制关闭。"""
     cleanup_cancel = None
 
@@ -246,7 +247,7 @@ async def _finish_run(report, save, *, budget=None, resources=(), model=None,
         except Exception:
             report.setdefault('reportSaveFailures', []).append(label)
             if report['status'] == 'complete':
-                report.update(status='stopped', stopReason='RAG_RERANK_REPORT_SAVE_FAILED')
+                report.update(status='stopped', stopReason=save_failure_code)
 
     def close_sync(label, closer):
         try:
