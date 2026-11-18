@@ -221,10 +221,12 @@ async def execute_answers(report, frozen, cfg, model, save):
             if model.observation.get('providerCalled'):
                 streak = streak + 1 if row['status'] == 'error' else 0
             save()
-            if model.invalid_context or model.pre_send_failure or streak >= 3:
+            # 检索等故障可能在模型包装层前被正式服务折成错误结果，也必须立即停止。
+            pre_send_error = row['status'] == 'error' and not model.observation.get('providerCalled')
+            if model.invalid_context or model.pre_send_failure or pre_send_error or streak >= 3:
                 report.update(status='stopped', stopReason='RAG_CAP_CONTEXT_MISMATCH'
                     if model.invalid_context else 'RAG_CAP_PRE_SEND_FAILED'
-                    if model.pre_send_failure else 'THREE_CONSECUTIVE_CALL_FAILURES')
+                    if model.pre_send_failure or pre_send_error else 'THREE_CONSECUTIVE_CALL_FAILURES')
                 break
         except asyncio.CancelledError as error:
             report['results'][index].update(status='error', errorCode='CANCELLED', **model.observation)

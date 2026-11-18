@@ -7,7 +7,7 @@ import json
 import pytest
 
 from ai_service.config import Settings
-from ai_service.infrastructure.milvus_knowledge import RetrievedChunk
+from ai_service.infrastructure.milvus_knowledge import RetrievedChunk, IndexedDocument, MilvusKnowledgeStore
 from ai_service.orchestration import rag_cap_contracts as contracts
 from ai_service.orchestration.document_etl import parse_document, split_sections
 from ai_service.orchestration.rag_rerank_contracts import PRODUCT, load_rubric, fingerprint
@@ -42,13 +42,18 @@ def frozen_source(tmp_path, monkeypatch):
             document_id=document_id, document_version=d['version'],
             source_name=identity['fileName'], settings=cfg)
         receipt_docs.append({**identity, 'chunkCount': len(chunks)})
+        identity_key = MilvusKnowledgeStore._identity(IndexedDocument(document_id, d['version'],
+            '1', cfg.rag_embedding_model, identity['fileName'], 'md', d['sha256'], (), 1, 1))
         for c in chunks:
-            rows.append({'recordType': 'chunk', 'id': c.chunk_id, 'chunkId': c.chunk_id,
+            rows.append({'recordType': 'chunk',
+                'id': hashlib.sha256(f'{identity_key}\0{c.chunk_id}'.encode()).hexdigest(), 'chunkId': c.chunk_id,
                 'documentId': document_id, 'documentVersion': d['version'],
                 'chunkIndex': c.chunk_index, 'content': c.content, 'fileName': identity['fileName'],
                 'fileType': 'md', 'sourceLocator': c.source_locator,
                 'contentHash': hashlib.sha256(c.content.encode()).hexdigest(),
                 'documentContentHash': d['sha256'], 'indexRevision': 1, 'activationRevision': 1,
+                'etlVersion': '1', 'embeddingModelVersion': cfg.rag_embedding_model,
+                'embeddingDimension': 2, 'schemaVersion': 1, 'revisionProtocol': 2, 'isActive': True,
                 'embedding': [1.0, 0.0]})
     snapshot = {'enabled': True, 'epoch': 1, 'publicationId': 'bootstrap_' + 'a' * 32,
         'collectionName': 'frozen_collection', 'snapshotHash': 'a' * 64,
@@ -160,4 +165,28 @@ def test_deep_source_checks_reject_even_self_reported_rehashed_damage(frozen_sou
     monkeypatch.setattr(contracts, 'SOURCE_REPORT_SHA256', fingerprint(report))
     write(source / 'report.json', report)
     with pytest.raises(ValueError, match='RAG_CAP_'):
+        contracts.load_frozen_inputs(cfg)
+
+
+@pytest.mark.parametrize('field,value', [('chunkId', 'forged:1:0'), ('id', '0' * 64),
+    ('fileName', '伪造.md'), ('indexRevision', 99), ('activationRevision', 99), ('fileType', 'txt')])
+def test_every_canonical_chunk_identity_is_checked_outside_retrieval(
+        frozen_source, monkeypatch, field, value):
+    source, cfg, _, report, replay_path = frozen_source
+    rows = contracts.read_json(source / 'publication-rows.json')
+    target = rows[-1]
+    retrieved_ids = {c['chunk_id'] for cached in report['retrieval'].values() for c in cached['retrieved']}
+    assert target['chunkId'] not in retrieved_ids
+    target[field] = value
+    report['corpusRowsSha256'] = fingerprint(rows)
+    report_pin = fingerprint(report)
+    monkeypatch.setattr(contracts, 'SOURCE_REPORT_SHA256', report_pin)
+    write(source / 'publication-rows.json', rows)
+    write(source / 'report.json', report)
+    # 重新绑定隔离 pin 和 replay，使负例只能由全语料身份核对拒绝。
+    replay = contracts.read_json(replay_path)
+    replay['sourceReportFingerprint'] = report_pin
+    write(replay_path, replay)
+    monkeypatch.setattr(contracts, 'REPLAY_SHA256', fingerprint(replay))
+    with pytest.raises(ValueError, match='RAG_CAP_CANONICAL_CHUNK_IDENTITY_CHANGED'):
         contracts.load_frozen_inputs(cfg)

@@ -147,7 +147,7 @@ async def test_live_180_reserved_before_send_and_no_new_retrieval_clients(frozen
     forbidden = lambda *a, **kw: pytest.fail('答案实验构造了额外外部资源')
     monkeypatch.setattr(openai, 'AsyncOpenAI', forbidden)
     monkeypatch.setattr(LocalCrossEncoderReranker, 'create', forbidden)
-    monkeypatch.setattr(milvus_knowledge, 'MilvusKnowledgeStore', forbidden)
+    monkeypatch.setattr(milvus_knowledge.MilvusKnowledgeStore, '__init__', forbidden)
     monkeypatch.setattr(spring_knowledge_publication, 'SpringKnowledgePublicationClient', forbidden)
     calls, closed, constructors, _ = fake_sdk(monkeypatch)
     report = await runner.run_live(tmp_path / 'prepared/plan.json', approve(plan, tmp_path))
@@ -323,3 +323,61 @@ async def test_new_study_save_failure_code_keeps_old_cleanup_compatibility():
     await runner._finish_run(report, failing_save, save_failure_code='RAG_CAP_REPORT_SAVE_FAILED')
     assert report['stopReason'] == 'RAG_CAP_REPORT_SAVE_FAILED'
     assert report['reportSaveFailures'] == ['before_cleanup', 'after_cleanup']
+
+
+@pytest.mark.asyncio
+async def test_formal_store_error_stops_before_reservation_and_send(frozen_source, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from ai_service.orchestration.rag_rerank_experiment import FrozenStore
+
+    cfg, plan = await prepared(frozen_source, tmp_path, monkeypatch)
+    frozen = runner.validate_plan(plan, cfg)
+    report = runner.new_report(frozen, plan, {})
+    sends, _, _, _ = fake_sdk(monkeypatch)
+    reservations, begins = [], []
+    model = runner._runtime_model(cfg, SimpleNamespace(reserve_chat=reservations.append))
+    original_begin = model.begin
+    def begin(key):
+        begins.append(key)
+        original_begin(key)
+    model.begin = begin
+    guarded = runner.FrozenContextModel(model,
+        {e['id']: e['question'].strip() for e in frozen.rubric['entries']}, plan['contexts'])
+
+    async def failed_search(self, vector, limit):
+        raise OSError('模拟冻结 store 读取失败，不输出异常正文')
+    # 只注入 store 故障，保留真实 answer_once 和正式服务的异常转换路径。
+    monkeypatch.setattr(FrozenStore, 'search', failed_search)
+    try:
+        await runner.execute_answers(report, frozen, cfg, guarded, lambda: None)
+    finally:
+        await runner._finish_run(report, lambda: None, model=model)
+    assert report['status'] == 'stopped' and report['stopReason'] == 'RAG_CAP_PRE_SEND_FAILED'
+    assert begins == ['q0:cap1'] and reservations == [] and sends == []
+    assert sum(r['status'] == 'error' for r in report['results']) == 1
+    assert sum(r['status'] == 'not_run' for r in report['results']) == 179
+    assert report['results'][0]['providerCalled'] is False
+    assert not runner.AUTHORIZATION.exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('relative', ['ai-service/src/ai_service/prompts/__init__.py',
+                                     'ai-service/src/ai_service/models/input_review.py'])
+async def test_actual_prompt_export_and_budget_helper_drift_rejected_before_resources(
+        frozen_source, tmp_path, monkeypatch, relative):
+    _, plan = await prepared(frozen_source, tmp_path, monkeypatch)
+    original_hash = contracts.file_hash
+    changed_path = (contracts.ROOT / relative).resolve()
+    def drifted_hash(path):
+        return '0' * 64 if Path(path).resolve() == changed_path else original_hash(path)
+    monkeypatch.setattr(contracts, 'file_hash', drifted_hash)
+    touched = []
+    def forbidden_sdk(*args):
+        touched.append('sdk')
+        raise AssertionError('关键文件漂移后不得初始化 SDK')
+    monkeypatch.setattr(runner, '_runtime_model', forbidden_sdk)
+    with pytest.raises(ValueError, match='RAG_CAP_IMPLEMENTATION_CHANGED'):
+        await runner.run_live(tmp_path / 'prepared/plan.json', approve(plan, tmp_path))
+    assert relative in plan['implementationFiles']
+    assert touched == [] and not runner.AUTHORIZATION.exists()
+    assert not (tmp_path / 'prepared/live').exists()

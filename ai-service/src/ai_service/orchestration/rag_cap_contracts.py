@@ -78,6 +78,7 @@ def implementation_manifest():
         modules / 'customer_service_rag.py', modules / 'customer_service_trace.py',
         modules / 'document_etl.py', modules.parent / 'config.py',
         modules.parent / 'models/base.py', modules.parent / 'models/openai_compatible.py',
+        modules.parent / 'models/input_review.py', modules.parent / 'prompts/__init__.py',
         modules.parent / 'models/reranker.py', modules.parent / 'prompts/customer_service.py',
         modules.parent / 'infrastructure/milvus_knowledge.py',
         modules.parent / 'api/knowledge_publication_schemas.py', ROOT / 'ai-service/uv.lock']
@@ -108,6 +109,36 @@ class FrozenInputs:
     replay: dict
     source_files: dict
     source_report_sha256: str
+
+
+def _verify_canonical_chunk_identities(corpus, snapshot, cfg):
+    """核对全部规范块的存储身份，不以进入某题 Top8 作为校验前提。"""
+    from ai_service.infrastructure.milvus_knowledge import IndexedDocument, MilvusKnowledgeStore, SCHEMA_VERSION
+
+    documents = {d.document_id: d for d in snapshot.documents}
+    for row in corpus:
+        identity = documents.get(row.get('documentId'))
+        index = row.get('chunkIndex')
+        if identity is None or type(index) is not int or index < 0:
+            fail('CANONICAL_CHUNK_IDENTITY_CHANGED')
+        document = IndexedDocument(identity.document_id, identity.document_version,
+            str(identity.index_revision), cfg.rag_embedding_model, identity.file_name,
+            identity.file_type.lower(), identity.sha256, (), identity.index_revision,
+            identity.activation_revision)
+        # _identity 是纯静态身份公式；此处不构造存储或 Milvus 客户端。
+        identity_key = MilvusKnowledgeStore._identity(document)
+        chunk_id = f'{identity.document_id}:{identity.document_version}:{index}'
+        expected = {'recordType': 'chunk', 'chunkId': chunk_id,
+            'id': hashlib.sha256(f'{identity_key}\0{chunk_id}'.encode()).hexdigest(),
+            'documentId': identity.document_id, 'documentVersion': identity.document_version,
+            'indexRevision': identity.index_revision, 'activationRevision': identity.activation_revision,
+            'documentContentHash': identity.sha256, 'fileName': identity.file_name,
+            'fileType': identity.file_type.lower(), 'etlVersion': str(identity.index_revision),
+            'embeddingModelVersion': cfg.rag_embedding_model,
+            'embeddingDimension': cfg.rag_embedding_dimension, 'schemaVersion': SCHEMA_VERSION,
+            'revisionProtocol': 2, 'isActive': True}
+        if any(encoded(row.get(key)) != encoded(value) for key, value in expected.items()):
+            fail('CANONICAL_CHUNK_IDENTITY_CHANGED')
 
 
 def _load(cfg):
@@ -164,9 +195,11 @@ def _load(cfg):
     corpus = verify_corpus(snapshot, receipt, rows, mapping, cfg)
     by_id = {c['chunkId']: c for c in corpus}
     if (len(corpus) != 72 or len(by_id) != len(corpus) or report['corpusChunks'] != 72
+            or sum(row.get('recordType') == 'chunk' for row in rows) != len(corpus)
             or any(sum(c['documentId'] == d.document_id for c in corpus) != d.chunk_count
                    for d in receipt.documents)):
         fail('CORPUS_INVALID')
+    _verify_canonical_chunk_identities(corpus, snapshot, cfg)
     prepared = {}
     attributes = {'chunk_id': 'chunkId', 'document_id': 'documentId', 'document_version': 'documentVersion',
         'chunk_index': 'chunkIndex', 'content': 'content', 'file_name': 'fileName', 'file_type': 'fileType',
