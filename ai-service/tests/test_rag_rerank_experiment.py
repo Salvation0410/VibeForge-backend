@@ -280,6 +280,7 @@ def test_offline_main_does_not_enter_live(monkeypatch, capsys):
 async def test_metered_model_reserves_before_send_has_zero_retries_and_keeps_usage(tmp_path, monkeypatch):
     from langchain_core.messages import AIMessage
     import langchain_openai
+    import ai_service.models.openai_compatible as adapter
     from ai_service.orchestration.rag_rerank_experiment import _runtime_model
     ledger, questions, keys = budget(tmp_path)
     for i in range(3): ledger.reserve_embedding(i, questions[i * 32:(i + 1) * 32])
@@ -295,13 +296,15 @@ async def test_metered_model_reserves_before_send_has_zero_retries_and_keeps_usa
                 usage_metadata={'input_tokens': 10, 'output_tokens': 5, 'total_tokens': 15},
                 response_metadata={'finish_reason': 'stop', 'model_name': 'response-model-v1',
                                    'unsafe_extra_header': '不得写入'})
+    # 基类模块已绑定独立符号，单独封锁才能证明没有偷偷构造真实 SDK/HTTP 客户端。
+    monkeypatch.setattr(adapter, 'ChatOpenAI', lambda **kwargs: pytest.fail('不得构造基类真实客户端'))
     monkeypatch.setattr(langchain_openai, 'ChatOpenAI', FakeChat)
     model = _runtime_model(cfg(model_api_key='offline-key'), ledger)
     model.begin(keys[0])
     from ai_service.models.base import CustomerServiceContext
     answer = await model.answer_customer_service('问题', [CustomerServiceContext('a1', '正文')])
     assert answer.answered
-    assert constructors[-1]['max_retries'] == 0
+    assert len(constructors) == 1 and constructors[0]['max_retries'] == 0
     assert model.observation['usage']['total_tokens'] == 15
     assert model.observation['responseMetadata'] == {'finish_reason': 'stop', 'model_name': 'response-model-v1'}
     assert len(model.observation['actualMessages']) == 2
@@ -370,3 +373,121 @@ async def test_validated_actual_mapping_is_frozen_before_resource_initialization
     assert report['mappingSha256'] == fingerprint(read_json(output / 'document-map.json'))
     assert report['callsReserved'] == {'embeddingRequests': 0, 'queryInputs': 0, 'chat': 0}
     assert not (tmp_path / 'must-not-create.jsonl').exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('cancelled', [False, True])
+async def test_final_report_save_failure_still_closes_resources_and_preserves_cancel(rubric, tmp_path, monkeypatch, cancelled):
+    import uuid
+    import ai_service.config as config
+    import ai_service.infrastructure.milvus_knowledge as milvus
+    import ai_service.infrastructure.knowledge_publication_store as publications
+    import ai_service.orchestration.rag_rerank_experiment as runner
+    from ai_service.orchestration.rag_rerank_contracts import ROOT
+    mapping = {'schemaVersion': 'product-knowledge-document-map/v1', 'documents': {
+        d['documentId']: {'documentId': str(index), 'documentVersion': 1, 'sha256': d['sha256']}
+        for index, d in enumerate(rubric['freeze']['documents'], 1)}}
+    source = tmp_path / 'mapping.json'
+    source.write_text(json.dumps(mapping), encoding='utf8')
+    output = ROOT / 'tmp/rag-verification-20261118/tool-validation' / ('cleanup-fixture-' + uuid.uuid4().hex)
+    settings = Settings(_env_file=None, customer_service_rag_enabled=False, rag_publication_enabled=True)
+    primary = asyncio.CancelledError('原始取消') if cancelled else ValueError('RAG_RERANK_TEST_STOP')
+    closed = []
+    class Client:
+        async def snapshot(self):
+            return SimpleNamespace(collection_name='frozen')
+        async def close(self):
+            closed.append('client')
+    class Store:
+        async def close(self):
+            closed.append('store')
+    class Publications:
+        async def completed(self, collection):
+            raise primary
+    real_write = runner.write_json
+    def fail_final_save(path, value):
+        if Path(path).name == 'report.json' and 'finishedAtUtc' in value:
+            raise OSError('不得记录异常正文')
+        real_write(path, value)
+    monkeypatch.setattr(config, 'Settings', lambda **kwargs: settings)
+    monkeypatch.setattr(runner, 'AUTHORIZATION', tmp_path / 'must-not-create.jsonl')
+    monkeypatch.setattr(runner, 'source_manifest', lambda rubric: {})
+    monkeypatch.setattr(runner, '_local_model_manifest', lambda cfg: (tmp_path, {}))
+    monkeypatch.setattr(runner, 'publication_client', lambda cfg: Client())
+    monkeypatch.setattr(milvus, 'MilvusKnowledgeStore', lambda cfg: Store())
+    monkeypatch.setattr(publications, 'PublicationStore', lambda *args: Publications())
+    monkeypatch.setattr(runner, 'write_json', fail_final_save)
+    if cancelled:
+        with pytest.raises(asyncio.CancelledError) as observed:
+            await runner.run_live(output, source)
+        assert observed.value is primary
+    else:
+        report = await runner.run_live(output, source)
+        assert report['status'] == 'stopped'
+        assert report['reportSaveFailures'] == ['before_cleanup', 'after_cleanup']
+    assert closed == ['client', 'store']
+    assert not (tmp_path / 'must-not-create.jsonl').exists()
+
+
+@pytest.mark.asyncio
+async def test_each_failing_closer_and_gpu_release_are_attempted_even_when_report_saves_fail():
+    from ai_service.orchestration.rag_rerank_experiment import _finish_run
+    calls = []
+    def fail_sync(name):
+        def close():
+            calls.append(name)
+            raise OSError('不得记录异常正文')
+        return close
+    def fail_async(name):
+        async def close():
+            calls.append(name)
+            raise OSError('不得记录异常正文')
+        return close
+    resources = tuple((name, SimpleNamespace(close=fail_async(name)))
+                      for name in ('reranker', 'embedding', 'client', 'store'))
+    model = SimpleNamespace(_client=SimpleNamespace(
+        root_async_client=SimpleNamespace(close=fail_async('answer_model_async')),
+        root_client=SimpleNamespace(close=fail_sync('answer_model_sync'))))
+    report = {'status': 'complete'}
+    await _finish_run(report, fail_sync('save'),
+        budget=SimpleNamespace(close=fail_sync('budget')), resources=resources, model=model,
+        gpu_owner=SimpleNamespace(release=fail_sync('gpu_owner')))
+    expected = ['budget', 'reranker', 'embedding', 'client', 'store',
+                'answer_model_async', 'answer_model_sync', 'gpu_owner']
+    assert calls == ['save', *expected, 'save']
+    assert report['cleanupErrors'] == expected
+    assert report['reportSaveFailures'] == ['before_cleanup', 'after_cleanup']
+    assert report['status'] == 'stopped'
+    assert report['stopReason'] == 'RAG_RERANK_REPORT_SAVE_FAILED'
+    assert '不得记录异常正文' not in str(report)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('already_cancelled', [False, True])
+async def test_cleanup_cancellation_keeps_remaining_closers_and_original_identity(already_cancelled):
+    from ai_service.orchestration.rag_rerank_experiment import _finish_run
+    original = asyncio.CancelledError('原取消')
+    during_cleanup = asyncio.CancelledError('收尾取消')
+    closed = []
+    async def cancel_close():
+        closed.append('cancel')
+        raise during_cleanup
+    async def later_close():
+        closed.append('later')
+    report = {'status': 'cancelled' if already_cancelled else 'complete'}
+    async def run():
+        if not already_cancelled:
+            await _finish_run(report, lambda: None, resources=(('cancel', SimpleNamespace(close=cancel_close)),
+                ('later', SimpleNamespace(close=later_close))))
+        else:
+            try:
+                raise original
+            finally:
+                await _finish_run(report, lambda: None,
+                    resources=(('cancel', SimpleNamespace(close=cancel_close)),
+                               ('later', SimpleNamespace(close=later_close))), original_cancel=original)
+    with pytest.raises(asyncio.CancelledError) as observed:
+        await run()
+    assert observed.value is (original if already_cancelled else during_cleanup)
+    assert closed == ['cancel', 'later']
+    assert report['status'] == 'cancelled'

@@ -226,11 +226,79 @@ async def execute_answers(report, rubric, settings, prepared, vectors, model, sa
     save()
 
 
+async def _finish_run(report, save, *, budget=None, resources=(), model=None,
+                      gpu_owner=None, original_cancel=None):
+    """报告写盘与逐项清理解耦；这里只保证尝试，不宣称失败资源已强制关闭。"""
+    cleanup_cancel = None
+
+    def remember_cancel(error, label):
+        nonlocal cleanup_cancel
+        if cleanup_cancel is None:
+            cleanup_cancel = error
+        report.setdefault('cleanupErrors', []).append(label)
+        report.update(status='cancelled', stopReason='CANCELLED')
+
+    def final_save(label):
+        try:
+            save()
+        except asyncio.CancelledError as error:
+            remember_cancel(error, label)
+        except Exception:
+            report.setdefault('reportSaveFailures', []).append(label)
+            if report['status'] == 'complete':
+                report.update(status='stopped', stopReason='RAG_RERANK_REPORT_SAVE_FAILED')
+
+    def close_sync(label, closer):
+        try:
+            closer()
+        except asyncio.CancelledError as error:
+            remember_cancel(error, label)
+        except Exception:
+            report.setdefault('cleanupErrors', []).append(label)
+
+    async def close_async(label, closer):
+        try:
+            await closer()
+        except asyncio.CancelledError as error:
+            remember_cancel(error, label)
+        except Exception:
+            report.setdefault('cleanupErrors', []).append(label)
+
+    # 外层写盘和任一 closer 均不能跳过更内层 finally 的剩余清理及 GPU 所有权释放。
+    try:
+        final_save('before_cleanup')
+    finally:
+        try:
+            if budget is not None:
+                close_sync('budget', lambda: budget.close())
+            for label, resource in resources:
+                if resource is not None:
+                    await close_async(label, lambda: resource.close())
+            if model is not None:
+                await close_async('answer_model_async', lambda: model._client.root_async_client.close())
+                close_sync('answer_model_sync', lambda: model._client.root_client.close())
+        finally:
+            if gpu_owner is not None:
+                close_sync('gpu_owner', lambda: gpu_owner.release())
+            final_save('after_cleanup')
+    # 已在传播的原取消由调用方原样重抛，收尾新收到的取消也不能被观察失败吞掉。
+    if original_cancel is None and cleanup_cancel is not None:
+        raise cleanup_cancel
+
+
 def _runtime_model(settings, budget):
     from langchain_openai import ChatOpenAI
     from langsmith import tracing_context
     from ai_service.models.openai_compatible import OpenAICompatibleModel
     class MeteredModel(OpenAICompatibleModel):
+        def __init__(self, settings):
+            # 基类当前只依赖这三项；评测直接建立唯一零重试客户端，避免先构造再覆盖泄漏。
+            self._settings = settings
+            self._customer_service_prompt_max_bytes = settings.rag_prompt_max_bytes
+            self._client = ChatOpenAI(api_key=settings.model_api_key, base_url=settings.model_base_url,
+                model=settings.model_name, temperature=settings.model_temperature,
+                max_tokens=settings.model_max_tokens, max_retries=0, timeout=settings.rag_answer_timeout_seconds)
+
         def begin(self, key):
             self.key = key
             self.observation = {'providerCalled': False, 'usage': None, 'answerLatencyMs': None,
@@ -254,11 +322,7 @@ def _runtime_model(settings, budget):
                 return response
             finally:
                 self.observation['answerLatencyMs'] = round((time.perf_counter() - started) * 1000, 3)
-    model = MeteredModel(settings)
-    model._client = ChatOpenAI(api_key=settings.model_api_key, base_url=settings.model_base_url,
-        model=settings.model_name, temperature=settings.model_temperature,
-        max_tokens=settings.model_max_tokens, max_retries=0, timeout=settings.rag_answer_timeout_seconds)
-    return model
+    return MeteredModel(settings)
 
 
 def _local_model_manifest(settings):
@@ -336,7 +400,7 @@ async def run_live(output, mapping_path):
     output.mkdir(parents=True)
     write_json(output / 'document-map.json', mapping)
     budget = None
-    client = store = embedding = reranker = model = gpu_owner = None
+    client = store = embedding = reranker = model = gpu_owner = original_cancel = None
     def save():
         report['callsReserved'] = dict(budget.counts) if budget else {'embeddingRequests': 0, 'queryInputs': 0, 'chat': 0}
         write_json(output / 'report.json', report)
@@ -445,32 +509,17 @@ async def run_live(output, mapping_path):
         await execute_answers(report, rubric, cfg, prepared, query_vectors, model, save,
             snapshot=snapshot, client=client,
             logical_by_actual={m['documentId']: logical for logical, m in mapping['documents'].items()})
-    except asyncio.CancelledError:
+    except asyncio.CancelledError as error:
+        original_cancel = error
         report.update(status='cancelled', stopReason='CANCELLED')
         raise
     except Exception as error:
         report.update(status='stopped', stopReason=code(error))
     finally:
         report['finishedAtUtc'] = now()
-        save()
-        if budget is not None:
-            budget.close()
-        # 逐个关闭，某项清理失败不能跳过其他资源，也不覆盖原始运行状态。
-        for resource in (reranker, embedding, client, store):
-            if resource is not None:
-                try:
-                    await resource.close()
-                except Exception:
-                    report.setdefault('cleanupErrors', []).append(type(resource).__name__)
-        if model is not None:
-            try:
-                await model._client.root_async_client.close()
-                model._client.root_client.close()
-            except Exception:
-                report.setdefault('cleanupErrors', []).append('answerModelClient')
-        if gpu_owner is not None:
-            gpu_owner.release()
-        save()
+        await _finish_run(report, save, budget=budget, resources=(('reranker', reranker),
+            ('embedding', embedding), ('client', client), ('store', store)), model=model,
+            gpu_owner=gpu_owner, original_cancel=original_cancel)
     return report
 
 
