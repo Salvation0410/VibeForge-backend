@@ -86,7 +86,7 @@ class CustomerServiceMultiChunkSourcesTest {
 
             assertUnavailable(error);
             assertNull(returned.get(), "来源无效时不能返回已累积的部分来源");
-            // 无效状态放在另一文档，保证首个合法来源已通过，避免同文档状态使测试提前失败。
+            // 同文档仅破坏第二块的来源身份；文档状态异常放在另一文档，避免首个来源提前失败。
             var reads = inOrder(mapper);
             if ("7".equals(second.documentId())) {
                 reads.verify(mapper, times(2)).findIncludingDeleted(7L);
@@ -108,6 +108,16 @@ class CustomerServiceMultiChunkSourcesTest {
         staleIndex.setIndexedVersion(2L);
         return Stream.of(
                 Arguments.of("重复 chunk 整次拒绝", FIRST, activeDocument(8, "常见问题", 3, 1)),
+                Arguments.of("同文档第二块来源版本过旧", source("7", "使用说明", 1, "7:1:0", "旧版位置", "旧版摘录"),
+                        activeDocument(8, "常见问题", 3, 1)),
+                Arguments.of("同文档第二块文档名不符", source("7", "另一文档", 2, "7:2:0", "位置", "摘录"),
+                        activeDocument(8, "常见问题", 3, 1)),
+                Arguments.of("同文档第二块的文档身份不符", source("7", "使用说明", 2, "8:2:0", "位置", "摘录"),
+                        activeDocument(8, "常见问题", 3, 1)),
+                Arguments.of("同文档第二块的版本身份不符", source("7", "使用说明", 2, "7:1:0", "位置", "摘录"),
+                        activeDocument(8, "常见问题", 3, 1)),
+                Arguments.of("同文档第二块索引越界", source("7", "使用说明", 2, "7:2:2", "位置", "摘录"),
+                        activeDocument(8, "常见问题", 3, 1)),
                 Arguments.of("第二来源版本过旧", source("8", "常见问题", 2, "8:2:0", "旧版位置", "旧版摘录"),
                         activeDocument(8, "常见问题", 3, 1)),
                 Arguments.of("第二来源文档名不符", source("8", "另一文档", 3, "8:3:0", "位置", "摘录"),
