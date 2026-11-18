@@ -10,7 +10,7 @@ from ai_service.config import Settings
 from ai_service.infrastructure.milvus_knowledge import RetrievedChunk, IndexedDocument, MilvusKnowledgeStore
 from ai_service.orchestration import rag_cap_contracts as contracts
 from ai_service.orchestration.document_etl import parse_document, split_sections
-from ai_service.orchestration.rag_rerank_contracts import PRODUCT, load_rubric, fingerprint
+from ai_service.orchestration.rag_rerank_contracts import PRODUCT, RUBRIC, read_json, fingerprint
 
 
 def write(path, value):
@@ -24,8 +24,8 @@ def frozen_source(tmp_path, monkeypatch):
     cfg = Settings(_env_file=None, customer_service_rag_enabled=False,
         rag_publication_enabled=True, rag_embedding_dimension=2,
         rag_reranker_provider='local_cross_encoder', model_context_window_tokens=200000)
-    rubric = deepcopy(load_rubric())
-    # 仍保留真实公开文档 freeze；题目改用合成 90 题使 CI 不依赖私有证据。
+    # 只借用公开 rubric 结构生成隔离来源，不执行历史真实批次的源码字节 freeze。
+    rubric = read_json(RUBRIC)
     for i, entry in enumerate(rubric['entries']):
         entry.update(id=f'q{i}', question=f'合成问题{i}')
     mapping = {'schemaVersion': 'product-knowledge-document-map/v1', 'documents': {}}
@@ -103,6 +103,21 @@ def test_complete_loader_binds_id_to_vector_and_corpus(frozen_source):
     assert len(frozen.prepared) == 90
     assert frozen.source_report_sha256 == fingerprint(report)
     assert frozen.source_files['query-vectors.json'] == contracts.file_hash(source / 'query-vectors.json')
+
+
+def test_isolated_fixture_builds_when_legacy_freeze_validation_is_forbidden(request, monkeypatch):
+    from ai_service.orchestration import rag_rerank_contracts as legacy
+
+    def forbidden(*args, **kwargs):
+        pytest.fail('隔离 fixture 不得调用依赖历史源码字节换行的真实 freeze 校验')
+    monkeypatch.setattr(legacy, 'load_rubric', forbidden)
+    # 同时阻断历史实现已缓存的直接导入，防止函数别名掩盖边界回归。
+    monkeypatch.setitem(globals(), 'load_rubric', forbidden)
+    source, cfg, _, report, _ = request.getfixturevalue('frozen_source')
+    frozen = contracts.load_frozen_inputs(cfg)
+    assert len(frozen.prepared) == 90 and len(frozen.vectors) == 90
+    assert frozen.source_report_sha256 == fingerprint(report)
+    assert frozen.source_files['report.json'] == contracts.file_hash(source / 'report.json')
 
 
 @pytest.mark.parametrize('damage', ['report', 'matrix-order', 'matrix-nan', 'mapping', 'rows',

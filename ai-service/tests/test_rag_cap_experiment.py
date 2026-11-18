@@ -64,7 +64,8 @@ async def test_invalid_approval_refused_before_resources(frozen_source, tmp_path
 
 
 @pytest.mark.asyncio
-async def test_guard_rejects_question_or_context_before_delegate():
+@pytest.mark.parametrize('question,text', [('变化', '原文'), ('问题', '变化')])
+async def test_guard_rejects_question_or_context_before_delegate(question, text):
     class Model:
         observation = {'providerCalled': False}
         def begin(self, key): pass
@@ -72,9 +73,24 @@ async def test_guard_rejects_question_or_context_before_delegate():
     frozen = {'q:cap1': [{'chunkId': 'a', 'content': '原文'}]}
     model = runner.FrozenContextModel(Model(), {'q': '问题'}, frozen)
     model.begin('q:cap1')
-    for question, text in [('变化', '原文'), ('问题', '变化')]:
-        with pytest.raises(ValueError, match='RAG_CAP_CONTEXT_MISMATCH'):
-            await model.answer_customer_service(question, [CustomerServiceContext('a', text)])
+    with pytest.raises(ValueError, match='RAG_CAP_CONTEXT_MISMATCH'):
+        await model.answer_customer_service(question, [CustomerServiceContext('a', text)])
+
+
+@pytest.mark.asyncio
+async def test_guard_stays_closed_after_mismatch_even_for_restored_input():
+    class Model:
+        observation = {'providerCalled': False}
+        def begin(self, key): pass
+        async def answer_customer_service(self, *args): pytest.fail('失效 guard 不得再次委派模型')
+    contexts = {'q:cap1': [{'chunkId': 'a', 'content': '原文'}]}
+    guarded = runner.FrozenContextModel(Model(), {'q': '问题'}, contexts)
+    guarded.begin('q:cap1')
+    with pytest.raises(ValueError, match='RAG_CAP_CONTEXT_MISMATCH'):
+        await guarded.answer_customer_service('变化', [CustomerServiceContext('a', '原文')])
+    guarded.begin('q:cap1')
+    with pytest.raises(ValueError, match='RAG_CAP_CONTEXT_MISMATCH'):
+        await guarded.answer_customer_service('问题', [CustomerServiceContext('a', '原文')])
 
 
 def approve(plan, tmp_path):
