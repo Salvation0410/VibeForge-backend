@@ -1,0 +1,474 @@
+{
+  "schemaVersion": "rag-cap-answer-real-result/v1",
+  "round": 16,
+  "date": "2026-11-18",
+  "studyId": "rag-cap-20261118-answer-round-v1",
+  "runtimeCode": {
+    "codeSha": "346c26eaad3eb2c4e1afbfff554559c612fd9f0a",
+    "dirty": true
+  },
+  "runtimeDirtyReason": "保留README原围栏修改及未跟踪取消计划；关键执行文件按计划摘要核对。",
+  "authorization": {
+    "source": "direct-user-response",
+    "answer": "批准本轮最多180次真实回答",
+    "questionCallId": "call_a230d364925747038b1fb0a35a2062d7",
+    "maxNewChatCalls": 180,
+    "maxNewEmbeddingCalls": 0,
+    "maxNewBgeCalls": 0,
+    "maxNewIndexCalls": 0,
+    "failuresConsumeBudget": true,
+    "automaticRetries": 0,
+    "resumeSupported": false,
+    "planCanonicalSha256": "fb3f2ac0ab7b4d02df9185a2f26144b37b1b8e9743801e1498fe1f19653a4544",
+    "ledgerReservationLines": 180,
+    "ledgerAuthorizationLines": 1,
+    "ledgerUniqueKeys": 180,
+    "ledgerByteSha256": "eec517b7fe1cf932c9609958679c7ee466911a72ec8deb791e478c77d598a6fc",
+    "exhausted": true
+  },
+  "frozenInputs": {
+    "sourceReportCanonicalSha256": "ad21903b50000f50d077af1c93b137e77bff1da6ca47d4ca04617f8c33781ee1",
+    "sourceReplayCanonicalSha256": "0acd669af2f70ea03035341fb410b7413808b9908b4473c318aad44d8d9fcbca",
+    "rubricSha256": "79d2cf63949c8de69877f9c49d4b66c1f834f5ee9b64ce9fcb48d70e1aa54363",
+    "evaluationBindings": {
+      "originalAnnotations": {
+        "byteSha256": "3617f42c3f2ba2bbad6b8744c2ca4c493a9a149985032ed0ce59cb9f831b9f8c",
+        "canonicalSha256": "c35630ff7f72d0c6a9d5bc7639ddc1d8d1be7aba87b8313d6b06c5092acb7366"
+      },
+      "paymentClarification": {
+        "byteSha256": "03cc5e6273c9c368b1f126dab2a5874d0c590e6296702f0712eb6d572a022ee7",
+        "canonicalSha256": "9dab5f6503ea5948be762490c750152c4b30e452decdcee75125c0b94f4d1fbc"
+      }
+    },
+    "documents": 11,
+    "chunks": 72,
+    "questionPairs": 90,
+    "answerableQuestions": 81,
+    "refusalQuestions": 9,
+    "variable": "per-document-chunk-limit-1-vs-2",
+    "bothArmsRerank": "historical-frozen-on",
+    "retrievalTopK": 8,
+    "finalTopK": 3,
+    "maxContextChars": 1200,
+    "maxTotalContextChars": 3000,
+    "promptMaxBytes": 16384,
+    "actualContextsMatchPlan": 180,
+    "changedSelectionPairs": 65,
+    "unchangedSelectionPairs": 25
+  },
+  "runtime": {
+    "counts": {
+      "error": 3,
+      "ok": 177
+    },
+    "startedAtUtc": "2026-11-18T11:23:12.821060+00:00",
+    "finishedAtUtc": "2026-11-18T11:26:18.431693+00:00",
+    "wallSeconds": 185.610633,
+    "requestedModel": "deepseek-chat",
+    "responseModelNames": {
+      "deepseek-flash": 180
+    },
+    "responseSystemFingerprints": {
+      "bc19ba97cbe016479903222bb1578db6": 180
+    },
+    "responseFinishReasons": {
+      "stop": 180
+    },
+    "modelIdentityLimitation": "请求deepseek-chat，全部响应自报deepseek-flash；不能认证实际供应商模型身份或同名模型稳定性。",
+    "newEmbeddingCalls": 0,
+    "newBgeCalls": 0,
+    "productionIndexWrites": 0,
+    "productionWrites": 0,
+    "automaticRetries": 0,
+    "currentAuthoritativeSnapshotChecked": false,
+    "onlineE2ETested": false
+  },
+  "responseGenerationConfig": {
+    "temperature": 0.1,
+    "maxOutputTokens": 8192,
+    "contextWindowTokens": 200000,
+    "protocolOverheadTokens": 4096
+  },
+  "requestErrors": [
+    {
+      "arm": "cap2",
+      "errorCode": "MODEL_PARSE_FAILED",
+      "finishReason": "stop",
+      "id": "preview-history-004",
+      "observedDefect": "missing-opening-quote-before-citedChunkIds",
+      "parserMessage": "Expecting property name enclosed in double quotes",
+      "parserPosition": 76,
+      "providerCalled": true,
+      "rawResponseSha256": "e60a180ba52d5d76f00e1e43fda8ef68766cdb0fa85a4991de87c9c92ab96a87"
+    },
+    {
+      "arm": "cap1",
+      "errorCode": "MODEL_PARSE_FAILED",
+      "finishReason": "stop",
+      "id": "preview-history-004",
+      "observedDefect": "missing-opening-quote-before-citedChunkIds",
+      "parserMessage": "Expecting property name enclosed in double quotes",
+      "parserPosition": 73,
+      "providerCalled": true,
+      "rawResponseSha256": "b4a063a52e7bf2c343501031d2483be8315e00239cef94db0a6295c5c03f158b"
+    },
+    {
+      "arm": "cap2",
+      "errorCode": "MODEL_PARSE_FAILED",
+      "finishReason": "stop",
+      "id": "deployment-download-003",
+      "observedDefect": "missing-opening-quote-before-citedChunkIds",
+      "parserMessage": "Expecting property name enclosed in double quotes",
+      "parserPosition": 113,
+      "providerCalled": true,
+      "rawResponseSha256": "3ddde0fe88a24d4823419873bd770446a1f8ea3601b6b915027247047d5b9bfd"
+    }
+  ],
+  "agentReview": {
+    "role": "agent",
+    "reviewedCards": 180,
+    "shards": 3,
+    "cardsPerShard": 60,
+    "qualityStatus": "complete",
+    "humanReview": "pending",
+    "humanGold": false,
+    "generalization": "反复使用的90题开发回归集，非独立盲测泛化成绩",
+    "initialPassCounts": {
+      "cap1": 75,
+      "cap2": 79
+    },
+    "initialPaired": {
+      "bootstrap95": [
+        -0.011111111111111112,
+        0.1111111111111111
+      ],
+      "bootstrapDraws": 10000,
+      "bootstrapSeed": 20261118,
+      "bothFail": 9,
+      "bothPass": 73,
+      "cap1Only": 2,
+      "cap2MinusCap1": 0.044444444444444446,
+      "cap2Only": 6,
+      "questionPairs": 90
+    },
+    "independentSemanticRecheck": {
+      "questionPairs": 18,
+      "cards": 36,
+      "revisedCards": 13,
+      "missingToMetFacts": 3,
+      "initialReviewsAndSummariesPreserved": true,
+      "rubricChanged": false,
+      "selection": "全部初审失败及同题对照、所有代理疑义成对复核"
+    },
+    "arms": {
+      "cap1": {
+        "answerLatencyMs": {
+          "count": 90,
+          "mean": 980.5537555555555,
+          "p95": 1445.173
+        },
+        "answerTokens": {
+          "input_tokens": 64464,
+          "output_tokens": 6845,
+          "total_tokens": 71309
+        },
+        "answerableDenominator": 81,
+        "answerablePassRate": 0.8395061728395061,
+        "correctContractRefusals": 9,
+        "denominator": 90,
+        "errors": 1,
+        "failureCategories": {
+          "annotation_dispute": 1,
+          "evidence_present_generation_error": 2
+        },
+        "falseRefusals": 3,
+        "notRun": 0,
+        "overallPassRate": 0.8555555555555555,
+        "pending": 0,
+        "publicFactCoverage": 0.8384615384615385,
+        "refusalDenominator": 9,
+        "refusalPassRate": 1.0,
+        "requiredPublicFactsDenominator": 130,
+        "reviewed": 90,
+        "reviewedCitations": 116,
+        "reviewedClaims": 341,
+        "reviewedFactualErrors": 1,
+        "reviewedPublicFactCoverage": 0.8384615384615385,
+        "reviewedSafeCorrectRefusals": 9,
+        "reviewedSafetyViolations": 0,
+        "supportedCitations": 116,
+        "unsupportedClaims": 2
+      },
+      "cap2": {
+        "answerLatencyMs": {
+          "count": 90,
+          "mean": 971.3490999999999,
+          "p95": 1547.801
+        },
+        "answerTokens": {
+          "input_tokens": 64904,
+          "output_tokens": 6882,
+          "total_tokens": 71786
+        },
+        "answerableDenominator": 81,
+        "answerablePassRate": 0.8641975308641975,
+        "correctContractRefusals": 9,
+        "denominator": 90,
+        "errors": 2,
+        "failureCategories": {
+          "annotation_dispute": 1,
+          "evidence_present_generation_error": 3
+        },
+        "falseRefusals": 2,
+        "notRun": 0,
+        "overallPassRate": 0.8777777777777778,
+        "pending": 0,
+        "publicFactCoverage": 0.8692307692307693,
+        "refusalDenominator": 9,
+        "refusalPassRate": 1.0,
+        "requiredPublicFactsDenominator": 130,
+        "reviewed": 90,
+        "reviewedCitations": 122,
+        "reviewedClaims": 338,
+        "reviewedFactualErrors": 1,
+        "reviewedPublicFactCoverage": 0.8692307692307693,
+        "reviewedSafeCorrectRefusals": 9,
+        "reviewedSafetyViolations": 0,
+        "supportedCitations": 121,
+        "unsupportedClaims": 2
+      }
+    },
+    "paired": {
+      "bootstrap95": [
+        -0.03333333333333333,
+        0.07777777777777778
+      ],
+      "bootstrapDraws": 10000,
+      "bootstrapSeed": 20261118,
+      "bothFail": 9,
+      "bothPass": 75,
+      "cap1Only": 2,
+      "cap2MinusCap1": 0.022222222222222223,
+      "cap2Only": 4,
+      "questionPairs": 90
+    },
+    "humanOverallQualityImprovement": null,
+    "annotationDisputes": {
+      "caseIds": [
+        "deployment-download-009"
+      ],
+      "cards": 2,
+      "meaning": "下载负前置的隐含支持需人工裁决；另有未限定Vue的独立范围错误，两组均已失败。"
+    }
+  },
+  "failureAttribution": {
+    "finalMissingPublicFactRecords": 38,
+    "primaryCauseCounts": {
+      "quota_or_budget_loss": 18,
+      "not_recalled": 12,
+      "request_parse_failure": 4,
+      "evidence_present_generation_error": 3,
+      "ranking_truncation": 1
+    },
+    "byArm": {
+      "cap1": {
+        "missingPublicFactRecords": 21,
+        "primaryCauseCounts": {
+          "quota_or_budget_loss": 13,
+          "request_parse_failure": 1,
+          "not_recalled": 6,
+          "evidence_present_generation_error": 1
+        },
+        "requiredPublicFactsDenominator": 130,
+        "metPublicFacts": 109,
+        "publicFactCoverage": 0.8384615384615385
+      },
+      "cap2": {
+        "missingPublicFactRecords": 17,
+        "primaryCauseCounts": {
+          "quota_or_budget_loss": 5,
+          "not_recalled": 6,
+          "request_parse_failure": 3,
+          "evidence_present_generation_error": 2,
+          "ranking_truncation": 1
+        },
+        "requiredPublicFactsDenominator": 130,
+        "metPublicFacts": 113,
+        "publicFactCoverage": 0.8692307692307693
+      }
+    },
+    "removedInitialMissingFacts": 3,
+    "pendingMissingFactRecords": 0,
+    "requestParseFailureRequests": 3,
+    "requestParseFailureFactRecords": 4,
+    "actualCharacterOrByteBudgetLossObserved": false,
+    "otherClaimIssuesNotAddedToMissingFactCount": true,
+    "meaningZh": "逐事实集合恰为最终评审requiredFacts中basisType=public-document且verdict非met的所有必要事实。解析失败为3次请求、4条未交付事实，不算正确拒答或证据丢失。下载009claim争议不增加缺失事实。"
+  },
+  "evidenceUseGains": [
+    "platform-account-001",
+    "admin-knowledge-005",
+    "community-007",
+    "community-013"
+  ],
+  "cap1OnlyPassCases": {
+    "platform-account-005": "冗余FAQ引用未支持事实",
+    "deployment-download-003": "坏JSON；不能将协议生成错误直接归因cap2"
+  },
+  "paymentClarificationPostHoc": {
+    "caseId": "boundaries-safety-001",
+    "confirmedFact": "当前平台不支持支付功能",
+    "directCurrentStateAnswerMet": {
+      "cap1": false,
+      "cap2": false
+    },
+    "reviewMethod": "代理按用户确认口径逐份语义复核；不是关键词自动判定",
+    "reviewerRole": "agent",
+    "frozenPrimaryScoresChanged": false,
+    "corpusChanged": false,
+    "indexWritten": false,
+    "status": "candidate-not-published"
+  },
+  "cost": {
+    "monetaryCost": null,
+    "unitPricesFrozen": false,
+    "totalTokensDelta": 477,
+    "totalTokensRelativeDelta": 0.006689197716978222,
+    "cacheReadIsInputSubset": true,
+    "timingMeaning": "历史候选与BGE结果回放；仅统计本轮新回答耗时，未计当前检索/BGE耗时，不是在线E2E"
+  },
+  "verification": {
+    "currentTargetedTests": {
+      "tests": 199,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "dependencyWarnings": 2,
+    "parserReplay": {
+      "accepted": 177,
+      "meaning": "仅复现正式解析结果，不是新答案或语义质量验收",
+      "networkAttempts": 0,
+      "newRealCalls": 0,
+      "rawResponsesModified": false,
+      "rejected": 3,
+      "schemaVersion": "rag-cap-real-parser-replay/v1"
+    },
+    "strictFinalReviewImport": {
+      "cards": 180,
+      "humanTemplateStillPending": true
+    },
+    "protectedFilesUnchanged": 9,
+    "readmeOriginalUnstagedPatchPreserved": true,
+    "independentMethodReview": {
+      "conclusion": "机器方法、授权绑定、初版与最终代理评审结构及题级统计检查通过；人工语义结论待审",
+      "blockingFindingCount": 0
+    },
+    "fullPythonSuiteRerunThisRound": false,
+    "compileallRerunThisRound": false,
+    "uvLockRerunThisRound": false,
+    "javaRerunThisRound": false,
+    "frontendRerunThisRound": false,
+    "trackedChanges": "results-and-documents-only",
+    "auditFirstAttempt": "README diff字节比较因index摘要与CRLF/LF不同退出1；仅修正临时检查器，完整原hunk及文件保持。"
+  },
+  "deployment": {
+    "productionCap": 1,
+    "cap2Enabled": false,
+    "servicesRestarted": false,
+    "humanProductAcceptance": "pending-by-user-request"
+  },
+  "decision": "保留cap1默认；cap2净+2/90但题级区间包含零，继续作为候选，不能宣称稳定收益。",
+  "nextCandidate": "单独验证客服供应商JSON输出约束；先离线/Fake SDK，真实调用另列计划与额度，不自动修补或重试。",
+  "limits": [
+    "复用历史检索/重排结果；未核对当前权威publication，不是在线E2E。",
+    "供应商自报模型名称与请求不同，不能认证实际模型身份。",
+    "90题重复开发回归集，代理结果不能代替独立泛化或人工验收。",
+    "每臂每题仅一次生成，证据加入与使用不证明稳定因果效果。",
+    "38条是缺失事实计数，其中4条来自3次故障，不与请求数相加。",
+    "来源结构/引文可追溯不证明语义穷尽；下载隐含支持仍待人工裁决。",
+    "支付新口径两组未满足，尚未发布新语料或变更冻结主标准。"
+  ],
+  "evidence": {
+    "prepared/plan.json": {
+      "byteSha256": "504a5a6b09339ee66674551032d977edef8ddbe377eb95bb77ec866c9bd3ddcb",
+      "canonicalSha256": "fb3f2ac0ab7b4d02df9185a2f26144b37b1b8e9743801e1498fe1f19653a4544"
+    },
+    "prepared/live/report.json": {
+      "byteSha256": "c34af6aa6b5f96f654e3255ccd239d8da5474ace2db3fc3337b270dcb3dbb704",
+      "canonicalSha256": "0ac36490828077d642511ac972bf773972a84072fa5d8c5cbc387fb6fa9d5972"
+    },
+    "real-approval-receipt.json": {
+      "byteSha256": "6e3488d74738407c98cf713ace81a92802027ef77b45b5518d6de0e3cdbc09ff",
+      "canonicalSha256": "87b6a5985fb40fcb02ffb15a5d63e6a726c9eb21d045abe4e85346bb410012bd"
+    },
+    "cap-authorization.jsonl": {
+      "byteSha256": "eec517b7fe1cf932c9609958679c7ee466911a72ec8deb791e478c77d598a6fc"
+    },
+    "real-runtime-audit.json": {
+      "byteSha256": "5b5d4ad1defc4e95633966f5de354cecadccf5eab2bb4c4019a3543b423bc1ca",
+      "canonicalSha256": "6efca629df79907812c6614971cbfcf58abe54e9e95d65a751d29ea5ded14c78"
+    },
+    "real-parser-replay.json": {
+      "byteSha256": "ebf296bdd155b84f2fcf628474612028355ffb117545d64a515f55c9fc2e771e",
+      "canonicalSha256": "00f4dac7a9c38fb7a729080d8cf775ddee2cac457d7346ea53e8d4195511fdf1"
+    },
+    "real-blind/cards.json": {
+      "byteSha256": "943a5d475875570fe1e79d183859031501e2f8c3b0ad7859bc34ddb34b849518",
+      "canonicalSha256": "05aab4597da58bc9c3f342a53a7ee69afd0567fc37dd3277677ba3e2a174c642"
+    },
+    "real-blind/reviews-template.json": {
+      "byteSha256": "404005b8ba81243c4cc9cdf772f8a9fdc1d0e3c9002d472be9ee4f66b3d9d6d0",
+      "canonicalSha256": "06b9ce9b02ddd66ce375914e895136d50b2be800ff546ab35aa131829321373d"
+    },
+    "agent-review/provenance-initial.json": {
+      "byteSha256": "a73cc5fb5ac182f565513939a36781eed6bd171eec1a0e045977f959b1052d77",
+      "canonicalSha256": "6b458f91befa64765971f60e35b7d0168cd4161986c0b3941f4ca9796292986d"
+    },
+    "reviews-agent-initial.json": {
+      "byteSha256": "9c44c2f39436498cdcb04f30054587458eab4afe4af131d44348c711d0caeaf5",
+      "canonicalSha256": "2e10c5a086a9269a7d69a8073dd9319037d9dd2f3a6455ac173ef34cc75cfbdb"
+    },
+    "analysis-agent-initial.json": {
+      "byteSha256": "7acd1f6b3271aec94fd9bdb51c40e124ea5f8d671c8f0b176cac870c8565274d",
+      "canonicalSha256": "549208d24ca529f74908183535606a01976934c7a08b1de799539abe9275890d"
+    },
+    "agent-review/semantic-audit.json": {
+      "byteSha256": "3a0e3bf31bd58ac3e03bc38164b0727187b690e27b35d4191f02eb9eafd1c80b",
+      "canonicalSha256": "c2d0a719cbc02077c13e9ac5f868453483fb6a4076772263e3cade70c5f32426"
+    },
+    "semantic-audit-application.json": {
+      "byteSha256": "4cf13e3a18a9e5aba168ad5ba9cd8fbeae5ffadd1e8efe2d8d62922306891482",
+      "canonicalSha256": "97905e5b8dcaa3c92d9ed70fe34477f6b946ee4f7d4b489bc40d51c40cda1baa"
+    },
+    "reviews-agent-final.json": {
+      "byteSha256": "49ea23a42f13c6b017159d7416fc6459f47b13c9fceca764d0dcbe97e07785b1",
+      "canonicalSha256": "dcf6a0c57f562d183a3f9f41a6ef8eca19e9a2e1134956347180fbeaba8ad743"
+    },
+    "analysis-agent-final.json": {
+      "byteSha256": "910ac51d111a34b82805d19cea76dc7e171853b186054c65279eef840eba6b92",
+      "canonicalSha256": "50d7bebf52c045ce37bfd9d80fc2a727c4d7b2f248fe8cbe487c51a5393fc5a8"
+    },
+    "failure-attribution-initial.json": {
+      "byteSha256": "c1e18d5aef23ab18647aa1e8115402ee3bf1be8e371ac9380dac90c66beca87b",
+      "canonicalSha256": "ae56c102cf57d1d2dc66f6dbb5407278f926cd0ef2e2f72a2d99cebee4745a07"
+    },
+    "failure-attribution-final.json": {
+      "byteSha256": "2ea0a195516bc55b922401f2a4497a7a09a323010856dfeb23c5c8c868ccb9aa",
+      "canonicalSha256": "8dbfb3139b2a57462c059bf351aa2bc66ba8c5eb16d9df40c354206b6cd546e7"
+    },
+    "tool-validation/real-method-review.json": {
+      "byteSha256": "b7d2010324fb25c3086eae0d3fc3bae5c91f7f0d588fd576cf19b6420aa0b35c",
+      "canonicalSha256": "92ad881cdee14db62db383bb5bf81bdb68160b31e39f1be9181137a9d5ae1071"
+    },
+    "tool-validation/real-round-tool-tests.xml": {
+      "byteSha256": "5d6a09c8cafa955e83c11669bfac120e9d9b8c6f387b0a3d9f1e049d2aa9bcaa"
+    },
+    "tool-validation/real-live-exit.txt": {
+      "byteSha256": "13bf7b3039c63bf5a50491fa3cfd8eb4e699d1ba1436315aef9cbe5711530354"
+    },
+    "tool-validation/real-audit-attempt-1.txt": {
+      "byteSha256": "7c492265bbbd33d6b5bb09b442ee9adcfd9cf923c69da1c626e0facd41d53644"
+    }
+  }
+}

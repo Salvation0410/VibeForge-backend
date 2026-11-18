@@ -36,4 +36,6 @@
 - [x] 网络禁止阶段用 Fake SDK/模型走完整新运行器及发送前预占（测试用隔离锚点，不能创建正式授权），保存180结果、完整匿名包和pending人工模板，严格导入；单列 Fake 调用，真实调用为0。
 - [x] `uv run python -m compileall -q src`、`uv run pytest --junitxml=../tmp/rag-cap-answer-20261118/tool-validation/python-full.xml`、`uv lock --check`；必要定向复验保留新旧日志。
 - [x] 更新 ai-service README（隔离用户原 hunk）、产品 README、第十五轮交接及脱敏设施结果；记载失败、未测项和零真实调用。独立最终审查、保护摘要核对、中文提交。
-- [ ] 代码/文档提交后生成最终 plan 与 pending 批准文件，使用户能审阅调用数、来源、模型参数、输出位置和失败计费规则。只此时请求“最多180次新回答、0 Embedding/BGE/INDEX”，未获明确答复不得创建正式锚点或 live 发送。
+- [x] 代码/文档提交后生成最终 plan 与 pending 批准文件，使用户能审阅调用数、来源、模型参数、输出位置和失败计费规则。只此时请求“最多180次新回答、0 Embedding/BGE/INDEX”，未获明确答复不得创建正式锚点或 live 发送。
+
+后续第十六轮记录：第十五轮交付提交 `346c26e` 后，最终计划指纹为 `fb3f2ac0ab7b4d02df9185a2f26144b37b1b8e9743801e1498fe1f19653a4544`；用户明确答复“批准本轮最多180次真实回答”，才建立独立批准收据及正式账本。真实执行与代理初审另记于 `doc/customer-service-rag-rounds-handoff.md` 第十六轮，不回写第十五轮当时的零真实调用或待批准状态。人工验收继续待办。
