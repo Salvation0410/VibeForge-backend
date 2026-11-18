@@ -1,0 +1,332 @@
+{
+  "schemaVersion": "rag-cap-evidence-public-result/v1",
+  "date": "2026-11-18",
+  "generatedAtUtc": "2026-11-18T08:26:43.483096+00:00",
+  "role": "agent-evidence-only",
+  "sourceReportFingerprint": "ad21903b50000f50d077af1c93b137e77bff1da6ca47d4ca04617f8c33781ee1",
+  "rubricFingerprint": "79d2cf63949c8de69877f9c49d4b66c1f834f5ee9b64ce9fcb48d70e1aa54363",
+  "replayFingerprint": "0acd669af2f70ea03035341fb410b7413808b9908b4473c318aad44d8d9fcbca",
+  "reviewProvenance": [
+    {
+      "shard": 1,
+      "cases": 30,
+      "factsPerArm": 42,
+      "packetFingerprint": "a871b1cf9b2db4156b8b359440a54f5a00781c2ad956893ad3d98fd7ce9f0a8d",
+      "reviewsFingerprint": "66a3005566ecdbce1a33278b721500e7c5581166d0f5bfc25360f6891f55c407"
+    },
+    {
+      "shard": 2,
+      "cases": 30,
+      "factsPerArm": 43,
+      "packetFingerprint": "01df42e3594d0c704b1e539f17b4e380adba00e0db13cabd1e2831106851c5f3",
+      "reviewsFingerprint": "f4d9bbb48ce2fabc967d186796db2c7e6359c495156af50cab114cdb6cdb56f2"
+    },
+    {
+      "shard": 3,
+      "cases": 30,
+      "factsPerArm": 45,
+      "packetFingerprint": "a6cf78349c5b094382393e1280d622dac63154410cad140dc72e9be5a83e5eab",
+      "reviewsFingerprint": "d11a12962f69747ece68397c1dc98ec094ebbf0353db443f9f51a95233341cff"
+    }
+  ],
+  "variable": "per-document-cap",
+  "rerank": "frozen-on",
+  "finalTopK": 3,
+  "promptMaxBytes": 16384,
+  "cases": 90,
+  "answerableCases": 81,
+  "publicFactsPerArm": 130,
+  "cap1ExactFinalContextMatches": 90,
+  "arms": {
+    "cap1": {
+      "verdicts": {
+        "partial": 12,
+        "covered": 106,
+        "missing": 12
+      },
+      "completeEvidenceCases": 67,
+      "documentCountDistribution": {
+        "3": 84,
+        "2": 6
+      },
+      "characterTruncatedCases": 0,
+      "byteTruncatedCases": 0,
+      "maxPromptBytes": 1642,
+      "totalContentChars": 33061
+    },
+    "cap2": {
+      "verdicts": {
+        "covered": 116,
+        "partial": 7,
+        "missing": 7
+      },
+      "completeEvidenceCases": 72,
+      "documentCountDistribution": {
+        "2": 65,
+        "3": 25
+      },
+      "characterTruncatedCases": 0,
+      "byteTruncatedCases": 0,
+      "maxPromptBytes": 1646,
+      "totalContentChars": 33663
+    }
+  },
+  "transitions": {
+    "missing->covered": 4,
+    "partial->covered": 6,
+    "covered->covered": 106,
+    "missing->missing": 7,
+    "partial->partial": 6,
+    "missing->partial": 1
+  },
+  "answerQualityTested": false,
+  "newChatCalls": 0,
+  "newEmbeddingCalls": 0,
+  "newBgeCalls": 0,
+  "productionWrites": 0,
+  "networkAttempts": [],
+  "humanReview": "pending",
+  "originalInputsAndLedgerUnchanged": true,
+  "validatorNegativeChecks": {
+    "passed": 12,
+    "expected": 12
+  },
+  "limits": [
+    "只比较冻结候选的最终证据，不产生新答案或准确率",
+    "90题是重复使用的开发回归集，语义裁决为代理审阅",
+    "原支付标准有后置澄清，本轮不将新产品事实混入旧语料",
+    "9道拒答题只回放上下文，未重新验证模型拒答",
+    "生产选择器仍为cap1；现有wire按chunk表达来源，但多块来源仅源码核对，未完成跨服务或浏览器验收"
+  ],
+  "postBlindQualityAudit": {
+    "status": "applied",
+    "factIds": [
+      "admin-knowledge-005:required:02",
+      "deployment-download-009:required:02"
+    ],
+    "judgmentsChecked": 4,
+    "judgmentsChanged": 3,
+    "sameRuleForBothArms": true,
+    "rawBlindReviewsUnchanged": true,
+    "rubricUnchanged": true,
+    "correctionByteSha256": "80661529e93eca81e3e7ebf3ed5249d2722a500dbf7f81a5040a4c72c6c6075c",
+    "initialSummaryByteSha256": "8e7c279d31280e50a3d1b28fb5dabaa026c2c8bcfb73d04d4755999cd5a973f7",
+    "initialBlindArms": {
+      "cap1": {
+        "verdicts": {
+          "partial": 13,
+          "covered": 105,
+          "missing": 12
+        },
+        "completeEvidenceCases": 67,
+        "documentCountDistribution": {
+          "3": 84,
+          "2": 6
+        },
+        "characterTruncatedCases": 0,
+        "byteTruncatedCases": 0,
+        "maxPromptBytes": 1642,
+        "totalContentChars": 33061
+      },
+      "cap2": {
+        "verdicts": {
+          "covered": 114,
+          "partial": 9,
+          "missing": 7
+        },
+        "completeEvidenceCases": 72,
+        "documentCountDistribution": {
+          "2": 65,
+          "3": 25
+        },
+        "characterTruncatedCases": 0,
+        "byteTruncatedCases": 0,
+        "maxPromptBytes": 1646,
+        "totalContentChars": 33663
+      }
+    },
+    "initialBlindTransitions": {
+      "missing->covered": 3,
+      "partial->covered": 6,
+      "covered->covered": 105,
+      "missing->missing": 7,
+      "partial->partial": 7,
+      "missing->partial": 2
+    },
+    "reason": "适用范围限制结论外推，等价表达不增加独立必述清单；对直接支持statement的证据不追加其他事实要求。仅定向复核两项事实，两组一致适用。"
+  },
+  "changedSelectionPairs": 65,
+  "addedBlocks": 65,
+  "lostDocumentOccurrences": 59,
+  "factCoverageGains": [
+    {
+      "id": "platform-account-001",
+      "factId": "platform-account-001:required:01",
+      "before": "missing",
+      "after": "covered"
+    },
+    {
+      "id": "platform-account-001",
+      "factId": "platform-account-001:required:02",
+      "before": "partial",
+      "after": "covered"
+    },
+    {
+      "id": "app-generation-005",
+      "factId": "app-generation-005:required:02",
+      "before": "missing",
+      "after": "covered"
+    },
+    {
+      "id": "app-generation-007",
+      "factId": "app-generation-007:required:01",
+      "before": "partial",
+      "after": "covered"
+    },
+    {
+      "id": "community-006",
+      "factId": "community-006:required:01",
+      "before": "partial",
+      "after": "covered"
+    },
+    {
+      "id": "community-007",
+      "factId": "community-007:required:01",
+      "before": "partial",
+      "after": "covered"
+    },
+    {
+      "id": "community-007",
+      "factId": "community-007:required:02",
+      "before": "partial",
+      "after": "covered"
+    },
+    {
+      "id": "community-013",
+      "factId": "community-013:required:01",
+      "before": "missing",
+      "after": "covered"
+    },
+    {
+      "id": "community-013",
+      "factId": "community-013:required:02",
+      "before": "partial",
+      "after": "covered"
+    },
+    {
+      "id": "admin-knowledge-005",
+      "factId": "admin-knowledge-005:required:02",
+      "before": "missing",
+      "after": "covered"
+    }
+  ],
+  "factCoverageLosses": [],
+  "historicalOnQuotaFacts": {
+    "denominator": 15,
+    "cap2Verdicts": {
+      "covered": 8,
+      "partial": 2,
+      "missing": 5
+    },
+    "newlyCovered": 7,
+    "alreadyCoveredInCurrentCap1Review": [
+      "deployment-download-013:required:02"
+    ],
+    "transitions": {
+      "covered->covered": 1,
+      "partial->covered": 3,
+      "missing->partial": 1,
+      "missing->covered": 4,
+      "missing->missing": 5,
+      "partial->partial": 1
+    },
+    "factIds": [
+      "deployment-download-013:required:02",
+      "community-007:required:01",
+      "admin-knowledge-005:required:01",
+      "admin-knowledge-005:required:02",
+      "app-generation-005:required:01",
+      "app-generation-005:required:02",
+      "app-generation-005:required:03",
+      "community-004:required:02",
+      "admin-knowledge-002:required:01",
+      "admin-knowledge-002:required:02",
+      "admin-knowledge-002:required:03",
+      "community-013:required:01",
+      "community-013:required:02",
+      "platform-account-001:required:01",
+      "platform-account-001:required:02"
+    ],
+    "historicalAttributionUnchanged": true,
+    "meaning": "历史生成失败归因与本轮上下文证据复核是不同审阅任务；不把已在cap1支持的事实计为cap2新增恢复。"
+  },
+  "completeEvidencePairs": {
+    "bothComplete": 67,
+    "cap1Only": 0,
+    "cap2Only": 5,
+    "bothIncomplete": 9
+  },
+  "currentComponentTests": {
+    "tests": 25,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "sourceCodeSha": "35c000524366e3487f5fb6b3d788f7c3c4493705",
+  "replayImplementationByteSha256": "dddfd1b3dbb8d4fc8f0b3443879db59f56a94d5b48478583f549356000bfe916",
+  "summaryImplementationByteSha256": "83951ca1c5fc9373c34c06f63478bfcdaf0cd99fc42fde92aff47357c16a5691",
+  "methodReviewByteSha256": "d3e4d3db08b26aeb9fd505a5f407cbcc797e5fe066938d6a6956e7a524d3e4f4",
+  "qualityReviewByteSha256": "86cbd416bd5c5be6fe8f66929f1667976cd919e1f628d25d15ed6aade2c44410",
+  "qualityReviewStatus": "pass-after-targeted-reconciliation",
+  "sidecarNegativeChecks": {
+    "kind": "post-blind-sidecar-import-negative-checks",
+    "passed": 6,
+    "expected": 6,
+    "sourceByteSha256": "83951ca1c5fc9373c34c06f63478bfcdaf0cd99fc42fde92aff47357c16a5691",
+    "cases": [
+      {
+        "case": "original-verdict-mismatch",
+        "rejected": true
+      },
+      {
+        "case": "fabricated-correction-quote",
+        "rejected": true
+      },
+      {
+        "case": "unbound-reason",
+        "rejected": true
+      },
+      {
+        "case": "unbound-verdict",
+        "rejected": true
+      },
+      {
+        "case": "recheck-hash-mismatch",
+        "rejected": true
+      },
+      {
+        "case": "missing-arm",
+        "rejected": true
+      }
+    ],
+    "realFilesChanged": false
+  },
+  "sourceContractObservation": {
+    "runtimeIntegrationTested": false,
+    "browserTested": false,
+    "backendCodeSha": "35c000524366e3487f5fb6b3d788f7c3c4493705",
+    "frontendCodeSha": "becdf0a11ba14a7769ef569c92fc09c89992a03b",
+    "conclusion": "现有wire结构可表达同文档不同块；生产选择仍cap1。需要测试确认状态核对、引用顺序和展示，但不能预先断言必须改三端schema。"
+  },
+  "paymentClarification": {
+    "status": "candidate-not-published",
+    "source": "../payment-clarification-20261118-v1.json",
+    "frozenRubricUnchanged": true
+  },
+  "deployment": {
+    "productionSelector": "cap1",
+    "productionConfigChanged": false,
+    "servicesStarted": false
+  },
+  "finalAuditedSummaryByteSha256": "8b54062cbf7a5d956f6d45dd7b76fcb1da7715d59f9a1f3c65f252da1d3c2a39"
+}
