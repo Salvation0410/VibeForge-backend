@@ -463,6 +463,7 @@ Authorization: Bearer <AI_SERVICE_INTERNAL_BEARER_TOKEN>
 | 知识别名 | `AI_SERVICE_MILVUS_COLLECTION_ALIAS` | `customer_service_knowledge`，与 Spring 配置一致 |
 | 切分 | `AI_SERVICE_RAG_CHUNK_SIZE`、`AI_SERVICE_RAG_CHUNK_OVERLAP` | `1000`、`150` |
 | 检索 | `AI_SERVICE_RAG_RETRIEVAL_TOP_K`、`AI_SERVICE_RAG_FINAL_TOP_K` | `8`、`3` |
+| 单文档块配额 | `AI_SERVICE_RAG_DOCUMENT_CHUNK_LIMIT` | 默认 `1`，仅接受整数 `1` 或 `2`；启动时读取 |
 | 重排器 | `AI_SERVICE_RAG_RERANKER_PROVIDER` | 默认 `local_cross_encoder`；可设 `disabled` |
 | 重排模型与设备 | `AI_SERVICE_RAG_RERANKER_MODEL`、`AI_SERVICE_RAG_RERANKER_DEVICE` | `BAAI/bge-reranker-v2-m3`、`cuda` |
 | 下载限制 | `AI_SERVICE_RAG_OSS_ALLOWED_HOSTS`、`AI_SERVICE_RAG_DOWNLOAD_MAX_BYTES` | 受控 OSS HTTPS 主机白名单；上限 20 MiB |
@@ -477,7 +478,9 @@ Authorization: Bearer <AI_SERVICE_INTERNAL_BEARER_TOKEN>
 
 客服健康接口检查组件生命周期以及 Milvus、Spring 租约校验依赖，不发送真实聊天或 Embedding 请求。RAG 关闭时返回 disabled，依赖不可用时返回降级摘要；这些状态不等于真实问答效果验收。客服不使用生成 checkpoint，也不保存跨请求会话。
 
-客服候选先校验活动版本和元数据，仅按 chunk ID 去重，按原检索顺序最多保留 100 块；同文档多个块全部参与重排。重排请求覆盖全部候选，返回结果校验身份、重复 ID 和有限分数，并始终使用原始候选正文与来源；按分数降序排列，并列保持原检索顺序。阈值仅用于真实重排分数，随后每个文档保留最高分块，重复文档不占名额，最多选择三个不同文档（受 final top-k 配置限制）。禁用或故障降级按原检索顺序执行同样的文档选择。诊断 `selected` 阶段分别标记 `duplicate_document` 和 `top_k`。单块上下文最多 1200 字符、合计最多 3000 字符，最终 JSON 还受 `AI_SERVICE_RAG_PROMPT_MAX_BYTES` 的 UTF-8 字节预算约束。
+客服候选先校验活动版本和元数据，仅按 chunk ID 去重，按原检索顺序最多保留 100 块；同文档多个块全部参与重排。重排请求覆盖全部候选，返回结果校验身份、重复 ID 和有限分数，并始终使用原始候选正文与来源；按分数降序排列，并列保持原检索顺序。阈值仅用于真实重排分数，随后按 `AI_SERVICE_RAG_DOCUMENT_CHUNK_LIMIT` 限制每文档块数：默认 1 保留最高分块，设为 2 时可保留同文档第二块，每块都占总名额，最终仍最多 `min(rag_final_top_k, 3)` 块。禁用或故障降级按原检索顺序应用同一配额。诊断 `selected` 阶段将 cap1 超额标记为 `duplicate_document`、cap2 超额标记为 `document_chunk_limit`，总名额耗尽标记为 `top_k`；配置指纹包含 `documentChunkLimit`。单块上下文最多 1200 字符、合计最多 3000 字符，最终 JSON 还受 `AI_SERVICE_RAG_PROMPT_MAX_BYTES` 的 UTF-8 字节预算约束。
+
+配额在进程启动时固定；显式设置为 2 并重启才生效，改回 1 并重启可回退。本轮未修改真实 `.env` 或部署 cap2；开关及离线协议验证不能证明 cap2 的真实答案质量已通过。同文档不同块仍按各自 chunkId 返回，沿用最多三项来源及严格引用校验。固定 cap1 的 `rag_rerank_experiment --live` 与 `rag_snapshot_experiment --live` 会在供应商及授权初始化前拒绝 cap2，避免旧实验口径被配置覆盖；新 cap 对照须另列真实调用额度。
 
 mutation control collection 的占位向量维度固定为 2，以兼容 Milvus 3.x 对最小向量维度的限制。客服知识健康探测验证服务依赖可用性，但不会证明每个禁用文档的异步 Milvus 删除任务均已完成；请同时检查文档 ETL 任务状态。失败的删除任务可由管理员通过 `POST /api/admin/customer-service/knowledge/{id}/tasks/{taskId}:retry` 重新排队，接口只接受与当前禁用/删除文档版本匹配的失败 DELETE 任务。
 

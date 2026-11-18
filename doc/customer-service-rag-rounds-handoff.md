@@ -583,6 +583,57 @@ uv run pytest tests/test_rag_bounded_evidence_experiment.py -q --junitxml=../tmp
 
 独立规格/方法审查及语义/结论质量审查通过，审查记录、原盲审与审后侧车均保留。本轮仅提交脱敏聚合、方法计划及交接说明，未部署生产配置；提交哈希以本轮交付记录为准。
 
+## 第十四轮：可回退的单文档块配额与三端来源验证（2026-11-18）
+
+### 问题、历史依据与方案取舍
+
+用户在第十三轮交付后要求“继续执行下一轮优化”，本轮落实上轮已明确建议的默认 cap1、可选 cap2、可回退路线。同文档所需事实分散在不同块时，旧选择器只保留其中一块。第十三轮审后 106/130 对 116/130 的完整事实支持是历史离线证据，支持开展有界候选实现；它不是本轮新答案通过率，也不构成人工验收。
+
+直接默认改成两块缺少独立回退入口，按题自适应配额会增加策略变量。本轮采用数值配置 `AI_SERVICE_RAG_DOCUMENT_CHUNK_LIMIT`，默认 1、仅允许整数 1/2，环境字符串 `1`/`2` 可读，布尔、浮点及范围外值拒绝启动。保持现有 Top8、重排器、阈值、提示、语料及最终三块预算，不更新支付语料，不沿用耗尽的首轮真实调用授权。
+
+### 触发、判断、流程与关键模块
+
+`Settings.rag_document_chunk_limit` 在 `CustomerServiceRagService` 创建时固定；活动版本过滤、chunkId 去重、稳定重排及原阈值之后，`_select_documents(..., per_document_limit=...)` 按当前顺序分配名额。设为 2 时，同文档第二块也占总名额，第三块不能进入，其他文档可在余位补入；最终仍最多 `min(rag_final_top_k, 3)` 块。禁用重排及故障降级使用原候选顺序和同一配额，有阈值的故障继续失败关闭。
+
+默认 cap1 的选择及主要诊断保持兼容：同文档超额为 `duplicate_document`；cap2 超额为 `document_chunk_limit`；总名额耗尽为 `top_k`。`customer_service_trace` 的固定 `configFingerprint` 增加 `documentChunkLimit`，没有新增问题、正文或答案日志。字符 1200/块、3000 总量及实际 UTF-8 JSON 字节预算仍在选择后执行；引用仍只能来自最终上下文中的唯一 chunkId，按模型引用顺序返回各自身份、locator 和摘要。
+
+旧 `rag_rerank_experiment` 与 `rag_snapshot_experiment` 的真实入口固定 cap1，在供应商、输出目录及授权账本初始化前拒绝 cap2；补了禁止触达资源的入口测试。历史固定上下文拒答实验不经过选块，不作改动。`.env.example` 和 Python README 说明默认、启动生效与回退；没有更换 wire/schema。
+
+### 本轮离线验证与失败记录
+
+原 Python 四文件定向基线 **168/168**，Java 原两类 **20/20**，前端当前工作树原客服测试 **30/30**。Python 新增 29 项行为测试，先红 **197 项中 23 失败**，实现后 **197/197**；覆盖稳定排序、第三块/总名额、默认及环境校验、禁用/降级、阈值、字符/实际 JSON 字节、旧版本/不活动/重复块、逆序/重复/未知引用和旧实验保护。独立规格与质量审查通过，质量审查另跑新增 **29/29**。
+
+正式回放脚本为本机忽略目录 `tmp/rag-cap-rollout-20261118/formal-replay.py`。它读取第十二轮真实报告冻结的实际候选、查询向量和 BGE 顺序，校验报告/rubric/检索/向量及原文件摘要，经 `rag_rerank_experiment.answer_once` 调用正式 `CustomerServiceRagService`。cap1、cap2 各 **90/90** 组最终上下文与第十三轮对应输入逐字一致，**180/180** 组逆序引用身份、定位和摘要匹配。这里的 **180 次是 Fake Answer Model 调用**，输出固定文本，只验证选择/预算/来源协议；不能用作新答案质量、拒答准确率或跨服务在线 E2E 成绩。
+
+首试临时回放脚本在任何 RAG 调用前被审计钩子拦截：Windows asyncio 初始化的本机 socketpair 也产生 `socket.connect`。核对标准库调用栈后，仅将本机事件循环建立移至审计之前；全部服务导入与 RAG 执行仍禁止 connect/getaddrinfo/sendto，成功运行该阶段网络尝试为 0。首试日志 `formal-replay-attempt-1.log` 保留。这是本轮验证设施初始化问题，没有修改生产网络或引用逻辑。
+
+在 `ai-service` 执行 `uv run python -m compileall -q src`、`uv lock --check`，均退出 0；完整 `uv run pytest --junitxml=../tmp/rag-cap-rollout-20261118/python-full.xml` 为 **1753 通过、25 跳过、0 失败/错误、2 条依赖弃用警告**，退出 0。第十二轮 1724 通过等是历史记录，本轮没有用其替代完整验证；本轮全套也不证明历史 30ms 恢复调用超时根因已经查明。
+
+Java 新增独立 `CustomerServiceMultiChunkSourcesTest`，本地 `HttpServer` 回显真实 requestId，串联真实 `CustomerServiceAiClient` 和 `CustomerServiceAnswerServiceImpl`，仅 Mapper 使用替身。`7:2:1, 7:2:0, 8:3:0` 保留同文档两块及另一文档的来源顺序和全部元数据；九种第二来源异常拒绝整次回答；超过三项在 HTTP 客户端解析边界拒绝，服务不查 Mapper。状态异常用第二文档，首文档保持合法，并核对读取顺序，避免首项提前失败的空覆盖。最终覆盖审查又补上同文档第二块的旧版本、错名称、chunk 文档身份错、版本身份错和索引越界五项；首块合法、两次读取相同文档并整次拒绝，可防止未来按文档跳过第二块校验的回归。它不证明数据库原子快照或真实 Python 服务。
+
+在根目录执行 `mvn clean -DskipTests compile`，退出 0；随后执行 `mvn "-Dtest=CustomerServiceMultiChunkSourcesTest,CustomerServiceAnswerServiceTest,CustomerServiceAiClientTest" test`，初版 **31 通过**、新增 11；补齐上述五项后主 Agent 同命令复验为 **36 通过、0 失败/错误/跳过**，本轮新增合计 **16**。原 `java-final.log`/XML 保留 31 项证据，补强日志 `java-review-fix.log` 与最终 `java-final-v2.log`/三份 XML 单列。没有修改生产 Java 或协议 schema，测试补强后未重复生产干净编译。
+
+独立前端仓库仅新增 `tests/customerServiceSources.test.ts`，**4** 项覆盖同文档双块及第三文档的顺序/身份/独立 locator/excerpt、按 chunkId 去重、第四来源不能超过三项、成功状态的三个公开来源和空白/Unicode 摘要边界。`normalizeCustomerServiceSources` 函数与已提交 HEAD 相同，未修改组件、生产函数或来源 schema；用户原三项修改仍在工作树。
+
+前端执行两份客服测试 **34/34**；独立质量审查提出期望对象与输入别名可能使未来原地修改误绿，随后四处调用前建立独立快照，复验仍 **34/34**，原目标日志保留、修正日志单列为 `frontend-review-fix.log`。主 Agent 在修正后合并执行以下五文件为 **48 通过、0 失败/取消/跳过**，修正前 48 项日志另存。`npm run type-check` 和 `npm run build-only` 同轮退出 0，构建保留动态/静态混合导入及大于 500 kB 包体积提示。它们来自保留三项用户改动的当前工作树，不能称为干净前端 HEAD 或浏览器交互验收。
+
+```powershell
+# 在独立前端仓库执行
+node --test --experimental-strip-types tests/customerServiceSources.test.ts tests/customerService.test.ts tests/optimizePrompt.test.ts tests/generationStreamProgress.test.ts tests/previewRefreshCoordinator.test.ts
+npm run type-check
+npm run build-only
+```
+
+### 部署状态、边界与下一轮
+
+配置需要重启进程生效，改回 1 并重启可回退。本轮不修改真实 `.env`，不启动或重启 Spring/Python 正式服务，不启用本地或生产 cap2；新增真实聊天、Embedding、BGE 推理、INDEX 和生产写入均为 **0**。原真实调用账本保持耗尽状态，不能删除、更换目录或重建账本再跑。
+
+原 `.env`、184 行授权账本、历史真实报告、取消计划及前端三项已有修改的字节摘要均与本轮初始快照一致；正式回放全部输入摘要也保持一致。README 只隔离暂存本轮配置说明，原三个反引号改为两个的用户 hunk 继续未暂存。核对证据为 `final-controls.json`，原始产物全部留在忽略目录。实现提交为后端 `6822752`（Python 配额）、`84d34f0`（Java 测试）及 `54cc728`（同文档第二块负向补强），前端独立提交 `2aa44fb`（来源测试）与 `16b6074`（期望快照加固）；设计/计划为 `81b2195`。脱敏聚合为 `doc/knowledge/product/evaluation/results/cap-rollout-20261118-v1.json`，旧 31 项聚合草稿另存在本机忽略目录，本轮交接说明提交以最终交付哈希为准。
+
+cap2 可能挤掉其他文档，也不能解决 Top8 未召回、同文档第三块、知识缺失、模型遗漏或坏 JSON。正式路径精确回放及来源契约通过不代表真实回答质量已通过；用户指定的全量人工验收继续待办，支付“目前平台不支持支付功能”仍是单列未发布候选，不与配额收益混合。
+
+下一轮应单列 cap1/cap2 真实回答额度与新实验入口，保持冻结候选、BGE 顺序、提示和预算，仅改变文档配额，验证新增证据是否被使用以及跨文档退步。失败、坏 JSON 和未运行仍留在每组分母，代理审阅与人工裁决分开；未获新额度前可以准备设施及离线校验，不能启动真实答案对照。支付语料和 INDEX 另走独立版本及授权，不同时加入这一变量。
+
 ## 以后每轮必须使用的交接格式
 
 1. 本轮解决什么：原问题的具体触发场景、证据和目标。

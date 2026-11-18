@@ -1,0 +1,158 @@
+{
+  "schemaVersion": "rag-cap-rollout-result/v1",
+  "date": "2026-11-18",
+  "round": 14,
+  "scope": "offline-feature-and-source-contract-verification",
+  "configuration": {
+    "environmentVariable": "AI_SERVICE_RAG_DOCUMENT_CHUNK_LIMIT",
+    "default": 1,
+    "allowedIntegers": [
+      1,
+      2
+    ],
+    "maxTotalChunks": 3,
+    "effectiveOnRestart": true,
+    "realEnvChanged": false,
+    "cap2Deployed": false
+  },
+  "historicalBasis": {
+    "sourceRound": 13,
+    "meaning": "agent-evidence-coverage-only",
+    "cap1FullySupportedFacts": 106,
+    "cap2FullySupportedFacts": 116,
+    "factsPerArm": 130,
+    "newAnswerQualityClaim": false
+  },
+  "implementationCommits": {
+    "python": "6822752bdbce771d49ce0e2d48f1cabf380c312b",
+    "javaTestsInitial": "84d34f0c9e25d7b5a67fe63ddd5645374fa87cf2",
+    "javaTests": "54cc72870b089ed9e6af410b17dccf4d33b01a1b",
+    "frontendTestsInitial": "2aa44fbd079e0c7a7925c8c01b329f5bbd82956a",
+    "frontendTests": "16b6074965ed69bd5d1889d9e267c0bdbe536e54"
+  },
+  "verification": {
+    "pythonBaseline": {
+      "passed": 168,
+      "tests": 168,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "pythonRedBeforeImplementation": {
+      "passed": 174,
+      "tests": 197,
+      "failures": 23,
+      "errors": 0,
+      "skipped": 0
+    },
+    "pythonTarget": {
+      "passed": 197,
+      "tests": 197,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "pythonFull": {
+      "passed": 1753,
+      "tests": 1778,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 25
+    },
+    "pythonCompileallExitCode": 0,
+    "uvLockCheckExitCode": 0,
+    "javaCleanCompileExitCode": 0,
+    "javaInitialRelatedTestsPassed": 31,
+    "javaRelatedTests": {
+      "tests": 36,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 36
+    },
+    "javaNewTests": 16,
+    "frontendTargetTests": {
+      "tests": 34,
+      "pass": 34,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 0
+    },
+    "frontendRelatedTests": {
+      "tests": 48,
+      "pass": 48,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 0
+    },
+    "frontendTypeCheckExitCode": 0,
+    "frontendBuildOnlyExitCode": 0,
+    "frontendWorkspace": "current worktree including three preserved user modifications",
+    "browserVerified": false
+  },
+  "formalServiceReplay": {
+    "codeSha": "6822752bdbce771d49ce0e2d48f1cabf380c312b",
+    "sourceReportFingerprint": "ad21903b50000f50d077af1c93b137e77bff1da6ca47d4ca04617f8c33781ee1",
+    "priorReplayFingerprint": "0acd669af2f70ea03035341fb410b7413808b9908b4473c318aad44d8d9fcbca",
+    "implementationByteSha256": "73ee50e2efb7860a6605713e20a3e769d6cf33a91f89efe00871db30371a53b6",
+    "cap1ExactMatches": 90,
+    "cap2ExactMatches": 90,
+    "reverseCitationMatches": 180,
+    "fakeAnswerModelCalls": 180,
+    "newChatProviderCalls": 0,
+    "newEmbeddingProviderCalls": 0,
+    "newBgeInferenceCalls": 0,
+    "networkAttempts": [],
+    "networkAuditScope": "after asyncio local event-loop initialization, including imports and all RAG work",
+    "productionWrites": 0,
+    "answerQualityTested": false
+  },
+  "failureRecord": {
+    "temporaryReplayFirstAttempt": "Windows asyncio local socketpair blocked before RAG execution",
+    "resolution": "create local event loop before auditing imports and all RAG work",
+    "originalFailureLogRetained": true,
+    "productionFixRequired": false
+  },
+  "reviewHardening": [
+    "snapshot frontend test expectations before normalization to avoid input aliasing false positives",
+    "add five invalid second-chunk cases sharing the valid first chunk document identity"
+  ],
+  "warnings": [
+    "two Python dependency deprecations",
+    "existing Java unchecked compilation note",
+    "frontend mixed dynamic and static import",
+    "frontend minified bundle over 500 kB"
+  ],
+  "preservationControls": {
+    "protectedFilesOtherThanReadme": 7,
+    "allByteHashesUnchanged": true,
+    "originalReadmeUserHunkPreserved": true,
+    "formalReplayInputsUnchanged": true,
+    "originalAuthorizationLedgerLines": 184,
+    "originalAuthorizationLedgerUnchanged": true,
+    "realEnvUnchanged": true,
+    "frontendOriginalDirtyFiles": 3,
+    "frontendOriginalDirtyStatusUnchanged": true,
+    "diffCheckPassed": true
+  },
+  "agentCodeReviews": "spec-and-quality-passed",
+  "humanReview": "pending-by-user-request",
+  "realAnswerQuality": "not-tested-this-round",
+  "paymentCorpusPublication": "separate-pending-candidate",
+  "nextStep": "separately authorize and prepare fixed-input cap1/cap2 real-answer comparison",
+  "localEvidenceByteSha256": {
+    "python-full.xml": "efdf2394333975f8d60ba0c646a2dd342165b0170b35c88ecbfe56fa501f68bb",
+    "python-target-red.xml": "5dd7525f383f0d5f8e7a00261e2fa9640872e03933e9842db5ffe998205d7cd3",
+    "python-target.xml": "7a2f2a3f41888ecdd9135c024f64f7c4ffb8646047e6932ab23260799f5a5146",
+    "formal-replay.json": "3ea058820255765f474278b6b7b67aff7c0ed28dc7e3371ac26d39837527f74d",
+    "java-final.log": "5392d5ffd83001a6ed08437532214a506c4a046369fc4243b2b2573cb8fb997c",
+    "java-review-fix.log": "fcaab66b4a4401e828d57a782845b86740a6a6ed8aab5a6946a2640c0b0b6312",
+    "java-final-v2.log": "e999fcbf0379c4f96943bc2adcdf04ba83da41dc99614aef7874908db4b2494f",
+    "frontend-target.log": "d687835f922719ddfaea094d9d542a287652d5dfa38f4f5db3f0d5aeb2b564f7",
+    "frontend-review-fix.log": "3233fca34185c8216bad017e2e6962c75c948b74948e4d80ad2599b14349cd21",
+    "frontend-final.log": "5b4d6ba827131a4d6430aa5aca2178c37a880b37c1247da19dab4f0b0e66828d",
+    "final-controls.json": "d1ebaa641babf437b38d2f9886f3bb43ac6a2a8fd850d7d567c909cee8fdccbf"
+  }
+}
