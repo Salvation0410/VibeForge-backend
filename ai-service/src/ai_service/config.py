@@ -113,6 +113,8 @@ class Settings(BaseSettings):
     rag_document_chunk_limit: int = Field(default=1, ge=1, le=2)
     rag_min_rerank_score: float | None = Field(default=None, allow_inf_nan=False)
     rag_answer_timeout_seconds: float = Field(default=60.0, gt=0, le=300)
+    # 仅客服回答显式启用供应商 JSON 对象约束；默认不发送额外请求参数。
+    rag_answer_response_format: Literal["text", "json_object"] = "text"
     rag_prompt_max_bytes: int = Field(default=16_384, ge=1024, le=1_000_000)
     rag_collection_retention_generations: int = Field(default=2, ge=2, le=20)
     rag_collection_cleanup_grace_seconds: float = Field(default=120.0, gt=0, le=86_400)

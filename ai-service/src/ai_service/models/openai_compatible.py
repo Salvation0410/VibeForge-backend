@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from contextlib import aclosing
-from typing import Any
+from typing import Any, Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -46,7 +46,7 @@ from ai_service.prompts import (
 
 
 class CustomerServiceModelOutputError(RuntimeError):
-    """Stable failure for malformed or ungrounded answer-model output."""
+    """回答格式错误或引用不属于输入知识时，返回稳定错误码。"""
 
     def __init__(self):
         self.code = "CUSTOMER_SERVICE_MODEL_INVALID_OUTPUT"
@@ -91,9 +91,12 @@ class OpenAICompatibleModel:
                 overhead_tokens=settings.model_context_overhead_tokens,
             )
 
-    async def _invoke(self, messages):
+    async def _invoke(self, messages, *, response_format: Literal["json_object"] | None = None):
         self._check_budget(messages)
         with tracing_context(enabled=False):
+            if response_format == "json_object":
+                # 格式只约束本次请求，不能修改共享客户端而污染并发生成调用。
+                return await self._client.ainvoke(messages, response_format={"type": "json_object"})
             return await self._client.ainvoke(messages)
 
     def _vue_messages(self, instructions: str, context: dict[str, Any]):
@@ -313,15 +316,20 @@ class OpenAICompatibleModel:
         question: str,
         contexts: list[CustomerServiceContext],
     ) -> CustomerServiceModelAnswer:
-        """Generate and strictly validate a grounded single-turn answer."""
+        """基于本次知识片段生成单轮回答，并严格校验字段、引用及拒答协议。"""
 
-        response = await self._invoke([
+        messages = [
             SystemMessage(content=CUSTOMER_SERVICE_SYSTEM_PROMPT),
             HumanMessage(content=customer_service_user_prompt(
                 question, contexts,
                 max_bytes=self._customer_service_prompt_max_bytes,
             )),
-        ])
+        ]
+        if getattr(getattr(self, "_settings", None), "rag_answer_response_format", "text") == "json_object":
+            response = await self._invoke(messages, response_format="json_object")
+        else:
+            # 保留默认及无配置注入模型的旧调用签名，不向旧覆写方法添加关键字。
+            response = await self._invoke(messages)
         try:
             payload = _CustomerServiceAnswerPayload.model_validate_json(
                 str(response.content).strip()
