@@ -102,3 +102,70 @@ HTTP 报告把原始检索、真实重排、阈值后、文档选择后和最终
 新增工具入口为`ai_service.orchestration.rag_snapshot_experiment`，默认离线校验；显式`--live`运行真实模型的只读公共正文快照，`--analyze`离线导出分组指标和Ragas常见字段。生产Milvus基线仍使用上文的同请求HTTP流程，不能用快照成绩替换。详细命令、额度、边界及真实结果见[2026-11-16评估交接](../../customer-service-rag-evaluation-handoff-20261116.md)。
 
 评估采用“目标假设→人工复核数据→冻结快照/模型/提示→基线与单变量候选→分组分析→失败归因→回归门槛”的闭环。三元组分别关注上下文相关性、忠实度与答案相关性；另外保留必要事实完整性、拒答、安全、版本一致性、错误、延迟与成本。语义评审不能替代人工核对，错误/缺失不得算通过；旧v1分数保留纵向对照，不因候选引用变多而扩大允许集合刷分。
+
+## 固定90题的重排开关对照与全量盲审
+
+新增 [rubric-20261118-v1.json](evaluation/rubric-20261118-v1.json) 独立保存采集答案前的来源审计与独立复核，`rubricVersion=product-2026-11-18-source-audit-draft-2`。它保留原 `dataset.json` 的全部问题、81道可答/9道拒答，以及每题历史 `originalAnnotation`。当前157条必要事实包含130条公共产品事实、27条R1拒答协议事实，另有29条可选事实、159处逐字原文证据。七项非题干必答补充已移入可选并记录旧/新factId及理由；没有因答案内容重新标注。标注仍为 `agent-source-reviewed-human-pending`，`humanGold=false`，精确quote只证明可追踪性。
+
+[special-boundaries-20261118-v1.json](evaluation/special-boundaries-20261118-v1.json) 另列SLA、错误前提、部分可答和条件不匹配各2题。它仅用于离线诊断，未获本轮付费运行授权；不改变原90题分母、R1提示或生产策略，尤其不把未完善的部分回答契约当成已实现能力。
+
+新入口 `ai_service.orchestration.rag_rerank_experiment` 默认只做本地校验，所有原文quote的Unicode码点起止、正文hash、历史问题与标注身份均需一致。下列命令在 `ai-service` 目录执行：
+
+```powershell
+uv run python -m ai_service.orchestration.rag_rerank_experiment
+# 可选：同时校验现有逻辑文档与真实业务ID、版本、正文hash映射；仍不联网。
+uv run python -m ai_service.orchestration.rag_rerank_experiment --document-map ../tmp/product-document-map.json
+```
+
+只有以下显式命令会消费本轮授权，需在规格和质量审查通过后运行。Spring内部snapshot须可读且内容冻结；不要另启Python API或其他BGE owner。工具自行最小组装依赖，不启动worker，不写MySQL、Milvus、alias或GC。它先核对Spring权威publication、完整Milvus语料/向量、11文档映射和本地正式ETL内容；源文件名和逻辑ID不冒充真实chunk身份。BGE固定本地HF修订 `953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e`，缓存不全或CUDA不可用即失败，不下载、不降级。
+
+```powershell
+uv run python -m ai_service.orchestration.rag_rerank_experiment --live --document-map ../tmp/product-document-map.json --output ../tmp/rag-verification-20261118/rerank-live
+```
+
+授权study固定为 `rag-rerank-20261118-first-round-v1`，锚点固定为仓库 `tmp/rag-verification-20261118/rerank-authorization.jsonl`，独占新建并绑定输出目录与规范hash。不要删除、覆盖锚点或换目录重启绕过授权；工具拒绝复用，新的study不自动获得相同额度。额度为90个query输入的32/32/26三次Embedding请求和最多180次回答，发送前flush/fsync预占，失败/取消同样占用，无自动重试、付费裁判或稳定性轮次。GPU及知识预检失败可能发生在创建授权锚点前，后续准备失败则保留已发生的账本、向量和未运行结果。
+
+两组共享同一次真实Milvus Top8，关闭组保留向量顺序且不调用BGE，开启组使用预先真实BGE分数；全部检索/重排准备成功后才开始回答。两组都走正式 `CustomerServiceRagService` 的过滤、每文档1块/最多3篇、1200/3000字符、UTF-8 JSON预算、R1严格解析及引用检查，阈值关闭。并发固定1，每题交替组别先后顺序，模型及预算相同。正式disabled模式无需BGE，开启组发生降级记为故障。模型前后继续核对权威snapshot；变化或不可用即停止，已经发送的调用不返还额度。
+
+运行前即保存180个 `not_run` 结果，三次连续供应商调用失败停止，故障和未运行不从分母删除。报告保存代码SHA/脏工作树及文件指纹、配置/数据/标注/查询向量hash、完整publication只读快照、索引/search参数、本地模型/tokenizer文件hash、packages/GPU、预热、每题候选/排序/配额/预算、实际完整消息/答案/来源、usage和供应商结束原因。共享检索、BGE、回答供应商耗时和服务回放耗时分开，不将其称为两次在线E2E；未冻结单价时只报告token和调用数。终态非complete时CLI退出码为2。原始产物留在忽略目录，不能提交或作为公共trace输出。
+
+离线导出全180张匿名卡片及严格模板：
+
+```powershell
+uv run python -m ai_service.orchestration.rag_blind_review --report ../tmp/rag-verification-20261118/rerank-live/report.json --export ../tmp/rag-verification-20261118/blind-review
+# 将模板复制为实际评审文件，保持全部180项。给盲审人cards.md/cards.json及模板，私有映射单独保管。
+Copy-Item ../tmp/rag-verification-20261118/blind-review/reviews-template.json ../tmp/rag-verification-20261118/blind-review/reviews-human.json
+# 填写实际reviewer和role，再导入；允许pending，但缺项、重复、未知fact、伪证据与隐式类型转换会拒绝。
+uv run python -m ai_service.orchestration.rag_blind_review --report ../tmp/rag-verification-20261118/rerank-live/report.json --package ../tmp/rag-verification-20261118/blind-review --reviews ../tmp/rag-verification-20261118/blind-review/reviews-human.json --output ../tmp/rag-verification-20261118/analysis-human.json
+```
+
+公共卡片随机打乱并隐藏arm、分数、调用顺序与耗时；`private-mapping.json` 才保存组别映射和seed。卡片提供问题、冻结必要/可选事实、支持源、实际最终上下文和回答/引用/故障。人工尚未填写时所有判定为pending；代理初审用独立文件并写 `reviewer.role=agent`，不会产生人工总体提升结论。软件校验身份声明和证据可追踪性，不能认证填写人身份，也不能证明其语义判断正确或claim已穷尽。
+
+模板结构如下（单卡示意，实际文件必须保留全部180项，ID和原文从真实卡片复制）：
+
+```json
+{
+  "schemaVersion": "rag-blind-reviews/v1",
+  "studyId": "rag-rerank-20261118-first-round-v1",
+  "publicPackageSha256": "保留模板生成的hash",
+  "reviewer": {"name": "实际评审人", "role": "human"},
+  "reviews": [{
+    "blindId": "保留真实blindId",
+    "status": "complete",
+    "facts": [{"factId": "保留真实factId", "verdict": "met", "answerQuote": "逐字答案片段", "notes": "语义核对说明"}],
+    "claims": [{"text": "逐字答案片段", "supported": true, "evidence": [{"chunkId": "真实输入chunkId", "quote": "实际上下文原文"}]}],
+    "claimsComplete": true,
+    "citations": [{"chunkId": "真实被引用chunkId", "supported": true, "claimTexts": ["逐字答案片段"]}],
+    "answerRelevance": 2,
+    "factualError": false,
+    "safetyViolation": false,
+    "annotationDispute": false,
+    "failureCategories": [],
+    "notes": "人工判断说明"
+  }]
+}
+```
+
+fact的verdict只允许pending/met/missing/contradicted；完整评审不能有pending。公共fact判met需提供逐字答案摘录，支持claim的证据只能来自实际contexts，不能用旁列的公共全文冒充模型输入。9道拒答的协议fact不要求空答案quote，按成功响应的answered=false、空来源及无安全违规分别核对。正常 `NO_ANSWER_TEXT` 与 `SYSTEM_FALLBACK_TEXT` 故障分开，不能把fallback算正确拒答。引用逐条登记支持的claim，未支持项不附虚构证据。
+
+主通过率要求必要事实满足、没有错误/无依据claim、引用支持且相关性完整；故障/未运行按失败保留在每组90分母。公共必要事实覆盖仅统计81题的130条公共fact，拒答单列9题协议。报告同时保留误拒、故障、claim/引用、token/耗时及人工失败分类：未召回、排序截断、配额/预算丢失、证据在场生成错、标注疑义。自动“标注支持片段存活”先同等压缩空白，但整段quote未存活不能证明必要事实丢失，最终归因仍由盲审人判定。全部人工审完才生成总体人工提升值；未填项保留pending。配对四格和固定seed=20261118的10000次题级bootstrap 95%差值区间不把两组回答当独立样本；这90题仍是反复使用的开发回归集。

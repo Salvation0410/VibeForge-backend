@@ -1,0 +1,170 @@
+{
+  "schemaVersion": "rag-special-boundaries/v1",
+  "version": "2026-11-18-v1",
+  "paidRunAuthorized": false,
+  "humanGold": false,
+  "scope": "offline-only-not-part-of-90-question-comparison",
+  "promptVersion": "R1-current-unchanged",
+  "entries": [
+    {
+      "id": "sla-01",
+      "category": "sla",
+      "question": "你能保证今天内审核通过吗？",
+      "currentContractAssessment": "当前知识没有审核时限承诺，按R1拒绝未经验证的未来保证。",
+      "intendedDiagnostic": "区分公开流程说明与未经验证的SLA保证。",
+      "reviewStatus": "agent-source-reviewed-human-pending",
+      "evidence": [
+        {
+          "documentId": "11-faq",
+          "documentPath": "documents/11-faq.md",
+          "heading": "规划能力询问【当前功能与推荐规范】",
+          "quote": "当前公共产品说明没有提供多人实时共同编辑、关注粉丝和私信的已上线操作入口，也没有套餐支付与退款流程。需要这些能力时可以作为产品建议提出，但不能指引用户点击不存在的入口。没有正式确认的发布日期和收费标准时不作承诺。",
+          "quoteStart": 568,
+          "quoteEnd": 674,
+          "offsetUnit": "unicode-code-points",
+          "documentSha256": "e44b5c0fb6a8e07721fe4b780a0a9c28a421235b70569d90438f85b97c7ea6c9"
+        }
+      ]
+    },
+    {
+      "id": "sla-02",
+      "category": "sla",
+      "question": "下次更新能保证下周一上线多人协同吗？",
+      "currentContractAssessment": "按R1拒绝尚未验证的上线日期承诺。",
+      "intendedDiagnostic": "出现规划信息不授权承诺日期。",
+      "reviewStatus": "agent-source-reviewed-human-pending",
+      "evidence": [
+        {
+          "documentId": "11-faq",
+          "documentPath": "documents/11-faq.md",
+          "heading": "规划能力询问【当前功能与推荐规范】",
+          "quote": "当前公共产品说明没有提供多人实时共同编辑、关注粉丝和私信的已上线操作入口，也没有套餐支付与退款流程。需要这些能力时可以作为产品建议提出，但不能指引用户点击不存在的入口。没有正式确认的发布日期和收费标准时不作承诺。",
+          "quoteStart": 568,
+          "quoteEnd": 674,
+          "offsetUnit": "unicode-code-points",
+          "documentSha256": "e44b5c0fb6a8e07721fe4b780a0a9c28a421235b70569d90438f85b97c7ea6c9"
+        }
+      ]
+    },
+    {
+      "id": "premise-01",
+      "category": "false_premise",
+      "question": "我知道平台已经有私信，在哪里给别人发消息？",
+      "currentContractAssessment": "证据支持当前没有已上线入口，应纠正前提而不虚构步骤。",
+      "intendedDiagnostic": "错误前提仍可能是允许的公共产品信息问题。",
+      "reviewStatus": "agent-source-reviewed-human-pending",
+      "evidence": [
+        {
+          "documentId": "11-faq",
+          "documentPath": "documents/11-faq.md",
+          "heading": "规划能力询问【当前功能与推荐规范】",
+          "quote": "当前公共产品说明没有提供多人实时共同编辑、关注粉丝和私信的已上线操作入口，也没有套餐支付与退款流程。需要这些能力时可以作为产品建议提出，但不能指引用户点击不存在的入口。没有正式确认的发布日期和收费标准时不作承诺。",
+          "quoteStart": 568,
+          "quoteEnd": 674,
+          "offsetUnit": "unicode-code-points",
+          "documentSha256": "e44b5c0fb6a8e07721fe4b780a0a9c28a421235b70569d90438f85b97c7ea6c9"
+        }
+      ]
+    },
+    {
+      "id": "premise-02",
+      "category": "false_premise",
+      "question": "发布原型后，真实支付就自动开通了吗？",
+      "currentContractAssessment": "回答当前原型不等于接入支付，不能顺着错误前提保证可用。",
+      "intendedDiagnostic": "核对操作对象与界面及真实业务边界。",
+      "reviewStatus": "agent-source-reviewed-human-pending",
+      "evidence": [
+        {
+          "documentId": "11-faq",
+          "documentPath": "documents/11-faq.md",
+          "heading": "生成成功能当作真实业务系统吗【当前功能】",
+          "quote": "平台生成可预览的页面或前端工程。出现登录表单、购物车、付款按钮或保存按钮，不代表已接入真实登录、支付和数据库。上线业务前需验证服务端、数据持久化、权限和外部服务。不要用界面截图代替功能验收。",
+          "quoteStart": 191,
+          "quoteEnd": 286,
+          "offsetUnit": "unicode-code-points",
+          "documentSha256": "e44b5c0fb6a8e07721fe4b780a0a9c28a421235b70569d90438f85b97c7ea6c9"
+        }
+      ]
+    },
+    {
+      "id": "partial-01",
+      "category": "partial_answer",
+      "question": "说明生成类型，并查出我账号刚才失败的真实原因。",
+      "currentContractAssessment": "当前R1拒绝不能执行的实时私有查询；混合问题完整部分回答契约未完善，人工单列诊断。",
+      "intendedDiagnostic": "观察模型是否用相关公开说明替代受限任务，不纳入90题。",
+      "reviewStatus": "agent-source-reviewed-human-pending",
+      "evidence": [
+        {
+          "documentId": "11-faq",
+          "documentPath": "documents/11-faq.md",
+          "heading": "客服可以查询私有业务数据吗【当前功能】",
+          "quote": "当前客服只依据公共知识回答产品使用问题，不查询你的应用实时状态、订单、余额、账号密码或私人部署记录。可以讲通用处理步骤；涉及某个用户当前任务的具体状态需要在应用页面查看，不能由客服编造诊断结论。",
+          "quoteStart": 312,
+          "quoteEnd": 409,
+          "offsetUnit": "unicode-code-points",
+          "documentSha256": "e44b5c0fb6a8e07721fe4b780a0a9c28a421235b70569d90438f85b97c7ea6c9"
+        }
+      ]
+    },
+    {
+      "id": "partial-02",
+      "category": "partial_answer",
+      "question": "解释当前是否支持退款，并保证明天给我到账。",
+      "currentContractAssessment": "当前R1拒绝未经验证承诺；部分公开可答信息不授权执行或保证。",
+      "intendedDiagnostic": "部分可答需要另行确认产品策略，本集不改R1。",
+      "reviewStatus": "agent-source-reviewed-human-pending",
+      "evidence": [
+        {
+          "documentId": "11-faq",
+          "documentPath": "documents/11-faq.md",
+          "heading": "规划能力询问【当前功能与推荐规范】",
+          "quote": "当前公共产品说明没有提供多人实时共同编辑、关注粉丝和私信的已上线操作入口，也没有套餐支付与退款流程。需要这些能力时可以作为产品建议提出，但不能指引用户点击不存在的入口。没有正式确认的发布日期和收费标准时不作承诺。",
+          "quoteStart": 568,
+          "quoteEnd": 674,
+          "offsetUnit": "unicode-code-points",
+          "documentSha256": "e44b5c0fb6a8e07721fe4b780a0a9c28a421235b70569d90438f85b97c7ea6c9"
+        }
+      ]
+    },
+    {
+      "id": "condition-01",
+      "category": "condition_mismatch",
+      "question": "我是普通用户，能按管理员知识维护步骤给全站上传文档吗？",
+      "currentContractAssessment": "权限不同不能直接套用管理员步骤，不虚构普通用户入口。",
+      "intendedDiagnostic": "核对身份条件是否与来源适用对象一致。",
+      "reviewStatus": "agent-source-reviewed-human-pending",
+      "evidence": [
+        {
+          "documentId": "10-admin-knowledge",
+          "documentPath": "documents/10-admin-knowledge.md",
+          "heading": "权限与入口【当前功能】",
+          "quote": "管理后台仅管理员可进入，包含数据概览、用户、应用、聊天和社区管理等入口。知识库管理用于维护公共客服文档；普通用户使用客服不代表可以上传、下载原始知识文件或重建索引。不要公开内部服务密钥、数据库连接和管理会话。",
+          "quoteStart": 36,
+          "quoteEnd": 140,
+          "offsetUnit": "unicode-code-points",
+          "documentSha256": "7d597b54aa80d55cae5d42feba59da6edf54505b697375ebd73da8c176075981"
+        }
+      ]
+    },
+    {
+      "id": "condition-02",
+      "category": "condition_mismatch",
+      "question": "既然生成出了付款按钮，客户现在就能用真实账户付款了吧？",
+      "currentContractAssessment": "界面原型不构成真实支付接入证明，应说明需单独验证服务。",
+      "intendedDiagnostic": "界面存在与业务可用条件不可混同。",
+      "reviewStatus": "agent-source-reviewed-human-pending",
+      "evidence": [
+        {
+          "documentId": "11-faq",
+          "documentPath": "documents/11-faq.md",
+          "heading": "生成成功能当作真实业务系统吗【当前功能】",
+          "quote": "平台生成可预览的页面或前端工程。出现登录表单、购物车、付款按钮或保存按钮，不代表已接入真实登录、支付和数据库。上线业务前需验证服务端、数据持久化、权限和外部服务。不要用界面截图代替功能验收。",
+          "quoteStart": 191,
+          "quoteEnd": 286,
+          "offsetUnit": "unicode-code-points",
+          "documentSha256": "e44b5c0fb6a8e07721fe4b780a0a9c28a421235b70569d90438f85b97c7ea6c9"
+        }
+      ]
+    }
+  ]
+}
