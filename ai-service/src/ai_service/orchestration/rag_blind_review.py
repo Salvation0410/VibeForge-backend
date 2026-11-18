@@ -108,6 +108,35 @@ def result_key(record):
     return record['id'] + ':' + record['arm']
 
 
+# 对齐 CustomerServiceSourceResponse 的公开字段；旧离线材料允许只提供 chunk_id。
+_SOURCE_STRING_LIMITS = {'chunk_id': (1, 512), 'document_id': (1, 128),
+    'document_name': (1, 255), 'locator': (1, 500), 'excerpt': (0, 400)}
+
+
+def _public_sources(sources):
+    """来源只输出契约标量，禁止私有诊断经来源对象或合法字段内的子树泄露。"""
+    if not isinstance(sources, list):
+        fail('RESULT_SOURCE_INVALID')
+    projected = []
+    for source in sources:
+        if not isinstance(source, dict) or 'chunk_id' not in source:
+            fail('RESULT_SOURCE_INVALID')
+        public = {}
+        for key, (minimum, maximum) in _SOURCE_STRING_LIMITS.items():
+            if key in source:
+                value = source[key]
+                if type(value) is not str or not minimum <= len(value) <= maximum:
+                    fail('RESULT_SOURCE_INVALID')
+                public[key] = value
+        if 'document_version' in source:
+            version = source['document_version']
+            if type(version) is not int or version < 1:
+                fail('RESULT_SOURCE_INVALID')
+            public['document_version'] = version
+        projected.append(public)
+    return projected
+
+
 def validate_results(report, rubric):
     study = _study(report.get('studyId'))
     expected = {e['id'] + ':' + arm for e in rubric['entries'] for arm in study.arms}
@@ -120,6 +149,7 @@ def validate_results(report, rubric):
     for row in records:
         if row['status'] not in {'not_run', 'error', 'ok'}:
             fail('RESULT_STATUS_INVALID')
+        sources = _public_sources(row.get('sources', []))
         if row['status'] == 'ok' and (type(row.get('answered')) is not bool
                 or not isinstance(row.get('answer'), str)
                 or not isinstance(row.get('sources'), list)):
@@ -128,7 +158,7 @@ def validate_results(report, rubric):
             from ai_service.orchestration.customer_service_rag import NO_ANSWER_TEXT
             terminal = row.get('trace', {}).get('terminal', {})
             cited = row.get('citedChunkIds', [])
-            source_ids = [s.get('chunk_id') for s in row['sources'] if isinstance(s, dict)]
+            source_ids = [s['chunk_id'] for s in sources]
             allowed = {c['chunkId'] for c in row.get('contexts', [])}
             if (terminal.get('outcome') != ('answered' if row['answered'] else 'refused')
                     or row.get('degraded') is not False
@@ -176,7 +206,7 @@ def export_blind(report, output, rubric=None):
                 'contexts': contexts, 'status': row['status'],
                 'failure': None if row['status'] == 'ok' else 'request_failed_or_not_run',
                 'answered': row.get('answered'), 'answer': row.get('answer'),
-                'sources': row.get('sources', []), 'citedChunkIds': row.get('citedChunkIds', [])}
+                'sources': _public_sources(row.get('sources', [])), 'citedChunkIds': row.get('citedChunkIds', [])}
         cards.append(card)
         template.append({'blindId': blind_id, 'status': 'pending',
             'facts': [{'factId': f['factId'], 'verdict': 'pending', 'answerQuote': '', 'notes': ''} for f in facts],

@@ -41,9 +41,10 @@ def make_report(study_id=CAP_STUDY, arms=CAP_ARMS):
 @pytest.fixture(scope='module')
 def packages():
     paths = []
-    def create(study_id=CAP_STUDY, arms=CAP_ARMS):
-        rubric, report = make_report(study_id, arms)
-        path = ROOT / 'tmp/rag-cap-answer-20261118/tool-validation' / ('blind-fixture-' + uuid.uuid4().hex)
+    def create(study_id=CAP_STUDY, arms=CAP_ARMS, *, report=None, output=None):
+        rubric, default_report = make_report(study_id, arms)
+        report = default_report if report is None else report
+        path = output or ROOT / 'tmp/rag-cap-answer-20261118/tool-validation' / ('blind-fixture-' + uuid.uuid4().hex)
         paths.append(path)
         public = export_blind(report, path, rubric)
         return rubric, report, public, read_json(path / 'private-mapping.json'), read_json(path / 'reviews-template.json')
@@ -233,3 +234,63 @@ def test_old_study_keeps_output_and_statistics_keys_with_synthetic_rubric(packag
     assert result['sharedRetrievalLatencyMs'] == {'count': 1, 'mean': 111, 'p95': 111}
     assert result['realBgeLatencyMs'] == {'count': 1, 'mean': 222, 'p95': 222}
     assert result['timingMeaning'] == '共享检索/BGE准备与回答耗时分账，不是两次在线E2E'
+
+
+PUBLIC_SOURCE = {'chunk_id': 'c1', 'document_id': 'd1', 'document_name': '公开文档',
+                 'document_version': 1, 'locator': '小节', 'excerpt': '有据答案'}
+
+
+@pytest.mark.parametrize(('study_id', 'arms'), [(OLD_STUDY, OLD_ARMS), (CAP_STUDY, CAP_ARMS)])
+def test_source_projection_keeps_public_metadata_without_nested_private_diagnostics(packages, study_id, arms):
+    rubric, report = make_report(study_id, arms)
+    diagnostics = {'arm': arms[1], 'perDocument': 2, 'score': .91,
+        'usage': {'input_tokens': 123, 'arm': arms[1]}, 'answerLatencyMs': 456,
+        'executionOrder': 7, 'privateMapping': {'c1': arms[1]},
+        'diagnostics': {'nested': {'arm': arms[1], 'quota': 2}}}
+    report['results'][1]['sources'] = [{**PUBLIC_SOURCE, **diagnostics}]
+    original = deepcopy(report)
+    path = ROOT / 'tmp/rag-cap-answer-20261118/tool-validation' / ('blind-fixture-' + uuid.uuid4().hex)
+    _, returned_report, public, private, template = packages(study_id, arms, report=report, output=path)
+    assert returned_report is report and report == original
+    success = next(card for card in public['cards'] if card['status'] == 'ok')
+    assert success['sources'] == [PUBLIC_SOURCE]
+    assert read_json(path / 'cards.json') == public
+    for text in (json.dumps(public, ensure_ascii=False), (path / 'cards.md').read_text(encoding='utf8')):
+        for field in diagnostics:
+            assert '"' + field + '"' not in text
+        assert all(arm not in text for arm in (*OLD_ARMS, *CAP_ARMS))
+    assert {mapping['arm'] for mapping in private['mapping'].values()} == set(arms)
+    assert private['reportSha256'] == fingerprint(original)
+    validate_reviews(template, public)
+    assert summarize(report, public, private, template, rubric)['humanReview'] == 'pending'
+    # 公共数据必须独立构造，后续审阅侧修改不能回写原始私有报告。
+    success['sources'][0]['excerpt'] = '审阅侧修改'
+    assert report == original
+
+
+@pytest.mark.parametrize(('study_id', 'arms'), [(OLD_STUDY, OLD_ARMS), (CAP_STUDY, CAP_ARMS)])
+@pytest.mark.parametrize('field', list(PUBLIC_SOURCE))
+@pytest.mark.parametrize('nested', [{'arm': 'cap2', 'usage': {'total_tokens': 123}}, [{'arm': 'cap2'}]])
+def test_public_source_fields_reject_nested_objects_before_export(packages, study_id, arms, field, nested):
+    _, report = make_report(study_id, arms)
+    report['results'][1]['sources'] = [{**PUBLIC_SOURCE, field: deepcopy(nested)}]
+    original = deepcopy(report)
+    path = ROOT / 'tmp/rag-cap-answer-20261118/tool-validation' / ('blind-fixture-' + uuid.uuid4().hex)
+    with pytest.raises(ValueError):
+        packages(study_id, arms, report=report, output=path)
+    assert not path.exists()
+    assert report == original
+
+
+@pytest.mark.parametrize(('study_id', 'arms'), [(OLD_STUDY, OLD_ARMS), (CAP_STUDY, CAP_ARMS)])
+@pytest.mark.parametrize(('field', 'value'), [('document_version', True), ('document_version', '1'),
+                                            ('excerpt', 7), ('locator', None)])
+def test_public_source_fields_reject_non_contract_scalar_types(packages, study_id, arms, field, value):
+    _, report = make_report(study_id, arms)
+    report['results'][1]['sources'] = [{**PUBLIC_SOURCE, field: value}]
+    original = deepcopy(report)
+    path = ROOT / 'tmp/rag-cap-answer-20261118/tool-validation' / ('blind-fixture-' + uuid.uuid4().hex)
+    with pytest.raises(ValueError):
+        packages(study_id, arms, report=report, output=path)
+    assert not path.exists()
+    assert report == original
