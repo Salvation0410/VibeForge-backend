@@ -1,0 +1,385 @@
+{
+  "schemaVersion": "rag-rerank-public-result/v1",
+  "date": "2026-11-18",
+  "studyId": "rag-rerank-20261118-first-round-v1",
+  "run": {
+    "schemaVersion": "rag-rerank-run-summary/v1",
+    "studyId": "rag-rerank-20261118-first-round-v1",
+    "status": "complete",
+    "startedAtUtc": "2026-11-18T07:14:56.623008+00:00",
+    "finishedAtUtc": "2026-11-18T07:19:04.730906+00:00",
+    "runnerWallSeconds": 248.107898,
+    "onlineE2ETested": false,
+    "providerCalls": {
+      "chat": 180,
+      "embeddingRequests": 3,
+      "queryInputs": 90
+    },
+    "observedAnswerCalls": 180,
+    "answerUsage": {
+      "responsesWithUsage": 180,
+      "inputTokens": 128527,
+      "outputTokens": 12987,
+      "totalTokens": 141514,
+      "cacheReadTokens": 54400
+    },
+    "embeddingUsage": [
+      {
+        "batch": 0,
+        "inputs": 32,
+        "latencyMs": 3181.802,
+        "model": "text-embedding-3-large",
+        "usage": {
+          "prompt_tokens": 592,
+          "total_tokens": 592
+        }
+      },
+      {
+        "batch": 1,
+        "inputs": 32,
+        "latencyMs": 2185.442,
+        "model": "text-embedding-3-large",
+        "usage": {
+          "prompt_tokens": 582,
+          "total_tokens": 582
+        }
+      },
+      {
+        "batch": 2,
+        "inputs": 26,
+        "latencyMs": 1382.602,
+        "model": "text-embedding-3-large",
+        "usage": {
+          "prompt_tokens": 519,
+          "total_tokens": 519
+        }
+      }
+    ],
+    "arms": {
+      "rerank_off": {
+        "statuses": {
+          "ok": 87,
+          "error": 3
+        },
+        "errors": [
+          {
+            "id": "app-generation-014",
+            "code": "MODEL_PARSE_FAILED"
+          },
+          {
+            "id": "app-generation-023",
+            "code": "MODEL_PARSE_FAILED"
+          },
+          {
+            "id": "preview-history-004",
+            "code": "MODEL_PARSE_FAILED"
+          }
+        ],
+        "usage": {
+          "responsesWithUsage": 90,
+          "inputTokens": 64063,
+          "outputTokens": 6255,
+          "totalTokens": 70318,
+          "cacheReadTokens": 27520
+        },
+        "answerLatency": {
+          "count": 90,
+          "totalMs": 91482.376,
+          "meanMs": 1016.471,
+          "medianMs": 1003.522,
+          "p95Ms": 1421.857,
+          "minMs": 484.938,
+          "maxMs": 1785.658
+        },
+        "contractRefusalsAmongExpected9": 9,
+        "falseRefusalsAmongExpected81": 8
+      },
+      "rerank_on": {
+        "statuses": {
+          "ok": 89,
+          "error": 1
+        },
+        "errors": [
+          {
+            "id": "preview-history-004",
+            "code": "MODEL_PARSE_FAILED"
+          }
+        ],
+        "usage": {
+          "responsesWithUsage": 90,
+          "inputTokens": 64464,
+          "outputTokens": 6732,
+          "totalTokens": 71196,
+          "cacheReadTokens": 26880
+        },
+        "answerLatency": {
+          "count": 90,
+          "totalMs": 91320.353,
+          "meanMs": 1014.671,
+          "medianMs": 1015.139,
+          "p95Ms": 1598.178,
+          "minMs": 398.299,
+          "maxMs": 1780.076
+        },
+        "contractRefusalsAmongExpected9": 9,
+        "falseRefusalsAmongExpected81": 3
+      }
+    },
+    "sharedRetrieval": {
+      "count": 90,
+      "totalMs": 3317.793,
+      "meanMs": 36.864,
+      "medianMs": 32.99,
+      "p95Ms": 44.531,
+      "minMs": 17.01,
+      "maxMs": 403.481
+    },
+    "realBge": {
+      "count": 90,
+      "totalMs": 11417.634,
+      "meanMs": 126.863,
+      "medianMs": 125.263,
+      "p95Ms": 144.663,
+      "minMs": 53.344,
+      "maxMs": 351.36
+    },
+    "warmup": {
+      "count": 1,
+      "inputSha256": "232aa5a3f2d08c6ac326bf5a2690dc5afe0575ea0aaf76182be132989a14d8f7",
+      "kind": "local-only-single-pair",
+      "latencyMs": 1279.642
+    },
+    "documents": 11,
+    "chunks": 72,
+    "snapshotEpoch": 1,
+    "codeSha": "0d5748cd758ee1c81ddfde61feba1e105a2439e3",
+    "dirty": true,
+    "rubricSha256": "79d2cf63949c8de69877f9c49d4b66c1f834f5ee9b64ce9fcb48d70e1aa54363",
+    "mappingSha256": "4a3670ac9ef8235555fdc33fd0e29e49a4eb29f496b08daeb44e2b4bb2f69cf3",
+    "corpusRowsSha256": "644a3b6af98719d3e069465df5f33717e12ebe26d09dab8549d911119c85350a",
+    "reportSha256": "ad21903b50000f50d077af1c93b137e77bff1da6ca47d4ca04617f8c33781ee1",
+    "cleanupErrors": [],
+    "reportSaveFailures": [],
+    "humanReview": "pending",
+    "monetaryCost": null,
+    "monetaryCostReason": "本轮未绑定已核实的供应商计费单价，token usage不等于账单",
+    "ledgerRecords": 184,
+    "contextDiagnostics": {
+      "changedSelectedChunkSetPairs": 62,
+      "changedChunkOrderOrSelectionPairs": 76,
+      "qualityJudgment": false
+    }
+  },
+  "agentBlindReview": {
+    "status": "complete",
+    "cards": 180,
+    "role": "agent",
+    "reviewSha256": "d08d83fd4ff7d1b91522f14af83f317864459ec699caa53652c6f7ffbb5e38d0",
+    "publicPackageSha256": "9a9a8733a5d7f6475683a3dd54702b8f80b009135906d4c19e2755c58e740954",
+    "arms": {
+      "rerank_off": {
+        "answerTokens": {
+          "input_tokens": 64063,
+          "output_tokens": 6255,
+          "total_tokens": 70318
+        },
+        "answerableDenominator": 81,
+        "answerablePassRate": 0.6666666666666666,
+        "correctContractRefusals": 9,
+        "denominator": 90,
+        "errors": 3,
+        "falseRefusals": 8,
+        "notRun": 0,
+        "overallPassRate": 0.7,
+        "pending": 0,
+        "publicFactCoverage": 0.7307692307692307,
+        "refusalDenominator": 9,
+        "refusalPassRate": 1.0,
+        "requiredPublicFactsDenominator": 130,
+        "reviewed": 90,
+        "reviewedCitations": 104,
+        "reviewedClaims": 327,
+        "reviewedFactualErrors": 0,
+        "reviewedPublicFactCoverage": 0.7307692307692307,
+        "reviewedSafeCorrectRefusals": 9,
+        "reviewedSafetyViolations": 0,
+        "supportedCitations": 102,
+        "unsupportedClaims": 7,
+        "passed": 63,
+        "requiredPublicFactsMet": 95,
+        "answerablePassed": 54
+      },
+      "rerank_on": {
+        "answerTokens": {
+          "input_tokens": 64464,
+          "output_tokens": 6732,
+          "total_tokens": 71196
+        },
+        "answerableDenominator": 81,
+        "answerablePassRate": 0.8024691358024691,
+        "correctContractRefusals": 9,
+        "denominator": 90,
+        "errors": 1,
+        "falseRefusals": 3,
+        "notRun": 0,
+        "overallPassRate": 0.8222222222222222,
+        "pending": 0,
+        "publicFactCoverage": 0.8076923076923077,
+        "refusalDenominator": 9,
+        "refusalPassRate": 1.0,
+        "requiredPublicFactsDenominator": 130,
+        "reviewed": 90,
+        "reviewedCitations": 119,
+        "reviewedClaims": 362,
+        "reviewedFactualErrors": 0,
+        "reviewedPublicFactCoverage": 0.8076923076923077,
+        "reviewedSafeCorrectRefusals": 9,
+        "reviewedSafetyViolations": 0,
+        "supportedCitations": 119,
+        "unsupportedClaims": 1,
+        "passed": 74,
+        "requiredPublicFactsMet": 105,
+        "answerablePassed": 65
+      }
+    },
+    "paired": {
+      "bootstrap95": [
+        0.044444444444444446,
+        0.2
+      ],
+      "bootstrapDraws": 10000,
+      "bootstrapSeed": 20261118,
+      "bothFail": 14,
+      "bothPass": 61,
+      "offOnly": 2,
+      "onMinusOff": 0.12222222222222222,
+      "onOnly": 13,
+      "questionPairs": 90
+    },
+    "standard": "生成前冻结的draft-2；保留原始代理裁决，非人工最终成绩"
+  },
+  "failureAttribution": {
+    "schemaVersion": "rag-rerank-attribution-summary/v1",
+    "reviewsSha256": "d08d83fd4ff7d1b91522f14af83f317864459ec699caa53652c6f7ffbb5e38d0",
+    "cards": 43,
+    "requestFailures": [
+      {
+        "caseId": "preview-history-004",
+        "arm": "rerank_off",
+        "code": "MODEL_PARSE_FAILED",
+        "jsonReason": "Expecting property name enclosed in double quotes",
+        "line": 1,
+        "column": 77
+      },
+      {
+        "caseId": "app-generation-023",
+        "arm": "rerank_off",
+        "code": "MODEL_PARSE_FAILED",
+        "jsonReason": "Expecting property name enclosed in double quotes",
+        "line": 1,
+        "column": 104
+      },
+      {
+        "caseId": "app-generation-014",
+        "arm": "rerank_off",
+        "code": "MODEL_PARSE_FAILED",
+        "jsonReason": "Expecting property name enclosed in double quotes",
+        "line": 1,
+        "column": 117
+      },
+      {
+        "caseId": "preview-history-004",
+        "arm": "rerank_on",
+        "code": "MODEL_PARSE_FAILED",
+        "jsonReason": "Expecting property name enclosed in double quotes",
+        "line": 1,
+        "column": 74
+      }
+    ],
+    "arms": {
+      "rerank_off": {
+        "failedCards": 27,
+        "requestFailures": 3,
+        "normalFailedCards": 24,
+        "unmetFactCategories": {
+          "quota_or_budget_loss": 21,
+          "not_recalled": 6,
+          "evidence_present_generation_error": 3
+        },
+        "cardCategories": {
+          "evidence_present_generation_error": 8,
+          "quota_or_budget_loss": 13,
+          "not_recalled": 4
+        },
+        "otherFailures": 9
+      },
+      "rerank_on": {
+        "failedCards": 16,
+        "requestFailures": 1,
+        "normalFailedCards": 15,
+        "unmetFactCategories": {
+          "evidence_present_generation_error": 3,
+          "quota_or_budget_loss": 15,
+          "not_recalled": 6
+        },
+        "cardCategories": {
+          "evidence_present_generation_error": 4,
+          "quota_or_budget_loss": 8,
+          "not_recalled": 4
+        },
+        "otherFailures": 1
+      }
+    },
+    "overlappingCardCategories": true,
+    "basis": "评分后代理逐卡语义归因，支持引文经机械溯源；非人工最终裁决"
+  },
+  "postRunHumanClarification": {
+    "path": "../payment-clarification-20261118-v1.json",
+    "sha256": "03cc5e6273c9c368b1f126dab2a5874d0c590e6296702f0712eb6d572a022ee7",
+    "topic": "当前平台不支持支付功能",
+    "historicalEvidenceUnchanged": true,
+    "appliedEquallyToExistingAnswers": true,
+    "postHocOnly": true,
+    "modelRegeneration": false,
+    "sensitivity": {
+      "rerankOffPassed": 62,
+      "rerankOnPassed": 74,
+      "denominatorPerArm": 90,
+      "paired": {
+        "questionPairs": 90,
+        "bothPass": 61,
+        "offOnly": 1,
+        "onOnly": 13,
+        "bothFail": 15,
+        "onMinusOff": 0.13333333333333333,
+        "bootstrap95": [
+          0.05555555555555555,
+          0.2111111111111111
+        ],
+        "bootstrapSeed": 20261118,
+        "bootstrapDraws": 10000
+      }
+    },
+    "meaning": "仅将支付题两组现有答案按新口径均记未满足，其他89对保留原判；不是重新生成或原冻结指标提升。"
+  },
+  "humanReview": {
+    "status": "pending",
+    "deferredByUser": true,
+    "humanGold": false,
+    "singleProductClarificationConfirmed": true
+  },
+  "limits": [
+    "90题为反复使用的开发回归集，非独立泛化盲测",
+    "每题每组仅一次，未获额外稳定性轮次或付费裁判授权",
+    "8道专项只完成离线定义，未真实运行",
+    "本轮计时分开统计共享检索、真实BGE和回答，未测两个完整在线E2E",
+    "四个故障占分母且不重试；不能把所有差额确定归因为重排",
+    "新支付口径为答案生成后确认，未修改或发布冻结语料",
+    "代理逐语义审阅不是实际人工产品验收"
+  ],
+  "commits": {
+    "publicationTests": "e8051cdbb739588e789b06ede9dddb55b26d31e9",
+    "experimentTool": "f812751ae0b487de2bb269597747c58d867a2430",
+    "experimentCleanup": "0d5748cd758ee1c81ddfde61feba1e105a2439e3"
+  }
+}

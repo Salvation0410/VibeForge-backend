@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "product-knowledge-post-run-clarification/v1",
+  "clarificationId": "current-payment-support-20261118-v1",
+  "recordedDate": "2026-11-18",
+  "sourceType": "human-user-message",
+  "sourceText": "没有支付功能 直接说现在不支持支付功能",
+  "confirmedProductFact": "当前平台不支持支付功能",
+  "preferredAnswer": "目前平台不支持支付功能。",
+  "candidatePublicKnowledgeText": "当前平台不支持支付功能。生成页面出现付款按钮不代表具备真实支付能力。",
+  "affectedCaseIds": ["boundaries-safety-001"],
+  "timing": "after-all-180-answers-and-frozen-agent-blind-reviews",
+  "originalRubricSha256": "79d2cf63949c8de69877f9c49d4b66c1f834f5ee9b64ce9fcb48d70e1aa54363",
+  "originalReportSha256": "ad21903b50000f50d077af1c93b137e77bff1da6ca47d4ca04617f8c33781ee1",
+  "originalAgentReviewsSha256": "d08d83fd4ff7d1b91522f14af83f317864459ec699caa53652c6f7ffbb5e38d0",
+  "originalRubricIssue": "原必要事实要求验证服务端、权限和外部服务，等价表达仅要求确认后端及接口，成对复核发现不同评审采用了不同完整度；原语料也未直接写明当前不支持支付。",
+  "application": {
+    "appliesEquallyToBothArms": true,
+    "expectedAnswerable": true,
+    "futureRequiredFact": "直接说明平台当前不支持支付功能；仅说按钮不能证明已经接入，不足以表达当前产品状态。",
+    "fullBackendChecklistRequired": false,
+    "existingOffAnswerMeetsClarifiedDirectAnswer": false,
+    "existingOnAnswerMeetsClarifiedDirectAnswer": false,
+    "originalAnswersAndRubricUnchanged": true,
+    "originalAgentScoresUnchanged": true,
+    "postHocSensitivityOnly": true,
+    "other89PairsKeepOriginalAgentJudgments": true
+  },
+  "publication": {
+    "status": "candidate-not-published",
+    "corpusDocumentsChanged": false,
+    "springOrMilvusWritten": false,
+    "newModelOrEmbeddingCalls": 0,
+    "nextStep": "后续按新语料版本同步公共文档和标注，再另行登记INDEX及真实答案验证额度；不覆盖本轮冻结证据。"
+  },
+  "humanReview": {
+    "full180Answers": "pending",
+    "userPreference": "先完成代理初审，人工验收保留待办",
+    "singleProductFactConfirmed": true,
+    "humanGoldForDataset": false
+  }
+}

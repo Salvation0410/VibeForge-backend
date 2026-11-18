@@ -169,3 +169,9 @@ uv run python -m ai_service.orchestration.rag_blind_review --report ../tmp/rag-v
 fact的verdict只允许pending/met/missing/contradicted；完整评审不能有pending。公共fact判met需提供逐字答案摘录，支持claim的证据只能来自实际contexts，不能用旁列的公共全文冒充模型输入。9道拒答的协议fact不要求空答案quote，按成功响应的answered=false、空来源及无安全违规分别核对。正常 `NO_ANSWER_TEXT` 与 `SYSTEM_FALLBACK_TEXT` 故障分开，不能把fallback算正确拒答。引用逐条登记支持的claim，未支持项不附虚构证据。
 
 主通过率要求必要事实满足、没有错误/无依据claim、引用支持且相关性完整；故障/未运行按失败保留在每组90分母。公共必要事实覆盖仅统计81题的130条公共fact，拒答单列9题协议。报告同时保留误拒、故障、claim/引用、token/耗时及人工失败分类：未召回、排序截断、配额/预算丢失、证据在场生成错、标注疑义。自动“标注支持片段存活”先同等压缩空白，但整段quote未存活不能证明必要事实丢失，最终归因仍由盲审人判定。全部人工审完才生成总体人工提升值；未填项保留pending。配对四格和固定seed=20261118的10000次题级bootstrap 95%差值区间不把两组回答当独立样本；这90题仍是反复使用的开发回归集。
+
+### 2026-11-18 首轮结果与新产品口径
+
+本轮固定授权已使用：180 次回答、90 个 query Embedding 输入/3 请求。原冻结标注下，全量代理盲审为关闭重排 63/90、开启 74/90；人工验收按用户安排保留待办。脱敏聚合及题级配对区间见 [首轮结果](evaluation/results/rerank-20261118-v1.json)，失败与离线/真实验证范围见[逐轮交接](../../customer-service-rag-rounds-handoff.md)。原始答案、上下文和私有映射保存在本机忽略目录，不提交。
+
+生成和盲审冻结后，用户进一步确认当前平台没有支付功能，应直接回答“目前平台不支持支付功能。”。该澄清单独记录于 [支付口径修订](evaluation/payment-clarification-20261118-v1.json)，两组旧答案按新口径均未直接说明当前状态；后置复核不覆盖原始成绩。短知识候选尚未发布，原 11 篇语料、90 题及本轮 rubric 保持冻结；新语料版本、INDEX 与真实验证需分别安排。

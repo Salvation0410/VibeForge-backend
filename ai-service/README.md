@@ -698,3 +698,22 @@ uv run python -m ai_service.orchestration.rag_refusal_experiment
 有界证据实验仍总计三块及原字符/字节预算。扩大候选但未重排时最终覆盖保留 null；不得拿旧 Top8 顺序冒充 Top16/24 的结果。本轮同文档 cap3 未比 cap2 增益，Top16/24 的最终证据覆盖反而略降，生产仍保持 Top8、每文档一块。标题与父章节扩展尚未完成质量验证。
 
 `evaluation/customer-service-refusal-pairs-v1.json` 含八条冻结拒答题及八条公开解释反例，仍是开发诊断集。显式 `--live --rounds 3 --max-chat-calls 96 --output <不存在的tmp目录>` 才调用模型；预占落盘、失败占额、无自动重试，连续三次错误终止。R2 仅为候选，生产仍用 R1。本轮真实96次对照中 R2 拒答24/24、公开题24/24可答，但有两条公开回答证据范围存疑，不能据此宣称语义质量通过。原 v2 标注冻结；人工裁决和独立盲测仍待完成。
+
+### 固定 90 题重排开关对照与盲审
+
+`rag_rerank_experiment` 是独立评测入口，默认离线核对原题、版本化事实标注、精确支持引文及 8 道专项定义，不访问供应商；专项不进入原 90 题分母，也未获真实调用授权。事实标注仍为代理源码审阅稿，`humanGold=false`，人工裁决待完成。
+
+```powershell
+uv run python -m ai_service.orchestration.rag_rerank_experiment --document-map ../tmp/product-document-map.json
+# 仅在首轮授权尚未使用且只读预检完成后执行一次；不能换目录或删除锚点重开。
+uv run python -m ai_service.orchestration.rag_rerank_experiment --live --document-map ../tmp/product-document-map.json --output ../tmp/rag-verification-20261118/live
+uv run python -m ai_service.orchestration.rag_blind_review --report ../tmp/rag-verification-20261118/live/report.json --export ../tmp/rag-verification-20261118/blind
+```
+
+真实入口先经 Spring 核对权威 snapshot，以 `PublicationStore` 完整读取验收语料和向量，固定代码/配置/索引、模型与 tokenizer 文件指纹，再加载本地固定 revision 的 BGE。每题两组共享同次 Milvus Top8；关闭组保留 dense 顺序，开启组回放真实 BGE 排序，均复用正式 RAG 过滤、每文档一块、最多三篇及提示预算，不改 R1 或生产配置。并发为 1，题内组别先后交替；共享检索、BGE 推理和回答分别计时，不能当作两次完整在线端到端延迟。
+
+唯一授权锚点固定为 `tmp/rag-verification-20261118/rerank-authorization.jsonl`，独占创建并发送前 flush/fsync 预占，最多 180 次回答及独立记账的 90 个 query Embedding 输入/3 个请求。失败、取消及进程退出不返还额度，不自动重试、续跑或额外付费裁判。权威快照变化或连续调用故障停止后保留全部 180 个预定记录；未运行和错误不能算作正确拒答。正式调用需要可用的 Spring 权威只读接口、Milvus 和独占 CUDA BGE；不要求启动另一个 Python API 服务。
+
+评测只构造一个零重试回答客户端。最终报告写盘与各资源关闭分别尝试，以固定标签记录 `reportSaveFailures` / `cleanupErrors`；单项失败仍尝试其余清理，原始取消继续传播。关闭失败不等于已强制清理资源。本地供应商地址与凭据应在启用唯一授权前检查，不以付费请求探测配置。
+
+匿名包包含全部答案、实际最终 contexts、逐事实及逐引用审阅模板，私有映射独立保存，不交给盲审者。事实等价表达和整段标注引文存活只作审阅辅助，不是关键词评分或语义事实覆盖证明。断言支持必须来自该答案的实际 contexts。`rag_blind_review` 严格核对完整 ID、答案摘录和支持摘录，按题配对统计；`role=agent` 的全量初审始终保留 `humanReview=pending`，无法代替实际人工产品验收。90 题是反复使用的开发回归集，不能称独立泛化盲测。原始报告、向量、答案及盲审材料仅保存在忽略目录 `tmp/`；运行记录与未测范围见[逐轮交接](../doc/customer-service-rag-rounds-handoff.md)。
