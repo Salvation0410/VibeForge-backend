@@ -7,8 +7,8 @@ import com.yupi.yuaicodemother.model.dto.customerservice.KnowledgePublicationPro
 import com.yupi.yuaicodemother.service.*;
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
 import org.apache.ibatis.mapping.Environment;
-import org.apache.ibatis.session.Configuration;
-import org.apache.ibatis.session.SqlSessionFactoryBuilder;
+import com.mybatisflex.core.mybatis.FlexConfiguration;
+import com.mybatisflex.core.mybatis.FlexSqlSessionFactoryBuilder;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.mybatis.spring.SqlSessionTemplate;
@@ -283,6 +283,9 @@ class KnowledgePublicationMysqlIntegrationTest {
         });
     }
     void isolated(Scenario scenario) throws Exception {
+        isolated(Clock.fixed(NOW,ZoneOffset.UTC),scenario);
+    }
+    void isolated(Clock clock,Scenario scenario) throws Exception {
         String schema="rag_publication_it_"+UUID.randomUUID().toString().replace("-","");
         if(!schema.matches("rag_publication_it_[a-f0-9]{32}")) throw new IllegalArgumentException("隔离库名称无效");
         try(var admin=KnowledgeRevisionMysqlSupport.connect()) {
@@ -294,8 +297,9 @@ class KnowledgePublicationMysqlIntegrationTest {
                 KnowledgeRevisionMysqlSupport.script(admin,Files.readString(Path.of("sql/alter_customer_service_knowledge_publication.sql")));
                 KnowledgeRevisionMysqlSupport.script(admin,Files.readString(Path.of("sql/alter_customer_service_knowledge_prepare_anchor.sql")));
                 KnowledgeRevisionMysqlSupport.script(admin,Files.readString(Path.of("sql/alter_customer_service_knowledge_prepare_execution.sql")));
-                scenario.run(new Fixture(schema));
+                scenario.run(new Fixture(schema,true,clock));
             } finally {
+                com.mybatisflex.core.FlexGlobalConfig.getGlobalConfigs().remove(schema);
                 if(created) {
                     admin.setCatalog("yu_ai_code_mother");
                     try(var stmt=admin.createStatement()) {stmt.execute("DROP DATABASE `"+schema+"`");}
@@ -311,12 +315,17 @@ class KnowledgePublicationMysqlIntegrationTest {
         final KnowledgePublicationService service;
         final CustomerServiceKnowledgeEtlOutboxMapper tasks;
         final CustomerServiceKnowledgeDocumentMapper documentMapper;
+        final KnowledgePublicationMapper publicationMapper;
+        final CustomerServiceKnowledgeMutationLeaseMapper leaseMapper;
         final CustomerServiceProperties properties=new CustomerServiceProperties();
         Fixture(String schema) throws Exception {
             this(schema,true);
         }
         Fixture(String schema, boolean initialize) throws Exception {
-            var source=new AbstractDataSource() {
+            this(schema,initialize,Clock.fixed(NOW,ZoneOffset.UTC));
+        }
+        Fixture(String schema, boolean initialize,Clock clock) throws Exception {
+            var isolatedSource=new AbstractDataSource() {
                 @Override public Connection getConnection() throws SQLException {
                     Connection connection=null;
                     try {connection=KnowledgeRevisionMysqlSupport.connect();connection.setCatalog(schema);
@@ -325,22 +334,33 @@ class KnowledgePublicationMysqlIntegrationTest {
                 }
                 @Override public Connection getConnection(String user,String password) throws SQLException {throw new SQLException("拒绝非受控凭据");}
             };
+            var source=new com.mybatisflex.core.datasource.FlexDataSource(schema,isolatedSource,
+                    com.mybatisflex.core.dialect.DbType.MYSQL,false);
             jdbc=new JdbcTemplate(source);transactions=new DataSourceTransactionManager(source);
-            var cfg=new Configuration(new Environment("publication-it",new SpringManagedTransactionFactory(),source));
+            // 管理上传通过 BaseMapper 更新文档及插入任务，需要与生产一致的 Flex 映射注册。
+            var cfg=new FlexConfiguration(new Environment(schema,new SpringManagedTransactionFactory(),source));
+            // Flex在注册insert时查全局配置；需像Spring工厂一样先注册，不能依赖前一个夹具的残留配置。
+            var global=new com.mybatisflex.core.FlexGlobalConfig();global.setConfiguration(cfg);
+            com.mybatisflex.core.FlexGlobalConfig.setConfig(schema,global,false);
             cfg.addMapper(CustomerServiceKnowledgeDocumentMapper.class);cfg.addMapper(CustomerServiceKnowledgeEtlOutboxMapper.class);
             cfg.addMapper(CustomerServiceKnowledgeMutationLeaseMapper.class);cfg.addMapper(KnowledgePublicationMapper.class);
             try(var input=Files.newInputStream(Path.of("src/main/resources/mapper/KnowledgePublicationMapper.xml"))) {
                 new XMLMapperBuilder(input,cfg,"publication-mapper",cfg.getSqlFragments()).parse();
             }
-            var sessions=new SqlSessionTemplate(new SqlSessionFactoryBuilder().build(cfg));
+            var sessions=new SqlSessionTemplate(new FlexSqlSessionFactoryBuilder().build(cfg));
+            assertInstanceOf(com.mybatisflex.core.keygen.CustomKeyGenerator.class,
+                    cfg.getMappedStatement(CustomerServiceKnowledgeEtlOutboxMapper.class.getName()+".insert").getKeyGenerator(),
+                    "夹具必须由生产注解注册雪花ID生成器");
             tasks=sessions.getMapper(CustomerServiceKnowledgeEtlOutboxMapper.class);
             documentMapper=sessions.getMapper(CustomerServiceKnowledgeDocumentMapper.class);
+            publicationMapper=sessions.getMapper(KnowledgePublicationMapper.class);
+            leaseMapper=sessions.getMapper(CustomerServiceKnowledgeMutationLeaseMapper.class);
             properties.setPublicationEnabled(true);
             var ai=new AiEngineProperties();ai.setToken("isolated-signing-secret");
-            coordinator=transactional(new KnowledgeMutationCoordinator(sessions.getMapper(CustomerServiceKnowledgeMutationLeaseMapper.class),ai,properties,Clock.fixed(NOW,ZoneOffset.UTC)));
-            service=transactional(new KnowledgePublicationService(sessions.getMapper(KnowledgePublicationMapper.class),
+            coordinator=transactional(new KnowledgeMutationCoordinator(leaseMapper,ai,properties,clock));
+            service=transactional(new KnowledgePublicationService(publicationMapper,
                     sessions.getMapper(CustomerServiceKnowledgeDocumentMapper.class),tasks,sessions.getMapper(CustomerServiceKnowledgeMutationLeaseMapper.class),
-                    coordinator,properties,Clock.fixed(NOW,ZoneOffset.UTC)));
+                    coordinator,properties,clock));
             if(!initialize) return;
             var initial=new CandidateReceipt("bootstrap_"+"0".repeat(32),0,"bootstrap",1,"customer_service_knowledge_pub_"+"0".repeat(32),HASH,"model-v1",3,List.of());
             jdbc.update("INSERT INTO customer_service_knowledge_publication(publicationId,epoch,collectionName,receiptJson) VALUES(?,1,?,?)",initial.publicationId(),initial.candidateCollection(),new ObjectMapper().writeValueAsString(initial));
@@ -352,9 +372,7 @@ class KnowledgePublicationMysqlIntegrationTest {
             @SuppressWarnings("unchecked") T result=(T)proxy.getProxy();return result;
         }
         Execution prepare(long id) {
-            jdbc.update("INSERT INTO customer_service_knowledge_document(id,name,fileType,objectKey,fileSize,contentHash,documentVersion,etlVersion,status,createdBy,updatedBy) VALUES(?,'隔离原文','TXT','fake.txt',1,?,1,2,'INDEXING',1,1)",id,String.format("%064d",id));
-            jdbc.update("INSERT INTO customer_service_knowledge_content_revision(documentId,documentVersion,name,fileType,objectKey,fileSize,contentHash) VALUES(?,1,'隔离原文','TXT','fake.txt',1,?)",id,String.format("%064d",id));
-            jdbc.update("INSERT INTO customer_service_knowledge_etl_outbox(id,documentId,documentVersion,etlVersion,operation,status,nextRetryTime) VALUES(?,?,1,2,'INDEX','PENDING','2029-12-31 00:00:00')",id,id);
+            seed(id);
             assertEquals(1,tasks.claim(id,"owner",LocalDateTime.ofInstant(NOW,ZoneOffset.UTC),LocalDateTime.ofInstant(NOW.plusSeconds(60),ZoneOffset.UTC)));
             var lease=coordinator.acquire("document:"+id,"attempt_"+id,"INDEX","owner");
             var context=service.prepare(id,"owner",lease);
@@ -362,6 +380,11 @@ class KnowledgePublicationMysqlIntegrationTest {
                     "customer_service_knowledge_pub_"+String.format("%032d",id),HASH,"model-v1",3,
                     context.documents().stream().map(d->new ReceiptDocument(d.documentId(),d.documentVersion(),d.indexRevision(),d.activationRevision(),d.sha256(),d.fileName(),d.fileType(),4)).toList());
             return new Execution(lease,context,receipt);
+        }
+        void seed(long id) {
+            jdbc.update("INSERT INTO customer_service_knowledge_document(id,name,fileType,objectKey,fileSize,contentHash,documentVersion,etlVersion,status,createdBy,updatedBy) VALUES(?,'隔离原文','TXT','fake.txt',1,?,1,2,'INDEXING',1,1)",id,String.format("%064d",id));
+            jdbc.update("INSERT INTO customer_service_knowledge_content_revision(documentId,documentVersion,name,fileType,objectKey,fileSize,contentHash) VALUES(?,1,'隔离原文','TXT','fake.txt',1,?)",id,String.format("%064d",id));
+            jdbc.update("INSERT INTO customer_service_knowledge_etl_outbox(id,documentId,documentVersion,etlVersion,operation,status,nextRetryTime) VALUES(?,?,1,2,'INDEX','PENDING','2029-12-31 00:00:00')",id,id);
         }
         int tryCommit(long id,Execution execution) {
             try {service.commit(id,"owner",execution.lease,execution.context,execution.receipt);return 1;}
