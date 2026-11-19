@@ -1,0 +1,244 @@
+{
+  "schemaVersion": "rag-json-answer-facility-acceptance/v1",
+  "round": 18,
+  "date": "2026-11-19",
+  "scope": "independent-facility-offline-verification",
+  "studyId": "rag-json-answer-20261119-v1",
+  "implementationCommit": "c1116fd",
+  "planConfirmationCommit": "f865579",
+  "productionResponseFormat": "text",
+  "productionDocumentChunkLimit": 1,
+  "liveAuthorized": false,
+  "formalDecision": "pending",
+  "maxFutureChatCalls": 180,
+  "formalPlanCanonicalSha256": "9ad2784956f2aeebbf0f5141f041e950d0a8c7ba82a92324ceb742783bb17625",
+  "formalPlanByteSha256": "0eb5eb5ca473eed012ec5d3417a7002be870e10f1590821a35a5eb2d19c2668b",
+  "pendingRequestByteSha256": "652f5343c3386df352292f00d1d8e2beb35b72e02961f0478454aa92911ea566",
+  "sourceReportByteSha256": "c34af6aa6b5f96f654e3255ccd239d8da5474ace2db3fc3337b270dcb3dbb704",
+  "commonInputCanonicalSha256": "bf559c24a88cebf92e16f50f67fc1f71b47ed77670455f1444f6cb5710d30b1f",
+  "implementationFiles": 24,
+  "implementationManifestCanonicalSha256": "592903ec9ecb8fad9b5df413c68e1690e0450747412c614533e5153dc76d5f3b",
+  "frozenSettings": {
+    "model_name": "deepseek-chat",
+    "model_temperature": 0.1,
+    "model_max_tokens": 8192,
+    "model_context_window_tokens": 200000,
+    "model_context_overhead_tokens": 4096,
+    "rag_prompt_max_bytes": 16384,
+    "perDocument": 1,
+    "maxContexts": 3,
+    "maxContextChars": 1200,
+    "maxTotalContextChars": 3000
+  },
+  "sdkVersions": {
+    "httpx": "0.28.1",
+    "langchain-core": "0.3.86",
+    "langchain-openai": "0.3.35",
+    "openai": "2.54.0",
+    "pydantic": "2.13.5"
+  },
+  "responseCaptureLimitBytes": 1048576,
+  "responseCaptureMeaning": "decoded_entity; oversize records observed prefix only",
+  "textRejectedFinishReasons": [
+    "length",
+    "content_filter"
+  ],
+  "jsonTermination": "native-sdk-parse",
+  "sdkRetries": 0,
+  "applicationRetries": 0,
+  "concurrency": 1,
+  "stopPolicy": {
+    "http400": "immediate",
+    "consecutiveOtherCallErrors": 3,
+    "preSendLedgerObservationOrSaveFailure": "immediate"
+  },
+  "newRealOperations": {
+    "chat": 0,
+    "embedding": 0,
+    "bge": 0,
+    "index": 0,
+    "productionWrites": 0
+  },
+  "fullPythonTests": {
+    "tests": 2128,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 25,
+    "passed": 2103,
+    "seconds": 376.888,
+    "xmlByteSha256": "aa9762442e1f26f109bb2518bb2a0509576c3fdc5dcc8c67283dda5dc45867a7",
+    "exitCode": 0,
+    "warnings": 2
+  },
+  "compileall": {
+    "exitCode": 0
+  },
+  "lockCheck": {
+    "exitCode": 0,
+    "resolvedPackages": 150,
+    "logByteSha256": "77341bc64951b090592fc3a10b88ba6cd9834d7e63c80d22d659c17a576dcaeb"
+  },
+  "testStages": {
+    "facility-red.xml": {
+      "tests": 3,
+      "failures": 0,
+      "errors": 3,
+      "skipped": 0,
+      "passed": 0,
+      "seconds": 0.304,
+      "xmlByteSha256": "30da064fe1806f1cfc500a5fb3bd2eea3bc67f969d7b469f3c92057888269a9d"
+    },
+    "facility-iteration.xml": {
+      "tests": 44,
+      "failures": 3,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 41,
+      "seconds": 60.665,
+      "xmlByteSha256": "d8a40d798b129eaf9d3ed5230102e6354ca9ceec99922a6fc814282a3f029c5b"
+    },
+    "facility-target.xml": {
+      "tests": 193,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 192,
+      "seconds": 115.962,
+      "xmlByteSha256": "b37981f6f434835d30279b8104c3147493dd684d6124703fe3e9dfefe93caa42"
+    },
+    "facility-spec-fixes.xml": {
+      "tests": 21,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 21,
+      "seconds": 17.327,
+      "xmlByteSha256": "8b73b382505404d692d201345cc6f81c79440c6055c503060c947c8a44c6b6d3"
+    },
+    "facility-cleanup-fix.xml": {
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 2,
+      "seconds": 3.189,
+      "xmlByteSha256": "2b9de107fb5f7eb6675c890ef5364448e310086e49388da5197436814ce5bba7"
+    },
+    "facility-final-save-fix.xml": {
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 3,
+      "seconds": 4.926,
+      "xmlByteSha256": "12395f5bfb47a44ce6f46dd62f8a555fa831be9026e2df0fe885a829ab78b9cd"
+    },
+    "facility-quality-compression-red.xml": {
+      "tests": 4,
+      "failures": 2,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 2,
+      "seconds": 1.977,
+      "xmlByteSha256": "68896f0765e6d16cf01a28fb2e0b31efd12ad91e852bcbc95f9b297b7315a015"
+    },
+    "facility-quality-fixes.xml": {
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 6,
+      "seconds": 3.504,
+      "xmlByteSha256": "e020c8dd59d72429825f9457953debde75cfa33f2b9a595dda120e0955203025"
+    }
+  },
+  "offlineWholeRun": {
+    "status": "complete",
+    "planCanonicalSha256": "954713d73b2328006ee12188c107e11db71b24518b83342bd17456bb5b8faa8b",
+    "reportByteSha256": "a1bfa85d1728d5cb82b653ae6c27fdb30ea26410af9aa1f101f65e82ad955674",
+    "reportCanonicalSha256": "59ce2f1695aadb6d949b652a51597d7776ca1447cced84fbfa5100c871715755",
+    "ledgerByteSha256": "25198241e509669c2e115dc9575c9ce9fb8a333a2ec1d1597a48c9f8cacb933b",
+    "publicPackageCanonicalSha256": "6d11f0886bc32018c5ef823eaf3b85ada36462a25ea77e81af9e28a09d4ea7b6",
+    "analysisByteSha256": "faf0bf4cf6fc3f91babf8af8ad10ca2c97f11dbdbd3bc77dddc4dc66bbc888e5",
+    "actualSdkMockHttpRequests": 180,
+    "persistedReservations": 180,
+    "reservationFsyncBeforeEachSend": true,
+    "networkAttempts": 0,
+    "realSupplierCalls": 0,
+    "newAnswersGenerated": 0,
+    "denominatorDroppedResponses": 0,
+    "arms": {
+      "text": {
+        "denominator": 90,
+        "ok": 89,
+        "MODEL_PARSE_FAILED": 1,
+        "notRun": 0
+      },
+      "json_object": {
+        "denominator": 90,
+        "ok": 89,
+        "MODEL_PARSE_FAILED": 1,
+        "notRun": 0
+      }
+    },
+    "cleanupErrors": [],
+    "sdkAsyncClosed": true,
+    "sdkSyncClosed": true,
+    "httpAsyncClosed": true,
+    "mockTransportClosed": true,
+    "budgetClosed": true,
+    "anonymousCards": 180,
+    "qualityStatus": "pending",
+    "humanReview": "pending",
+    "paired": null,
+    "humanOverallQualityImprovement": null
+  },
+  "offlineRunCorrections": [],
+  "corrections": [
+    "初版结束原因及超限观测字段预期修正，原失败日志保留。",
+    "LangChain异常聚合掩盖传输取消；实验边界私有保存原取消并由适配器恢复传播。",
+    "严格校验计划UTC时间与代码诊断结构，补实际HTTP漂移/重复发送及预算前拒绝回归。",
+    "末次报告保存失败不覆盖原执行错误或收尾取消。",
+    "gzip已解压正文重建响应移除旧编码/长度头，避免二次解码；超限摘要标为已观测前缀。"
+  ],
+  "independentReviews": {
+    "specification": "passed-after-fixes",
+    "specFreshTargetTests": 18,
+    "quality": "passed-after-gzip-fix",
+    "qualityFreshTargetTests": 10
+  },
+  "protectedFiles": 19,
+  "unchangedProtectedFiles": 19,
+  "readmeOriginalBytesPreserved": true,
+  "formalAuthorizationAnchorExists": false,
+  "formalLiveExists": false,
+  "formalApprovedExists": false,
+  "oldLedgerLines": [
+    184,
+    181
+  ],
+  "servicesStartedOrRestarted": false,
+  "requestModel": "deepseek-chat",
+  "historicalResponseModel": "deepseek-flash",
+  "knownWarnings": [
+    "Starlette BlockingPortal alias deprecation",
+    "LangGraph allowed_objects default pending deprecation"
+  ],
+  "notVerified": [
+    "real-supplier-format-support",
+    "new-format-error-rate",
+    "new-answer-quality",
+    "current-authoritative-snapshot",
+    "Spring/Python-HTTP-E2E",
+    "browser-interaction",
+    "human-review"
+  ],
+  "meaning": "180份是两模式重放相同历史cap1原文，验证设施与解析；无新生成答案，不证明真实格式效果或质量收益。",
+  "commandResultsByteSha256": "7c3ddfa08b114f55e27a9e3deb84db51b0454cb378f43e0606f041223de0b30c",
+  "controlsFinalByteSha256": "0130a7119562dcf8c06f8bad61541408c7b7eca412858aac94455692693ec297",
+  "independentFinalReviews": {
+    "specification": "passed",
+    "quality": "passed",
+    "fullSuiteRepeated": false
+  }
+}

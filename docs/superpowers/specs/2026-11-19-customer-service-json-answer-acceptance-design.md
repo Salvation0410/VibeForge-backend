@@ -1,6 +1,6 @@
 # 客服 JSON 输出约束下一轮验收设计
 
-日期：2026-11-19。阶段：第十八轮设计已确认，离线设施实施中；真实调用尚未授权。用户已回复“继续下一轮的验收 按推荐方案执行”，确认90题×两模式路线和离线设施实施。承接第十七轮交接，只推进响应格式变量，生产仍为 text/cap1。
+日期：2026-11-19。阶段：第十八轮设施实现及离线验收完成，正式计划pending；真实调用尚未授权。用户已回复“继续下一轮的验收 按推荐方案执行”，确认90题×两模式路线和离线设施实施。承接第十七轮交接，只推进响应格式变量，生产仍为 text/cap1。
 
 ## 问题、范围与方案选择
 
@@ -26,25 +26,25 @@
 
 实际本地模型为 deepseek-chat、温度 0.1、输出 8192、协议预留 4096、上下文窗口 200000。这是本地冻结配置，不是公共默认 65536；不为本实验扩容。Top8、开启重排顺序、单文档 cap1、最终最多三块、1200/3000 字符及 16384 JSON 字节预算保持。每组的实际完整 messages、模型、温度、输出预算相同，HTTP 仅 json_object 组增加固定 `response_format`，text 组不发送该字段。
 
-## 新设施的职责与边界（待确认实施）
+## 已实现设施的职责与边界
 
-新 study 拟为 `rag-json-answer-20261119-v1`，新报告 schema 为 `rag-json-answer-experiment/v1`，两组严格为 `text/json_object`。原 rerank/cap/snapshot/refusal runner 保持 text 保护，不扩展旧 `_runtime_model` 的行为，不把 cap 两组改名伪装成格式实验。
+新 study 为 `rag-json-answer-20261119-v1`，新报告 schema 为 `rag-json-answer-experiment/v1`，两组严格为 `text/json_object`。原 rerank/cap/snapshot/refusal runner 保持 text 保护，不扩展旧 `_runtime_model` 的行为，不把 cap 两组改名伪装成格式实验。
 
-拟新增 `rag_json_answer_contracts.py`、`rag_json_answer_budget.py`、`rag_json_answer_experiment.py` 和相应专项测试。纯输入校验及正式 `answer_once` 复用既有实现；新 runtime 直接构造唯一零重试 SDK 客户端，注入两个分别持有固定模式 Settings 副本的适配器，两者共享同一客户端，不调用基类构造器再覆盖或额外建立 SDK 客户端。适配显式 `_invoke(..., response_format=None)` 参数，并保留原 `answer_customer_service` 的严格业务解析。真实 `.env` 不改，客户端或 Settings 不临时切换全局模式。
+已新增 `rag_json_answer_contracts.py`、`rag_json_answer_budget.py`、`rag_json_answer_experiment.py`、`rag_json_answer_transport.py` 和相应专项测试。纯输入校验及正式 `answer_once` 复用既有实现；新 runtime 直接构造唯一零重试 SDK 客户端，注入两个分别持有固定模式 Settings 副本的适配器，两者共享同一客户端，不调用基类构造器再覆盖或额外建立 SDK 客户端。适配显式 `_invoke(..., response_format=None)` 参数，并保留原 `answer_customer_service` 的严格业务解析。真实 `.env` 不改，客户端或 Settings 不临时切换全局模式。
 
 新准备入口默认离线，`--prepare` 只生成正式 plan 与 `decision=pending` 请求。plan 绑定上述输入、完整两组消息、配对题序、配置、供应商地址指纹、相关代码/uv.lock、当前 SDK 版本、原标注与支付澄清、唯一输出位置及整数 180。当前预验收摘要不是正式 plan 或批准文件；新设施实施后必须重新生成并核对正式绑定，不把本设计中的当前代码摘要当成未来执行摘要。
 
 新 `--live --plan ... --approval ...` 拒绝未批准或任意相关漂移，验证顺序为批准/计划 → 输入/配置/代码/消息 → 新输出和固定账本 → SDK。批准文件严格字段、整数额度及 study/plan/output 全匹配，软件结构校验不能认证批准人，Agent 仍须有可信用户对正式计划和新额度的明确授权。
 
-正式账本拟固定于 `tmp/rag-json-answer-20261119/json-answer-authorization.jsonl`，不接受任意 `--ledger` 参数。独占创建，发送前 flush/fsync 预占该题该组，重复 key、同授权重启、换输出目录或写入不确定均失败关闭。失败和取消不返还额度；进程崩溃后不自动续跑、不删除锚点重建，本轮没有恢复额度或严格计费 exactly-once 保证。
+正式账本固定于 `tmp/rag-json-answer-20261119/json-answer-authorization.jsonl`，不接受任意 `--ledger` 参数。独占创建，发送前 flush/fsync 预占该题该组，重复 key、同授权重启、换输出目录或写入不确定均失败关闭。失败和取消不返还额度；进程崩溃后不自动续跑、不删除锚点重建，本轮没有恢复额度或严格计费 exactly-once 保证。
 
 两组各 90 占位先持久化，单并发按题交替 text→json_object/json_object→text，最大 180 次新回答。模型前输入/预算/账本失败立即停止；任意 HTTP 400 在记录后停止，不继续试 text 或静默探测支持；其他调用错误连续三次停止，未运行项保持。SDK 和应用重试均为 0；不改正式共享客户端现有默认重试策略。
 
-预算必须包围实际发送边界，捕获序列化 HTTP body，核对实际模式、完整消息和预算再发送。报告保留预占/发送区分、原文及规范摘要、usage、SDK/请求模型和响应模型、结束原因、耗时与稳定错误码。SDK parse 的 length/content_filter 可能早于 `AIMessage` 抛错，须在本地 HTTP transport 层留存有界响应观测，不把缺少 `AIMessage` 当成未发送或未计费；响应捕获超限失败关闭、保存长度/摘要，不截断凑出成功 JSON。禁止记录 Authorization、真实 key、请求头、完整供应商 URL 或异常正文。
+预算必须包围实际发送边界，捕获序列化 HTTP body，核对实际模式、完整消息和预算再发送。报告保留预占/发送区分、原文及规范摘要、usage、SDK/请求模型和响应模型、结束原因、耗时与稳定错误码。观测上限1 MiB，摘要与长度按解压实体计算；gzip重建去除失效编码/长度头。JSON沿原SDK parse终态门禁，text仅拒绝length/content_filter；不扩展为任意非stop结束拒绝。SDK parse 的 length/content_filter 可能早于 `AIMessage` 抛错，须在本地 HTTP transport 层留存有界响应观测，不把缺少 `AIMessage` 当成未发送或未计费；响应捕获超限失败关闭、保存长度/摘要，不截断凑出成功 JSON。禁止记录 Authorization、真实 key、请求头、完整供应商 URL 或异常正文。
 
 ## 离线设施验收与真实裁决
 
-新设施确认实施后先跑 Fake/完整 SDK MockTransport：
+设施验收已按以下要求执行 Fake/完整 SDK MockTransport：
 
 1. 准备不构造 SDK/存储/Embedding/BGE、不创建正式账本/live；每题两模式的正式上下文与消息逐字相同。
 2. 非法批准、布尔/浮点额度、漂移输入/代码/配置/模式/输出、跨 study、已用账本、预占/fsync 失败全部在发送前拒绝。
@@ -61,8 +61,8 @@
 
 保留题级配对四格和差值，质量分析按新 study 输出 jsonObjectOnly/textOnly/jsonObjectMinusText，不改旧分析键。报告仅说明本次观测；两组均无格式错误也不能证明约束降低故障率，不自动启用生产 JSON、cap2 或支付知识。当前权威快照、Spring/Python HTTP、浏览器交互不在本实验验收范围。
 
-## 当前交付、确认与下一步
+## 当前交付与下一步
 
-本轮到当前只完成输入预验收、前置回归、候选设计和保护文件核对。原始材料位于 `tmp/rag-json-answer-20261119/`，脱敏预验收结果见 `doc/knowledge/product/evaluation/results/json-answer-preflight-20261119-v1.json`；没有新 runner、正式 plan、approved 文件、正式账本或 live 输出，尚无真实格式效果成绩。
+设施实现提交`c1116fd`，完整离线run_live完成180次实际SDK/MockTransport发送与持久化预占，各组89接受/1历史解析错误。180匿名卡全部pending；网络尝试和新真实操作均0，原响应重播不证明新格式效果或质量改善。完整pytest 2103通过/25跳过，compileall/lock通过，独立规格和质量审查通过。严格计划字段、取消传播及gzip问题的红绿修正证据保留，详见[设施聚合](../../../doc/knowledge/product/evaluation/results/json-answer-facility-20261119-v1.json)及[逐轮交接](../../../doc/customer-service-rag-rounds-handoff.md)。
 
-待用户确认推荐的 90 题×两模式路线后，再编写完整实施计划并交付零真实调用设施验收；设施就绪后以实际正式 plan/manifest 申请独立 180 次额度。若用户选择 12 次探测，须改用明确的六题及独立限额方案，不先执行 12 次再将其当作额外免费探测。
+实际正式`tmp/rag-json-answer-20261119/prepared/plan.json`规范SHA256为`9ad2784956f2aeebbf0f5141f041e950d0a8c7ba82a92324ceb742783bb17625`，批准请求仍严格pending。它绑定24份关键执行文件及依赖、当前SDK、完整两组输入和唯一输出。没有真实approved/正式账本/live；下一步由用户对该实际plan明确批准最多180次新Chat后才开始。失败和取消也占额度，不补跑；新增Embedding/BGE/INDEX/生产写入均不在授权范围。生产text/cap1、旧标注/支付语料、19份保护材料及用户原修改保持，供应商效果、当前E2E和人工验收仍未完成。

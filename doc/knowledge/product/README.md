@@ -218,6 +218,10 @@ cap2 改变 65 题选块，审后新增完整支持 10 项，本集未观察到�
 
 本轮完整 Python 测试 **2011 通过/25 跳过**，compileall 与依赖锁检查退出 0，保留两条依赖弃用警告。真实 `.env`、生产 text/cap1 和支付语料保持，本轮未启用候选、未启动服务，新增真实 Chat/Embedding/BGE/INDEX/生产写入均为 0。供应商支持与效果对照须另定绑定模式及实现的新计划和额度，不能复用已耗尽账本；人工验收仍待办。
 
-### 2026-11-19 第十八轮：真实格式对照的输入预验收
+### 2026-11-19 第十八轮：JSON格式对照设施离线交付
 
-已核对90组cap1上下文和完整消息与第十六轮逐字一致，前置回归122通过，19份保护字节不变。推荐以这90题分别重新生成text/json_object，最多180次新回答，其他输入、提示、预算、重排及配额保持；12次探测只能提供小样本兼容性观察，复用旧text答案会引入时间差。当前仅完成[候选设计](../../../docs/superpowers/specs/2026-11-19-customer-service-json-answer-acceptance-design.md)及[脱敏预验收](evaluation/results/json-answer-preflight-20261119-v1.json)，没有新运行器、正式plan、approved文件或真实效果成绩。需先确认路线、交付零真实调用设施，再以正式计划单独批准新额度；旧耗尽账本不复用。错误/取消/未运行保留分母，生产text/cap1及人工待办保持，具体边界见[第十八轮交接](../../customer-service-rag-rounds-handoff.md)。
+已按确认的90题×text/json_object推荐路线交付独立冻结契约、固定预占账本及运行器。唯一共享零重试SDK在实际HTTP载荷校验后、flush/fsync预占后才发送；两组完整消息和cap1上下文相同，仅JSON组增加response_format。失败/取消不补跑，400立即停，其他调用错误连续三次停，未运行保留各组90分母。响应在SDK解析前有界观测，1 MiB上限按解压实体计算，超限只记已观测前缀；新盲审study严格隔离，pending不产出质量收益。
+
+真实历史输入完整走新run_live与本地SDK/MockTransport共180次发送、180次持久化预占，网络尝试0。两模式各重放相同90份历史cap1原文，各89正常/1解析错误；180匿名卡全部pending，无新生成答案或真实供应商效果。完整Python本轮 **2103通过/25跳过**，compileall及依赖锁检查通过，规格/质量审查修复严格计划校验、取消掩盖和gzip重复解码后通过，原红测和失败日志保留。
+
+正式pending计划已生成，规范SHA256为`9ad2784956f2aeebbf0f5141f041e950d0a8c7ba82a92324ceb742783bb17625`，绑定24份关键实现/依赖摘要、SDK及唯一输出；尚无正式approved、账本或live。真实执行须对该实际计划单独明确批准最多180次新Chat，旧耗尽账本不复用。生产text/cap1、支付语料及用户原修改保持，当前权威快照、双服务/浏览器E2E和人工验收未完成。前期122项预验收保留为历史，见[脱敏预验收](evaluation/results/json-answer-preflight-20261119-v1.json)；本次证据、故障修正和下一步见[设施聚合](evaluation/results/json-answer-facility-20261119-v1.json)、[设计](../../../docs/superpowers/specs/2026-11-19-customer-service-json-answer-acceptance-design.md)及[第十八轮交接](../../customer-service-rag-rounds-handoff.md)。

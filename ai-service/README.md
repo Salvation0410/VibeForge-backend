@@ -755,3 +755,19 @@ JSON 对象约束不能保证业务字段、引用或答案事实正确，返回
 固定 text 的 `rag_rerank_experiment`、`rag_cap_experiment`（包括准备阶段）、`rag_snapshot_experiment` 和 `rag_refusal_experiment` 在非 text 配置下前置拒绝，防止旧实验静默改变条件或消耗资源后才失败。原冻结报告、schema、授权账本和 cap settings_manifest 不重写。后续 JSON 真实对照需要绑定请求模式和实现的新计划、单独额度，不能复用耗尽账本。
 
 本项验证使用真正 SDK 和本地 MockTransport，覆盖参数序列化、并发隔离、严格解析、故障/取消与旧入口保护；历史 180 份原响应在双模式下回放仅说明解析兼容，不代表供应商在 JSON 约束下新生成的结果。本轮没有启用正式配置或新增真实调用，供应商是否遵守约束、格式错误率及答案质量变化仍未实测。结果与限制见[第十七轮交接](../doc/customer-service-rag-rounds-handoff.md)。
+
+### 第十八轮：独立 text/json_object 回答对照设施（2026-11-19）
+
+`ai_service.orchestration.rag_json_answer_experiment` 复用第十六轮冻结的90组 cap1 上下文及完整消息，两组只改变响应格式。默认离线核对，不初始化在线模型、Embedding 或 BGE。准备命令只生成计划和 `decision=pending` 请求：
+
+```powershell
+uv run --offline python -m ai_service.orchestration.rag_json_answer_experiment --prepare --output ../tmp/rag-json-answer-20261119/prepared
+```
+
+真实执行命令为 `--live --plan <plan.json> --approval <approval.json>`，需用户对实际正式计划另行明确批准最多180次新 Chat；当前离线设施验收没有该授权。计划绑定历史输入、完整两组消息、配置和供应商地址指纹、代码/依赖/SDK、标注及唯一输出。批准必须严格为新 study、整数180及匹配的计划摘要和输出，相关漂移在资源和发送前拒绝。固定账本为 `tmp/rag-json-answer-20261119/json-answer-authorization.jsonl`，独占创建，不提供 `--ledger`、补跑或重启恢复额度。
+
+两固定 Settings 适配器共用一个零重试 ChatOpenAI；实际 HTTP body 通过完整字段校验后先 flush/fsync 预占再尝试发送。每题两组交替、单并发，失败和取消也占额度。400立即停止，其他调用错误连续三次停止，模型前、账本、响应观测或保存失败立即停止；180占位保留未运行项和各组90分母。不补引号、不降级 text、不增加探测调用。生产客户端原有重试策略及默认 text/cap1 保持。
+
+响应观测上限为1 MiB；SDK解析前保留答案原文、解压实体摘要、规范usage、实际响应模型及结束原因，超限只记已观测前缀的长度/hash并失败关闭。JSON组保留SDK parse的length/content_filter提前异常，text组另行拒绝这些非正常结束；不把缺少AIMessage当作未发送。不记录请求头、供应商完整URL、凭据或异常正文。
+
+新报告为 `rag-json-answer-experiment/v1`，study为 `rag-json-answer-20261119-v1`。盲审工具接受 text/json_object，匿名包移除模式和内部诊断，pending不能生成质量收益；新配对差值为 `jsonObjectMinusText`，旧实验键保持。完整SDK/MockTransport离线发送及历史原文回放不证明供应商实际支持或质量提升。正式 pending 计划、精确测试和未验收项见[第十八轮交接](../doc/customer-service-rag-rounds-handoff.md)及[设施聚合](../doc/knowledge/product/evaluation/results/json-answer-facility-20261119-v1.json)。当前权威快照、双服务/浏览器E2E和人工裁决仍待办。
