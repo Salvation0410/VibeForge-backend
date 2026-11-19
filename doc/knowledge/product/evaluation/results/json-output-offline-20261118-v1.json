@@ -1,0 +1,145 @@
+{
+  "schemaVersion": "rag-json-output-offline-result/v1",
+  "date": "2026-11-19",
+  "designDate": "2026-11-18",
+  "round": 17,
+  "scope": "offline-request-format-and-parser-compatibility",
+  "configuration": {
+    "environmentVariable": "AI_SERVICE_RAG_ANSWER_RESPONSE_FORMAT",
+    "default": "text",
+    "allowedValues": [
+      "text",
+      "json_object"
+    ],
+    "textOmitsResponseFormat": true,
+    "jsonObjectIsCustomerRequestOnly": true,
+    "effectiveOnRestart": true,
+    "realEnvChanged": false,
+    "jsonObjectDeployed": false,
+    "productionCap": 1,
+    "sharedClientChanged": false,
+    "strictParserChanged": false,
+    "applicationRetryAdded": false,
+    "automaticTextFallback": false,
+    "existingSdkDefaultRetriesUnchanged": true
+  },
+  "implementationCommits": {
+    "customerRequest": "77a26aaa23a79b0a4bd06ebc290e8b311835e5ed",
+    "legacyExperimentGuards": "da8970941ed063bb5d35cbd7ed599949530577bc"
+  },
+  "verification": {
+    "pythonFull": {
+      "tests": 2036,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 25,
+      "passed": 2011
+    },
+    "pythonFullExitCode": 0,
+    "pythonFullSeconds": 192.972,
+    "pythonCompileallExitCode": 0,
+    "uvLockCheckExitCode": 0,
+    "warnings": [
+      "starlette anyio.abc.BlockingPortal alias deprecated",
+      "langgraph checkpoint allowed_objects default pending deprecation"
+    ],
+    "task1PriorTarget": {
+      "tests": 257,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 257
+    },
+    "task2PriorRed": {
+      "tests": 16,
+      "failures": 9,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 7
+    },
+    "task2PriorTarget": {
+      "tests": 132,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 132
+    },
+    "freshIndependentNewFilesPassed": 122,
+    "coverage": [
+      "configuration and invalid types",
+      "complete SDK HTTP payload and identical messages",
+      "concurrent customer/generation isolation with same client",
+      "strict answer/refusal/citation rejection",
+      "400 no fallback, length/content_filter failure, cancellation",
+      "budget before HTTP and tracing suppressed",
+      "other model entries omit response_format",
+      "four legacy experiment guards before output/resources/reservation"
+    ],
+    "commands": [
+      "uv run --offline python -m compileall -q src",
+      "uv run --offline pytest --junitxml=../tmp/rag-json-output-20261118/python-full-20261119.xml",
+      "uv lock --check --offline",
+      "uv run --offline python ../tmp/rag-json-output-20261118/replay-sdk-20261119.py",
+      "uv run --offline python ../tmp/rag-json-output-20261118/check-controls.py controls-final-20261119.json"
+    ],
+    "javaTestRun": false,
+    "frontendTestRun": false,
+    "browserVerified": false
+  },
+  "historicalSdkReplay": {
+    "sourceRound": 16,
+    "historicalRawResponses": 180,
+    "localRecords": 360,
+    "modes": {
+      "text": {
+        "accepted": 177,
+        "rejected": 3,
+        "mockHttpSends": 180
+      },
+      "json_object": {
+        "accepted": 177,
+        "rejected": 3,
+        "mockHttpSends": 180
+      }
+    },
+    "networkAttempts": 0,
+    "newRealCalls": 0,
+    "sourceModified": false,
+    "pairedRawAndMessagesHashesMatch": true,
+    "perRequestModeCaptured": true,
+    "sdkMaxRetries": 0,
+    "newFormatGenerationEffectMeasured": false,
+    "requestedModel": "deepseek-chat",
+    "historicalReportedModel": "deepseek-flash",
+    "meaning": "相同历史原文经两个请求模式回放，只证明参数传输和解析兼容，不能证明供应商遵守新约束或降低格式错误率。"
+  },
+  "controls": {
+    "protectedFiles": 16,
+    "unchangedExceptReadmeTaskAppend": 16,
+    "readmeUserOriginalBytesPreserved": true,
+    "unrelatedBackendPlanPreserved": true,
+    "frontendExistingChangesPreserved": 3,
+    "rerankLedgerLines": 184,
+    "capLedgerLines": 181
+  },
+  "newRealOperations": {
+    "chat": 0,
+    "embedding": 0,
+    "bge": 0,
+    "index": 0,
+    "productionWrites": 0
+  },
+  "evidence": {
+    "directory": "tmp/rag-json-output-20261118/",
+    "sourceReportByteSha256": "c34af6aa6b5f96f654e3255ccd239d8da5474ace2db3fc3337b270dcb3dbb704",
+    "replayByteSha256": "e5f01b3f4cabc50b9b6adffa341550a7000d8b4b4d7b2419b8ae9530b2b75628",
+    "pythonFullXmlByteSha256": "abfa11ea479818df902853debdb53b4fe6b865820893ff6d3e97514472a672e2",
+    "replayScriptByteSha256": "9402e66dd02a18d9691547d701d141eb7e2dc9fa96d1ef513228f0dfc3d94b4c"
+  },
+  "pending": [
+    "provider json_object support and compliance",
+    "new real same-input format comparison with separate approval and budget",
+    "human adjudication",
+    "current Spring/Python end-to-end and browser verification"
+  ]
+}

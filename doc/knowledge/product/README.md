@@ -209,3 +209,11 @@ cap2 改变 65 题选块，审后新增完整支持 10 项，本集未观察到�
 四个改善题确实使用新增同文档证据；退步包括冗余 FAQ 引用和坏 JSON，不能将随机生成协议错误直接归因 cap2。两组下载负前置的隐含支持有标注疑义，未限定 Vue 的部署构建规则范围错误也仍存在。后置支付新口径两组均未直接说明当前不支持支付，单列未满足，不覆盖冻结主成绩，也未发布新语料。生产默认仍为 cap1。
 
 本轮工具定向 **199 通过**；已落盘响应经正式解析器离线复现 177 接受/3 拒绝，无新调用。cap1/cap2 total tokens 为 71309/71786，回答均值约 981/971ms，p95 1445/1548ms；无冻结计费单价，不推算金额。完整方法、错误、复核修正及下一轮 JSON 输出约束建议见[第十六轮交接](../../customer-service-rag-rounds-handoff.md)，脱敏汇总见[真实答案对照](evaluation/results/cap-answer-20261118-v1.json)。旧设施零真实结果保留为历史；新旧账本均已耗尽，不得重建或换目录继续使用。
+
+### 2026-11-19 第十七轮：客服 JSON 输出约束离线交付
+
+`AI_SERVICE_RAG_ANSWER_RESPONSE_FORMAT` 默认 `text`，只允许 `text/json_object`，启动时读取，修改后需重启。text 保留原请求；json_object 仅给该次客服回答增加固定 `response_format`，不修改共享客户端或其他生成请求。原提示、检索、配额、严格字段/引用/拒答校验保持；不修补 JSON、不新增格式重试、不自动降级。供应商不支持或 SDK parse 的 length/content_filter 错误按调用失败处理，坏 JSON 仍为解析失败；正式客户端原 SDK 默认重试仍存在。
+
+四类旧实验在非 text 下前置拒绝，冻结 schema、settings_manifest、报告及耗尽账本保持。完整 SDK→本地 MockTransport 覆盖请求序列化、并发隔离、错误与取消；历史 180 份相同原文在两模式各回放 177 接受/3 拒绝，不能称新约束下生成的答案或格式错误率改善。完整测试与脱敏汇总见[离线验证结果](evaluation/results/json-output-offline-20261118-v1.json)，命令、失败记录及保护核对见[第十七轮交接](../../customer-service-rag-rounds-handoff.md)。
+
+本轮完整 Python 测试 **2011 通过/25 跳过**，compileall 与依赖锁检查退出 0，保留两条依赖弃用警告。真实 `.env`、生产 text/cap1 和支付语料保持，本轮未启用候选、未启动服务，新增真实 Chat/Embedding/BGE/INDEX/生产写入均为 0。供应商支持与效果对照须另定绑定模式及实现的新计划和额度，不能复用已耗尽账本；人工验收仍待办。

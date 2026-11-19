@@ -780,29 +780,49 @@ uv run python ../tmp/rag-cap-answer-20261118/replay-real-parser.py
 
 证据选择仍需后续独立研究：cap2 无法覆盖同文档第三块、Top8 未召回或生成遗漏，不能继续通过扩大配额同时混入其他变量。支付候选应另建知识/标注版本，人工验收模板及下载负前置疑义保持待办，不在本轮直接推广。
 
-## 第十七轮：客服 JSON 输出约束方案准备（2026-11-18，待确认）
+## 第十七轮：客服 JSON 输出约束离线实施（2026-11-18，2026-11-19 收尾）
 
 ### 问题、证据与方案取舍
 
-用户要求继续下一轮优化，本阶段承接第十六轮的 JSON 格式故障方向。历史 180 次真实回答中三份在 `citedChunkIds` 前缺起始引号，均 finish_reason=stop；177 接受/3 拒绝属于上轮原始响应与解析回放，不能记为本轮新测试。只读源码核对确认正式客服当前仅通过提示要求 JSON，尚无供应商 `response_format`。
+用户要求继续下一轮优化，并确认“按推荐方案实施”，本轮承接第十六轮的 JSON 格式故障方向。历史 180 次真实回答中三份在 `citedChunkIds` 前缺起始引号，均 finish_reason=stop；这是历史诊断依据，不是本轮新生成结果。实施前正式客服仅通过提示要求 JSON，没有供应商 `response_format`。
 
-候选方案为默认 text、客服单次请求可显式配置 json_object；仍用现有严格字段、引用及拒答校验。相较强化提示，该方案增加传输层格式约束；相较 strict json_schema，适配面更宽、改动较小，但不保证代理支持、语义正确或字段符合业务要求。完整设计与三个方案取舍见 [JSON 输出约束候选设计](../docs/superpowers/specs/2026-11-18-customer-service-json-output-design.md)。具体请求模式、兼容边界尚待用户确认，当前没有实施或启用。
+已实现默认 text、客服单次请求可显式配置 json_object；仍用现有严格字段、引用及拒答校验。相较强化提示，该方案增加传输层格式约束；相较 strict json_schema，适配面更宽、改动较小，但不保证代理支持、语义正确或字段符合业务要求。完整设计与三个方案取舍见 [JSON 输出约束设计](../docs/superpowers/specs/2026-11-18-customer-service-json-output-design.md)，[实施计划](../docs/superpowers/plans/2026-11-18-customer-service-json-output.md)沿用当前 dev 检出和本地依赖，保持证据路径与用户修改。
 
-### 拟定触发、流程、模块与边界
+### 触发、流程、模块与边界
 
-拟新增 `AI_SERVICE_RAG_ANSWER_RESPONSE_FORMAT=text|json_object`，默认 text 不发送任何新字段；只有 `OpenAICompatibleModel.answer_customer_service` 显式 opt-in 时将固定格式参数传入该次调用。不修改共享客户端，不影响生成、路由、审查、修复、预算或 tracing；不做字符串修补、格式重试或静默 text 降级。
+新增 `AI_SERVICE_RAG_ANSWER_RESPONSE_FORMAT=text|json_object`，非法值在 Settings 加载时拒绝，默认 text 不发送任何新字段。配置启动时读取，修改后重启生效，改回 text 并重启可回退。`answer_customer_service` 构造原消息后，仅在可信配置为 json_object 时显式传参给 `_invoke`；预算和 tracing 抑制仍先执行。text 保留 `_invoke(messages)`，兼容旧子类。共享 ChatOpenAI 不变，格式仅约束本次客服请求，生成、路由、审查、修复、需求整理和输入审核均不携带此字段。
 
-供应商/SDK 报错、忽略约束返回坏 JSON、length/content_filter 提前报错和取消必须分别验收。客户端原有 SDK 默认重试并未在此阶段改变，不得称正式服务零重试。旧 rerank、cap 独立 checker、snapshot 与 refusal 实验拟在资源、输出及预算动作前拒绝非 text，以免改变冻结条件或因旧 `_invoke` 参数不兼容消耗额度。
+返回后仍严格校验 JSON 字段、最多三条唯一且属于实际 contexts 的引用及空拒答协议；坏 JSON/协议错误保持 `MODEL_PARSE_FAILED`，供应商不支持、SDK length/content_filter 异常沿调用失败返回系统 fallback，取消照常传播。不修补字符串，不新增应用层格式重试或自动 text 降级。正式客户端原有 SDK 默认重试保持，不能称正式服务零重试；本地验收显式 SDK 零重试，仅证明固定测试路径没有第二次发送。
 
-### 本阶段验证与交付状态
+四类旧实验在非 text 配置下、资源/输出/授权预占前拒绝：rerank 保留 `UNSUPPORTED_BASELINE_SETTINGS`，cap 独立 checker 保留 `SETTINGS_CHANGED`，snapshot/refusal 保留 `RAG_EVAL_UNSUPPORTED_BASELINE_CONFIG`。冻结 schema、cap settings_manifest、旧 pin 和历史报告不变。不改变检索、文档配额、语料、支付口径或公共 API。
 
-本轮目前仅完成只读调查、设计自审、文档事实与保护文件核对；没有生产代码、依赖或真实配置改动，没有运行 Python/Java/前端测试、启动服务或调用真实模型。新增 Chat、Embedding、BGE、INDEX 和生产写入均为 0；上轮耗尽额度不复用。文档提交哈希随本阶段回复报告。
+### 离线验证、失败记录与交付状态
 
-16 份保护文件以 `tmp/rag-json-output-20261118/initial-state.json` 为基线，涵盖真实 `.env`、两份历史账本、原报告/回放/评审、人工模板、支付澄清与两仓既有修改。既有 README 围栏修改和取消回归计划不纳入本轮提交，前端三项修改保留。人工验收继续待办，生产 cap1 与支付语料保持原状态。
+任务一在旧代码上先运行红测，随后完整 SDK/MockTransport 定向测试 **257 通过**；任务二红测计数记录为 16 项中 9 失败，修正后相关回归 **132 通过**。2026-11-19 独立规格审查重新执行两个新增文件，共 **122 通过**，规格和质量审查无阻断问题；原定向记录及红测保留在 `tmp/rag-json-output-20261118/`，不是本次完整测试成绩。
 
-### 确认后的下一步
+本次只读重新回放第十六轮全部 180 份原响应，每份分别通过正式适配器、真正 LangChain/OpenAI SDK 与本地 MockTransport；共 360 次本地发送，text/json_object 各 **177 接受/3 拒绝**。校验完整消息（历史 LangChain human 角色对应 HTTP user）、模型、温度、输出预算、单次请求模式、原文及消息 hash，socket 网络尝试为 0，旧报告未写。相同坏 JSON 在两模式仍拒绝，不能推断供应商新生成的格式错误率改善或答案质量提升。请求 deepseek-chat/历史响应自报 deepseek-flash 的身份差异保留。
 
-确认完整设计后编写实施计划，再验证真实 SDK→本地 MockTransport 参数序列化、同适配器并发隔离、严格解析、失败关闭、预算与取消，以及旧实验前置拒绝。历史 180 份响应只读回放到新目录，用于验证解析兼容，不冒充新约束下生成的答案；新增代码按范围补齐文档并执行 Python compileall、全量 pytest、锁检查及限定中文提交。供应商实际遵守程度、故障率和答案质量仍需新计划及单独额度的同条件真实对照，离线通过不能代替这些结果。
+前次回放首试因 `_env_file=None` 缺少必填占位配置失败，第二次误将 LangChain human 与 HTTP user 做全等比较失败；补固定虚假配置及仅角色协议转换后成功。两次原失败日志保留，本次复验创建独立 `sdk-historical-replay-20261119.json`，不覆盖前次回放或旧真实报告。这些是离线设施修正，没有调用真实供应商。
+
+2026-11-19 完整 pytest **2011 通过、25 跳过、0 失败/错误**，耗时约 193 秒；保留 Starlette 的 BlockingPortal 别名弃用及 LangGraph checkpoint allowed_objects 默认值待弃用两条警告。compileall 和依赖锁检查均退出 0，锁检查解析 150 个包；未启用可选真实基础设施集成测试。精确计数、摘要及命令见 [脱敏离线结果](knowledge/product/evaluation/results/json-output-offline-20261118-v1.json)。命令在 `ai-service` 执行：
+
+```powershell
+uv run --offline python -m compileall -q src
+uv run --offline pytest --junitxml=../tmp/rag-json-output-20261118/python-full-20261119.xml
+uv lock --check --offline
+uv run --offline python ../tmp/rag-json-output-20261118/replay-sdk-20261119.py
+uv run --offline python ../tmp/rag-json-output-20261118/check-controls.py controls-final-20261119.json
+```
+
+实现提交为 `77a26aa`（客服请求配置与 SDK 边界）、`da89709`（旧评测保护），文档/结果提交哈希随最终回复报告。未修改依赖、Java 或前端代码，本轮未重跑 Java/前端构建或浏览器验收。正式 `.env`、生产 text/cap1、支付知识保持，未启用 JSON 候选或启动/重启服务；新增真实 Chat、Embedding、BGE、INDEX 和生产写入均为 **0**。原始回放和测试日志只留忽略目录，提交脱敏聚合与必要文档。
+
+16 份保护文件以 `tmp/rag-json-output-20261118/initial-state.json` 为基线，涵盖真实 `.env`、两份历史账本、原报告/回放/评审、人工模板、支付澄清与两仓既有修改。README 原有字节仅允许追加本轮说明，原围栏 hunk 精确隔离、不提交；其他 15 份要求字节不变。旧/新耗尽账本分别保持 184/181 行，不能重建或换目录复用。取消回归计划不纳入提交，前端三项修改保留，人工验收继续待办。
+
+### 下一轮建议与未验收项
+
+下一轮如验证实际格式效果，应另建同时绑定 text/json_object、完整消息、SDK 行为、模型身份及实现摘要的新计划和独立额度，只改变响应格式这一变量。先准备可审阅的计划和零真实调用设施，再由用户明确授权；本轮不新增真实入口或预算，旧 runner 不扩展。代理可能拒绝/忽略参数，故障必须保留分母，不能自动降级、补跑或字符串修补。
+
+供应商实际支持、格式错误率、答案质量、当前双服务 E2E 和人工裁决均未验收。cap2 仍是候选，支付知识及标注疑义另行处理，不与格式效果同时推广。离线解析兼容和并发隔离不能替代这些证据。
 
 ## 以后每轮必须使用的交接格式
 

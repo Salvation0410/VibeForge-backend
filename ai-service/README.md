@@ -745,3 +745,13 @@ uv run python -m ai_service.orchestration.rag_cap_experiment --live --plan ../tm
 盲审入口沿用 `rag_blind_review`：旧 study 仅接受 `rerank_off/rerank_on`，新 study 仅接受 `cap1/cap2`，报告、公共包、私有映射和评审须属于同一 study。新分析使用 `cap1Only`、`cap2Only` 和 `cap2MinusCap1`；旧分析键保持兼容。匿名卡不携带组别、配额、分数、usage 或耗时，全部 180 项包括故障仍保留。待审模板不产生提升值，代理审阅始终保持人工验收待办。
 
 来源仅投影正式六项公开标量元数据，拒绝对象/数组、错误类型及长度/版本越界；额外诊断不进入卡片 JSON/Markdown，旧 `chunk_id` 单字段材料仍兼容。第十五轮最终 Python 全套 1889 通过/25 跳过，完整运行器 180 次 Fake SDK 与匿名包 pending 导入通过；新增真实调用为零，不能据此声称新答案质量已通过。原失败、修正、离线边界及具体新额度请求见[第十五轮交接](../doc/customer-service-rag-rounds-handoff.md)。
+
+### 客服回答的可选 JSON 输出约束
+
+`AI_SERVICE_RAG_ANSWER_RESPONSE_FORMAT` 只接受 `text` / `json_object`，默认 `text`。启动时读取，修改配置并重启才生效。text 保持现有请求，不发送 `response_format`；json_object 仅在 `OpenAICompatibleModel.answer_customer_service` 的该次调用携带 `response_format={"type":"json_object"}`。共享客户端和其他路由、生成、修复、需求整理、输入审核及 Reviewer 请求均不设置此参数，原提示与 token/字节预算不变。
+
+JSON 对象约束不能保证业务字段、引用或答案事实正确，返回内容仍必须通过原严格 Pydantic、唯一且属于本次 contexts 的引用和空拒答协议校验。坏 JSON 或业务协议错误继续为 `MODEL_PARSE_FAILED`；供应商不支持、SDK length/content_filter 等异常仍按调用失败返回系统 fallback。取消沿原路径传播。本功能不修补字符串、不新增格式重试或自动 text 降级；正式共享客户端已有的 SDK 默认重试策略仍然存在。
+
+固定 text 的 `rag_rerank_experiment`、`rag_cap_experiment`（包括准备阶段）、`rag_snapshot_experiment` 和 `rag_refusal_experiment` 在非 text 配置下前置拒绝，防止旧实验静默改变条件或消耗资源后才失败。原冻结报告、schema、授权账本和 cap settings_manifest 不重写。后续 JSON 真实对照需要绑定请求模式和实现的新计划、单独额度，不能复用耗尽账本。
+
+本项验证使用真正 SDK 和本地 MockTransport，覆盖参数序列化、并发隔离、严格解析、故障/取消与旧入口保护；历史 180 份原响应在双模式下回放仅说明解析兼容，不代表供应商在 JSON 约束下新生成的结果。本轮没有启用正式配置或新增真实调用，供应商是否遵守约束、格式错误率及答案质量变化仍未实测。结果与限制见[第十七轮交接](../doc/customer-service-rag-rounds-handoff.md)。
