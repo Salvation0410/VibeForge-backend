@@ -38,6 +38,9 @@ _STUDIES = {study.study_id: study for study in (
     Study('rag-cap-20261118-answer-round-v1', ('cap1', 'cap2'), 'rag-cap-analysis/v1',
           ('cap1Only', 'cap2Only', 'cap2MinusCap1'),
           '历史候选与BGE结果回放；仅统计本轮新回答耗时，未计当前检索/BGE耗时，不是在线E2E'),
+    Study('rag-json-answer-20261119-v1', ('text', 'json_object'), 'rag-json-answer-analysis/v1',
+          ('textOnly', 'jsonObjectOnly', 'jsonObjectMinusText'),
+          '历史 cap1 完整输入；仅统计本轮两格式新回答耗时，不是在线E2E'),
 )}
 
 
@@ -98,7 +101,7 @@ class Reviewer(Strict):
 
 class Reviews(Strict):
     schemaVersion: Literal['rag-blind-reviews/v1']
-    studyId: Literal['rag-rerank-20261118-first-round-v1', 'rag-cap-20261118-answer-round-v1']
+    studyId: Literal['rag-rerank-20261118-first-round-v1', 'rag-cap-20261118-answer-round-v1', 'rag-json-answer-20261119-v1']
     publicPackageSha256: str
     reviewer: Reviewer
     reviews: list[CardReview]
@@ -139,6 +142,9 @@ def _public_sources(sources):
 
 def validate_results(report, rubric):
     study = _study(report.get('studyId'))
+    if (study.study_id == 'rag-json-answer-20261119-v1'
+            and report.get('schemaVersion') != 'rag-json-answer-experiment/v1'):
+        fail('RESULT_SCHEMA_INVALID')
     expected = {e['id'] + ':' + arm for e in rubric['entries'] for arm in study.arms}
     records = report.get('results', [])
     if (len(records) != 180
