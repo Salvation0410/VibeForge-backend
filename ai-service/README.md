@@ -771,3 +771,11 @@ uv run --offline python -m ai_service.orchestration.rag_json_answer_experiment -
 响应观测上限为1 MiB；SDK解析前保留答案原文、解压实体摘要、规范usage、实际响应模型及结束原因，超限只记已观测前缀的长度/hash并失败关闭。JSON组保留SDK parse的length/content_filter提前异常，text组另行拒绝这些非正常结束；不把缺少AIMessage当作未发送。不记录请求头、供应商完整URL、凭据或异常正文。
 
 新报告为 `rag-json-answer-experiment/v1`，study为 `rag-json-answer-20261119-v1`。盲审工具接受 text/json_object，匿名包移除模式和内部诊断，pending不能生成质量收益；新配对差值为 `jsonObjectMinusText`，旧实验键保持。完整SDK/MockTransport离线发送及历史原文回放不证明供应商实际支持或质量提升。正式 pending 计划、精确测试和未验收项见[第十八轮交接](../doc/customer-service-rag-rounds-handoff.md)及[设施聚合](../doc/knowledge/product/evaluation/results/json-answer-facility-20261119-v1.json)。当前权威快照、双服务/浏览器E2E和人工裁决仍待办。
+
+### 第十九轮：text/json_object 真实回答对照（2026-11-19）
+
+第十八轮的零真实调用结果描述设施交付阶段；随后用户对正式计划明确批准最多180次新Chat，当前固定账本已用尽。实际计划规范SHA256为`9ad2784956f2aeebbf0f5141f041e950d0a8c7ba82a92324ceb742783bb17625`，原pending保留，approved单独存档。执行器完成两组各90次，180条预占在发送前持久化，失败不补跑；新增Embedding/BGE/INDEX/生产写入均0，生产配置仍text/cap1。
+
+本批次text为88正常/2个MODEL_PARSE_FAILED，json_object为90正常/0解析失败，均无调用错误或未运行；两份失败是finish_reason=stop的JSON语法错误，正式解析器离线复验178接受/2拒绝。实际完整消息、cap1上下文及24份执行文件摘要与冻结计划匹配。请求deepseek-chat、全部响应自报deepseek-flash，身份差异保持；本批次未拒绝JSON参数不保证供应商长期遵守约束，单次90题零故障不能证明稳定错误率改善。
+
+全部180匿名卡由代理分别核对必要事实、断言/引用支持和拒答，代理成绩及配对区间见[真实对照聚合](../doc/knowledge/product/evaluation/results/json-answer-20261119-v1.json)与[第十九轮交接](../doc/customer-service-rag-rounds-handoff.md)。人工模板仍pending，支付新口径后置复核不覆盖冻结主成绩；本轮不自动推广生产JSON/cap2，不代表当前权威快照、双服务或浏览器E2E通过。原始报告、原响应、评审和耗尽账本只留忽略目录，不能重建账本、换输出或删除已用锚点恢复额度。

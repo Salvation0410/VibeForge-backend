@@ -1,0 +1,487 @@
+{
+  "schemaVersion": "rag-json-answer-real-acceptance/v1",
+  "round": 19,
+  "date": "2026-11-19",
+  "studyId": "rag-json-answer-20261119-v1",
+  "status": "complete-agent-acceptance-human-pending",
+  "scope": "fixed-historical-cap1-input-new-real-text-json-object-answers",
+  "implementationCommit": "c1116fd",
+  "historicalFacilityResultUnchanged": true,
+  "authorization": {
+    "decision": "approved",
+    "trustedUserReply": "是",
+    "maxChatCalls": 180,
+    "spentReservations": 180,
+    "remainingCalls": 0,
+    "retryOrSupplementAllowed": false,
+    "formalPlanCanonicalSha256": "9ad2784956f2aeebbf0f5141f041e950d0a8c7ba82a92324ceb742783bb17625",
+    "approvalByteSha256": "d50b4a1d9d935ba188d229b3654b4cab76927ae1f2952197cad28a4ec152d1fc",
+    "trustedAuthorizationByteSha256": "b9579d75e722f56ac26ed3938464a1a2ff58cd76fde558a2493b61d69c54909b",
+    "spentLedgerByteSha256": "83ed94efb277fedf27145e9dabe15e9ab3b8bbb86a827d1dcdbba353ec842f58",
+    "ledgerLines": [
+      184,
+      181,
+      181
+    ]
+  },
+  "evidence": {
+    "reportByteSha256": "7fa940447c2553431974c342519ec233395932ca72d7b43b18a005149b325579",
+    "reportCanonicalSha256": "d293dc02e57b858cf0b724ec3d475dee10f22924fca3cd4a7d0d246ca068fcfd",
+    "runtimeAuditByteSha256": "0d43a5efd492e5de139f2d9dceabfc38657dae423600ba039c36d2d89bbbf8af",
+    "publicCardsCanonicalSha256": "9a9acf1adea38b1423797c453a7a934c0e81ded0412d61f810149c0f9308d134",
+    "initialReviewsCanonicalSha256": "8ba411d27cecb2d1594f601818256061c93877709eb5eab0ee8141682a529635",
+    "finalReviewsCanonicalSha256": "1ecd8e49bf3245fbfa41d40f5f36f0ec2888090568e5ddfe11ac3af1d3d5f05b",
+    "finalAnalysisCanonicalSha256": "b3895ccc38c3fc543aa691934b1f13175c44c3cc79b365276fd7c4730d03bfc6",
+    "correctionsCanonicalSha256": "38ee1de8e79f86fa934d79fdded05e01a1a6061bbd5259cc10b1522e1e4b7bc3",
+    "paymentPosthocByteSha256": "8b8bb3cf1651f0b0d0327e3477308a01c89329253e348519668eb4b1760f29a0",
+    "rawArtifactsLocation": "local-ignored-tmp-only"
+  },
+  "run": {
+    "startedAtUtc": "2026-11-19T03:25:36.837958+00:00",
+    "finishedAtUtc": "2026-11-19T03:28:46.862116+00:00",
+    "reserved": 180,
+    "attemptedSend": 180,
+    "http200": 180,
+    "concurrency": 1,
+    "sdkRetries": 0,
+    "applicationRetries": 0,
+    "persistedReservationBeforeSend": true,
+    "officialRunLive": true,
+    "injectedTransport": false,
+    "commonInputMatchesAll180": true,
+    "implementationFilesVerified": 24,
+    "cleanupErrors": [],
+    "reportSaveErrors": [],
+    "requestModel": "deepseek-chat",
+    "responseModelsSelfReported": {
+      "deepseek-flash": 180
+    },
+    "modelIdentityMeaning": "仅供应商响应自报身份，不认证底层模型或将成绩标为已验证deepseek-chat。"
+  },
+  "format": {
+    "json_object": {
+      "answered": 78,
+      "attemptedSend": 90,
+      "callErrors": 0,
+      "denominator": 90,
+      "modelParseFailed": 0,
+      "notRun": 0,
+      "refused": 12,
+      "reserved": 90
+    },
+    "text": {
+      "answered": 76,
+      "attemptedSend": 90,
+      "callErrors": 0,
+      "denominator": 90,
+      "modelParseFailed": 2,
+      "notRun": 0,
+      "refused": 12,
+      "reserved": 90
+    }
+  },
+  "parseErrors": [
+    {
+      "id": "app-generation-014",
+      "arm": "text",
+      "errorCode": "MODEL_PARSE_FAILED",
+      "diagnostic": "JSON_SYNTAX",
+      "syntaxLocation": {
+        "pos": 112,
+        "line": 1,
+        "column": 113
+      },
+      "rawResponseSha256": "9eba9b2f0d6c0c631df17500d7805a87831f659f5d52f0728aee7b2575408126",
+      "finishReason": "stop"
+    },
+    {
+      "id": "preview-history-004",
+      "arm": "text",
+      "errorCode": "MODEL_PARSE_FAILED",
+      "diagnostic": "JSON_SYNTAX",
+      "syntaxLocation": {
+        "pos": 73,
+        "line": 1,
+        "column": 74
+      },
+      "rawResponseSha256": "93fe8e35285b676902ac85f8be62cc6dc9cf1efd976dde5427ec73a35c4b3b8c",
+      "finishReason": "stop"
+    }
+  ],
+  "offlineParserReplay": {
+    "accepted": 178,
+    "rejected": 2,
+    "newRealCalls": 0,
+    "originalResponsesUnmodified": true
+  },
+  "agentQuality": {
+    "humanReview": "pending",
+    "humanOverallQualityImprovement": null,
+    "initialPassed": {
+      "text": 70,
+      "json_object": 74
+    },
+    "arms": {
+      "json_object": {
+        "answerLatencyMs": {
+          "count": 90,
+          "mean": 1027.8146777777777,
+          "p95": 1519.296
+        },
+        "answerTokens": {
+          "input_tokens": 66444,
+          "output_tokens": 6822,
+          "total_tokens": 73266
+        },
+        "answerableDenominator": 81,
+        "answerablePassRate": 0.8271604938271605,
+        "correctContractRefusals": 9,
+        "denominator": 90,
+        "errors": 0,
+        "failureCategories": {
+          "annotation_dispute": 1,
+          "evidence_present_generation_error": 1,
+          "not_recalled": 11
+        },
+        "falseRefusals": 3,
+        "notRun": 0,
+        "overallPassRate": 0.8444444444444444,
+        "pending": 0,
+        "publicFactCoverage": 0.8384615384615385,
+        "refusalDenominator": 9,
+        "refusalPassRate": 1.0,
+        "requiredPublicFactsDenominator": 130,
+        "reviewed": 90,
+        "reviewedCitations": 121,
+        "reviewedClaims": 238,
+        "reviewedFactualErrors": 1,
+        "reviewedPublicFactCoverage": 0.8384615384615385,
+        "reviewedSafeCorrectRefusals": 9,
+        "reviewedSafetyViolations": 0,
+        "supportedCitations": 119,
+        "unsupportedClaims": 3,
+        "overallPassed": 76,
+        "answerablePassed": 67,
+        "requiredPublicFactsMet": 109
+      },
+      "text": {
+        "answerLatencyMs": {
+          "count": 90,
+          "mean": 1008.0974111111112,
+          "p95": 1480.358
+        },
+        "answerTokens": {
+          "input_tokens": 64464,
+          "output_tokens": 6866,
+          "total_tokens": 71330
+        },
+        "answerableDenominator": 81,
+        "answerablePassRate": 0.8024691358024691,
+        "correctContractRefusals": 9,
+        "denominator": 90,
+        "errors": 2,
+        "failureCategories": {
+          "annotation_dispute": 1,
+          "evidence_present_generation_error": 6,
+          "not_recalled": 11
+        },
+        "falseRefusals": 3,
+        "notRun": 0,
+        "overallPassRate": 0.8222222222222222,
+        "pending": 0,
+        "publicFactCoverage": 0.8076923076923077,
+        "refusalDenominator": 9,
+        "refusalPassRate": 1.0,
+        "requiredPublicFactsDenominator": 130,
+        "reviewed": 90,
+        "reviewedCitations": 115,
+        "reviewedClaims": 243,
+        "reviewedFactualErrors": 2,
+        "reviewedPublicFactCoverage": 0.8076923076923077,
+        "reviewedSafeCorrectRefusals": 9,
+        "reviewedSafetyViolations": 0,
+        "supportedCitations": 114,
+        "unsupportedClaims": 4,
+        "overallPassed": 74,
+        "answerablePassed": 65,
+        "requiredPublicFactsMet": 105
+      }
+    },
+    "paired": {
+      "bootstrap95": [
+        -0.022222222222222223,
+        0.06666666666666667
+      ],
+      "bootstrapDraws": 10000,
+      "bootstrapSeed": 20261118,
+      "bothFail": 13,
+      "bothPass": 73,
+      "jsonObjectMinusText": 0.022222222222222223,
+      "jsonObjectOnly": 3,
+      "questionPairs": 90,
+      "textOnly": 1
+    },
+    "questionOutcomes": {
+      "bothPass": [
+        "admin-knowledge-001",
+        "admin-knowledge-003",
+        "admin-knowledge-004",
+        "app-generation-001",
+        "app-generation-002",
+        "app-generation-003",
+        "app-generation-004",
+        "app-generation-007",
+        "app-generation-009",
+        "app-generation-010",
+        "app-generation-011",
+        "app-generation-012",
+        "app-generation-013",
+        "app-generation-015",
+        "app-generation-016",
+        "app-generation-017",
+        "app-generation-018",
+        "app-generation-019",
+        "app-generation-020",
+        "app-generation-021",
+        "app-generation-022",
+        "app-generation-023",
+        "app-generation-024",
+        "boundaries-safety-001",
+        "boundaries-safety-002",
+        "boundaries-safety-003",
+        "boundaries-safety-005",
+        "boundaries-safety-006",
+        "boundaries-safety-007",
+        "boundaries-safety-008",
+        "boundaries-safety-009",
+        "boundaries-safety-010",
+        "boundaries-safety-011",
+        "boundaries-safety-012",
+        "boundaries-safety-013",
+        "boundaries-safety-014",
+        "boundaries-safety-015",
+        "community-001",
+        "community-002",
+        "community-003",
+        "community-005",
+        "community-008",
+        "community-009",
+        "community-010",
+        "community-011",
+        "community-012",
+        "community-014",
+        "deployment-download-002",
+        "deployment-download-003",
+        "deployment-download-004",
+        "deployment-download-005",
+        "deployment-download-006",
+        "deployment-download-007",
+        "deployment-download-008",
+        "deployment-download-010",
+        "deployment-download-011",
+        "deployment-download-012",
+        "deployment-download-014",
+        "platform-account-002",
+        "platform-account-003",
+        "platform-account-004",
+        "platform-account-005",
+        "platform-account-006",
+        "platform-account-007",
+        "platform-account-008",
+        "preview-history-001",
+        "preview-history-002",
+        "preview-history-003",
+        "preview-history-005",
+        "preview-history-007",
+        "preview-history-008",
+        "preview-history-009",
+        "preview-history-010"
+      ],
+      "textOnly": [
+        "deployment-download-013"
+      ],
+      "jsonObjectOnly": [
+        "app-generation-014",
+        "community-006",
+        "preview-history-004"
+      ],
+      "bothFail": [
+        "admin-knowledge-002",
+        "admin-knowledge-005",
+        "app-generation-005",
+        "app-generation-006",
+        "app-generation-008",
+        "boundaries-safety-004",
+        "community-004",
+        "community-007",
+        "community-013",
+        "deployment-download-001",
+        "deployment-download-009",
+        "platform-account-001",
+        "preview-history-006"
+      ]
+    },
+    "blindInitialShards": [
+      60,
+      60,
+      60
+    ],
+    "independentPairedAuditShards": [
+      22,
+      20
+    ],
+    "pairedRecheckSelection": "全部初审失败/疑义题，两侧成对；21题42卡，非额外随机泛化集",
+    "primaryPassChangedCards": 6,
+    "initialAndAuditAndRootDecisionsPreserved": true,
+    "frozenRubricUnchanged": true,
+    "rootDecisions": {
+      "accept-audit": 38,
+      "accept-audit-with-root-correction": 2,
+      "retain-initial": 2
+    },
+    "failureCategoriesMeaning": "代理审阅标签可重叠、可未标，不能相加作为失败总数或阶段因果证明；下方为主代理逐题归因。",
+    "manualFailureAttribution": {
+      "platform-account-001": "双方未召回首次使用流程，答案转为需求编写和验收建议。",
+      "app-generation-005": "双方最终上下文没有HTML/MULTI_FILE结构与完整Vue文件工具说明，答案介绍检查/部署而遗漏结构事实。",
+      "app-generation-006": "双方未召回HTML完整单页建议；回答描述视觉内容，未给生成类型。",
+      "app-generation-008": "双方缺Vue适用性和组件/状态清单证据；答案未完成类型与清单要求。",
+      "community-004": "双方缺图片可选材料；text还遗漏已在最终上下文的登录、正文及有效标签前置。",
+      "community-007": "双方未召回作者/管理员查看非公开帖的例外。",
+      "community-013": "双方未召回目标/预期实际结果/尝试处理的求助模板。",
+      "deployment-download-001": "双方未召回创建者部署操作和成功访问链接流程。",
+      "deployment-download-009": "双方把Vue构建产物部署规则泛化，负前置的公开证据另有疑义；text还遗漏下载权限/目录条件。",
+      "deployment-download-013": "仅JSON遗漏已召回的可用生成结果核对，并把图片小节的建议泛化到整个预览，存在无支持引用。",
+      "preview-history-006": "双方已回答保留旧预览，但多引的静态校验块不能支持停止后通用预览保留，引用不支持。",
+      "community-006": "仅text的通常是因为添加发生频率/原因，公共上下文只证明流程；JSON仅建议查看状态。",
+      "admin-knowledge-002": "双方正常知识不足拒答，最终上下文缺上传类型、大小及有效性材料；按冻结可答题计错误拒答。",
+      "admin-knowledge-005": "双方正常知识不足拒答，最终上下文只出现相似问法而无禁用语义/异步核对说明。",
+      "boundaries-safety-004": "双方正常拒答，冻结标准要求直接说明当前无套餐支付退款流程；实际上下文未直接给无流程句，保留原标准和后续标注审计边界。",
+      "app-generation-014": "仅text在finish_reason=stop下原JSON语法失败；最终上下文含必要事实。",
+      "preview-history-004": "仅text在finish_reason=stop下原JSON语法失败；最终上下文含必要事实。"
+    },
+    "attributionRole": "agent",
+    "stageAttributionLimit": "只核对本轮最终公共上下文与冻结事实，未证明缺证据发生于召回、重排或cap预算的具体阶段。",
+    "generalization": "反复使用的90题开发回归集，非独立盲测泛化成绩",
+    "reviewConstructionIssue": {
+      "schemaVersion": "rag-json-answer-review-construction-issue/v1",
+      "shard": 2,
+      "source": "original-agent-tool-history-and-agent-followup-confirmation",
+      "standaloneOriginalLogExists": false,
+      "error": "AssertionError: nonliteral claim substring",
+      "correction": "claim.text补齐原答案的自己二字；不改事实/证据/语义评分",
+      "failedBeforeSuccessfulReviewFileWrite": true,
+      "successfulFrozenReviewsUnchanged": true,
+      "strictImportAfterCorrection": 60,
+      "newRealCalls": 0
+    }
+  },
+  "paymentPostHoc": {
+    "schemaVersion": "rag-json-answer-payment-posthoc/v1",
+    "caseId": "boundaries-safety-001",
+    "reviewerRole": "agent",
+    "clarificationByteSha256": "03cc5e6273c9c368b1f126dab2a5874d0c590e6296702f0712eb6d572a022ee7",
+    "clarifiedFact": "当前平台不支持支付功能",
+    "preferredAnswer": "目前平台不支持支付功能。",
+    "appliesEquallyToBothArms": true,
+    "primaryRubricAndScoresUnchanged": true,
+    "bothAnswersDirectlyStateCurrentUnsupported": false,
+    "textMeetsClarifiedDirectAnswer": false,
+    "jsonObjectMeetsClarifiedDirectAnswer": false,
+    "reason": "两侧只说明付款按钮不能证明真实支付接入并建议核对真实服务；均未直接说明平台当前不支持支付。冻结输入没有该直接当前事实，新口径不得追溯混入主评分。",
+    "publication": "candidate-not-published",
+    "newCalls": 0,
+    "humanReview": "pending"
+  },
+  "observations": {
+    "answerTokens": {
+      "text": {
+        "input_tokens": 64464,
+        "output_tokens": 6866,
+        "total_tokens": 71330
+      },
+      "json_object": {
+        "input_tokens": 66444,
+        "output_tokens": 6822,
+        "total_tokens": 73266
+      }
+    },
+    "answerLatencyMs": {
+      "text": {
+        "count": 90,
+        "mean": 1008.0974111111112,
+        "p95": 1480.358
+      },
+      "json_object": {
+        "count": 90,
+        "mean": 1027.8146777777777,
+        "p95": 1519.296
+      }
+    },
+    "jsonInputTokenDifferencePerPair": 22,
+    "monetaryCost": null,
+    "timingMeaning": "仅本轮回答供应商调用耗时，无本轮检索/BGE/在线E2E时间；不推算费用或单轮因果。"
+  },
+  "newRealOperations": {
+    "chat": 180,
+    "embedding": 0,
+    "bge": 0,
+    "index": 0,
+    "productionWrites": 0
+  },
+  "productionResponseFormat": "text",
+  "productionDocumentChunkLimit": 1,
+  "protectedFiles": 19,
+  "protectedOriginalBytesUnchanged": 19,
+  "readmeOriginalPrefixPreserved": true,
+  "servicesStartedOrRestarted": false,
+  "productionChanges": false,
+  "currentRoundFullSuiteRepeated": false,
+  "currentRoundProductionCodeChanged": false,
+  "independentFinalReviews": {
+    "specification": "passed",
+    "quality": "passed"
+  },
+  "notVerified": [
+    "stable-format-error-rate-improvement",
+    "independent-unseen-generalization",
+    "underlying-provider-model-identity",
+    "current-authoritative-snapshot",
+    "Spring/Python-HTTP-E2E",
+    "browser-interaction",
+    "human-review",
+    "payment-knowledge-publication"
+  ],
+  "recommendation": "本批次text两次语法失败、JSON零次为观测，代理差值区间跨零；保持生产text/cap1，先处理证据缺失、范围错误与支付知识候选，人工验收后另行决策，任何新真实调用须新授权。",
+  "currentRoundOfflineVerification": {
+    "status": "passed-after-final-reviews",
+    "commands": [
+      "validate-semantic-audit.py 1",
+      "validate-semantic-audit.py 2",
+      "verify-real-delivery.py delivery-verification-resumed.json",
+      "check-live-controls.py controls-resumed.json",
+      "git diff --check",
+      "git diff --cached --check"
+    ],
+    "strictAuditCards": [
+      22,
+      20
+    ],
+    "freshParserReplay": {
+      "accepted": 178,
+      "rejected": 2
+    },
+    "freshFinalReviews": 180,
+    "humanPending": 180,
+    "aggregateMatchesFreshAnalysis": true,
+    "protectedOriginalFilesUnchanged": 19,
+    "newRealCalls": 0,
+    "initialVerificationScriptIssue": {
+      "exitCode": 1,
+      "reason": "本地收尾核验脚本引用不存在的配置字段",
+      "correction": "按config.py使用rag_document_chunk_limit后同一核验通过",
+      "productionCodeChanged": false,
+      "originalFailureEvidence": "current-thread-tool-output"
+    },
+    "resumedDeliveryNewRealCalls": 0
+  }
+}

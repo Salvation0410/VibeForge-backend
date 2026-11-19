@@ -225,3 +225,13 @@ cap2 改变 65 题选块，审后新增完整支持 10 项，本集未观察到�
 真实历史输入完整走新run_live与本地SDK/MockTransport共180次发送、180次持久化预占，网络尝试0。两模式各重放相同90份历史cap1原文，各89正常/1解析错误；180匿名卡全部pending，无新生成答案或真实供应商效果。完整Python本轮 **2103通过/25跳过**，compileall及依赖锁检查通过，规格/质量审查修复严格计划校验、取消掩盖和gzip重复解码后通过，原红测和失败日志保留。
 
 正式pending计划已生成，规范SHA256为`9ad2784956f2aeebbf0f5141f041e950d0a8c7ba82a92324ceb742783bb17625`，绑定24份关键实现/依赖摘要、SDK及唯一输出；尚无正式approved、账本或live。真实执行须对该实际计划单独明确批准最多180次新Chat，旧耗尽账本不复用。生产text/cap1、支付语料及用户原修改保持，当前权威快照、双服务/浏览器E2E和人工验收未完成。前期122项预验收保留为历史，见[脱敏预验收](evaluation/results/json-answer-preflight-20261119-v1.json)；本次证据、故障修正和下一步见[设施聚合](evaluation/results/json-answer-facility-20261119-v1.json)、[设计](../../../docs/superpowers/specs/2026-11-19-customer-service-json-answer-acceptance-design.md)及[第十八轮交接](../../customer-service-rag-rounds-handoff.md)。
+
+### 2026-11-19 第十九轮：text/json_object真实答案对照
+
+用户批准正式计划最多180次新Chat后，两组各90次已执行完毕；发送前持久化预占180条，全部HTTP200，text88正常/2个JSON语法错误，json_object90正常/0解析失败，无调用故障、未运行或补跑。原响应经正式解析器离线核对178接受/2拒绝。请求deepseek-chat、180响应均自报deepseek-flash，不能认证底层模型或把请求名当作已核实模型身份。
+
+三份匿名代理全覆盖初审，另对失败/疑义21题42卡成对复核，主代理核对原context与冻结同义表达后，质量为 **text74/90、JSON76/90**；公共事实105/130对109/130，正确协议拒答均9/9、错误拒答均3。初审70/74独立保留，六卡通过状态修正及原初审/复核/主裁决理由可追踪，未改变原标注。配对73都过、1仅text过、3仅JSON过、13都失败；净差+2.22个百分点，固定seed的10000次bootstrap 95%区间[-2.22,+6.67]个百分点，不能确认稳定质量收益。
+
+必要证据缺失、回答遗漏、冗余引用和Vue部署规则范围错误仍存在。支付题在冻结旧口径下通过，但两侧均未直接说明“目前平台不支持支付功能”，后置新口径未满足且不覆盖主成绩，支付候选仍未发布。代理结果与人工分开；90题是反复使用的开发回归集，人工模板pending。
+
+本轮没有生产代码修改、启停服务或新增Embedding/BGE/INDEX/生产写入，生产保持text/cap1；第十八轮完整测试是历史设施证据。本轮回答tokens为71330/73266，均值约1008/1028ms，仅为回答调用观测，无当前检索/BGE/在线E2E时间或费用推算。180额度全部用尽，不能补跑或重建账本。详见[真实聚合](evaluation/results/json-answer-20261119-v1.json)、[第十九轮交接](../../customer-service-rag-rounds-handoff.md)及[执行计划](../../../docs/superpowers/plans/2026-11-19-customer-service-json-answer-live-acceptance.md)。
