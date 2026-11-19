@@ -217,3 +217,7 @@ cap2 改变 65 题选块，审后新增完整支持 10 项，本集未观察到�
 四类旧实验在非 text 下前置拒绝，冻结 schema、settings_manifest、报告及耗尽账本保持。完整 SDK→本地 MockTransport 覆盖请求序列化、并发隔离、错误与取消；历史 180 份相同原文在两模式各回放 177 接受/3 拒绝，不能称新约束下生成的答案或格式错误率改善。完整测试与脱敏汇总见[离线验证结果](evaluation/results/json-output-offline-20261118-v1.json)，命令、失败记录及保护核对见[第十七轮交接](../../customer-service-rag-rounds-handoff.md)。
 
 本轮完整 Python 测试 **2011 通过/25 跳过**，compileall 与依赖锁检查退出 0，保留两条依赖弃用警告。真实 `.env`、生产 text/cap1 和支付语料保持，本轮未启用候选、未启动服务，新增真实 Chat/Embedding/BGE/INDEX/生产写入均为 0。供应商支持与效果对照须另定绑定模式及实现的新计划和额度，不能复用已耗尽账本；人工验收仍待办。
+
+### 2026-11-19 第十八轮：真实格式对照的输入预验收
+
+已核对90组cap1上下文和完整消息与第十六轮逐字一致，前置回归122通过，19份保护字节不变。推荐以这90题分别重新生成text/json_object，最多180次新回答，其他输入、提示、预算、重排及配额保持；12次探测只能提供小样本兼容性观察，复用旧text答案会引入时间差。当前仅完成[候选设计](../../../docs/superpowers/specs/2026-11-19-customer-service-json-answer-acceptance-design.md)及[脱敏预验收](evaluation/results/json-answer-preflight-20261119-v1.json)，没有新运行器、正式plan、approved文件或真实效果成绩。需先确认路线、交付零真实调用设施，再以正式计划单独批准新额度；旧耗尽账本不复用。错误/取消/未运行保留分母，生产text/cap1及人工待办保持，具体边界见[第十八轮交接](../../customer-service-rag-rounds-handoff.md)。

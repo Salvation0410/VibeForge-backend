@@ -1,0 +1,52 @@
+{
+  "cap1ContextMatches": 90,
+  "currentCap": 1,
+  "currentCompleteMessageMatches": 90,
+  "currentResponseFormat": "text",
+  "date": "2026-11-19",
+  "decision": "pending",
+  "formalPreparationFakeCalls": 180,
+  "implementationManifestCanonicalSha256": "576bdb22c6c6f218b3319ae08768d5f82813429c170a351c82be331f7d3663a6",
+  "inputEvidenceByteSha256": "f7a4fe477417cad947d848cdc299eda243274d603236a1812d784b01c6f0b3f5",
+  "liveAuthorized": false,
+  "localContextWindowTokens": 200000,
+  "modelName": "deepseek-chat",
+  "newRealOperations": {
+    "bge": 0,
+    "chat": 0,
+    "embedding": 0,
+    "index": 0,
+    "productionWrites": 0
+  },
+  "outputTokens": 8192,
+  "overheadTokens": 4096,
+  "promptMaxBytes": 16384,
+  "proposedArms": [
+    "text",
+    "json_object"
+  ],
+  "proposedCasesPerArm": 90,
+  "proposedMaxChatCalls": 180,
+  "proposedStudyId": "rag-json-answer-20261119-v1",
+  "protectedFiles": 19,
+  "round": 18,
+  "schemaVersion": "rag-json-answer-candidate-preflight/v1",
+  "scope": "read-only-input-and-design-preparation",
+  "selectedInputsCanonicalSha256": "bf559c24a88cebf92e16f50f67fc1f71b47ed77670455f1444f6cb5710d30b1f",
+  "sourceReportByteSha256": "c34af6aa6b5f96f654e3255ccd239d8da5474ace2db3fc3337b270dcb3dbb704",
+  "sourceReportCanonicalSha256": "0ac36490828077d642511ac972bf773972a84072fa5d8c5cbc387fb6fa9d5972",
+  "temperature": 0.1,
+  "prerequisiteTests": {
+    "tests": 122,
+    "passed": 122,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "warnings": 2,
+    "exitCode": 0,
+    "xmlByteSha256": "3aabe30c16b60a8a9b7a85e4f7826419bbceb85bddbfe5c76a1b5c8867d53a26"
+  },
+  "unchangedProtectedFiles": 19,
+  "currentProductionOrRunnerCodeChanged": false,
+  "preflightCorrection": "完整消息核验首试传入dict，与prompt要求的CustomerServiceContext属性接口不符；查明接口后改用正式数据类，90项全等通过；生产代码与提示未改。"
+}

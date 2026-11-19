@@ -824,6 +824,45 @@ uv run --offline python ../tmp/rag-json-output-20261118/check-controls.py contro
 
 供应商实际支持、格式错误率、答案质量、当前双服务 E2E 和人工裁决均未验收。cap2 仍是候选，支付知识及标注疑义另行处理，不与格式效果同时推广。离线解析兼容和并发隔离不能替代这些证据。
 
+## 第十八轮：JSON 格式真实对照的输入预验收与候选设计（2026-11-19）
+
+### 问题、方案取舍与范围
+
+用户要求“根据交接文档继续完成下一轮验收”。第十七轮已经完成离线参数及解析兼容，下一步应验证供应商实际格式行为。本轮先完成可执行路线的输入预验收和设计准备；当前未实现新运行器、未取得新的真实调用额度，不能称第十八轮真实效果验收已完成。
+
+推荐同一组 cap1 输入的 90 题分别重新生成 text/json_object，共最多 180 次新回答，只改变响应格式。6 题×两模式最多 12 次适合兼容性探测，不能比较全部答案和低频格式故障；只生成 90 份 JSON 并复用旧 text 会混入时间及模型差异，因此不推荐。具体输入 pin、模块职责、SDK观测、错误/额度规则与待确认边界见[第十八轮设计](../docs/superpowers/specs/2026-11-19-customer-service-json-answer-acceptance-design.md)。
+
+### 如何准备及判断
+
+先通过既有 `load_frozen_inputs` 核对历史报告、完整规范语料、映射、向量和 BGE 排序，再以 `prepare_contexts` 的正式 RAG 选择路径完成 **180 次 Fake 准备调用**。两旧配额分支用于核对历史，不是新实验两组；仅抽取 cap1 的 90 组作为新 text/json_object 的共同输入。它们与第十六轮 cap1 实际 contexts **90/90 逐字一致**，用当前正式 prompt 函数与数据类重建的完整消息也 **90/90 一致**。
+
+本地窗口 200000、输出 8192、协议预留 4096、温度 0.1、字节预算 16384、Top8/BGE/单文档 cap1/最终最多三块都已记录；200000 是当前本地值，不改公共 65536 默认。新 study、正式 plan、两组消息、代码/SDK/配置/输入摘要、输出和整数额度将由确认后的独立设施绑定，不能将当前候选预验收摘要当作实际 runtime 的最终授权。
+
+### 边界与故障
+
+拟采用新 `rag-json-answer-20261119-v1` study、新 report/schema/固定账本，两组为 text/json_object，不改旧 runner 或其 text 保护。发送前预占、SDK零重试、不补跑/补引号/自动text降级；400记录后停止，取消和早期SDK parse错误计入额度，未运行保留分母。捕获实际HTTP body及有界响应观测，避免length/content_filter早于AIMessage时丢失发送事实。两适配器各持固定Settings副本，共用唯一SDK客户端；不修改生产配置或全局切模式。这些是拟定验收要求，不是本轮已经实现的能力。
+
+未来真实开始前先交付零真实调用设施及实际正式plan，再申请最多180次新Chat额度；当前“继续验收”不替代交接要求的独立计划与明确额度确认。旧184/181行耗尽账本不复用，当前没有创建新approved文件、正式账本或live目录。生产text/cap1、支付语料、旧标注不改；现有模型身份差异、人工裁决和当前权威快照/E2E/浏览器仍待验收。
+
+### 本轮验证、修正与交付
+
+重新执行两份第十七轮前置测试，**122通过、0失败/错误/跳过、2条依赖弃用警告**，退出0，耗时4.34秒。命令：
+
+```powershell
+# 在 ai-service 执行，真正 SDK + 本地 MockTransport/Fake，无真实供应商调用。
+uv run --offline pytest tests/test_customer_service_response_format.py tests/test_rag_response_format_guards.py --junitxml=../tmp/rag-json-answer-20261119/prerequisite-tests.xml
+```
+
+完整消息核验首试给prompt函数传dict，而其接口要求具有chunk_id/content属性的对象，出现AttributeError；按源码接口改用正式CustomerServiceContext后90项全等通过。修正仅涉及只读核验命令，没有改模型提示、生产代码或历史输入。输入预验收以socket拒绝连接执行，没有初始化真实模型/Embedding/BGE客户端；新增真实Chat/Embedding/BGE/INDEX/生产写入均为 **0**。
+
+建立并复核 **19份保护文件**的当前字节摘要，涵盖原.env/账本/报告/评审、README原字节、前端三项修改，并增加第十七轮新回放/脱敏结果和第十六轮正式plan；全部保持。生产/实验代码和依赖均未变，本轮没有为文档重跑compileall/完整pytest/Java/前端构建或真实服务。第十七轮2011/25不计入本轮成绩。
+
+原始材料及日志位于 `tmp/rag-json-answer-20261119/`，提交[脱敏预验收](knowledge/product/evaluation/results/json-answer-preflight-20261119-v1.json)、设计及本交接，准确提交哈希由本轮回复报告。当前只是候选设计与输入预验收交付，真实回答与质量判断尚未执行。
+
+### 下一步
+
+确认90题×两模式推荐路线后，编写实施计划，建立独立冻结契约、预算与执行器，并先完成完整MockTransport/Fake离线设施验收、独立审查及提交。就绪后再以实际正式plan申请独立180次新Chat授权。真实结果分别报告格式故障、调用故障、题级配对及匿名语义审查，人工审阅保留待办；不据单轮无故障自动启用JSON或推广cap2。若仅选择12次探测，先明确六题与额度，另作小样本兼容性结论。
+
 ## 以后每轮必须使用的交接格式
 
 1. 本轮解决什么：原问题的具体触发场景、证据和目标。
