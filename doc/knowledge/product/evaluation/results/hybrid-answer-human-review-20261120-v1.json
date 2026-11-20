@@ -1,0 +1,802 @@
+{
+  "schemaVersion": "hybrid-answer-human-review/v1",
+  "status": "pending",
+  "reviewer": null,
+  "sourceResultSha256": "82e7c5d619c251100eba3c43d724708d70c9e9ba6d8f408031c7faf76ac7294a",
+  "cases": [
+    {
+      "id": "app-generation-005",
+      "question": "HTML、MULTI_FILE 和 Vue 项目有什么区别？",
+      "facts": [
+        {
+          "factId": "app-generation-005:required:01",
+          "statement": "HTML是完整单文件文档，可包含样式与脚本",
+          "equivalentExpressions": [
+            "HTML分支在一个文档内组织页面"
+          ],
+          "applicableConditions": [
+            "限题干描述的当前公共产品使用场景，不执行私人操作。"
+          ],
+          "evidence": [
+            {
+              "documentId": "04-generation-types",
+              "documentPath": "documents/04-generation-types.md",
+              "heading": "HTML 单文件",
+              "quote": "HTML 分支要求完整 HTML 文档，可以在同一文件内包含页面样式和脚本。适合范围清楚的单页展示、活动页或简单工具原型。优化和修改后仍应返回完整文档，不能只给差异片段或省略未修改内容。页面发布前存在解析、确定性校验及浏览器运行检查；失败不应被当成新版本成功。使用建议：一个主页面、少量交互时优先描述清楚内容，不强求大型工程结构。",
+              "quoteStart": 222,
+              "quoteEnd": 387,
+              "offsetUnit": "unicode-code-points",
+              "documentSha256": "4878524fc969c37768b82ea28fe4677089c97d6b2b6bba3e1e5d99772f828471"
+            }
+          ],
+          "basisType": "public-document",
+          "reviewStatus": "agent-source-reviewed-human-pending"
+        },
+        {
+          "factId": "app-generation-005:required:02",
+          "statement": "MULTI_FILE是HTML、CSS、JavaScript等拆分的静态文件",
+          "equivalentExpressions": [
+            "多文件静态站点分离结构样式脚本"
+          ],
+          "applicableConditions": [
+            "限题干描述的当前公共产品使用场景，不执行私人操作。"
+          ],
+          "evidence": [
+            {
+              "documentId": "04-generation-types",
+              "documentPath": "documents/04-generation-types.md",
+              "heading": "MULTI_FILE 多文件",
+              "quote": "MULTI_FILE 分支将 HTML、CSS、JavaScript 等拆成文件，适合需要区分结构、样式和脚本的静态站点。它不等于 Vue 工程，也不自动提供后端数据库。输出必须包括完整必要文件，并保持文件间资源引用一致。使用建议：提出各页面关系与资源路径要求，修改时要求保留所有必要文件，不只替换一个孤立片段。",
+              "quoteStart": 419,
+              "quoteEnd": 575,
+              "offsetUnit": "unicode-code-points",
+              "documentSha256": "4878524fc969c37768b82ea28fe4677089c97d6b2b6bba3e1e5d99772f828471"
+            }
+          ],
+          "basisType": "public-document",
+          "reviewStatus": "agent-source-reviewed-human-pending"
+        },
+        {
+          "factId": "app-generation-005:required:03",
+          "statement": "VUE_PROJECT是Vue前端工程，通过文件工具与项目构建检查",
+          "equivalentExpressions": [
+            "Vue分支生成组件工程并执行构建"
+          ],
+          "applicableConditions": [
+            "限题干描述的当前公共产品使用场景，不执行私人操作。"
+          ],
+          "evidence": [
+            {
+              "documentId": "04-generation-types",
+              "documentPath": "documents/04-generation-types.md",
+              "heading": "VUE_PROJECT Vue 工程",
+              "quote": "VUE_PROJECT 分支生成 Vue 项目结构，通过文件工具和项目构建完成检查，适合组件较多、页面关系较复杂的前端工程。成功部署使用构建产物，源码下载则用于后续开发。项目依赖或路由错误可能造成构建失败，不能因为已写入文件就视为完成。使用建议：列清页面、组件、导航与状态，减少一次引入无关依赖。",
+              "quoteStart": 611,
+              "quoteEnd": 759,
+              "offsetUnit": "unicode-code-points",
+              "documentSha256": "4878524fc969c37768b82ea28fe4677089c97d6b2b6bba3e1e5d99772f828471"
+            }
+          ],
+          "basisType": "public-document",
+          "reviewStatus": "agent-source-reviewed-human-pending"
+        }
+      ],
+      "optionalFacts": [],
+      "forbiddenClaims": [
+        "不得把MULTI_FILE等同Vue，或声称某类前端产物自动具备真实业务后端。"
+      ],
+      "contexts": {
+        "cap1": [
+          {
+            "chunkId": "07-deployment-download:2:2",
+            "documentId": "07-deployment-download",
+            "documentVersion": 2,
+            "locator": "部署、访问与代码下载【当前功能】 / 三类产物【当前功能】",
+            "content": "HTML 和 MULTI_FILE 部署读取可用源码版本；Vue 工程部署使用可用的构建产物。源码 ZIP 与线上站点文件不是同一个用途。页面原型发布不等于平台替生成应用开通真实支付、用户账户或数据库，需要单独验证后端服务与外部接口。 常见问法：“部署链接和源码包有何不同”"
+          },
+          {
+            "chunkId": "04-generation-types:2:4",
+            "documentId": "04-generation-types",
+            "documentVersion": 2,
+            "locator": "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / 类型边界与完整性【当前功能】",
+            "content": "三类生成都需要保留原有功能、文字、图片和操作方式，不应输出残缺结果或额外解释。HTML 和 MULTI_FILE 有严格解析与活动版本发布检查，Vue 有工程构建检查；这些检查不能代替人工验证真实业务。请求“新增真实登录或支付”仍需要确认业务后端和服务接入，类型名称本身不代表具备这些能力。"
+          },
+          {
+            "chunkId": "05-images-preservation:2:3",
+            "documentId": "05-images-preservation",
+            "documentVersion": 2,
+            "locator": "图片、素材与已有功能保留【当前功能与推荐规范】 / 优化请求模板【推荐规范】",
+            "content": "优化当前页面视觉，保留全部已有功能、文字、图片和操作方式，只统一颜色、字体层级与间距。修复手机布局拥挤和图片比例问题，不能删掉交互按钮。按当前生成类型返回完整 HTML 文档、完整多文件产物或完整 Vue 项目修改结果，不输出省略内容和额外解释。"
+          }
+        ],
+        "cap2": [
+          {
+            "chunkId": "07-deployment-download:2:2",
+            "documentId": "07-deployment-download",
+            "documentVersion": 2,
+            "locator": "部署、访问与代码下载【当前功能】 / 三类产物【当前功能】",
+            "content": "HTML 和 MULTI_FILE 部署读取可用源码版本；Vue 工程部署使用可用的构建产物。源码 ZIP 与线上站点文件不是同一个用途。页面原型发布不等于平台替生成应用开通真实支付、用户账户或数据库，需要单独验证后端服务与外部接口。 常见问法：“部署链接和源码包有何不同”"
+          },
+          {
+            "chunkId": "04-generation-types:2:4",
+            "documentId": "04-generation-types",
+            "documentVersion": 2,
+            "locator": "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / 类型边界与完整性【当前功能】",
+            "content": "三类生成都需要保留原有功能、文字、图片和操作方式，不应输出残缺结果或额外解释。HTML 和 MULTI_FILE 有严格解析与活动版本发布检查，Vue 有工程构建检查；这些检查不能代替人工验证真实业务。请求“新增真实登录或支付”仍需要确认业务后端和服务接入，类型名称本身不代表具备这些能力。"
+          },
+          {
+            "chunkId": "04-generation-types:2:2",
+            "documentId": "04-generation-types",
+            "documentVersion": 2,
+            "locator": "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / MULTI_FILE 多文件【当前功能与推荐规范】",
+            "content": "MULTI_FILE 分支将 HTML、CSS、JavaScript 等拆成文件，适合需要区分结构、样式和脚本的静态站点。它不等于 Vue 工程，也不自动提供后端数据库。输出必须包括完整必要文件，并保持文件间资源引用一致。使用建议：提出各页面关系与资源路径要求，修改时要求保留所有必要文件，不只替换一个孤立片段。 常见问法：“三种生成方式有什么不同”“多文件是不是 Vue”"
+          }
+        ]
+      }
+    },
+    {
+      "id": "app-generation-008",
+      "question": "我要多页面和复用组件，提示词应该说明什么？",
+      "facts": [
+        {
+          "factId": "app-generation-008:required:01",
+          "statement": "列清所需页面、组件、导航与状态",
+          "equivalentExpressions": [
+            "明确多页面关系、可复用组件和页面状态"
+          ],
+          "applicableConditions": [
+            "限题干描述的当前公共产品使用场景，不执行私人操作。"
+          ],
+          "evidence": [
+            {
+              "documentId": "04-generation-types",
+              "documentPath": "documents/04-generation-types.md",
+              "heading": "VUE_PROJECT Vue 工程",
+              "quote": "VUE_PROJECT 分支生成 Vue 项目结构，通过文件工具和项目构建完成检查，适合组件较多、页面关系较复杂的前端工程。成功部署使用构建产物，源码下载则用于后续开发。项目依赖或路由错误可能造成构建失败，不能因为已写入文件就视为完成。使用建议：列清页面、组件、导航与状态，减少一次引入无关依赖。",
+              "quoteStart": 611,
+              "quoteEnd": 759,
+              "offsetUnit": "unicode-code-points",
+              "documentSha256": "4878524fc969c37768b82ea28fe4677089c97d6b2b6bba3e1e5d99772f828471"
+            }
+          ],
+          "basisType": "public-document",
+          "reviewStatus": "agent-source-reviewed-human-pending"
+        },
+        {
+          "factId": "app-generation-008:required:02",
+          "statement": "复杂页面关系与较多组件适合Vue工程描述",
+          "equivalentExpressions": [
+            "这类需求适合描述为Vue前端工程"
+          ],
+          "applicableConditions": [
+            "限题干描述的当前公共产品使用场景，不执行私人操作。"
+          ],
+          "evidence": [
+            {
+              "documentId": "04-generation-types",
+              "documentPath": "documents/04-generation-types.md",
+              "heading": "VUE_PROJECT Vue 工程",
+              "quote": "VUE_PROJECT 分支生成 Vue 项目结构，通过文件工具和项目构建完成检查，适合组件较多、页面关系较复杂的前端工程。成功部署使用构建产物，源码下载则用于后续开发。项目依赖或路由错误可能造成构建失败，不能因为已写入文件就视为完成。使用建议：列清页面、组件、导航与状态，减少一次引入无关依赖。",
+              "quoteStart": 611,
+              "quoteEnd": 759,
+              "offsetUnit": "unicode-code-points",
+              "documentSha256": "4878524fc969c37768b82ea28fe4677089c97d6b2b6bba3e1e5d99772f828471"
+            }
+          ],
+          "basisType": "public-document",
+          "reviewStatus": "agent-source-reviewed-human-pending"
+        }
+      ],
+      "optionalFacts": [],
+      "forbiddenClaims": [],
+      "contexts": {
+        "cap1": [
+          {
+            "chunkId": "02-app-generation:2:4",
+            "documentId": "02-app-generation",
+            "documentVersion": 2,
+            "locator": "应用生成与增量修改【当前功能】 / 增量修改写法【推荐规范】",
+            "content": "推荐写：“在现有页面保留导航、按钮和图片，只把统计区域改为四张卡片；空数据时显示暂无记录；不要删除其他内容。”如果涉及多个页面，列出页面名、需要保留的内容和验收条件。先说明改什么，再说明不允许破坏什么。避免“随便改一下”“重新做得更好”等没有边界的指令。"
+          },
+          {
+            "chunkId": "03-generation-requirements:2:2",
+            "documentId": "03-generation-requirements",
+            "documentVersion": 2,
+            "locator": "应用需求编写规范【推荐规范】 / 页面与视觉【推荐规范】",
+            "content": "说明页面数量、导航关系、主要文字、希望保留的图片以及移动端要求。视觉描述可写浅色、深色、主色、卡片密度和参考风格，尽量结合具体区域，例如“标题下留出简介，列表支持手机单列”。“高级一点”缺少可验收标准，应补充布局和信息优先级。 常见问法：“为什么结果不具体”"
+          },
+          {
+            "chunkId": "04-generation-types:2:3",
+            "documentId": "04-generation-types",
+            "documentVersion": 2,
+            "locator": "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / VUE_PROJECT Vue 工程【当前功能与推荐规范】",
+            "content": "VUE_PROJECT 分支生成 Vue 项目结构，通过文件工具和项目构建完成检查，适合组件较多、页面关系较复杂的前端工程。成功部署使用构建产物，源码下载则用于后续开发。项目依赖或路由错误可能造成构建失败，不能因为已写入文件就视为完成。使用建议：列清页面、组件、导航与状态，减少一次引入无关依赖。 常见问法：“三种生成方式有什么不同”"
+          }
+        ],
+        "cap2": [
+          {
+            "chunkId": "02-app-generation:2:4",
+            "documentId": "02-app-generation",
+            "documentVersion": 2,
+            "locator": "应用生成与增量修改【当前功能】 / 增量修改写法【推荐规范】",
+            "content": "推荐写：“在现有页面保留导航、按钮和图片，只把统计区域改为四张卡片；空数据时显示暂无记录；不要删除其他内容。”如果涉及多个页面，列出页面名、需要保留的内容和验收条件。先说明改什么，再说明不允许破坏什么。避免“随便改一下”“重新做得更好”等没有边界的指令。"
+          },
+          {
+            "chunkId": "03-generation-requirements:2:2",
+            "documentId": "03-generation-requirements",
+            "documentVersion": 2,
+            "locator": "应用需求编写规范【推荐规范】 / 页面与视觉【推荐规范】",
+            "content": "说明页面数量、导航关系、主要文字、希望保留的图片以及移动端要求。视觉描述可写浅色、深色、主色、卡片密度和参考风格，尽量结合具体区域，例如“标题下留出简介，列表支持手机单列”。“高级一点”缺少可验收标准，应补充布局和信息优先级。 常见问法：“为什么结果不具体”"
+          },
+          {
+            "chunkId": "03-generation-requirements:2:3",
+            "documentId": "03-generation-requirements",
+            "documentVersion": 2,
+            "locator": "应用需求编写规范【推荐规范】 / 可复制需求模板【推荐规范】",
+            "content": "为小团队做一个任务看板，目标是跟踪本周任务。包含待办、进行中、已完成三个区域；任务有标题、负责人和截止日期。支持添加任务、切换状态和按负责人筛选。无任务时显示空状态，标题不能为空。采用浅色界面，手机能正常操作。先用示例数据，不接真实登录和数据库；保留导航、已有文字、图片和操作方式。请输出当前生成类型所需的完整产物，不附额外解释。 常见问法：“提示词模板”"
+          }
+        ]
+      }
+    },
+    {
+      "id": "admin-knowledge-004",
+      "question": "更新使用说明应重复上传还是替换旧文件？",
+      "facts": [
+        {
+          "factId": "admin-knowledge-004:required:01",
+          "statement": "更新已有手册应替换原文档，避免新旧规则同时参与回答",
+          "equivalentExpressions": [
+            "沿用原文档更新内容而非重复新增副本"
+          ],
+          "applicableConditions": [
+            "限题干描述的当前公共产品使用场景，不执行私人操作。"
+          ],
+          "evidence": [
+            {
+              "documentId": "10-admin-knowledge",
+              "documentPath": "documents/10-admin-knowledge.md",
+              "heading": "替换与重建",
+              "quote": "更新已有内容时使用替换原文档方式，避免新旧规则同时参与回答。单文档重新索引用于重新处理文档，全库重建用于重建当前可重建文档的索引，不用于证明未成功索引的文件已自动补全。重建和单文档变更有协调与版本边界，不能随意同时对同一内容启动互相冲突的操作。",
+              "quoteStart": 311,
+              "quoteEnd": 433,
+              "offsetUnit": "unicode-code-points",
+              "documentSha256": "7d597b54aa80d55cae5d42feba59da6edf54505b697375ebd73da8c176075981"
+            }
+          ],
+          "basisType": "public-document",
+          "reviewStatus": "agent-source-reviewed-human-pending"
+        }
+      ],
+      "optionalFacts": [
+        {
+          "factId": "admin-knowledge-004:optional:01",
+          "statement": "单文档重索引与全库重建用途不同",
+          "equivalentExpressions": [
+            "重新处理单文档不等于重建全库"
+          ],
+          "applicableConditions": [
+            "限题干描述的当前公共产品使用场景，不执行私人操作。"
+          ],
+          "evidence": [
+            {
+              "documentId": "10-admin-knowledge",
+              "documentPath": "documents/10-admin-knowledge.md",
+              "heading": "替换与重建",
+              "quote": "更新已有内容时使用替换原文档方式，避免新旧规则同时参与回答。单文档重新索引用于重新处理文档，全库重建用于重建当前可重建文档的索引，不用于证明未成功索引的文件已自动补全。重建和单文档变更有协调与版本边界，不能随意同时对同一内容启动互相冲突的操作。",
+              "quoteStart": 311,
+              "quoteEnd": 433,
+              "offsetUnit": "unicode-code-points",
+              "documentSha256": "7d597b54aa80d55cae5d42feba59da6edf54505b697375ebd73da8c176075981"
+            }
+          ],
+          "basisType": "public-document",
+          "reviewStatus": "agent-source-reviewed-human-pending"
+        }
+      ],
+      "forbiddenClaims": [],
+      "contexts": {
+        "cap1": [
+          {
+            "chunkId": "10-admin-knowledge:2:3",
+            "documentId": "10-admin-knowledge",
+            "documentVersion": 2,
+            "locator": "管理后台与知识库维护【当前功能】 / 状态、禁用与删除【当前功能】",
+            "content": "当前状态包括 UPLOADED、INDEXING、ACTIVE、FAILED、DISABLED 和删除相关状态，以后台实际显示为准。ACTIVE 表示成功索引的活动文档。禁用、启用和删除涉及异步处理，必须等待任务终态并验证检索结果，不能把点击成功视为所有服务已立即一致。失败时查看任务错误而不是反复上传重复文件。 常见问法：“ACTIVE 是什么”“禁用马上就完全删了吗”"
+          },
+          {
+            "chunkId": "02-app-generation:2:5",
+            "documentId": "02-app-generation",
+            "documentVersion": 2,
+            "locator": "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】",
+            "content": "同一应用有进行中的任务时，应先等待或使用“停止生成”；不应连续发送相互冲突的修改。停止需要后端确认任务结束，按钮显示“正在停止”时请等待。失败后读取错误信息、缩小本轮修改范围再重试。HTML 与多文件发布未通过校验时保留上一成功版本；没有成功版本的新应用可能没有可用预览。不能承诺每次自动修复都成功。 常见问法：“生成中能再发一条吗”"
+          },
+          {
+            "chunkId": "03-generation-requirements:2:1",
+            "documentId": "03-generation-requirements",
+            "documentVersion": 2,
+            "locator": "应用需求编写规范【推荐规范】 / 功能、状态与数据【推荐规范】",
+            "content": "每个功能说明输入、动作和结果。例如“输入支出金额、选择类别、点击保存后加入列表并更新本月合计”。同时说明空数据、错误输入、加载中、成功和失败时的表现。需要筛选时注明按日期、分类还是关键词；需要删除时注明是否二次确认。展示原型可先用示例数据；不要把界面中的保存按钮等同于真实数据库持久化。 常见问法：“要不要写异常提示”"
+          }
+        ],
+        "cap2": [
+          {
+            "chunkId": "10-admin-knowledge:2:3",
+            "documentId": "10-admin-knowledge",
+            "documentVersion": 2,
+            "locator": "管理后台与知识库维护【当前功能】 / 状态、禁用与删除【当前功能】",
+            "content": "当前状态包括 UPLOADED、INDEXING、ACTIVE、FAILED、DISABLED 和删除相关状态，以后台实际显示为准。ACTIVE 表示成功索引的活动文档。禁用、启用和删除涉及异步处理，必须等待任务终态并验证检索结果，不能把点击成功视为所有服务已立即一致。失败时查看任务错误而不是反复上传重复文件。 常见问法：“ACTIVE 是什么”“禁用马上就完全删了吗”"
+          },
+          {
+            "chunkId": "10-admin-knowledge:2:2",
+            "documentId": "10-admin-knowledge",
+            "documentVersion": 2,
+            "locator": "管理后台与知识库维护【当前功能】 / 替换与重建【当前功能】",
+            "content": "更新已有内容时使用替换原文档方式，避免新旧规则同时参与回答。单文档重新索引用于重新处理文档，全库重建用于重建当前可重建文档的索引，不用于证明未成功索引的文件已自动补全。重建和单文档变更有协调与版本边界，不能随意同时对同一内容启动互相冲突的操作。 常见问法：“什么时候用重建”"
+          },
+          {
+            "chunkId": "02-app-generation:2:5",
+            "documentId": "02-app-generation",
+            "documentVersion": 2,
+            "locator": "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】",
+            "content": "同一应用有进行中的任务时，应先等待或使用“停止生成”；不应连续发送相互冲突的修改。停止需要后端确认任务结束，按钮显示“正在停止”时请等待。失败后读取错误信息、缩小本轮修改范围再重试。HTML 与多文件发布未通过校验时保留上一成功版本；没有成功版本的新应用可能没有可用预览。不能承诺每次自动修复都成功。 常见问法：“生成中能再发一条吗”"
+          }
+        ]
+      }
+    },
+    {
+      "id": "deployment-download-009",
+      "question": "下载项目之前必须先部署成功吗？",
+      "facts": [
+        {
+          "factId": "deployment-download-009:required:01",
+          "statement": "源码下载与部署是不同操作，下载不以先部署成功为前提",
+          "equivalentExpressions": [
+            "不必先上线才能下载源码"
+          ],
+          "applicableConditions": [
+            "具备源码可用性及创建者下载权限。"
+          ],
+          "evidence": [
+            {
+              "documentId": "07-deployment-download",
+              "documentPath": "documents/07-deployment-download.md",
+              "heading": "下载代码",
+              "quote": "在应用对话页点击“下载代码”，浏览器下载源码 ZIP。下载接口要求登录且只能由创建者下载；管理员管理权限不能推导为下载他人源码或部署他人应用的权限。聊天 Markdown 导出允许创建者或管理员，但与源码下载权限不同。压缩包排除 node_modules、dist、build、.git、.env、日志和临时文件。Vue 下载后需在本地安装依赖并按工程脚本运行或构建；缺少依赖目录和构建目录是预期过滤，不一定是文件丢失。HTML 或多文件站点按其资源关系运行。",
+              "quoteStart": 473,
+              "quoteEnd": 703,
+              "offsetUnit": "unicode-code-points",
+              "documentSha256": "bcc6b4845419722cd4e1a536e7c772a275b0443c9d694f770feef53c7f20e2e6"
+            }
+          ],
+          "basisType": "public-document",
+          "reviewStatus": "agent-source-reviewed-human-pending",
+          "contractNotes": "公共quote为隐含支持；源码AppController下载430–456行补核无部署状态前置。quote精确存在不直接证明负前置，争议仍待人工判断。"
+        },
+        {
+          "factId": "deployment-download-009:required:02",
+          "statement": "下载仍需源码可用及相应权限",
+          "equivalentExpressions": [
+            "免部署不等于免登录或任意下载他人源码"
+          ],
+          "applicableConditions": [
+            "具备源码可用性及创建者下载权限。"
+          ],
+          "evidence": [
+            {
+              "documentId": "07-deployment-download",
+              "documentPath": "documents/07-deployment-download.md",
+              "heading": "下载代码",
+              "quote": "在应用对话页点击“下载代码”，浏览器下载源码 ZIP。下载接口要求登录且只能由创建者下载；管理员管理权限不能推导为下载他人源码或部署他人应用的权限。聊天 Markdown 导出允许创建者或管理员，但与源码下载权限不同。压缩包排除 node_modules、dist、build、.git、.env、日志和临时文件。Vue 下载后需在本地安装依赖并按工程脚本运行或构建；缺少依赖目录和构建目录是预期过滤，不一定是文件丢失。HTML 或多文件站点按其资源关系运行。",
+              "quoteStart": 473,
+              "quoteEnd": 703,
+              "offsetUnit": "unicode-code-points",
+              "documentSha256": "bcc6b4845419722cd4e1a536e7c772a275b0443c9d694f770feef53c7f20e2e6"
+            }
+          ],
+          "basisType": "public-document",
+          "reviewStatus": "agent-source-reviewed-human-pending"
+        }
+      ],
+      "optionalFacts": [],
+      "forbiddenClaims": [],
+      "contexts": {
+        "cap1": [
+          {
+            "chunkId": "04-generation-types:2:3",
+            "documentId": "04-generation-types",
+            "documentVersion": 2,
+            "locator": "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / VUE_PROJECT Vue 工程【当前功能与推荐规范】",
+            "content": "VUE_PROJECT 分支生成 Vue 项目结构，通过文件工具和项目构建完成检查，适合组件较多、页面关系较复杂的前端工程。成功部署使用构建产物，源码下载则用于后续开发。项目依赖或路由错误可能造成构建失败，不能因为已写入文件就视为完成。使用建议：列清页面、组件、导航与状态，减少一次引入无关依赖。 常见问法：“三种生成方式有什么不同”"
+          },
+          {
+            "chunkId": "07-deployment-download:2:4",
+            "documentId": "07-deployment-download",
+            "documentVersion": 2,
+            "locator": "部署、访问与代码下载【当前功能】 / 失败排查【推荐规范】",
+            "content": "部署失败先核对是否为创建者、任务是否成功、源码或构建结果是否可用。链接打不开时检查完整链接、服务是否可达及页面错误；图片失效时核对素材可达性和相对路径。下载失败先看权限和生成目录是否存在，再读取响应错误；不要连续重复部署来掩盖构建错误。 常见问法：“图片预览正常上线失效怎么办”"
+          },
+          {
+            "chunkId": "11-faq:2:6",
+            "documentId": "11-faq",
+            "documentVersion": 2,
+            "locator": "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称",
+            "content": "“做网页/帮我做个网站”对应应用生成；“把网站发布出去/上线”对应部署应用；“下载项目/拿源码”对应下载代码；“保存聊天/拿对话”对应导出 Markdown；“帖子发了看不到”优先查看审核状态；“网页没动”先确认生成终态与预览规则。“上传素材”要区分社区图片和应用图片需求，不能假设两处数据自动同步。"
+          }
+        ],
+        "cap2": [
+          {
+            "chunkId": "04-generation-types:2:3",
+            "documentId": "04-generation-types",
+            "documentVersion": 2,
+            "locator": "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / VUE_PROJECT Vue 工程【当前功能与推荐规范】",
+            "content": "VUE_PROJECT 分支生成 Vue 项目结构，通过文件工具和项目构建完成检查，适合组件较多、页面关系较复杂的前端工程。成功部署使用构建产物，源码下载则用于后续开发。项目依赖或路由错误可能造成构建失败，不能因为已写入文件就视为完成。使用建议：列清页面、组件、导航与状态，减少一次引入无关依赖。 常见问法：“三种生成方式有什么不同”"
+          },
+          {
+            "chunkId": "07-deployment-download:2:4",
+            "documentId": "07-deployment-download",
+            "documentVersion": 2,
+            "locator": "部署、访问与代码下载【当前功能】 / 失败排查【推荐规范】",
+            "content": "部署失败先核对是否为创建者、任务是否成功、源码或构建结果是否可用。链接打不开时检查完整链接、服务是否可达及页面错误；图片失效时核对素材可达性和相对路径。下载失败先看权限和生成目录是否存在，再读取响应错误；不要连续重复部署来掩盖构建错误。 常见问法：“图片预览正常上线失效怎么办”"
+          },
+          {
+            "chunkId": "07-deployment-download:2:0",
+            "documentId": "07-deployment-download",
+            "documentVersion": 2,
+            "locator": "部署、访问与代码下载【当前功能】 / 部署前提与步骤【当前功能】",
+            "content": "使用创建应用的账号登录，进入该应用对话页，先确认已有可用生成结果并验收页面，然后点击“部署应用”。部署成功后得到访问链接，可以打开新标签页验证。后端部署操作只允许应用创建者；管理员能管理应用不意味着可以直接部署别人创建的应用。没有源码目录或 Vue 构建产物时部署可能失败。 常见问法：“怎么发布网站”“管理员能部署别人的应用吗”"
+          }
+        ]
+      }
+    }
+  ],
+  "answers": [
+    {
+      "key": "app-generation-005:cap1",
+      "inputSha256": "0bafe093bdea1f6f6f71a4e526fcbb4e42a7fe12760afca7a8f4d8f8aeddb4d9",
+      "status": "completed",
+      "reserved": true,
+      "reservationState": "confirmed",
+      "attemptedSend": true,
+      "httpStatus": 200,
+      "finishReason": "stop",
+      "usage": {
+        "prompt_tokens": 727,
+        "completion_tokens": 124,
+        "total_tokens": 851
+      },
+      "latencyMs": 1219,
+      "errorCode": null,
+      "responseModel": "deepseek-flash",
+      "answer": {
+        "answered": true,
+        "answer": "HTML 和 MULTI_FILE 部署读取可用源码版本，Vue 工程部署使用可用的构建产物。三类生成都需保留原有功能、文字、图片和操作方式；HTML 和 MULTI_FILE 有严格解析与活动版本发布检查，Vue 有工程构建检查，但这些检查不能代替人工验证真实业务。类型名称本身不代表具备真实登录或支付等能力，仍需确认业务后端和服务接入。",
+        "cited_chunk_ids": [
+          "07-deployment-download:2:2",
+          "04-generation-types:2:4"
+        ]
+      },
+      "contractValid": true
+    },
+    {
+      "key": "app-generation-005:cap2",
+      "inputSha256": "192a165bf0aca32636c7c8fb4a4db5b62ce24ad7c60dbaea8466f559fa24088d",
+      "status": "completed",
+      "reserved": true,
+      "reservationState": "confirmed",
+      "attemptedSend": true,
+      "httpStatus": 200,
+      "finishReason": "stop",
+      "usage": {
+        "prompt_tokens": 756,
+        "completion_tokens": 176,
+        "total_tokens": 932
+      },
+      "latencyMs": 1062,
+      "errorCode": null,
+      "responseModel": "deepseek-flash",
+      "answer": {
+        "answered": true,
+        "answer": "HTML 和 MULTI_FILE 属于静态站点生成方式：HTML 和 MULTI_FILE 部署读取可用源码版本，并经过严格的解析与活动版本发布检查；其中 MULTI_FILE 会把 HTML、CSS、JavaScript 等拆成文件，适合需要区分结构、样式和脚本的静态站点，但它不等于 Vue 工程，也不自动提供后端数据库。Vue 工程部署使用可用的构建产物，并经过工程构建检查。三类生成都需要保留原有功能、文字、图片和操作方式；这些检查不能代替人工验证真实业务，类型名称本身也不代表具备真实登录或支付等能力。",
+        "cited_chunk_ids": [
+          "07-deployment-download:2:2",
+          "04-generation-types:2:4",
+          "04-generation-types:2:2"
+        ]
+      },
+      "contractValid": true
+    },
+    {
+      "key": "app-generation-008:cap2",
+      "inputSha256": "e1bcffa01a9d6884b5f266df00434ace2e072cbe67bc9674059a09a47abd860b",
+      "status": "completed",
+      "reserved": true,
+      "reservationState": "confirmed",
+      "attemptedSend": true,
+      "httpStatus": 200,
+      "finishReason": "stop",
+      "usage": {
+        "prompt_tokens": 772,
+        "completion_tokens": 160,
+        "total_tokens": 932
+      },
+      "latencyMs": 1000,
+      "errorCode": null,
+      "responseModel": "deepseek-flash",
+      "answer": {
+        "answered": true,
+        "answer": "多页面和复用组件时，提示词应说明页面数量、导航关系、主要文字、希望保留的图片以及移动端要求；如果涉及多个页面，列出页面名、需要保留的内容和验收条件。先说明改什么，再说明不允许破坏什么，避免“随便改一下”“重新做得更好”等没有边界的指令。视觉描述可写浅色、深色、主色、卡片密度和参考风格，并结合具体区域，例如“标题下留出简介，列表支持手机单列”；“高级一点”缺少可验收标准，应补充布局和信息优先级。",
+        "cited_chunk_ids": [
+          "02-app-generation:2:4",
+          "03-generation-requirements:2:2"
+        ]
+      },
+      "contractValid": true
+    },
+    {
+      "key": "app-generation-008:cap1",
+      "inputSha256": "ade78e8f17b2073d32cfdca8a4d1ef0ff54100df603e56edf6aed17a8f4cf076",
+      "status": "completed",
+      "reserved": true,
+      "reservationState": "confirmed",
+      "attemptedSend": true,
+      "httpStatus": 200,
+      "finishReason": "stop",
+      "usage": {
+        "prompt_tokens": 756,
+        "completion_tokens": 143,
+        "total_tokens": 899
+      },
+      "latencyMs": 1266,
+      "errorCode": null,
+      "responseModel": "deepseek-flash",
+      "answer": {
+        "answered": true,
+        "answer": "多页面和复用组件时，提示词应说明：页面数量、导航关系、主要文字、希望保留的图片和移动端要求；涉及多个页面时列出页面名、需要保留的内容和验收条件，先说明改什么，再说明不允许破坏什么，避免“随便改一下”这类没有边界的指令。若页面关系较复杂、组件较多，可考虑 VUE_PROJECT 方式，并列清页面、组件、导航与状态，减少一次引入无关依赖。",
+        "cited_chunk_ids": [
+          "02-app-generation:2:4",
+          "03-generation-requirements:2:2",
+          "04-generation-types:2:3"
+        ]
+      },
+      "contractValid": true
+    },
+    {
+      "key": "admin-knowledge-004:cap1",
+      "inputSha256": "f016dd42987925fff71bb7d82cc0e2cce4916d555078b1c084010f201c6eb88c",
+      "status": "completed",
+      "reserved": true,
+      "reservationState": "confirmed",
+      "attemptedSend": true,
+      "httpStatus": 200,
+      "finishReason": "stop",
+      "usage": {
+        "prompt_tokens": 795,
+        "completion_tokens": 46,
+        "total_tokens": 841
+      },
+      "latencyMs": 625,
+      "errorCode": null,
+      "responseModel": "deepseek-flash",
+      "answer": {
+        "answered": true,
+        "answer": "应替换旧文件，而不是重复上传。文档失败时应查看任务错误，而不是反复上传重复文件。",
+        "cited_chunk_ids": [
+          "10-admin-knowledge:2:3"
+        ]
+      },
+      "contractValid": true
+    },
+    {
+      "key": "admin-knowledge-004:cap2",
+      "inputSha256": "e88fad4e4ebf5d8e0bcfee5b5b1f3eaa603a2ffd560863b0d2d3bc77b82bc179",
+      "status": "completed",
+      "reserved": true,
+      "reservationState": "confirmed",
+      "attemptedSend": true,
+      "httpStatus": 200,
+      "finishReason": "stop",
+      "usage": {
+        "prompt_tokens": 783,
+        "completion_tokens": 66,
+        "total_tokens": 849
+      },
+      "latencyMs": 1453,
+      "errorCode": null,
+      "responseModel": "deepseek-flash",
+      "answer": {
+        "answered": true,
+        "answer": "更新已有内容时应使用替换原文档的方式，避免新旧规则同时参与回答；失败时应查看任务错误，而不是反复上传重复文件。",
+        "cited_chunk_ids": [
+          "10-admin-knowledge:2:2",
+          "10-admin-knowledge:2:3"
+        ]
+      },
+      "contractValid": true
+    },
+    {
+      "key": "deployment-download-009:cap2",
+      "inputSha256": "d65ae43672cbe036e6dd46aa1152e39de8ad5f721ebbf6e0b9425d86d62245f5",
+      "status": "completed",
+      "reserved": true,
+      "reservationState": "confirmed",
+      "attemptedSend": true,
+      "httpStatus": 200,
+      "finishReason": "stop",
+      "usage": {
+        "prompt_tokens": 768,
+        "completion_tokens": 85,
+        "total_tokens": 853
+      },
+      "latencyMs": 891,
+      "errorCode": null,
+      "responseModel": "deepseek-flash",
+      "answer": {
+        "answered": true,
+        "answer": "不需要。部署和源码下载是两种不同用途：部署成功后得到访问链接，使用的是构建产物；源码下载则用于后续开发。部署前需要先确认已有可用的生成结果并验收页面，但并没有要求必须先部署成功才能下载源码。",
+        "cited_chunk_ids": [
+          "04-generation-types:2:3",
+          "07-deployment-download:2:0"
+        ]
+      },
+      "contractValid": true
+    },
+    {
+      "key": "deployment-download-009:cap1",
+      "inputSha256": "2eac3f1b3bd3291c3610038cb1e495fd4c590a934352528cd795d0471926458e",
+      "status": "completed",
+      "reserved": true,
+      "reservationState": "confirmed",
+      "attemptedSend": true,
+      "httpStatus": 200,
+      "finishReason": "stop",
+      "usage": {
+        "prompt_tokens": 759,
+        "completion_tokens": 73,
+        "total_tokens": 832
+      },
+      "latencyMs": 719,
+      "errorCode": null,
+      "responseModel": "deepseek-flash",
+      "answer": {
+        "answered": true,
+        "answer": "不需要。部署和下载代码是两个不同的操作：部署应用对应“把网站发布出去/上线”，下载代码对应“下载项目/拿源码”。部署使用构建产物，源码下载用于后续开发。",
+        "cited_chunk_ids": [
+          "04-generation-types:2:3",
+          "11-faq:2:6"
+        ]
+      },
+      "contractValid": true
+    }
+  ],
+  "judgments": [
+    {
+      "key": "admin-knowledge-004:cap1",
+      "factId": "admin-knowledge-004:required:01",
+      "answerCoverage": null,
+      "allContextSupport": null,
+      "actualCitationSupport": null,
+      "notes": ""
+    },
+    {
+      "key": "admin-knowledge-004:cap2",
+      "factId": "admin-knowledge-004:required:01",
+      "answerCoverage": null,
+      "allContextSupport": null,
+      "actualCitationSupport": null,
+      "notes": ""
+    },
+    {
+      "key": "app-generation-005:cap1",
+      "factId": "app-generation-005:required:01",
+      "answerCoverage": null,
+      "allContextSupport": null,
+      "actualCitationSupport": null,
+      "notes": ""
+    },
+    {
+      "key": "app-generation-005:cap1",
+      "factId": "app-generation-005:required:02",
+      "answerCoverage": null,
+      "allContextSupport": null,
+      "actualCitationSupport": null,
+      "notes": ""
+    },
+    {
+      "key": "app-generation-005:cap1",
+      "factId": "app-generation-005:required:03",
+      "answerCoverage": null,
+      "allContextSupport": null,
+      "actualCitationSupport": null,
+      "notes": ""
+    },
+    {
+      "key": "app-generation-005:cap2",
+      "factId": "app-generation-005:required:01",
+      "answerCoverage": null,
+      "allContextSupport": null,
+      "actualCitationSupport": null,
+      "notes": ""
+    },
+    {
+      "key": "app-generation-005:cap2",
+      "factId": "app-generation-005:required:02",
+      "answerCoverage": null,
+      "allContextSupport": null,
+      "actualCitationSupport": null,
+      "notes": ""
+    },
+    {
+      "key": "app-generation-005:cap2",
+      "factId": "app-generation-005:required:03",
+      "answerCoverage": null,
+      "allContextSupport": null,
+      "actualCitationSupport": null,
+      "notes": ""
+    },
+    {
+      "key": "app-generation-008:cap1",
+      "factId": "app-generation-008:required:01",
+      "answerCoverage": null,
+      "allContextSupport": null,
+      "actualCitationSupport": null,
+      "notes": ""
+    },
+    {
+      "key": "app-generation-008:cap1",
+      "factId": "app-generation-008:required:02",
+      "answerCoverage": null,
+      "allContextSupport": null,
+      "actualCitationSupport": null,
+      "notes": ""
+    },
+    {
+      "key": "app-generation-008:cap2",
+      "factId": "app-generation-008:required:01",
+      "answerCoverage": null,
+      "allContextSupport": null,
+      "actualCitationSupport": null,
+      "notes": ""
+    },
+    {
+      "key": "app-generation-008:cap2",
+      "factId": "app-generation-008:required:02",
+      "answerCoverage": null,
+      "allContextSupport": null,
+      "actualCitationSupport": null,
+      "notes": ""
+    },
+    {
+      "key": "deployment-download-009:cap1",
+      "factId": "deployment-download-009:required:01",
+      "answerCoverage": null,
+      "allContextSupport": null,
+      "actualCitationSupport": null,
+      "notes": ""
+    },
+    {
+      "key": "deployment-download-009:cap1",
+      "factId": "deployment-download-009:required:02",
+      "answerCoverage": null,
+      "allContextSupport": null,
+      "actualCitationSupport": null,
+      "notes": ""
+    },
+    {
+      "key": "deployment-download-009:cap2",
+      "factId": "deployment-download-009:required:01",
+      "answerCoverage": null,
+      "allContextSupport": null,
+      "actualCitationSupport": null,
+      "notes": ""
+    },
+    {
+      "key": "deployment-download-009:cap2",
+      "factId": "deployment-download-009:required:02",
+      "answerCoverage": null,
+      "allContextSupport": null,
+      "actualCitationSupport": null,
+      "notes": ""
+    }
+  ],
+  "boundary": "另存填写结果，不覆盖代理或旧人工裁决；本模板不直接兼容旧导入器。"
+}

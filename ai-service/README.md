@@ -884,3 +884,14 @@ uv run --offline python -m ai_service.orchestration.rag_hybrid_cap_evaluation --
 输出限仓库tmp内新非链接目录，禁止覆盖；固定归档/计划摘要、原47份绑定及本轮输入漂移时失败关闭。CLI阻断常见socket连接；多文件输出非事务，失败残片不得冒充成功结果。完整审计查看comparison.json和input-integrity.json，summary.json只包含统计，reviews-template.json保持真人pending。
 
 本轮cap1精确重现90/90，最终完整引文114→120/130，但新增8项同时丢失2项，59题文档多样性下降；引文存活不是回答质量，已含等价依据的新增原段也不是新增语义覆盖。无新Chat/Embedding/BGE或服务调用。结果与下一轮建议见[第28轮交接](../doc/customer-service-hybrid-cap-round28-handoff.md)，不自动推广cap2或执行真实回答验证。
+
+
+## 客服第29轮四题混合检索真实回答对照
+
+`rag_hybrid_answer_experiment`只使用第28轮冻结最终上下文，对005、008、admin004、download009四题cap1/cap2各回答一次，最多8次Chat；不重算Embedding/BGE，不改变生产选择器。固定归档摘要、可逆展开和55份历史绑定校验后，生成新的消息/配置/源码摘要计划；事实和预先证据评审只用于观测，不进入模型消息。
+
+`--prepare`只冻结本地计划，`--live --plan-sha256 <摘要> --authorization "按照下一轮建议继续执行"`才调用现有模型配置。固定账本在`tmp/rag-hybrid-answer-20261120/authorization.jsonl`，排他创建，发送前flush/fsync预占；无重试、首错停止、失败取消不返还，不能换账本补跑。模型HTTP由独立本地进程发送，无需启动双服务；不是Milvus或端到端生产验收。
+
+原始响应仅保存完整有界且UTF-8可解码的HTTP200结果，其他失败可能只有状态/固定码。responseModel只记录供应商自报的非空、可打印、最长128字符名称，不认证实际模型身份。计划不保存密钥或端点原文；未知预占与多文件落盘失败没有自动恢复。
+
+答案覆盖、上下文支持和实际引用支持分开评审；合法引用不证明语义正确，真人意见另存。本轮实际调用、收益与退步见[第29轮交接](../doc/customer-service-hybrid-answer-round29-handoff.md)。本轮已执行后不得直接重跑live，后续真实实验需另行冻结范围与总额度。
