@@ -18,6 +18,24 @@ logger.propagate = False
 logger.addHandler(logging.NullHandler())
 
 
+# 运行时与离线报告共用原因集合，供应商返回的任意字符串不能成为诊断字段。
+TERMINAL_REASON_CODES = frozenset({
+    'CUSTOMER_SERVICE_UNAVAILABLE', 'CUSTOMER_SERVICE_INVALID_REQUEST',
+    'CUSTOMER_SERVICE_EMBEDDING_UNAVAILABLE', 'CUSTOMER_SERVICE_VECTOR_STORE_UNAVAILABLE',
+    'KNOWLEDGE_PUBLICATION_EMPTY', 'KNOWLEDGE_PUBLICATION_UNAVAILABLE',
+    'KNOWLEDGE_PUBLICATION_CHANGED',
+    'RAW_RETRIEVAL_EMPTY', 'FILTERED_EMPTY', 'RERANK_EMPTY', 'THRESHOLD_EMPTY',
+    'RERANK_UNAVAILABLE_WITH_THRESHOLD', 'CHAR_CONTEXT_EMPTY',
+    'PROMPT_BUDGET_EXHAUSTED', 'BYTE_CONTEXT_EMPTY', 'MODEL_REFUSED',
+    'MODEL_CALL_FAILED', 'MODEL_PARSE_FAILED', 'CITATION_INVALID', 'ANSWERED',
+    'TIMEOUT', 'CLIENT_DISCONNECTED', 'CANCELLED',
+})
+TERMINAL_PHASES = frozenset({
+    'publication_read', 'publication_before_model', 'publication_after_model',
+    'publication_scope_exit',
+})
+
+
 def create_trace(request_id: str, settings: Settings) -> CustomerServiceRagTrace | None:
     prefix = settings.rag_diagnostics_request_prefix
     if settings.rag_diagnostics_enabled and prefix and request_id.startswith(prefix):
@@ -142,22 +160,18 @@ class CustomerServiceRagTrace:
     def set_degraded(self, degraded: bool) -> None:
         self._data['terminal']['degraded'] = degraded
 
-    def finish(self, outcome: str, reason: str, *, degraded: bool | None = None) -> None:
+    def finish(
+        self, outcome: str, reason: str, *, degraded: bool | None = None,
+        phase: str | None = None,
+    ) -> None:
         # 自定义服务异常的 code 也不受信任，拒绝把任意 provider 内容写入日志。
-        allowed = {
-            'CUSTOMER_SERVICE_UNAVAILABLE', 'CUSTOMER_SERVICE_INVALID_REQUEST',
-            'CUSTOMER_SERVICE_EMBEDDING_UNAVAILABLE', 'CUSTOMER_SERVICE_VECTOR_STORE_UNAVAILABLE',
-            'RAW_RETRIEVAL_EMPTY', 'FILTERED_EMPTY', 'RERANK_EMPTY', 'THRESHOLD_EMPTY',
-            'RERANK_UNAVAILABLE_WITH_THRESHOLD', 'CHAR_CONTEXT_EMPTY',
-            'PROMPT_BUDGET_EXHAUSTED', 'BYTE_CONTEXT_EMPTY', 'MODEL_REFUSED',
-            'MODEL_CALL_FAILED', 'MODEL_PARSE_FAILED', 'CITATION_INVALID', 'ANSWERED',
-            'TIMEOUT', 'CLIENT_DISCONNECTED', 'CANCELLED',
-        }
-        if reason not in allowed:
+        if reason not in TERMINAL_REASON_CODES:
             reason = 'CUSTOMER_SERVICE_UNAVAILABLE'
         if degraded is None:
             degraded = self._data['terminal']['degraded']
         self._data['terminal'] = {'outcome': outcome, 'reasonCode': reason, 'degraded': degraded}
+        if phase in TERMINAL_PHASES:
+            self._data['terminal']['phase'] = phase
 
     def snapshot(self) -> dict:
         return copy.deepcopy(self._data)

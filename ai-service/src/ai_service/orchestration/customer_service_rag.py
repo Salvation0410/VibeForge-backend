@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from ai_service.config import Settings
-from ai_service.infrastructure.milvus_knowledge import KnowledgeStore, RetrievedChunk
+from ai_service.infrastructure.milvus_knowledge import KnowledgeStore, MilvusKnowledgeError, RetrievedChunk
 from ai_service.models.base import CustomerServiceContext, GenerationModel
 from ai_service.models.embeddings import EmbeddingProvider
 from ai_service.models.reranker import RerankedChunk, RerankerProvider
@@ -95,15 +95,35 @@ class CustomerServiceRagService:
             scope = getattr(self._store, "read_scope", None)
             if scope is None:
                 return await self._answer(question, trace=trace)
+            phase = 'publication_read'
+            body_error = None
+            body_phase = None
             try:
                 async with scope():
-                    if self._store.empty:
-                        await self._store.assert_current()
-                        return _no_answer(degraded=False)
-                    return await self._answer(question, trace=trace)
-            except Exception:
+                    try:
+                        if self._store.empty:
+                            await self._store.assert_current()
+                            if trace:
+                                trace.finish('refused', 'KNOWLEDGE_PUBLICATION_EMPTY', phase=phase)
+                            return _no_answer(degraded=False)
+                        phase = None
+                        return await self._answer(question, trace=trace)
+                    except Exception as error:
+                        # 只保留原异常的阶段；退出时出现的新异常必须归到作用域退出。
+                        body_error, body_phase = error, phase
+                        raise
+                    finally:
+                        phase = 'publication_scope_exit'
+            except Exception as error:
                 if trace:
-                    trace.finish('service_error', 'KNOWLEDGE_PUBLICATION_UNAVAILABLE')
+                    if error is body_error:
+                        if body_phase is not None:
+                            trace.finish('service_error', _publication_failure_reason(error), phase=body_phase)
+                        elif not isinstance(error, CustomerServiceRagError):
+                            trace.finish('service_error', 'CUSTOMER_SERVICE_UNAVAILABLE')
+                        # 已分类的输入、Embedding 和检索异常沿原路径返回兜底，不覆盖诊断。
+                    else:
+                        trace.finish('service_error', _publication_failure_reason(error), phase=phase)
                 return CustomerServiceAnswer(False, SYSTEM_FALLBACK_TEXT, (), False)
         except asyncio.CancelledError:
             if trace:
@@ -243,10 +263,13 @@ class CustomerServiceRagService:
         if not contexts:
             return refused('BYTE_CONTEXT_EMPTY', degraded)
         reason = 'MODEL_CALL_FAILED'
+        publication_phase = None
         try:
             assert_current = getattr(self._store, 'assert_current', None)
             if assert_current is not None:
+                publication_phase = 'publication_before_model'
                 await assert_current()
+                publication_phase = None
             if trace:
                 trace.model_called()
             with stage('model'):
@@ -254,7 +277,9 @@ class CustomerServiceRagService:
                     normalized_question, contexts,
                 )
             if assert_current is not None:
+                publication_phase = 'publication_after_model'
                 await assert_current()
+                publication_phase = None
             if trace:
                 trace.model_answered(model_answer.answered)
             citations = model_answer.cited_chunk_ids
@@ -287,8 +312,18 @@ class CustomerServiceRagService:
             return refused('MODEL_REFUSED', degraded)
         except Exception as error:
             if trace:
-                trace.finish('service_error', 'MODEL_PARSE_FAILED' if isinstance(error, CustomerServiceModelOutputError) else reason, degraded=degraded)
+                if publication_phase is not None:
+                    trace.finish('service_error', _publication_failure_reason(error), degraded=degraded, phase=publication_phase)
+                else:
+                    trace.finish('service_error', 'MODEL_PARSE_FAILED' if isinstance(error, CustomerServiceModelOutputError) else reason, degraded=degraded)
             return CustomerServiceAnswer(False, SYSTEM_FALLBACK_TEXT, (), degraded)
+
+
+def _publication_failure_reason(error: Exception) -> str:
+    # 仅信任本地适配器的固定变化码，不透传任意异常 code 或正文。
+    if isinstance(error, MilvusKnowledgeError) and error.code == 'KNOWLEDGE_PUBLICATION_CHANGED':
+        return 'KNOWLEDGE_PUBLICATION_CHANGED'
+    return 'KNOWLEDGE_PUBLICATION_UNAVAILABLE'
 
 
 def _filter_and_dedupe(

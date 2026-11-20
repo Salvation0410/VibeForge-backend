@@ -54,3 +54,96 @@
 用户确认方案 B 后，编写实施计划、诊断修改及脚本，执行测试与历史只读回放，同步 AI 服务 README、本文和原逐轮交接入口，按中文 Conventional Commits 提交。每轮回复说明：改动、原触发场景、为什么这样做、验证与限制、提交和下一步。
 
 混合检索只在“必要证据在当前语料中存在但召回候选缺失”的可核对样本支持下再讨论；证据已召回却在配额或预算阶段丢失，优先研究选择策略；证据保留但答案遗漏/越界，需单独研究生成与评审；语料缺失或标注争议先处理知识与标注版本。这些是下一实验方向，不构成自动推广门槛。未知执行状态仍需人工处理，候选无自动 GC，引用校验不能消除幻觉。
+
+## 第二轮：方案 B 实施与离线观测（2026-11-20）
+
+用户已确认 B 方案。本轮对应原总交接的第二十轮；第一轮方案状态保留，不用实施结果覆盖此前“未运行测试”的记录。
+
+### 改动、触发条件与处理流程
+
+运行时：`customer_service_rag.py` 修正空权威库正常拒答的终态；`customer_service_trace.py` 提供共享固定原因集合。新增 `KNOWLEDGE_PUBLICATION_EMPTY`、`KNOWLEDGE_PUBLICATION_UNAVAILABLE`、`KNOWLEDGE_PUBLICATION_CHANGED`。变化码只接受本地 `MilvusKnowledgeError` 的精确固定值，任意供应商异常的同名属性不会被透传。
+
+`terminal.phase` 为可选字段，白名单是 `publication_read`、`publication_before_model`、`publication_after_model`、`publication_scope_exit`。模型前后复核失败不再记为模型调用失败；同一已分类输入/Embedding/检索异常穿过作用域时保留原原因，退出阶段另发新异常则归到退出失败。原返回、fallback、调用次数、取消和重试策略保持。schema 仍为 v1，历史无 phase 记录在新工具中显示 UNOBSERVED。
+
+诊断仍需显式 `AI_SERVICE_RAG_DIAGNOSTICS_ENABLED=true`，请求匹配非空 `AI_SERVICE_RAG_DIAGNOSTICS_REQUEST_PREFIX`，并由运维给 `customer_service.rag.trace` 配置 FileHandler。默认不开启，NullHandler 不存日志；本轮未更改 `.env` 或服务日志配置，也未重启服务，不能称线上采集已经部署。现有 HTTP 评测会调用真实模型，本轮未运行它。
+
+离线入口：`ai_service.orchestration.rag_failure_observation`，证据核对模块为 `rag_evidence_observation.py`。仅支持现有固定 rerank、cap 和 JSON 回答三项研究，各 90 题×两组；不接收任意线上 JSONL 作为实验报告。它按报告原始字节 SHA256、冻结 rubric、完整样本集合核对输入；文档映射必须匹配报告中 `sourceFilesSha256['document-map.json']` 及冻结文档摘要。未提供映射时仍统计工程状态，证据阶段为 UNKNOWN。
+
+各阶段用已捕获原文和 trace 的片段身份、文档版本、长度及 kept 集合交叉核对；过滤原文只从完整检索记录投影，不从最终答案反推。预算阶段允许前缀裁剪；阶段缺失、显式截断、达到 100 条元数据上限、重复身份、长度/版本不匹配保留 UNKNOWN。只报告经过当前标准文本清理的整段标注引文存活，不称语义证据充分性。相邻可观测阶段才能定位丢失；前段有缺口时不声称首次原因。选择丢失细分固定的 `duplicate_document`、`document_chunk_limit`、`top_k`，其余 UNKNOWN。
+
+人工入口复用 `rag_blind_review` 的匿名卡、严格逐事实/断言/引用校验及统计，并再次核对卡片问题、答案、上下文和事实与原报告一致。所有卡保留，无自动填分；human 是评审人的身份声明而非软件认证。代理完成仍为 human pending；引用和引文校验也不能证明人工判断语义正确。
+
+### 本轮历史材料观测结果
+
+原材料为第十九轮 2026-11-19 的已落盘真实报告，本轮仅本地读取：原始 SHA256 `7fa940447c2553431974c342519ec233395932ca72d7b43b18a005149b325579`。本轮新增 Chat/Embedding/BGE/INDEX/生产写入均为 0。
+
+| 项目 | text | json_object |
+| --- | ---: | ---: |
+| 固定样本分母 | 90 | 90 |
+| 正常回答 / 正常拒答 | 76 / 12 | 78 / 12 |
+| 工程错误 / 未运行 | 2 / 0 | 0 / 0 |
+| 工程错误原因 | MODEL_PARSE_FAILED × 2 | 无 |
+| 公共标注支持片段分母 | 130 | 130 |
+| 最终仍有整段标注引文 | 96 | 96 |
+| 已记录 Top8 无整段标注引文 | 10 | 10 |
+| 选择阶段丢失整段标注引文 | 24 | 24 |
+
+两组共享相同冻结输入，上述不是两批独立检索证据。选择阶段的 24 条均具有 `duplicate_document` 排除记录，字符/字节预算未发现新的整段标注引文首次丢失。七个阶段的 180 份记录都通过本工具核对；“OBSERVED”只代表捕获材料内部一致，不认证当年在线检索完整性、当前知识库或供应商身份。130 为支持片段/事实标注口径，不能把 96/130 称作真实答案正确率，也不能把 34 条引文未存活当成 34 个错误答案。
+
+历史原人工模板导入仍 pending；原代理终审导入是 quality complete、human pending，人工改善为 null。没有新增人工评分、重做代理质量裁决或改旧标注。输入旧 report、map、评审、盲包、三份耗尽账本以及本地配置等 12 份保护材料在本次最终回放前后摘要相同；README 随后仅追加本轮说明，用户原围栏修改保留。
+
+### 人工观测操作
+
+已生成本轮新匿名包：`tmp/rag-failure-observation-20261120/final-observation/blind/cards.md`。逐卡读取问题、答案、实际上下文及必要事实，将同目录 `reviews-template.json` 复制为新的 `reviews-human.json`，填写实际评审人及逐项结果；暂未评的卡保持 pending，不删除。只把 cards 与模板交给盲审人，不交私有映射或带 arm 的诊断报告。
+
+在 `ai-service` 运行以下命令可新建另一轮观测目录；已有目录会被拒绝。原始材料只在本机忽略目录，缺失时明确失败，不能从提交的聚合文件反构原文。
+
+```powershell
+uv run --offline python -m ai_service.orchestration.rag_failure_observation `
+  --report ../tmp/rag-json-answer-20261119/prepared/live/report.json `
+  --report-sha256 7fa940447c2553431974c342519ec233395932ca72d7b43b18a005149b325579 `
+  --document-map ../tmp/rag-verification-20261118/live/document-map.json `
+  --output ../tmp/rag-failure-observation-20261120/my-new-observation
+```
+
+实际填写完本轮包后导入（可保留未评卡，不要求一次评完 180 卡）：
+
+```powershell
+$reviewPath = '../tmp/rag-failure-observation-20261120/final-observation/blind/reviews-human.json'
+$reviewDigest = (Get-FileHash -LiteralPath $reviewPath -Algorithm SHA256).Hash.ToLowerInvariant()
+uv run --offline python -m ai_service.orchestration.rag_failure_observation `
+  --report ../tmp/rag-json-answer-20261119/prepared/live/report.json `
+  --report-sha256 7fa940447c2553431974c342519ec233395932ca72d7b43b18a005149b325579 `
+  --document-map ../tmp/rag-verification-20261118/live/document-map.json `
+  --package ../tmp/rag-failure-observation-20261120/final-observation/blind `
+  --reviews $reviewPath --reviews-sha256 $reviewDigest `
+  --output ../tmp/rag-failure-observation-20261120/my-human-review
+```
+
+输出 `observation.json` 保存逐题阶段诊断，`summary.json` 保存聚合，`review-analysis.json` 保存严格人工/代理统计，`README.md` 为快速说明。只允许新建仓库 tmp 子目录；输入单文件上限 64 MiB，拒绝重复 JSON 键和非有限数值，CLI 固定错误不回显输入正文。写入中断可能留下部分新目录，不保证文件事务；保留现场并换新的分析输出目录即可，本工具不发送真实请求，不涉及恢复模型额度。
+
+### 验证与交付记录
+
+运行时新增回归先复现 12 项失败，再修正；定向组合 75 项通过，原 RAG 加新增测试 83 项通过。离线工具红测先因模块未实现收集失败；初版 17 项中 1 项失败，原因是误把合成夹具原有 178 个错误当作 1 个，修正断言后通过，未修改统计来凑预期。规格审查另发现 cap>1 的固定配额码遗漏，补白名单与四组参数测试。
+
+新两个测试文件的独立规格复验为 57 项通过。真正历史 CLI 回放含新包导出、旧人工模板/旧代理审阅导入，错误 hash 在输出前拒绝；导入及坏 hash 回放禁止 socket 连接，网络尝试为 0。未运行真实服务、Java/前端构建、浏览器或可选基础设施集成验收。完整回归 **2160 通过、25 跳过、0 失败/错误**；末次 JSON 指数溢出拒绝加固后，两个新增文件再运行 **57 通过**，独立审查另确认有限浮点兼容与正负溢出拒绝。两组计数不累加；完整回归收集后的这次小改动以定向测试验收。compileall 和 `uv lock --check --offline` 退出 0，锁解析 150 包；保留 Starlette BlockingPortal 和 LangGraph allowed_objects 两条既有弃用警告。原始日志留 `tmp/rag-failure-observation-20261120/`，脱敏汇总为 `doc/knowledge/product/evaluation/results/failure-observation-20261120-v1.json`。
+
+保护校验脚本首次把 Windows 反斜杠路径和 POSIX 字面量比较，误把预期 README 追加当作保护文件变化；改为 resolved Path 比较后确认 11 份输入摘要不变、README 为原字节加本轮追加，未回滚或覆盖用户改动。代码/文档仅本轮定向提交，提交哈希由最终回复报告；未推送远端或部署。
+
+实际验证命令（ai-service 目录）：
+
+```powershell
+uv run --offline pytest --junitxml=../tmp/rag-failure-observation-20261120/python-final.xml
+uv run --offline pytest tests/test_rag_failure_observation.py tests/test_rag_failure_trace.py --junitxml=../tmp/rag-failure-observation-20261120/final-target.xml
+uv run --offline python -m compileall -q src
+uv lock --check --offline
+uv run --offline python ../tmp/rag-failure-observation-20261120/verify-replay.py
+```
+
+最后一条为本轮现场回放脚本，仅首次执行成功；因输出拒绝覆盖，重复运行会失败，应保留原证据并按上述正式 CLI 换新目录执行。
+
+### 下一轮建议、原因和仍可能失败的场景
+
+先人工核对这 34 条未存活引文对应的题目，尤其 24 条被单文档配额排除的情况：整段引文可能只是太长，而保留片段已经足够；也可能原标注或问题范围有争议。若人工确认确有必要证据丢失，优先做独立的证据选择对照；当前证据还不足以直接增加混合检索。对 10 条 Top8 未包含的引文，再核对语料和标注版本，确认是真召回不足后才设计混合检索实验。
+
+旧模型前后失败阶段无法补回，未知执行状态依然人工处理，候选没有自动 GC，当前最后快照复核后的撤销竞态仍在。本轮没有消除幻觉、认证语义正确性、自动恢复任务或变更生产 text/cap1。运行时代码变化也使旧真实实验计划的关键实现摘要失配；本轮只读回放不校验“旧实现等于新实现”，而校验旧材料自身身份。新真实实验仍需新计划和明确额度，不能复用耗尽账本或旧批准。

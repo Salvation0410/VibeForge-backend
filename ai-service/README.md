@@ -779,3 +779,13 @@ uv run --offline python -m ai_service.orchestration.rag_json_answer_experiment -
 本批次text为88正常/2个MODEL_PARSE_FAILED，json_object为90正常/0解析失败，均无调用错误或未运行；两份失败是finish_reason=stop的JSON语法错误，正式解析器离线复验178接受/2拒绝。实际完整消息、cap1上下文及24份执行文件摘要与冻结计划匹配。请求deepseek-chat、全部响应自报deepseek-flash，身份差异保持；本批次未拒绝JSON参数不保证供应商长期遵守约束，单次90题零故障不能证明稳定错误率改善。
 
 全部180匿名卡由代理分别核对必要事实、断言/引用支持和拒答，代理成绩及配对区间见[真实对照聚合](../doc/knowledge/product/evaluation/results/json-answer-20261119-v1.json)与[第十九轮交接](../doc/customer-service-rag-rounds-handoff.md)。人工模板仍pending，支付新口径后置复核不覆盖冻结主成绩；本轮不自动推广生产JSON/cap2，不代表当前权威快照、双服务或浏览器E2E通过。原始报告、原响应、评审和耗尽账本只留忽略目录，不能重建账本、换输出或删除已用锚点恢复额度。
+
+### 客服失败原因观测与人工评测（2026-11-20）
+
+请求 trace 新增固定 `KNOWLEDGE_PUBLICATION_EMPTY/UNAVAILABLE/CHANGED` 原因。空权威库为正常拒答；读取、模型前/后复核及作用域退出通过可选 `terminal.phase` 区分，内层 Embedding/检索已知故障不再被外层通用异常覆盖。返回协议、重试、取消和调用次数不变。诊断默认关闭，仍需非空匹配前缀及自行配置 FileHandler；本轮未启用线上采集。旧 v1 trace 无 phase 时保持未观测，不补造历史原因。
+
+新增纯离线入口 `python -m ai_service.orchestration.rag_failure_observation --help`。支持现有固定 rerank/cap/JSON 回答研究，必填 `--report --report-sha256 --output`；可选 `--document-map` 从报告摘要及冻结语料验证真实文档身份。只分析已记录阶段原文和元数据，不连接在线资源。缺失/截断/版本或长度不一致的阶段为 UNKNOWN，标注整段引文存活不等于语义充分或回答正确。按固定分母区分正常回答、拒答、工程错误和未运行，unknown 不等同于未召回。
+
+默认创建新的匿名包和全量 pending 人工模板；已有材料用 `--package --reviews --reviews-sha256` 严格导入。代理评审不会变为人工完成；未评时人工质量改善为 null，human 字段只是评审人声明。输出只允许新的仓库 tmp 子目录，不覆盖旧报告、评审或耗尽账本，写入失败可能留下部分目录。单输入上限 64 MiB，拒绝重复 JSON 键及非有限数值；原文/答案仅留本地评测材料，不进入常规诊断日志。
+
+本轮只读复核第十九轮 180 份回答，两组共享的每组 130 条公共标注支持片段中，96 条最终存活、10 条在已记录 Top8 中未找到、24 条在选择阶段因单文档配额丢失。该统计不等同于 34 个错误答案，不支持自动推广混合检索或 cap2；人工验收仍 pending。实际命令、可填写材料、验证及限制见[失败原因观测交接](../doc/customer-service-failure-observation-handoff.md)。未知执行状态、无自动 GC 和模型幻觉边界保持。

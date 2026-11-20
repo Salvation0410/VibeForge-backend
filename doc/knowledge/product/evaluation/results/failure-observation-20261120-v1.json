@@ -1,0 +1,171 @@
+{
+  "schemaVersion": "rag-failure-observation-round/v1",
+  "round": 20,
+  "date": "2026-11-20",
+  "scope": "offline-historical-material-and-runtime-fake-regression",
+  "sourceStudyId": "rag-json-answer-20261119-v1",
+  "bindings": {
+    "reportSha256": "7fa940447c2553431974c342519ec233395932ca72d7b43b18a005149b325579",
+    "reportCanonicalSha256": "d293dc02e57b858cf0b724ec3d475dee10f22924fca3cd4a7d0d246ca068fcfd",
+    "rubricSha256": "79d2cf63949c8de69877f9c49d4b66c1f834f5ee9b64ce9fcb48d70e1aa54363",
+    "documentMappingProvided": true
+  },
+  "arms": {
+    "text": {
+      "denominator": 90,
+      "statuses": {
+        "answered": 76,
+        "refused": 12,
+        "error": 2,
+        "not_run": 0
+      },
+      "reasonCodes": {
+        "ANSWERED": 76,
+        "MODEL_PARSE_FAILED": 2,
+        "MODEL_REFUSED": 12
+      },
+      "phases": {
+        "UNOBSERVED": 90
+      },
+      "stages": {
+        "retrieved": {
+          "OBSERVED": 90
+        },
+        "filtered": {
+          "OBSERVED": 90
+        },
+        "reranked": {
+          "OBSERVED": 90
+        },
+        "thresholded": {
+          "OBSERVED": 90
+        },
+        "selected": {
+          "OBSERVED": 90
+        },
+        "characterBudget": {
+          "OBSERVED": 90
+        },
+        "byteBudget": {
+          "OBSERVED": 90
+        }
+      },
+      "snippetFirstLoss": {
+        "NOT_IN_RETRIEVED": 10,
+        "SURVIVED": 96,
+        "selected": 24
+      },
+      "selectionDropReasons": {
+        "duplicate_document": 24
+      }
+    },
+    "json_object": {
+      "denominator": 90,
+      "statuses": {
+        "answered": 78,
+        "refused": 12,
+        "error": 0,
+        "not_run": 0
+      },
+      "reasonCodes": {
+        "ANSWERED": 78,
+        "MODEL_REFUSED": 12
+      },
+      "phases": {
+        "UNOBSERVED": 90
+      },
+      "stages": {
+        "retrieved": {
+          "OBSERVED": 90
+        },
+        "filtered": {
+          "OBSERVED": 90
+        },
+        "reranked": {
+          "OBSERVED": 90
+        },
+        "thresholded": {
+          "OBSERVED": 90
+        },
+        "selected": {
+          "OBSERVED": 90
+        },
+        "characterBudget": {
+          "OBSERVED": 90
+        },
+        "byteBudget": {
+          "OBSERVED": 90
+        }
+      },
+      "snippetFirstLoss": {
+        "NOT_IN_RETRIEVED": 10,
+        "SURVIVED": 96,
+        "selected": 24
+      },
+      "selectionDropReasons": {
+        "duplicate_document": 24
+      }
+    }
+  },
+  "humanReview": "pending",
+  "humanOverallQualityImprovement": null,
+  "newCalls": {
+    "chat": 0,
+    "embedding": 0,
+    "bge": 0,
+    "index": 0
+  },
+  "productionWrites": 0,
+  "deployed": false,
+  "verification": {
+    "full": {
+      "tests": 2185,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 25,
+      "passed": 2160
+    },
+    "finalTargeted": {
+      "tests": 57,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 57
+    },
+    "finalExponentOverflowGuardVerifiedByTargetedSuite": true,
+    "compileallExitCode": 0,
+    "lockCheckExitCode": 0,
+    "specReview": "passed",
+    "qualityReview": "passed",
+    "replay": {
+      "imports": [
+        {
+          "case": "original-human-pending",
+          "humanReview": "pending",
+          "qualityStatus": "pending"
+        },
+        {
+          "case": "original-agent-review",
+          "humanReview": "pending",
+          "qualityStatus": "complete"
+        }
+      ],
+      "networkAttempts": 0,
+      "badHashRejectedBeforeOutput": true,
+      "protectedFilesUnchanged": 12
+    },
+    "controls": {
+      "protectedInputHashesUnchanged": 11,
+      "readmeExactOriginalPlusAddition": true,
+      "initialControlCheckIssue": "Windows relative separator did not match POSIX literal; fixed by resolved Path comparison"
+    }
+  },
+  "limitations": [
+    "整段标注引文存活不是语义事实覆盖或答案正确率",
+    "两组共享历史输入，非独立检索复现或当前线上错误率",
+    "人工未评分；代理评审不等于人工验收",
+    "无真实服务/浏览器/可选基础设施集成验证",
+    "未知执行状态、无自动GC、最后复核后的撤销竞态保持"
+  ],
+  "rawArtifacts": "local-ignored-tmp-only"
+}
