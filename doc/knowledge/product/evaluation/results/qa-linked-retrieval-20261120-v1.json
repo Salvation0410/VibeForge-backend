@@ -1,0 +1,5833 @@
+{
+  "schemaVersion": "rag-qa-linked-round23-results/v1",
+  "studyId": "qa-linked-20261120-v1",
+  "status": "real-retrieval-completed-human-pending",
+  "planSha256": "91465b65b2b5afd0a33ae2a6b27ce6638de480d72ee6f2723acd4d27ba7d1dae",
+  "reportSha256": "2fca0c8dcaff6c48be185488e97c350679ebbb75b4a40838ffc198d30b3ac1fb",
+  "ledgerSha256": "fe4f69f22ea406a87efc6bc2abbb3947c6214fef5f589ff90c942d48fc49a805",
+  "metrics": {
+    "before": {
+      "wholeQuoteSurvived": {
+        "retrieved": 120,
+        "filtered": 120,
+        "reranked": 120,
+        "thresholded": 120,
+        "selected": 96,
+        "characterBudget": 96,
+        "finalContext": 96
+      },
+      "firstMissingStage": {
+        "selected": 24,
+        "survived": 96,
+        "retrieved": 10
+      },
+      "changedByCharacterBudget": 0,
+      "changedByByteBudget": 0
+    },
+    "after": {
+      "wholeQuoteSurvived": {
+        "retrieved": 124,
+        "filtered": 124,
+        "reranked": 124,
+        "thresholded": 124,
+        "selected": 111,
+        "characterBudget": 111,
+        "finalContext": 111
+      },
+      "firstMissingStage": {
+        "survived": 111,
+        "selected": 13,
+        "retrieved": 6
+      },
+      "changedByCharacterBudget": 0,
+      "changedByByteBudget": 0
+    }
+  },
+  "pairs": {
+    "retrieved": {
+      "gains": [
+        "app-generation-016:required:01",
+        "deployment-download-001:required:01",
+        "deployment-download-001:required:02",
+        "deployment-download-014:required:01"
+      ],
+      "losses": []
+    },
+    "filtered": {
+      "gains": [
+        "app-generation-016:required:01",
+        "deployment-download-001:required:01",
+        "deployment-download-001:required:02",
+        "deployment-download-014:required:01"
+      ],
+      "losses": []
+    },
+    "reranked": {
+      "gains": [
+        "app-generation-016:required:01",
+        "deployment-download-001:required:01",
+        "deployment-download-001:required:02",
+        "deployment-download-014:required:01"
+      ],
+      "losses": []
+    },
+    "thresholded": {
+      "gains": [
+        "app-generation-016:required:01",
+        "deployment-download-001:required:01",
+        "deployment-download-001:required:02",
+        "deployment-download-014:required:01"
+      ],
+      "losses": []
+    },
+    "selected": {
+      "gains": [
+        "platform-account-001:required:01",
+        "platform-account-001:required:02",
+        "app-generation-007:required:01",
+        "app-generation-016:required:01",
+        "deployment-download-001:required:01",
+        "deployment-download-001:required:02",
+        "deployment-download-013:required:01",
+        "deployment-download-013:required:02",
+        "deployment-download-014:required:01",
+        "community-004:required:01",
+        "community-004:required:02",
+        "community-013:required:01",
+        "community-013:required:02",
+        "community-013:required:03",
+        "admin-knowledge-002:required:01",
+        "admin-knowledge-002:required:02",
+        "admin-knowledge-002:required:03",
+        "admin-knowledge-005:required:01",
+        "admin-knowledge-005:required:02"
+      ],
+      "losses": [
+        "app-generation-017:required:01",
+        "app-generation-017:required:02",
+        "deployment-download-003:required:01",
+        "deployment-download-003:required:02"
+      ]
+    },
+    "characterBudget": {
+      "gains": [
+        "platform-account-001:required:01",
+        "platform-account-001:required:02",
+        "app-generation-007:required:01",
+        "app-generation-016:required:01",
+        "deployment-download-001:required:01",
+        "deployment-download-001:required:02",
+        "deployment-download-013:required:01",
+        "deployment-download-013:required:02",
+        "deployment-download-014:required:01",
+        "community-004:required:01",
+        "community-004:required:02",
+        "community-013:required:01",
+        "community-013:required:02",
+        "community-013:required:03",
+        "admin-knowledge-002:required:01",
+        "admin-knowledge-002:required:02",
+        "admin-knowledge-002:required:03",
+        "admin-knowledge-005:required:01",
+        "admin-knowledge-005:required:02"
+      ],
+      "losses": [
+        "app-generation-017:required:01",
+        "app-generation-017:required:02",
+        "deployment-download-003:required:01",
+        "deployment-download-003:required:02"
+      ]
+    },
+    "finalContext": {
+      "gains": [
+        "platform-account-001:required:01",
+        "platform-account-001:required:02",
+        "app-generation-007:required:01",
+        "app-generation-016:required:01",
+        "deployment-download-001:required:01",
+        "deployment-download-001:required:02",
+        "deployment-download-013:required:01",
+        "deployment-download-013:required:02",
+        "deployment-download-014:required:01",
+        "community-004:required:01",
+        "community-004:required:02",
+        "community-013:required:01",
+        "community-013:required:02",
+        "community-013:required:03",
+        "admin-knowledge-002:required:01",
+        "admin-knowledge-002:required:02",
+        "admin-knowledge-002:required:03",
+        "admin-knowledge-005:required:01",
+        "admin-knowledge-005:required:02"
+      ],
+      "losses": [
+        "app-generation-017:required:01",
+        "app-generation-017:required:02",
+        "deployment-download-003:required:01",
+        "deployment-download-003:required:02"
+      ]
+    }
+  },
+  "target14": [
+    {
+      "factId": "platform-account-001:required:01",
+      "survival": {
+        "before": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": false,
+          "characterBudget": false,
+          "finalContext": false
+        },
+        "after": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": true,
+          "characterBudget": true,
+          "finalContext": true
+        }
+      },
+      "finalTransition": "False->True"
+    },
+    {
+      "factId": "platform-account-001:required:02",
+      "survival": {
+        "before": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": false,
+          "characterBudget": false,
+          "finalContext": false
+        },
+        "after": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": true,
+          "characterBudget": true,
+          "finalContext": true
+        }
+      },
+      "finalTransition": "False->True"
+    },
+    {
+      "factId": "app-generation-005:required:01",
+      "survival": {
+        "before": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": false,
+          "characterBudget": false,
+          "finalContext": false
+        },
+        "after": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": false,
+          "characterBudget": false,
+          "finalContext": false
+        }
+      },
+      "finalTransition": "False->False"
+    },
+    {
+      "factId": "app-generation-005:required:02",
+      "survival": {
+        "before": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": false,
+          "characterBudget": false,
+          "finalContext": false
+        },
+        "after": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": false,
+          "characterBudget": false,
+          "finalContext": false
+        }
+      },
+      "finalTransition": "False->False"
+    },
+    {
+      "factId": "app-generation-005:required:03",
+      "survival": {
+        "before": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": false,
+          "characterBudget": false,
+          "finalContext": false
+        },
+        "after": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": false,
+          "characterBudget": false,
+          "finalContext": false
+        }
+      },
+      "finalTransition": "False->False"
+    },
+    {
+      "factId": "community-004:required:02",
+      "survival": {
+        "before": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": false,
+          "characterBudget": false,
+          "finalContext": false
+        },
+        "after": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": true,
+          "characterBudget": true,
+          "finalContext": true
+        }
+      },
+      "finalTransition": "False->True"
+    },
+    {
+      "factId": "community-007:required:01",
+      "survival": {
+        "before": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": false,
+          "characterBudget": false,
+          "finalContext": false
+        },
+        "after": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": false,
+          "characterBudget": false,
+          "finalContext": false
+        }
+      },
+      "finalTransition": "False->False"
+    },
+    {
+      "factId": "community-013:required:01",
+      "survival": {
+        "before": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": false,
+          "characterBudget": false,
+          "finalContext": false
+        },
+        "after": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": true,
+          "characterBudget": true,
+          "finalContext": true
+        }
+      },
+      "finalTransition": "False->True"
+    },
+    {
+      "factId": "community-013:required:02",
+      "survival": {
+        "before": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": false,
+          "characterBudget": false,
+          "finalContext": false
+        },
+        "after": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": true,
+          "characterBudget": true,
+          "finalContext": true
+        }
+      },
+      "finalTransition": "False->True"
+    },
+    {
+      "factId": "admin-knowledge-002:required:01",
+      "survival": {
+        "before": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": false,
+          "characterBudget": false,
+          "finalContext": false
+        },
+        "after": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": true,
+          "characterBudget": true,
+          "finalContext": true
+        }
+      },
+      "finalTransition": "False->True"
+    },
+    {
+      "factId": "admin-knowledge-002:required:02",
+      "survival": {
+        "before": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": false,
+          "characterBudget": false,
+          "finalContext": false
+        },
+        "after": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": true,
+          "characterBudget": true,
+          "finalContext": true
+        }
+      },
+      "finalTransition": "False->True"
+    },
+    {
+      "factId": "admin-knowledge-002:required:03",
+      "survival": {
+        "before": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": false,
+          "characterBudget": false,
+          "finalContext": false
+        },
+        "after": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": true,
+          "characterBudget": true,
+          "finalContext": true
+        }
+      },
+      "finalTransition": "False->True"
+    },
+    {
+      "factId": "admin-knowledge-005:required:01",
+      "survival": {
+        "before": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": false,
+          "characterBudget": false,
+          "finalContext": false
+        },
+        "after": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": true,
+          "characterBudget": true,
+          "finalContext": true
+        }
+      },
+      "finalTransition": "False->True"
+    },
+    {
+      "factId": "admin-knowledge-005:required:02",
+      "survival": {
+        "before": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": false,
+          "characterBudget": false,
+          "finalContext": false
+        },
+        "after": {
+          "retrieved": true,
+          "filtered": true,
+          "reranked": true,
+          "thresholded": true,
+          "selected": true,
+          "characterBudget": true,
+          "finalContext": true
+        }
+      },
+      "finalTransition": "False->True"
+    }
+  ],
+  "cases": [
+    {
+      "id": "platform-account-001",
+      "facts": [
+        {
+          "factId": "platform-account-001:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "False->True"
+        },
+        {
+          "factId": "platform-account-001:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "False->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "平台使用说明与账号基础【当前功能】 / 快速上手【推荐规范】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 保留已有内容【当前功能与推荐规范】",
+          "应用需求编写规范【推荐规范】 / 拆分需求与验收【推荐规范】"
+        ],
+        "after": [
+          "平台使用说明与账号基础【当前功能】 / 平台用途【当前功能】",
+          "应用需求编写规范【推荐规范】 / 拆分需求与验收【推荐规范】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 生成成功能当作真实业务系统吗【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "platform-account-002",
+      "facts": [
+        {
+          "factId": "platform-account-002:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "platform-account-002:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "平台使用说明与账号基础【当前功能】 / 注册与登录【当前功能】",
+          "社区浏览、发帖与互动【当前功能】 / 发布帖子【当前功能】",
+          "应用需求编写规范【推荐规范】 / 拆分需求与验收【推荐规范】"
+        ],
+        "after": [
+          "平台使用说明与账号基础【当前功能】 / 注册与登录【当前功能】",
+          "应用生成与增量修改【当前功能】 / 创建应用【当前功能】",
+          "部署、访问与代码下载【当前功能】 / 部署前提与步骤【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "platform-account-003",
+      "facts": [
+        {
+          "factId": "platform-account-003:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "platform-account-003:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "平台使用说明与账号基础【当前功能】 / 注册与登录【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 不能加载图片时【推荐规范】",
+          "预览、停止与聊天历史【当前功能】 / 空白预览排查【推荐规范】"
+        ],
+        "after": [
+          "平台使用说明与账号基础【当前功能】 / 注册与登录【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 不能加载图片时【推荐规范】",
+          "预览、停止与聊天历史【当前功能】 / 空白预览排查【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "platform-account-004",
+      "facts": [
+        {
+          "factId": "platform-account-004:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "platform-account-004:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "平台使用说明与账号基础【当前功能】 / 登录异常与退出【当前功能】",
+          "预览、停止与聊天历史【当前功能】 / 空白预览排查【推荐规范】",
+          "管理后台与知识库维护【当前功能】 / 权限与入口【当前功能】"
+        ],
+        "after": [
+          "平台使用说明与账号基础【当前功能】 / 登录异常与退出【当前功能】",
+          "管理后台与知识库维护【当前功能】 / 权限与入口【当前功能】",
+          "应用生成与增量修改【当前功能】 / 继续修改与应用管理【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "platform-account-005",
+      "facts": [
+        {
+          "factId": "platform-account-005:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "平台使用说明与账号基础【当前功能】 / 个人中心与公开主页【当前功能】",
+          "应用生成与增量修改【当前功能】 / 继续修改与应用管理【当前功能】",
+          "社区浏览、发帖与互动【当前功能】 / 发布帖子【当前功能】"
+        ],
+        "after": [
+          "平台使用说明与账号基础【当前功能】 / 个人中心与公开主页【当前功能】",
+          "应用生成与增量修改【当前功能】 / 继续修改与应用管理【当前功能】",
+          "社区浏览、发帖与互动【当前功能】 / 发布帖子【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "platform-account-006",
+      "facts": [
+        {
+          "factId": "platform-account-006:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "平台使用说明与账号基础【当前功能】 / 个人中心与公开主页【当前功能】",
+          "社区浏览、发帖与互动【当前功能】 / 我的帖子与他人主页【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 客服可以查询私有业务数据吗【当前功能】"
+        ],
+        "after": [
+          "平台使用说明与账号基础【当前功能】 / 个人中心与公开主页【当前功能】",
+          "社区浏览、发帖与互动【当前功能】 / 我的帖子与他人主页【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 客服可以查询私有业务数据吗【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "platform-account-007",
+      "facts": [
+        {
+          "factId": "platform-account-007:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "功能边界与常见问题【当前功能与推荐规范】 / 客服可以查询私有业务数据吗【当前功能】",
+          "应用生成与增量修改【当前功能】 / 对话生成【当前功能】",
+          "平台使用说明与账号基础【当前功能】 / 客服与功能边界【当前功能】"
+        ],
+        "after": [
+          "平台使用说明与账号基础【当前功能】 / 客服与功能边界【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 客服可以查询私有业务数据吗【当前功能】",
+          "应用生成与增量修改【当前功能】 / 对话生成【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "platform-account-008",
+      "facts": [
+        {
+          "factId": "platform-account-008:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "platform-account-008:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "平台使用说明与账号基础【当前功能】 / 客服与功能边界【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 安全与来源【当前功能与推荐规范】",
+          "管理后台与知识库维护【当前功能】 / 内容发布【推荐规范】"
+        ],
+        "after": [
+          "平台使用说明与账号基础【当前功能】 / 客服与功能边界【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 安全与来源【当前功能与推荐规范】",
+          "管理后台与知识库维护【当前功能】 / 内容发布【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-001",
+      "facts": [
+        {
+          "factId": "app-generation-001:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "app-generation-001:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "应用生成与增量修改【当前功能】 / 创建应用【当前功能】",
+          "平台使用说明与账号基础【当前功能】 / 快速上手【推荐规范】",
+          "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / 类型如何确定【当前功能】"
+        ],
+        "after": [
+          "应用生成与增量修改【当前功能】 / 创建应用【当前功能】",
+          "平台使用说明与账号基础【当前功能】 / 快速上手【推荐规范】",
+          "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / 类型如何确定【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-002",
+      "facts": [
+        {
+          "factId": "app-generation-002:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "应用生成与增量修改【当前功能】 / 创建应用【当前功能】",
+          "部署、访问与代码下载【当前功能】 / 部署前提与步骤【当前功能】",
+          "预览、停止与聊天历史【当前功能】 / 空白预览排查【推荐规范】"
+        ],
+        "after": [
+          "应用生成与增量修改【当前功能】 / 创建应用【当前功能】",
+          "部署、访问与代码下载【当前功能】 / 部署前提与步骤【当前功能】",
+          "预览、停止与聊天历史【当前功能】 / 空白预览排查【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-003",
+      "facts": [
+        {
+          "factId": "app-generation-003:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "app-generation-003:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "应用生成与增量修改【当前功能】 / 创建应用【当前功能】",
+          "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / 类型如何确定【当前功能】",
+          "应用需求编写规范【推荐规范】 / 常见问法"
+        ],
+        "after": [
+          "应用生成与增量修改【当前功能】 / 创建应用【当前功能】",
+          "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / 类型如何确定【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 优化请求模板【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-004",
+      "facts": [
+        {
+          "factId": "app-generation-004:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "app-generation-004:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / 类型如何确定【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 优化请求模板【推荐规范】",
+          "应用生成与增量修改【当前功能】 / 优化提示【当前功能】"
+        ],
+        "after": [
+          "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / 类型如何确定【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 优化请求模板【推荐规范】",
+          "部署、访问与代码下载【当前功能】 / 三类产物【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-005",
+      "facts": [
+        {
+          "factId": "app-generation-005:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            }
+          },
+          "finalTransition": "False->False"
+        },
+        {
+          "factId": "app-generation-005:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            }
+          },
+          "finalTransition": "False->False"
+        },
+        {
+          "factId": "app-generation-005:required:03",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            }
+          },
+          "finalTransition": "False->False"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "部署、访问与代码下载【当前功能】 / 三类产物【当前功能】",
+          "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / 类型边界与完整性【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 优化请求模板【推荐规范】"
+        ],
+        "after": [
+          "部署、访问与代码下载【当前功能】 / 三类产物【当前功能】",
+          "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / 类型边界与完整性【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 优化请求模板【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-006",
+      "facts": [
+        {
+          "factId": "app-generation-006:required:01",
+          "survival": {
+            "before": {
+              "retrieved": false,
+              "filtered": false,
+              "reranked": false,
+              "thresholded": false,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": false,
+              "filtered": false,
+              "reranked": false,
+              "thresholded": false,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            }
+          },
+          "finalTransition": "False->False"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "应用需求编写规范【推荐规范】 / 页面与视觉【推荐规范】",
+          "应用生成与增量修改【当前功能】 / 增量修改写法【推荐规范】",
+          "社区发帖与互动规范【推荐规范】 / 分享作品【推荐规范】"
+        ],
+        "after": [
+          "应用需求编写规范【推荐规范】 / 页面与视觉【推荐规范】",
+          "应用生成与增量修改【当前功能】 / 增量修改写法【推荐规范】",
+          "社区发帖与互动规范【推荐规范】 / 分享作品【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-007",
+      "facts": [
+        {
+          "factId": "app-generation-007:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "False->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / 类型边界与完整性【当前功能】",
+          "社区发帖与互动规范【推荐规范】 / 评论与讨论【推荐规范】",
+          "部署、访问与代码下载【当前功能】 / 三类产物【当前功能】"
+        ],
+        "after": [
+          "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / MULTI_FILE 多文件【当前功能与推荐规范】",
+          "部署、访问与代码下载【当前功能】 / 三类产物【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 优化请求模板【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-008",
+      "facts": [
+        {
+          "factId": "app-generation-008:required:01",
+          "survival": {
+            "before": {
+              "retrieved": false,
+              "filtered": false,
+              "reranked": false,
+              "thresholded": false,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": false,
+              "filtered": false,
+              "reranked": false,
+              "thresholded": false,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            }
+          },
+          "finalTransition": "False->False"
+        },
+        {
+          "factId": "app-generation-008:required:02",
+          "survival": {
+            "before": {
+              "retrieved": false,
+              "filtered": false,
+              "reranked": false,
+              "thresholded": false,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": false,
+              "filtered": false,
+              "reranked": false,
+              "thresholded": false,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            }
+          },
+          "finalTransition": "False->False"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "应用生成与增量修改【当前功能】 / 增量修改写法【推荐规范】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 保留已有内容【当前功能与推荐规范】",
+          "应用需求编写规范【推荐规范】 / 页面与视觉【推荐规范】"
+        ],
+        "after": [
+          "应用生成与增量修改【当前功能】 / 增量修改写法【推荐规范】",
+          "应用需求编写规范【推荐规范】 / 页面与视觉【推荐规范】",
+          "社区发帖与互动规范【推荐规范】 / 评论与讨论【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-009",
+      "facts": [
+        {
+          "factId": "app-generation-009:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "app-generation-009:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / HTML 单文件【当前功能与推荐规范】",
+          "预览、停止与聊天历史【当前功能】 / 常见问法",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 优化请求模板【推荐规范】"
+        ],
+        "after": [
+          "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / HTML 单文件【当前功能与推荐规范】",
+          "预览、停止与聊天历史【当前功能】 / 输出窗口与完整记录【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 优化请求模板【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-010",
+      "facts": [
+        {
+          "factId": "app-generation-010:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "应用生成与增量修改【当前功能】 / 继续修改与应用管理【当前功能】",
+          "平台使用说明与账号基础【当前功能】 / 快速上手【推荐规范】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 优化请求模板【推荐规范】"
+        ],
+        "after": [
+          "应用生成与增量修改【当前功能】 / 继续修改与应用管理【当前功能】",
+          "部署、访问与代码下载【当前功能】 / 部署与预览区别【当前功能】",
+          "平台使用说明与账号基础【当前功能】 / 快速上手【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-011",
+      "facts": [
+        {
+          "factId": "app-generation-011:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "应用生成与增量修改【当前功能】 / 继续修改与应用管理【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 保留已有内容【当前功能与推荐规范】"
+        ],
+        "after": [
+          "应用生成与增量修改【当前功能】 / 继续修改与应用管理【当前功能】",
+          "部署、访问与代码下载【当前功能】 / 部署与预览区别【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-012",
+      "facts": [
+        {
+          "factId": "app-generation-012:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "app-generation-012:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "应用生成与增量修改【当前功能】 / 优化提示【当前功能】",
+          "部署、访问与代码下载【当前功能】 / 部署与预览区别【当前功能】",
+          "应用需求编写规范【推荐规范】 / 常见问法"
+        ],
+        "after": [
+          "应用生成与增量修改【当前功能】 / 优化提示【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 保留已有内容【当前功能与推荐规范】",
+          "预览、停止与聊天历史【当前功能】 / 预览刷新时机【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-013",
+      "facts": [
+        {
+          "factId": "app-generation-013:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "应用生成与增量修改【当前功能】 / 优化提示【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 保留已有内容【当前功能与推荐规范】",
+          "应用需求编写规范【推荐规范】 / 常见问法"
+        ],
+        "after": [
+          "应用生成与增量修改【当前功能】 / 优化提示【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 保留已有内容【当前功能与推荐规范】",
+          "应用需求编写规范【推荐规范】 / 描述对象与目标【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-014",
+      "facts": [
+        {
+          "factId": "app-generation-014:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "app-generation-014:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】",
+          "预览、停止与聊天历史【当前功能】 / 停止生成【当前功能】",
+          "社区浏览、发帖与互动【当前功能】 / 发帖失败【当前功能与推荐规范】"
+        ],
+        "after": [
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】",
+          "预览、停止与聊天历史【当前功能】 / 停止生成【当前功能】",
+          "社区浏览、发帖与互动【当前功能】 / 发帖失败【当前功能与推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-015",
+      "facts": [
+        {
+          "factId": "app-generation-015:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "app-generation-015:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "应用生成与增量修改【当前功能】 / 增量修改写法【推荐规范】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 保留已有内容【当前功能与推荐规范】",
+          "应用需求编写规范【推荐规范】 / 反例与改写【推荐规范】"
+        ],
+        "after": [
+          "应用生成与增量修改【当前功能】 / 增量修改写法【推荐规范】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 保留已有内容【当前功能与推荐规范】",
+          "应用需求编写规范【推荐规范】 / 反例与改写【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-016",
+      "facts": [
+        {
+          "factId": "app-generation-016:required:01",
+          "survival": {
+            "before": {
+              "retrieved": false,
+              "filtered": false,
+              "reranked": false,
+              "thresholded": false,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "False->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "应用需求编写规范【推荐规范】 / 常见问法",
+          "功能边界与常见问题【当前功能与推荐规范】 / 当前能力与推荐方法的区别【当前功能】",
+          "应用生成与增量修改【当前功能】 / 创建应用【当前功能】"
+        ],
+        "after": [
+          "应用需求编写规范【推荐规范】 / 描述对象与目标【推荐规范】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 当前能力与推荐方法的区别【当前功能】",
+          "应用生成与增量修改【当前功能】 / 创建应用【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-017",
+      "facts": [
+        {
+          "factId": "app-generation-017:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            }
+          },
+          "finalTransition": "True->False"
+        },
+        {
+          "factId": "app-generation-017:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            }
+          },
+          "finalTransition": "True->False"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "应用需求编写规范【推荐规范】 / 描述对象与目标【推荐规范】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称",
+          "平台使用说明与账号基础【当前功能】 / 快速上手【推荐规范】"
+        ],
+        "after": [
+          "应用需求编写规范【推荐规范】 / 页面与视觉【推荐规范】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称",
+          "社区发帖与互动规范【推荐规范】 / 求助模板【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-018",
+      "facts": [
+        {
+          "factId": "app-generation-018:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "app-generation-018:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "应用生成与增量修改【当前功能】 / 增量修改写法【推荐规范】",
+          "应用需求编写规范【推荐规范】 / 功能、状态与数据【推荐规范】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 保留已有内容【当前功能与推荐规范】"
+        ],
+        "after": [
+          "应用生成与增量修改【当前功能】 / 增量修改写法【推荐规范】",
+          "应用需求编写规范【推荐规范】 / 功能、状态与数据【推荐规范】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 保留已有内容【当前功能与推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-019",
+      "facts": [
+        {
+          "factId": "app-generation-019:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "应用需求编写规范【推荐规范】 / 页面与视觉【推荐规范】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 保留已有内容【当前功能与推荐规范】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 当前能力与推荐方法的区别【当前功能】"
+        ],
+        "after": [
+          "应用需求编写规范【推荐规范】 / 页面与视觉【推荐规范】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 当前能力与推荐方法的区别【当前功能】",
+          "平台使用说明与账号基础【当前功能】 / 快速上手【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-020",
+      "facts": [
+        {
+          "factId": "app-generation-020:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "app-generation-020:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "应用需求编写规范【推荐规范】 / 可复制需求模板【推荐规范】",
+          "应用生成与增量修改【当前功能】 / 增量修改写法【推荐规范】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 当前能力与推荐方法的区别【当前功能】"
+        ],
+        "after": [
+          "应用需求编写规范【推荐规范】 / 可复制需求模板【推荐规范】",
+          "应用生成与增量修改【当前功能】 / 增量修改写法【推荐规范】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 当前能力与推荐方法的区别【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-021",
+      "facts": [
+        {
+          "factId": "app-generation-021:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "app-generation-021:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 保留已有内容【当前功能与推荐规范】",
+          "应用生成与增量修改【当前功能】 / 增量修改写法【推荐规范】",
+          "应用需求编写规范【推荐规范】 / 页面与视觉【推荐规范】"
+        ],
+        "after": [
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 保留已有内容【当前功能与推荐规范】",
+          "应用生成与增量修改【当前功能】 / 增量修改写法【推荐规范】",
+          "应用需求编写规范【推荐规范】 / 页面与视觉【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-022",
+      "facts": [
+        {
+          "factId": "app-generation-022:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "app-generation-022:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 图片需求【当前功能与推荐规范】",
+          "社区发帖与互动规范【推荐规范】 / 审核与发布边界【当前功能与推荐规范】",
+          "预览、停止与聊天历史【当前功能】 / 预览刷新时机【当前功能】"
+        ],
+        "after": [
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 图片需求【当前功能与推荐规范】",
+          "社区发帖与互动规范【推荐规范】 / 审核与发布边界【当前功能与推荐规范】",
+          "管理后台与知识库维护【当前功能】 / 内容发布【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-023",
+      "facts": [
+        {
+          "factId": "app-generation-023:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "app-generation-023:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 不能加载图片时【推荐规范】",
+          "预览、停止与聊天历史【当前功能】 / 空白预览排查【推荐规范】",
+          "部署、访问与代码下载【当前功能】 / 失败排查【推荐规范】"
+        ],
+        "after": [
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 不能加载图片时【推荐规范】",
+          "部署、访问与代码下载【当前功能】 / 失败排查【推荐规范】",
+          "预览、停止与聊天历史【当前功能】 / 空白预览排查【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "app-generation-024",
+      "facts": [
+        {
+          "factId": "app-generation-024:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "app-generation-024:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 素材合规【推荐规范】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称",
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】"
+        ],
+        "after": [
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 素材合规【推荐规范】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称",
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "preview-history-001",
+      "facts": [
+        {
+          "factId": "preview-history-001:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "预览、停止与聊天历史【当前功能】 / 预览刷新时机【当前功能】",
+          "部署、访问与代码下载【当前功能】 / 部署与预览区别【当前功能】",
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】"
+        ],
+        "after": [
+          "预览、停止与聊天历史【当前功能】 / 预览刷新时机【当前功能】",
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】",
+          "部署、访问与代码下载【当前功能】 / 部署与预览区别【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "preview-history-002",
+      "facts": [
+        {
+          "factId": "preview-history-002:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "preview-history-002:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】",
+          "预览、停止与聊天历史【当前功能】 / 预览刷新时机【当前功能】",
+          "部署、访问与代码下载【当前功能】 / 部署与预览区别【当前功能】"
+        ],
+        "after": [
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】",
+          "预览、停止与聊天历史【当前功能】 / 预览刷新时机【当前功能】",
+          "部署、访问与代码下载【当前功能】 / 部署与预览区别【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "preview-history-003",
+      "facts": [
+        {
+          "factId": "preview-history-003:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "预览、停止与聊天历史【当前功能】 / 预览刷新时机【当前功能】",
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】",
+          "部署、访问与代码下载【当前功能】 / 部署与预览区别【当前功能】"
+        ],
+        "after": [
+          "预览、停止与聊天历史【当前功能】 / 预览刷新时机【当前功能】",
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】",
+          "部署、访问与代码下载【当前功能】 / 失败排查【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "preview-history-004",
+      "facts": [
+        {
+          "factId": "preview-history-004:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "预览、停止与聊天历史【当前功能】 / 停止生成【当前功能】",
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】",
+          "应用需求编写规范【推荐规范】 / 描述对象与目标【推荐规范】"
+        ],
+        "after": [
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】",
+          "预览、停止与聊天历史【当前功能】 / 停止生成【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 当前能力与推荐方法的区别【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "preview-history-005",
+      "facts": [
+        {
+          "factId": "preview-history-005:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "预览、停止与聊天历史【当前功能】 / 停止生成【当前功能】",
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】",
+          "应用需求编写规范【推荐规范】 / 拆分需求与验收【推荐规范】"
+        ],
+        "after": [
+          "预览、停止与聊天历史【当前功能】 / 停止生成【当前功能】",
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】",
+          "应用需求编写规范【推荐规范】 / 拆分需求与验收【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "preview-history-006",
+      "facts": [
+        {
+          "factId": "preview-history-006:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            }
+          },
+          "finalTransition": "False->False"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "预览、停止与聊天历史【当前功能】 / 预览刷新时机【当前功能】",
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 不能加载图片时【推荐规范】"
+        ],
+        "after": [
+          "预览、停止与聊天历史【当前功能】 / 预览刷新时机【当前功能】",
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 不能加载图片时【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "preview-history-007",
+      "facts": [
+        {
+          "factId": "preview-history-007:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "preview-history-007:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "预览、停止与聊天历史【当前功能】 / 输出窗口与完整记录【当前功能】",
+          "应用生成与增量修改【当前功能】 / 对话生成【当前功能】",
+          "部署、访问与代码下载【当前功能】 / 下载代码【当前功能】"
+        ],
+        "after": [
+          "预览、停止与聊天历史【当前功能】 / 输出窗口与完整记录【当前功能】",
+          "应用生成与增量修改【当前功能】 / 对话生成【当前功能】",
+          "部署、访问与代码下载【当前功能】 / 下载代码【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "preview-history-008",
+      "facts": [
+        {
+          "factId": "preview-history-008:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "预览、停止与聊天历史【当前功能】 / 历史查看与导出【当前功能】",
+          "应用生成与增量修改【当前功能】 / 对话生成【当前功能】",
+          "平台使用说明与账号基础【当前功能】 / 个人中心与公开主页【当前功能】"
+        ],
+        "after": [
+          "预览、停止与聊天历史【当前功能】 / 历史查看与导出【当前功能】",
+          "应用生成与增量修改【当前功能】 / 对话生成【当前功能】",
+          "平台使用说明与账号基础【当前功能】 / 个人中心与公开主页【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "preview-history-009",
+      "facts": [
+        {
+          "factId": "preview-history-009:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "预览、停止与聊天历史【当前功能】 / 历史查看与导出【当前功能】",
+          "部署、访问与代码下载【当前功能】 / 下载代码【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称"
+        ],
+        "after": [
+          "预览、停止与聊天历史【当前功能】 / 历史查看与导出【当前功能】",
+          "部署、访问与代码下载【当前功能】 / 下载代码【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "preview-history-010",
+      "facts": [
+        {
+          "factId": "preview-history-010:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "预览、停止与聊天历史【当前功能】 / 空白预览排查【推荐规范】",
+          "应用需求编写规范【推荐规范】 / 拆分需求与验收【推荐规范】",
+          "管理后台与知识库维护【当前功能】 / 状态、禁用与删除【当前功能】"
+        ],
+        "after": [
+          "预览、停止与聊天历史【当前功能】 / 空白预览排查【推荐规范】",
+          "应用需求编写规范【推荐规范】 / 拆分需求与验收【推荐规范】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 不能加载图片时【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "deployment-download-001",
+      "facts": [
+        {
+          "factId": "deployment-download-001:required:01",
+          "survival": {
+            "before": {
+              "retrieved": false,
+              "filtered": false,
+              "reranked": false,
+              "thresholded": false,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "False->True"
+        },
+        {
+          "factId": "deployment-download-001:required:02",
+          "survival": {
+            "before": {
+              "retrieved": false,
+              "filtered": false,
+              "reranked": false,
+              "thresholded": false,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "False->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "预览、停止与聊天历史【当前功能】 / 停止生成【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称",
+          "部署、访问与代码下载【当前功能】 / 三类产物【当前功能】"
+        ],
+        "after": [
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称",
+          "部署、访问与代码下载【当前功能】 / 部署前提与步骤【当前功能】",
+          "预览、停止与聊天历史【当前功能】 / 停止生成【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "deployment-download-002",
+      "facts": [
+        {
+          "factId": "deployment-download-002:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "部署、访问与代码下载【当前功能】 / 部署前提与步骤【当前功能】",
+          "应用生成与增量修改【当前功能】 / 继续修改与应用管理【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称"
+        ],
+        "after": [
+          "部署、访问与代码下载【当前功能】 / 部署前提与步骤【当前功能】",
+          "应用生成与增量修改【当前功能】 / 继续修改与应用管理【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "deployment-download-003",
+      "facts": [
+        {
+          "factId": "deployment-download-003:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            }
+          },
+          "finalTransition": "True->False"
+        },
+        {
+          "factId": "deployment-download-003:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            }
+          },
+          "finalTransition": "True->False"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "部署、访问与代码下载【当前功能】 / 部署前提与步骤【当前功能】",
+          "应用需求编写规范【推荐规范】 / 拆分需求与验收【推荐规范】",
+          "应用生成与增量修改【当前功能】 / 创建应用【当前功能】"
+        ],
+        "after": [
+          "部署、访问与代码下载【当前功能】 / 失败排查【推荐规范】",
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 不能加载图片时【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "deployment-download-004",
+      "facts": [
+        {
+          "factId": "deployment-download-004:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "deployment-download-004:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "部署、访问与代码下载【当前功能】 / 部署与预览区别【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 不能加载图片时【推荐规范】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称"
+        ],
+        "after": [
+          "部署、访问与代码下载【当前功能】 / 部署与预览区别【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 不能加载图片时【推荐规范】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "deployment-download-005",
+      "facts": [
+        {
+          "factId": "deployment-download-005:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "deployment-download-005:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "部署、访问与代码下载【当前功能】 / 部署与预览区别【当前功能】",
+          "应用生成与增量修改【当前功能】 / 继续修改与应用管理【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 常见问法"
+        ],
+        "after": [
+          "部署、访问与代码下载【当前功能】 / 部署与预览区别【当前功能】",
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "deployment-download-006",
+      "facts": [
+        {
+          "factId": "deployment-download-006:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "部署、访问与代码下载【当前功能】 / 部署与预览区别【当前功能】",
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称"
+        ],
+        "after": [
+          "部署、访问与代码下载【当前功能】 / 部署与预览区别【当前功能】",
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "deployment-download-007",
+      "facts": [
+        {
+          "factId": "deployment-download-007:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            }
+          },
+          "finalTransition": "False->False"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "部署、访问与代码下载【当前功能】 / 下载代码【当前功能】",
+          "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / VUE_PROJECT Vue 工程【当前功能与推荐规范】"
+        ],
+        "after": [
+          "部署、访问与代码下载【当前功能】 / 部署前提与步骤【当前功能】",
+          "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / VUE_PROJECT Vue 工程【当前功能与推荐规范】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 生成成功能当作真实业务系统吗【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "deployment-download-008",
+      "facts": [
+        {
+          "factId": "deployment-download-008:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "部署、访问与代码下载【当前功能】 / 下载代码【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称",
+          "应用生成与增量修改【当前功能】 / 创建应用【当前功能】"
+        ],
+        "after": [
+          "部署、访问与代码下载【当前功能】 / 下载代码【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称",
+          "应用生成与增量修改【当前功能】 / 创建应用【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "deployment-download-009",
+      "facts": [
+        {
+          "factId": "deployment-download-009:required:01",
+          "survival": {
+            "before": {
+              "retrieved": false,
+              "filtered": false,
+              "reranked": false,
+              "thresholded": false,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": false,
+              "filtered": false,
+              "reranked": false,
+              "thresholded": false,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            }
+          },
+          "finalTransition": "False->False"
+        },
+        {
+          "factId": "deployment-download-009:required:02",
+          "survival": {
+            "before": {
+              "retrieved": false,
+              "filtered": false,
+              "reranked": false,
+              "thresholded": false,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": false,
+              "filtered": false,
+              "reranked": false,
+              "thresholded": false,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            }
+          },
+          "finalTransition": "False->False"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / VUE_PROJECT Vue 工程【当前功能与推荐规范】",
+          "部署、访问与代码下载【当前功能】 / 失败排查【推荐规范】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 不能加载图片时【推荐规范】"
+        ],
+        "after": [
+          "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / VUE_PROJECT Vue 工程【当前功能与推荐规范】",
+          "部署、访问与代码下载【当前功能】 / 失败排查【推荐规范】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 不能加载图片时【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "deployment-download-010",
+      "facts": [
+        {
+          "factId": "deployment-download-010:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "部署、访问与代码下载【当前功能】 / 下载代码【当前功能】",
+          "管理后台与知识库维护【当前功能】 / 权限与入口【当前功能】",
+          "应用生成与增量修改【当前功能】 / 继续修改与应用管理【当前功能】"
+        ],
+        "after": [
+          "部署、访问与代码下载【当前功能】 / 下载代码【当前功能】",
+          "管理后台与知识库维护【当前功能】 / 权限与入口【当前功能】",
+          "应用生成与增量修改【当前功能】 / 继续修改与应用管理【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "deployment-download-011",
+      "facts": [
+        {
+          "factId": "deployment-download-011:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "deployment-download-011:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "部署、访问与代码下载【当前功能】 / 下载代码【当前功能】",
+          "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / VUE_PROJECT Vue 工程【当前功能与推荐规范】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 优化请求模板【推荐规范】"
+        ],
+        "after": [
+          "部署、访问与代码下载【当前功能】 / 下载代码【当前功能】",
+          "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / VUE_PROJECT Vue 工程【当前功能与推荐规范】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 优化请求模板【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "deployment-download-012",
+      "facts": [
+        {
+          "factId": "deployment-download-012:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "deployment-download-012:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "部署、访问与代码下载【当前功能】 / 下载代码【当前功能】",
+          "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / VUE_PROJECT Vue 工程【当前功能与推荐规范】"
+        ],
+        "after": [
+          "部署、访问与代码下载【当前功能】 / 下载代码【当前功能】",
+          "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南【当前功能与推荐规范】 / VUE_PROJECT Vue 工程【当前功能与推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "deployment-download-013",
+      "facts": [
+        {
+          "factId": "deployment-download-013:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "False->True"
+        },
+        {
+          "factId": "deployment-download-013:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "False->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "部署、访问与代码下载【当前功能】 / 部署前提与步骤【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 不能加载图片时【推荐规范】",
+          "社区发帖与互动规范【推荐规范】 / 求助模板【推荐规范】"
+        ],
+        "after": [
+          "部署、访问与代码下载【当前功能】 / 失败排查【推荐规范】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 不能加载图片时【推荐规范】",
+          "管理后台与知识库维护【当前功能】 / 运维故障【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "deployment-download-014",
+      "facts": [
+        {
+          "factId": "deployment-download-014:required:01",
+          "survival": {
+            "before": {
+              "retrieved": false,
+              "filtered": false,
+              "reranked": false,
+              "thresholded": false,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "False->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 不能加载图片时【推荐规范】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称",
+          "部署、访问与代码下载【当前功能】 / 常见问法"
+        ],
+        "after": [
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 不能加载图片时【推荐规范】",
+          "部署、访问与代码下载【当前功能】 / 失败排查【推荐规范】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "community-001",
+      "facts": [
+        {
+          "factId": "community-001:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "社区浏览、发帖与互动【当前功能】 / 浏览与筛选【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 素材合规【推荐规范】",
+          "平台使用说明与账号基础【当前功能】 / 常见问法"
+        ],
+        "after": [
+          "社区浏览、发帖与互动【当前功能】 / 浏览与筛选【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 素材合规【推荐规范】",
+          "平台使用说明与账号基础【当前功能】 / 注册与登录【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "community-002",
+      "facts": [
+        {
+          "factId": "community-002:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "社区浏览、发帖与互动【当前功能】 / 浏览与筛选【当前功能】",
+          "社区发帖与互动规范【推荐规范】 / 标签与图片【推荐规范】"
+        ],
+        "after": [
+          "社区浏览、发帖与互动【当前功能】 / 浏览与筛选【当前功能】",
+          "社区发帖与互动规范【推荐规范】 / 标签与图片【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "community-003",
+      "facts": [
+        {
+          "factId": "community-003:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "社区浏览、发帖与互动【当前功能】 / 浏览与筛选【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称",
+          "平台使用说明与账号基础【当前功能】 / 个人中心与公开主页【当前功能】"
+        ],
+        "after": [
+          "社区浏览、发帖与互动【当前功能】 / 浏览与筛选【当前功能】",
+          "平台使用说明与账号基础【当前功能】 / 个人中心与公开主页【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "community-004",
+      "facts": [
+        {
+          "factId": "community-004:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "False->True"
+        },
+        {
+          "factId": "community-004:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "False->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "社区发帖与互动规范【推荐规范】 / 审核与发布边界【当前功能与推荐规范】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 素材合规【推荐规范】",
+          "社区浏览、发帖与互动【当前功能】 / 发帖失败【当前功能与推荐规范】"
+        ],
+        "after": [
+          "社区发帖与互动规范【推荐规范】 / 审核与发布边界【当前功能与推荐规范】",
+          "社区浏览、发帖与互动【当前功能】 / 发布帖子【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "community-005",
+      "facts": [
+        {
+          "factId": "community-005:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "社区浏览、发帖与互动【当前功能】 / 发布帖子【当前功能】",
+          "社区发帖与互动规范【推荐规范】 / 标签与图片【推荐规范】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 素材合规【推荐规范】"
+        ],
+        "after": [
+          "社区浏览、发帖与互动【当前功能】 / 发布帖子【当前功能】",
+          "社区发帖与互动规范【推荐规范】 / 标签与图片【推荐规范】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 素材合规【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "community-006",
+      "facts": [
+        {
+          "factId": "community-006:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            }
+          },
+          "finalTransition": "False->False"
+        },
+        {
+          "factId": "community-006:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            }
+          },
+          "finalTransition": "False->False"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "社区浏览、发帖与互动【当前功能】 / 我的帖子与他人主页【当前功能】",
+          "社区发帖与互动规范【推荐规范】 / 审核与发布边界【当前功能与推荐规范】",
+          "预览、停止与聊天历史【当前功能】 / 空白预览排查【推荐规范】"
+        ],
+        "after": [
+          "社区浏览、发帖与互动【当前功能】 / 我的帖子与他人主页【当前功能】",
+          "社区发帖与互动规范【推荐规范】 / 审核与发布边界【当前功能与推荐规范】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 用户口语与正式名称"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "community-007",
+      "facts": [
+        {
+          "factId": "community-007:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            }
+          },
+          "finalTransition": "False->False"
+        },
+        {
+          "factId": "community-007:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            }
+          },
+          "finalTransition": "False->False"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "社区浏览、发帖与互动【当前功能】 / 我的帖子与他人主页【当前功能】",
+          "社区发帖与互动规范【推荐规范】 / 审核与发布边界【当前功能与推荐规范】",
+          "平台使用说明与账号基础【当前功能】 / 个人中心与公开主页【当前功能】"
+        ],
+        "after": [
+          "社区浏览、发帖与互动【当前功能】 / 我的帖子与他人主页【当前功能】",
+          "社区发帖与互动规范【推荐规范】 / 审核与发布边界【当前功能与推荐规范】",
+          "平台使用说明与账号基础【当前功能】 / 个人中心与公开主页【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "community-008",
+      "facts": [
+        {
+          "factId": "community-008:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "community-008:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "社区浏览、发帖与互动【当前功能】 / 发帖失败【当前功能与推荐规范】",
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】",
+          "社区发帖与互动规范【推荐规范】 / 标签与图片【推荐规范】"
+        ],
+        "after": [
+          "社区浏览、发帖与互动【当前功能】 / 发帖失败【当前功能与推荐规范】",
+          "部署、访问与代码下载【当前功能】 / 失败排查【推荐规范】",
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "community-009",
+      "facts": [
+        {
+          "factId": "community-009:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "community-009:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "社区浏览、发帖与互动【当前功能】 / 评论与回复【当前功能】",
+          "社区发帖与互动规范【推荐规范】 / 审核与发布边界【当前功能与推荐规范】"
+        ],
+        "after": [
+          "社区浏览、发帖与互动【当前功能】 / 评论与回复【当前功能】",
+          "社区发帖与互动规范【推荐规范】 / 审核与发布边界【当前功能与推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "community-010",
+      "facts": [
+        {
+          "factId": "community-010:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "community-010:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "社区浏览、发帖与互动【当前功能】 / 评论与回复【当前功能】",
+          "社区发帖与互动规范【推荐规范】 / 审核与发布边界【当前功能与推荐规范】"
+        ],
+        "after": [
+          "社区浏览、发帖与互动【当前功能】 / 评论与回复【当前功能】",
+          "社区发帖与互动规范【推荐规范】 / 审核与发布边界【当前功能与推荐规范】",
+          "预览、停止与聊天历史【当前功能】 / 输出窗口与完整记录【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "community-011",
+      "facts": [
+        {
+          "factId": "community-011:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "community-011:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "社区浏览、发帖与互动【当前功能】 / 评论与回复【当前功能】",
+          "社区发帖与互动规范【推荐规范】 / 评论与讨论【推荐规范】"
+        ],
+        "after": [
+          "社区浏览、发帖与互动【当前功能】 / 评论与回复【当前功能】",
+          "社区发帖与互动规范【推荐规范】 / 评论与讨论【推荐规范】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 安全与来源【当前功能与推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "community-012",
+      "facts": [
+        {
+          "factId": "community-012:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "社区浏览、发帖与互动【当前功能】 / 点赞与审核【当前功能】",
+          "预览、停止与聊天历史【当前功能】 / 停止生成【当前功能】",
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】"
+        ],
+        "after": [
+          "社区浏览、发帖与互动【当前功能】 / 点赞与审核【当前功能】",
+          "预览、停止与聊天历史【当前功能】 / 停止生成【当前功能】",
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "community-013",
+      "facts": [
+        {
+          "factId": "community-013:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "False->True"
+        },
+        {
+          "factId": "community-013:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "False->True"
+        },
+        {
+          "factId": "community-013:required:03",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "False->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "社区发帖与互动规范【推荐规范】 / 审核与发布边界【当前功能与推荐规范】",
+          "社区浏览、发帖与互动【当前功能】 / 发布帖子【当前功能】",
+          "预览、停止与聊天历史【当前功能】 / 空白预览排查【推荐规范】"
+        ],
+        "after": [
+          "社区发帖与互动规范【推荐规范】 / 求助模板【推荐规范】",
+          "社区浏览、发帖与互动【当前功能】 / 发布帖子【当前功能】",
+          "预览、停止与聊天历史【当前功能】 / 空白预览排查【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "community-014",
+      "facts": [
+        {
+          "factId": "community-014:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "community-014:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "社区发帖与互动规范【推荐规范】 / 审核与发布边界【当前功能与推荐规范】",
+          "社区浏览、发帖与互动【当前功能】 / 我的帖子与他人主页【当前功能】",
+          "管理后台与知识库维护【当前功能】 / 内容发布【推荐规范】"
+        ],
+        "after": [
+          "社区发帖与互动规范【推荐规范】 / 审核与发布边界【当前功能与推荐规范】",
+          "社区浏览、发帖与互动【当前功能】 / 我的帖子与他人主页【当前功能】",
+          "管理后台与知识库维护【当前功能】 / 内容发布【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "admin-knowledge-001",
+      "facts": [
+        {
+          "factId": "admin-knowledge-001:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "管理后台与知识库维护【当前功能】 / 权限与入口【当前功能】",
+          "平台使用说明与账号基础【当前功能】 / 客服与功能边界【当前功能】",
+          "社区浏览、发帖与互动【当前功能】 / 发帖失败【当前功能与推荐规范】"
+        ],
+        "after": [
+          "管理后台与知识库维护【当前功能】 / 权限与入口【当前功能】",
+          "平台使用说明与账号基础【当前功能】 / 客服与功能边界【当前功能】",
+          "社区浏览、发帖与互动【当前功能】 / 发帖失败【当前功能与推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "admin-knowledge-002",
+      "facts": [
+        {
+          "factId": "admin-knowledge-002:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "False->True"
+        },
+        {
+          "factId": "admin-knowledge-002:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "False->True"
+        },
+        {
+          "factId": "admin-knowledge-002:required:03",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "False->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "管理后台与知识库维护【当前功能】 / 权限与入口【当前功能】",
+          "平台使用说明与账号基础【当前功能】 / 客服与功能边界【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 安全与来源【当前功能与推荐规范】"
+        ],
+        "after": [
+          "管理后台与知识库维护【当前功能】 / 上传与索引【当前功能】",
+          "平台使用说明与账号基础【当前功能】 / 客服与功能边界【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 安全与来源【当前功能与推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "admin-knowledge-003",
+      "facts": [
+        {
+          "factId": "admin-knowledge-003:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "admin-knowledge-003:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "admin-knowledge-003:required:03",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "管理后台与知识库维护【当前功能】 / 上传与索引【当前功能】",
+          "平台使用说明与账号基础【当前功能】 / 客服与功能边界【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 常见问法"
+        ],
+        "after": [
+          "管理后台与知识库维护【当前功能】 / 上传与索引【当前功能】",
+          "社区浏览、发帖与互动【当前功能】 / 发帖失败【当前功能与推荐规范】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 不能加载图片时【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "admin-knowledge-004",
+      "facts": [
+        {
+          "factId": "admin-knowledge-004:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "管理后台与知识库维护【当前功能】 / 替换与重建【当前功能】",
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 保留已有内容【当前功能与推荐规范】"
+        ],
+        "after": [
+          "管理后台与知识库维护【当前功能】 / 替换与重建【当前功能】",
+          "应用生成与增量修改【当前功能】 / 失败与并发【当前功能】",
+          "部署、访问与代码下载【当前功能】 / 部署与预览区别【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "admin-knowledge-005",
+      "facts": [
+        {
+          "factId": "admin-knowledge-005:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "False->True"
+        },
+        {
+          "factId": "admin-knowledge-005:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "False->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "管理后台与知识库维护【当前功能】 / 常见问法",
+          "预览、停止与聊天历史【当前功能】 / 常见问法",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 优化请求模板【推荐规范】"
+        ],
+        "after": [
+          "管理后台与知识库维护【当前功能】 / 状态、禁用与删除【当前功能】",
+          "预览、停止与聊天历史【当前功能】 / 停止生成【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 优化请求模板【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "boundaries-safety-001",
+      "facts": [
+        {
+          "factId": "boundaries-safety-001:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "boundaries-safety-001:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "功能边界与常见问题【当前功能与推荐规范】 / 生成成功能当作真实业务系统吗【当前功能】",
+          "应用需求编写规范【推荐规范】 / 拆分需求与验收【推荐规范】",
+          "部署、访问与代码下载【当前功能】 / 三类产物【当前功能】"
+        ],
+        "after": [
+          "功能边界与常见问题【当前功能与推荐规范】 / 生成成功能当作真实业务系统吗【当前功能】",
+          "应用需求编写规范【推荐规范】 / 拆分需求与验收【推荐规范】",
+          "平台使用说明与账号基础【当前功能】 / 平台用途【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "boundaries-safety-002",
+      "facts": [
+        {
+          "factId": "boundaries-safety-002:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "功能边界与常见问题【当前功能与推荐规范】 / 规划能力询问【当前功能与推荐规范】",
+          "管理后台与知识库维护【当前功能】 / 内容发布【推荐规范】",
+          "社区浏览、发帖与互动【当前功能】 / 浏览与筛选【当前功能】"
+        ],
+        "after": [
+          "功能边界与常见问题【当前功能与推荐规范】 / 规划能力询问【当前功能与推荐规范】",
+          "管理后台与知识库维护【当前功能】 / 内容发布【推荐规范】",
+          "社区浏览、发帖与互动【当前功能】 / 浏览与筛选【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "boundaries-safety-003",
+      "facts": [
+        {
+          "factId": "boundaries-safety-003:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "社区浏览、发帖与互动【当前功能】 / 我的帖子与他人主页【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 规划能力询问【当前功能与推荐规范】",
+          "社区发帖与互动规范【推荐规范】 / 常见问法"
+        ],
+        "after": [
+          "社区浏览、发帖与互动【当前功能】 / 我的帖子与他人主页【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 规划能力询问【当前功能与推荐规范】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 素材合规【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "boundaries-safety-004",
+      "facts": [
+        {
+          "factId": "boundaries-safety-004:required:01",
+          "survival": {
+            "before": {
+              "retrieved": false,
+              "filtered": false,
+              "reranked": false,
+              "thresholded": false,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            },
+            "after": {
+              "retrieved": false,
+              "filtered": false,
+              "reranked": false,
+              "thresholded": false,
+              "selected": false,
+              "characterBudget": false,
+              "finalContext": false
+            }
+          },
+          "finalTransition": "False->False"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "功能边界与常见问题【当前功能与推荐规范】 / 当前能力与推荐方法的区别【当前功能】",
+          "平台使用说明与账号基础【当前功能】 / 客服与功能边界【当前功能】",
+          "应用需求编写规范【推荐规范】 / 描述对象与目标【推荐规范】"
+        ],
+        "after": [
+          "应用需求编写规范【推荐规范】 / 描述对象与目标【推荐规范】",
+          "平台使用说明与账号基础【当前功能】 / 客服与功能边界【当前功能】",
+          "应用生成与增量修改【当前功能】 / 继续修改与应用管理【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "boundaries-safety-005",
+      "facts": [
+        {
+          "factId": "boundaries-safety-005:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "平台使用说明与账号基础【当前功能】 / 客服与功能边界【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 没有知识和服务失败有什么区别【当前功能】",
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 保留已有内容【当前功能与推荐规范】"
+        ],
+        "after": [
+          "平台使用说明与账号基础【当前功能】 / 客服与功能边界【当前功能】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 没有知识和服务失败有什么区别【当前功能】",
+          "管理后台与知识库维护【当前功能】 / 权限与入口【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "boundaries-safety-006",
+      "facts": [
+        {
+          "factId": "boundaries-safety-006:required:01",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        },
+        {
+          "factId": "boundaries-safety-006:required:02",
+          "survival": {
+            "before": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            },
+            "after": {
+              "retrieved": true,
+              "filtered": true,
+              "reranked": true,
+              "thresholded": true,
+              "selected": true,
+              "characterBudget": true,
+              "finalContext": true
+            }
+          },
+          "finalTransition": "True->True"
+        }
+      ],
+      "selectedLocators": {
+        "before": [
+          "功能边界与常见问题【当前功能与推荐规范】 / 没有知识和服务失败有什么区别【当前功能】",
+          "平台使用说明与账号基础【当前功能】 / 客服与功能边界【当前功能】",
+          "管理后台与知识库维护【当前功能】 / 常见问法"
+        ],
+        "after": [
+          "功能边界与常见问题【当前功能与推荐规范】 / 没有知识和服务失败有什么区别【当前功能】",
+          "平台使用说明与账号基础【当前功能】 / 客服与功能边界【当前功能】",
+          "社区发帖与互动规范【推荐规范】 / 求助模板【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "boundaries-safety-007",
+      "facts": [],
+      "selectedLocators": {
+        "before": [
+          "应用生成与增量修改【当前功能】 / 增量修改写法【推荐规范】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 没有知识和服务失败有什么区别【当前功能】",
+          "社区发帖与互动规范【推荐规范】 / 评论与讨论【推荐规范】"
+        ],
+        "after": [
+          "功能边界与常见问题【当前功能与推荐规范】 / 没有知识和服务失败有什么区别【当前功能】",
+          "应用需求编写规范【推荐规范】 / 功能、状态与数据【推荐规范】",
+          "社区发帖与互动规范【推荐规范】 / 求助模板【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "boundaries-safety-008",
+      "facts": [],
+      "selectedLocators": {
+        "before": [
+          "功能边界与常见问题【当前功能与推荐规范】 / 客服可以查询私有业务数据吗【当前功能】",
+          "平台使用说明与账号基础【当前功能】 / 客服与功能边界【当前功能】",
+          "应用需求编写规范【推荐规范】 / 反例与改写【推荐规范】"
+        ],
+        "after": [
+          "功能边界与常见问题【当前功能与推荐规范】 / 客服可以查询私有业务数据吗【当前功能】",
+          "平台使用说明与账号基础【当前功能】 / 客服与功能边界【当前功能】",
+          "应用需求编写规范【推荐规范】 / 反例与改写【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "boundaries-safety-009",
+      "facts": [],
+      "selectedLocators": {
+        "before": [
+          "功能边界与常见问题【当前功能与推荐规范】 / 安全与来源【当前功能与推荐规范】",
+          "预览、停止与聊天历史【当前功能】 / 空白预览排查【推荐规范】",
+          "管理后台与知识库维护【当前功能】 / 权限与入口【当前功能】"
+        ],
+        "after": [
+          "功能边界与常见问题【当前功能与推荐规范】 / 安全与来源【当前功能与推荐规范】",
+          "预览、停止与聊天历史【当前功能】 / 空白预览排查【推荐规范】",
+          "管理后台与知识库维护【当前功能】 / 权限与入口【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "boundaries-safety-010",
+      "facts": [],
+      "selectedLocators": {
+        "before": [
+          "图片、素材与已有功能保留【当前功能与推荐规范】 / 保留已有内容【当前功能与推荐规范】",
+          "预览、停止与聊天历史【当前功能】 / 空白预览排查【推荐规范】",
+          "应用需求编写规范【推荐规范】 / 常见问法"
+        ],
+        "after": [
+          "应用需求编写规范【推荐规范】 / 可复制需求模板【推荐规范】",
+          "预览、停止与聊天历史【当前功能】 / 空白预览排查【推荐规范】",
+          "社区发帖与互动规范【推荐规范】 / 求助模板【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "boundaries-safety-011",
+      "facts": [],
+      "selectedLocators": {
+        "before": [
+          "管理后台与知识库维护【当前功能】 / 内容发布【推荐规范】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 客服可以查询私有业务数据吗【当前功能】",
+          "平台使用说明与账号基础【当前功能】 / 客服与功能边界【当前功能】"
+        ],
+        "after": [
+          "管理后台与知识库维护【当前功能】 / 内容发布【推荐规范】",
+          "功能边界与常见问题【当前功能与推荐规范】 / 客服可以查询私有业务数据吗【当前功能】",
+          "社区发帖与互动规范【推荐规范】 / 求助模板【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "boundaries-safety-012",
+      "facts": [],
+      "selectedLocators": {
+        "before": [
+          "功能边界与常见问题【当前功能与推荐规范】 / 客服可以查询私有业务数据吗【当前功能】",
+          "平台使用说明与账号基础【当前功能】 / 个人中心与公开主页【当前功能】",
+          "预览、停止与聊天历史【当前功能】 / 历史查看与导出【当前功能】"
+        ],
+        "after": [
+          "功能边界与常见问题【当前功能与推荐规范】 / 客服可以查询私有业务数据吗【当前功能】",
+          "平台使用说明与账号基础【当前功能】 / 个人中心与公开主页【当前功能】",
+          "预览、停止与聊天历史【当前功能】 / 历史查看与导出【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "boundaries-safety-013",
+      "facts": [],
+      "selectedLocators": {
+        "before": [
+          "平台使用说明与账号基础【当前功能】 / 客服与功能边界【当前功能】",
+          "管理后台与知识库维护【当前功能】 / 内容发布【推荐规范】",
+          "预览、停止与聊天历史【当前功能】 / 历史查看与导出【当前功能】"
+        ],
+        "after": [
+          "平台使用说明与账号基础【当前功能】 / 客服与功能边界【当前功能】",
+          "管理后台与知识库维护【当前功能】 / 内容发布【推荐规范】",
+          "预览、停止与聊天历史【当前功能】 / 历史查看与导出【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "boundaries-safety-014",
+      "facts": [],
+      "selectedLocators": {
+        "before": [
+          "功能边界与常见问题【当前功能与推荐规范】 / 规划能力询问【当前功能与推荐规范】",
+          "社区发帖与互动规范【推荐规范】 / 审核与发布边界【当前功能与推荐规范】",
+          "应用需求编写规范【推荐规范】 / 可复制需求模板【推荐规范】"
+        ],
+        "after": [
+          "功能边界与常见问题【当前功能与推荐规范】 / 规划能力询问【当前功能与推荐规范】",
+          "社区发帖与互动规范【推荐规范】 / 审核与发布边界【当前功能与推荐规范】",
+          "应用需求编写规范【推荐规范】 / 可复制需求模板【推荐规范】"
+        ]
+      },
+      "humanReview": "pending"
+    },
+    {
+      "id": "boundaries-safety-015",
+      "facts": [],
+      "selectedLocators": {
+        "before": [
+          "功能边界与常见问题【当前功能与推荐规范】 / 客服可以查询私有业务数据吗【当前功能】",
+          "平台使用说明与账号基础【当前功能】 / 常见问法",
+          "应用生成与增量修改【当前功能】 / 对话生成【当前功能】"
+        ],
+        "after": [
+          "功能边界与常见问题【当前功能与推荐规范】 / 客服可以查询私有业务数据吗【当前功能】",
+          "应用生成与增量修改【当前功能】 / 增量修改写法【推荐规范】",
+          "平台使用说明与账号基础【当前功能】 / 平台用途【当前功能】"
+        ]
+      },
+      "humanReview": "pending"
+    }
+  ],
+  "usage": {
+    "embeddingRequests": 8,
+    "embeddingInputs": 225,
+    "bgeCalls": 180,
+    "chatCalls": 0,
+    "indexWrites": 0,
+    "embeddingTokens": 17595
+  },
+  "humanReview": "pending",
+  "semanticReview": "agent-review-of-23-changed-quote-facts-only",
+  "boundary": "同一反复使用开发集的真实Embedding/BGE与本地穷举COSINE；整段引文存活非语义覆盖、回答正确率、Milvus或线上端到端验收。",
+  "changedFactReview": {
+    "reviewerType": "agent",
+    "humanReview": "pending",
+    "facts": [
+      {
+        "factId": "platform-account-001:required:01",
+        "arms": {
+          "before": {
+            "verdict": "missing",
+            "support": []
+          },
+          "after": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "01-platform-account:2:0",
+                "quote": "使用顺序是注册登录、描述需求、创建应用、进入对话生成、查看预览、继续修改，最后部署或下载代码。"
+              }
+            ]
+          }
+        },
+        "reason": "旧证据无注册登录与创建步骤，新证据给出完整使用顺序。",
+        "caveat": null,
+        "humanReview": "pending"
+      },
+      {
+        "factId": "platform-account-001:required:02",
+        "arms": {
+          "before": {
+            "verdict": "partial",
+            "support": [
+              {
+                "chunkId": "01-platform-account:1:5",
+                "quote": "等第一版成功后逐步增加功能"
+              }
+            ]
+          },
+          "after": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "01-platform-account:2:0",
+                "quote": "查看预览、继续修改，最后部署或下载代码"
+              }
+            ]
+          }
+        },
+        "reason": "旧证据仅有逐步修改，新证据补预览和部署下载。",
+        "caveat": null,
+        "humanReview": "pending"
+      },
+      {
+        "factId": "app-generation-007:required:01",
+        "arms": {
+          "before": {
+            "verdict": "disputed",
+            "support": [
+              {
+                "chunkId": "07-deployment-download:1:2",
+                "quote": "HTML 和 MULTI_FILE 部署读取可用源码版本；Vue 工程部署使用可用的构建产物。"
+              }
+            ]
+          },
+          "after": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "04-generation-types:2:2",
+                "quote": "它不等于 Vue 工程，也不自动提供后端数据库。"
+              }
+            ]
+          }
+        },
+        "reason": "新证据有直接否定；旧证据能否由分支区分推导仍沿用原争议。",
+        "caveat": "prior-annotation-dispute-not-resolved",
+        "humanReview": "pending"
+      },
+      {
+        "factId": "app-generation-016:required:01",
+        "arms": {
+          "before": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "11-faq:1:0",
+                "quote": "写需求模板、逐轮验收、分享作品格式是推荐使用方式，不是必须填写的系统表单。"
+              }
+            ]
+          },
+          "after": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "03-generation-requirements:2:0",
+                "quote": "需求规范是帮助生成的建议，不是系统强制要求每次填写的表单。"
+              }
+            ]
+          }
+        },
+        "reason": "旧FAQ已有完整等价支持，不计新增语义收益。",
+        "caveat": null,
+        "humanReview": "pending"
+      },
+      {
+        "factId": "app-generation-017:required:01",
+        "arms": {
+          "before": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "03-generation-requirements:1:0",
+                "quote": "先说给谁使用、要完成什么事。"
+              }
+            ]
+          },
+          "after": {
+            "verdict": "partial",
+            "support": [
+              {
+                "chunkId": "09-community-guidelines:2:1",
+                "quote": "我想完成什么"
+              }
+            ]
+          }
+        },
+        "reason": "新上下文只剩求助模板中的目标提示，丢失说明页面目标用户的直接依据。",
+        "caveat": "semantic-regression-target-user",
+        "humanReview": "pending"
+      },
+      {
+        "factId": "app-generation-017:required:02",
+        "arms": {
+          "before": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "03-generation-requirements:1:0",
+                "quote": "再列出主要页面或区域"
+              }
+            ]
+          },
+          "after": {
+            "verdict": "partial",
+            "support": [
+              {
+                "chunkId": "03-generation-requirements:2:2",
+                "quote": "说明页面数量、导航关系、主要文字"
+              }
+            ]
+          }
+        },
+        "reason": "仍有页面数量导航和局部布局建议，但不再直接要求列出主要页面或区域，等价程度待人工裁决。",
+        "caveat": "conditional-equivalence-dispute",
+        "humanReview": "pending"
+      },
+      {
+        "factId": "deployment-download-001:required:01",
+        "arms": {
+          "before": {
+            "verdict": "missing",
+            "support": []
+          },
+          "after": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "07-deployment-download:2:0",
+                "quote": "使用创建应用的账号登录，进入该应用对话页"
+              }
+            ]
+          }
+        },
+        "reason": "旧上下文缺创建者登录与入口，新证据补齐。",
+        "caveat": null,
+        "humanReview": "pending"
+      },
+      {
+        "factId": "deployment-download-001:required:02",
+        "arms": {
+          "before": {
+            "verdict": "partial",
+            "support": [
+              {
+                "chunkId": "07-deployment-download:1:2",
+                "quote": "HTML 和 MULTI_FILE 部署读取可用源码版本；Vue 工程部署使用可用的构建产物。"
+              }
+            ]
+          },
+          "after": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "07-deployment-download:2:0",
+                "quote": "先确认已有可用生成结果并验收页面，然后点击“部署应用”。部署成功后得到访问链接"
+              }
+            ]
+          }
+        },
+        "reason": "旧证据只含可用产物条件，新证据补按钮和成功链接。",
+        "caveat": null,
+        "humanReview": "pending"
+      },
+      {
+        "factId": "deployment-download-003:required:01",
+        "arms": {
+          "before": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "07-deployment-download:1:0",
+                "quote": "没有源码目录或 Vue 构建产物时部署可能失败。"
+              }
+            ]
+          },
+          "after": {
+            "verdict": "partial",
+            "support": [
+              {
+                "chunkId": "07-deployment-download:2:4",
+                "quote": "部署失败先核对是否为创建者、任务是否成功、源码或构建结果是否可用。"
+              }
+            ]
+          }
+        },
+        "reason": "通用源码/构建排查仍在，但明确Vue构建条件不在；条件推理能否补足待人工裁决。",
+        "caveat": "conditional-equivalence-dispute",
+        "humanReview": "pending"
+      },
+      {
+        "factId": "deployment-download-003:required:02",
+        "arms": {
+          "before": {
+            "verdict": "partial",
+            "support": [
+              {
+                "chunkId": "02-app-generation:1:0",
+                "quote": "创建记录成功不等于代码生成已经完成。"
+              }
+            ]
+          },
+          "after": {
+            "verdict": "partial",
+            "support": [
+              {
+                "chunkId": "02-app-generation:2:5",
+                "quote": "没有成功版本的新应用可能没有可用预览。"
+              }
+            ]
+          }
+        },
+        "reason": "两组都不是全部复合条件的直接证明；新组丢失创建记录不等于生成完成的明确子项，不得据等级不变说无退步。",
+        "caveat": "subfact-regression-record-is-not-completion",
+        "humanReview": "pending"
+      },
+      {
+        "factId": "deployment-download-013:required:01",
+        "arms": {
+          "before": {
+            "verdict": "partial",
+            "support": [
+              {
+                "chunkId": "07-deployment-download:1:0",
+                "quote": "先确认已有可用生成结果并验收页面"
+              }
+            ]
+          },
+          "after": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "07-deployment-download:2:4",
+                "quote": "部署失败先核对是否为创建者、任务是否成功、源码或构建结果是否可用。"
+              }
+            ]
+          }
+        },
+        "reason": "新组明确任务成功检查；旧组可用结果是否已等价仍属第22轮已记录尺度分歧，不算稳健新增收益。",
+        "caveat": "prior-review-scale-disagreement",
+        "humanReview": "pending"
+      },
+      {
+        "factId": "deployment-download-013:required:02",
+        "arms": {
+          "before": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "07-deployment-download:1:0",
+                "quote": "没有源码目录或 Vue 构建产物时部署可能失败。"
+              }
+            ]
+          },
+          "after": {
+            "verdict": "partial",
+            "support": [
+              {
+                "chunkId": "07-deployment-download:2:4",
+                "quote": "源码或构建结果是否可用"
+              }
+            ]
+          }
+        },
+        "reason": "虽整段标注引文新增，明确Vue类型条件却消失；通用构建检查能否等价待人工裁决。",
+        "caveat": "quote-gain-with-conditional-support-weakened",
+        "humanReview": "pending"
+      },
+      {
+        "factId": "deployment-download-014:required:01",
+        "arms": {
+          "before": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "05-images-preservation:1:2",
+                "quote": "先检查图片地址是否仍可访问、是否依赖登录或临时授权、相对路径是否与部署后的页面位置一致。"
+              }
+            ]
+          },
+          "after": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "05-images-preservation:2:2",
+                "quote": "先检查图片地址是否仍可访问、是否依赖登录或临时授权、相对路径是否与部署后的页面位置一致。"
+              }
+            ]
+          }
+        },
+        "reason": "原组已有另一文档的完整等价支持，新增标注出处不是新增语义覆盖。",
+        "caveat": null,
+        "humanReview": "pending"
+      },
+      {
+        "factId": "community-004:required:01",
+        "arms": {
+          "before": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "08-community-features:1:2",
+                "quote": "检查是否已登录、标题正文是否填写、标签是否有效及图片是否超限。"
+              }
+            ]
+          },
+          "after": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "08-community-features:2:1",
+                "quote": "登录后打开发布页，填写标题、正文、选择有效标签"
+              }
+            ]
+          }
+        },
+        "reason": "旧失败排查已覆盖登录和标题正文标签，不计新增语义收益。",
+        "caveat": null,
+        "humanReview": "pending"
+      },
+      {
+        "factId": "community-004:required:02",
+        "arms": {
+          "before": {
+            "verdict": "missing",
+            "support": []
+          },
+          "after": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "08-community-features:2:1",
+                "quote": "并按需添加图片。"
+              }
+            ]
+          }
+        },
+        "reason": "新组新增图片可选的明确条件。",
+        "caveat": null,
+        "humanReview": "pending"
+      },
+      {
+        "factId": "community-013:required:01",
+        "arms": {
+          "before": {
+            "verdict": "missing",
+            "support": []
+          },
+          "after": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "09-community-guidelines:2:1",
+                "quote": "我想完成什么—在哪里操作—预期结果—实际结果"
+              }
+            ]
+          }
+        },
+        "reason": "新组补齐目标、位置、预期和实际结果。",
+        "caveat": null,
+        "humanReview": "pending"
+      },
+      {
+        "factId": "community-013:required:02",
+        "arms": {
+          "before": {
+            "verdict": "partial",
+            "support": [
+              {
+                "chunkId": "09-community-guidelines:1:4",
+                "quote": "完整复现步骤"
+              }
+            ]
+          },
+          "after": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "09-community-guidelines:2:1",
+                "quote": "复现步骤—尝试过的办法"
+              }
+            ]
+          }
+        },
+        "reason": "旧组仅提复现步骤，新组补已尝试处理。",
+        "caveat": null,
+        "humanReview": "pending"
+      },
+      {
+        "factId": "community-013:required:03",
+        "arms": {
+          "before": {
+            "verdict": "partial",
+            "support": [
+              {
+                "chunkId": "06-preview-history:1:4",
+                "quote": "反馈时提供应用 ID、时间与错误摘要；不要公开密钥或完整个人信息。"
+              }
+            ]
+          },
+          "after": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "09-community-guidelines:2:1",
+                "quote": "错误描述只提供必要信息，不包含 API Key、密码、Cookie、OSS 签名链接或私人数据库资料。"
+              }
+            ]
+          }
+        },
+        "reason": "必要性限定更直接，但旧脱敏摘要是否已等价沿用第22轮尺度分歧，不计稳健新增。",
+        "caveat": "prior-review-scale-disagreement",
+        "humanReview": "pending"
+      },
+      {
+        "factId": "admin-knowledge-002:required:01",
+        "arms": {
+          "before": {
+            "verdict": "missing",
+            "support": []
+          },
+          "after": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "10-admin-knowledge:2:1",
+                "quote": "管理员上传 PDF、DOCX、Markdown 或 TXT 文件"
+              }
+            ]
+          }
+        },
+        "reason": "旧最终证据无此具体上传条件，新组直接包含原说明。",
+        "caveat": null,
+        "humanReview": "pending"
+      },
+      {
+        "factId": "admin-knowledge-002:required:02",
+        "arms": {
+          "before": {
+            "verdict": "missing",
+            "support": []
+          },
+          "after": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "10-admin-knowledge:2:1",
+                "quote": "默认单文件上限 20 MiB，可被部署配置收紧"
+              }
+            ]
+          }
+        },
+        "reason": "旧最终证据无此具体上传条件，新组直接包含原说明。",
+        "caveat": null,
+        "humanReview": "pending"
+      },
+      {
+        "factId": "admin-knowledge-002:required:03",
+        "arms": {
+          "before": {
+            "verdict": "missing",
+            "support": []
+          },
+          "after": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "10-admin-knowledge:2:1",
+                "quote": "空文件和无效格式不能导入。"
+              }
+            ]
+          }
+        },
+        "reason": "旧最终证据无此具体上传条件，新组直接包含原说明。",
+        "caveat": null,
+        "humanReview": "pending"
+      },
+      {
+        "factId": "admin-knowledge-005:required:01",
+        "arms": {
+          "before": {
+            "verdict": "missing",
+            "support": []
+          },
+          "after": {
+            "verdict": "partial",
+            "support": [
+              {
+                "chunkId": "10-admin-knowledge:2:3",
+                "quote": "不能把点击成功视为所有服务已立即一致。"
+              }
+            ]
+          }
+        },
+        "reason": "异步一致性有了直接说明，但仍未完整解释禁用与物理删除的区别；整段引文存活不等于该复合事实全覆盖。",
+        "caveat": null,
+        "humanReview": "pending"
+      },
+      {
+        "factId": "admin-knowledge-005:required:02",
+        "arms": {
+          "before": {
+            "verdict": "missing",
+            "support": []
+          },
+          "after": {
+            "verdict": "covered",
+            "support": [
+              {
+                "chunkId": "10-admin-knowledge:2:3",
+                "quote": "禁用、启用和删除涉及异步处理，必须等待任务终态并验证检索结果"
+              }
+            ]
+          }
+        },
+        "reason": "旧组只有问法枚举，新组补齐异步任务与验证要求。",
+        "caveat": null,
+        "humanReview": "pending"
+      }
+    ],
+    "scope": "仅对整段引文存活发生变化的23事实复核，未逐项复核其余107事实；不汇总为130事实语义得分。",
+    "packetSha256": "4b8650e55fa2ffafbb7c1bb9f42837c5c278598420223949acb113b1d67c6bce",
+    "priorDisputesPreserved": [
+      "app-generation-006:required:01",
+      "app-generation-007:required:01",
+      "deployment-download-009:required:01"
+    ]
+  },
+  "verification": {
+    "tests": {
+      "target-final": {
+        "passed": 33,
+        "skipped": 0,
+        "xmlSha256": "8b5c1df7727abd154c5ad11d12872ee2a7ee513b50beb27d34289d0ba4d98dad"
+      },
+      "python-verified": {
+        "passed": 2237,
+        "skipped": 25,
+        "xmlSha256": "6db0ff15c3aace418a4d3fbc6680316146a480c25882939150d120886e9189c4"
+      }
+    },
+    "fullSuiteWarnings": 2,
+    "compileallExitCode": 0,
+    "uvLockExitCode": 0,
+    "protectedHistoricalFilesUnchanged": 29,
+    "readmeOriginalPrefixPreserved": true,
+    "liveBoundFilesUnchanged": 37,
+    "formatOnlyRegenerationPreservedChunks": true,
+    "checkedChangedFactExcerpts": 37,
+    "originalCorpusDocuments": 11,
+    "boundary": "真实Embedding/BGE与离线测试；非Chat回答、Milvus、Spring/HTTP服务或生产发布验收。"
+  }
+}

@@ -165,3 +165,14 @@ uv run --offline python ../tmp/rag-failure-observation-20261120/verify-replay.py
 三项旧争议继续保留；另4项与第21轮评审尺度不同，不算稳健收益。cap1→cap2有一处复合fact子项证据退步，即使总等级仍partial也必须记录。90题/130事实/384摘录核验通过；人工仍pending。新增供应商、Embedding、BGE、INDEX及生产写入均0，未启停服务或修改生产策略。未知执行状态、候选GC与幻觉边界不变。
 
 新增独立离线脚本、44项定向测试和人工证据评审模板。完整方法、结果、分歧、重放命令、最终测试记录与下一轮选项见 [第22轮独立交接](customer-service-answer-first-round22-handoff.md)，逐事实判定见 [结构化结果](knowledge/product/evaluation/results/answer-first-selection-20261120-v1.json)。不建议推广A2；cap1加同规则的独立对照、知识分块关联或混合检索均待用户决定，本轮未实施。提交哈希由最终回复报告，用户既有修改保留。
+
+
+## 第23轮：B问答关联语料与真实检索对照（2026-11-20）
+
+用户选择执行B，并批准新的8次Embedding/225输入、180次BGE额度，Chat/INDEX/生产写入0。本轮创建独立11篇候选，60个原问法形成65处同文档同块关联，1项原篇无直接答案的问法保留未解决；原语料和旧标注不改。分块72→63，整库130项标注引文保持可用。
+
+真实Embedding与固定本地BGE完成90题两组对照，本地穷举COSINE Top8、cap1及预算固定。Top8完整引文120→124/130，最终96→111/130；最终新增19项、丢失4项。第21轮14项目标中10项恢复引文，但其中1项物理删除语义仍不完整。变化23事实的代理复核还发现等价支持、条件依据变弱和既有评审分歧，不能把引文变化算回答正确率。没有全130事实语义重评分，人工pending，无新答案或拒答验收。
+
+退步主因是重排竞争叠加cap1：app-generation-017视觉片段挤掉目标用户说明；deployment-download-003排查片段挤掉部署前提和创建记录边界。建议先用本轮冻结结果做新语料cap1/cap2离线复核，或另冻结更窄的歧义关联；未自动实施后续方案、推广生产或叠加混合检索。
+
+实际额度8次Embedding（225输入，17,595 tokens）与180次BGE全部消费，账本188次预占匹配，不得复用/删除。33项定向测试通过；最终全量测试、具体命令、故障修正、输入保护及提交见 [第23轮独立交接](customer-service-qa-linked-round23-handoff.md)。[结构化结果](knowledge/product/evaluation/results/qa-linked-retrieval-20261120-v1.json)保存全部90题逐事实阶段观测及23项变化复核。未启停Docker/Spring/HTTP Python服务；真实模型由本地Python实验进程运行，未验证Milvus、发布或线上双服务。未知执行状态、自动GC及幻觉边界不变，用户既有修改保留。
