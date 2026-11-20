@@ -858,3 +858,16 @@ uv run --offline python -m ai_service.orchestration.rag_answer_unit_evaluation -
 全库检查130项公共事实的整段原文可用性；90题诊断仅将旧最终来源映射到新块，首次出现去重、不补位，再应用1200/3000字符及16384字节预算。它假设旧来源仍入选，没有新向量或BGE分数，不能解释为新Top8召回、排序或回答质量。人工模板独立，不直接用于旧回答评审导入器。
 
 实际结果、两项局部人工裁决及未测项见[第26轮交接](../doc/customer-service-answer-unit-round26-handoff.md)。新候选未推广生产，真实Chat/Embedding/BGE/INDEX为0；同块不能消除坏JSON、模型遗漏或幻觉。
+
+
+## 客服第27轮混合检索独立对照
+
+`rag_hybrid_retrieval` 提供固定中文双字/ASCII词元BM25及等权RRF；`rag_hybrid_experiment` 在第23轮63块候选和旧真实向量上比较dense Top8与融合Top8，两组重新执行本地BGE，固定cap1、最多3块及原字符/字节预算。它是独立实验，没有接入正式检索或更换第26轮语料。
+
+默认或显式`--prepare`核对旧计划/账本/文本/向量、重现90题旧Top8并绑定本地模型和源码。真实运行须显式`--live --plan-sha256 <摘要>`，固定锚点`tmp/rag-hybrid-20261120/authorization.jsonl`，最多180次本地重排，每次推理前持久化预占；错误首停、不返还、不自动续跑。已有计划或锚点拒绝重用。第27轮已执行，不能直接重复命令消耗新额度。
+
+实验专属spawn worker复用正式模型、GPU锁和底层评分函数，以每批最多4对的无重试适配禁用OOM缩批重试；180次重排正常对应360批次。原服务适配器不变。Embedding/Chat/INDEX和生产写入均0，不需要启动Spring、Docker或HTTP Python服务，也不构成Milvus与双服务验收。
+
+逐项记录候选、重排、选择、字符与提示预算、耗时及固定故障阶段；推理后才读事实标签，输出逐事实引文缺失位置及独立人工模板。引文存活不是语义覆盖或回答正确率；无公共事实标注题不计算拒答质量。未知预占、落盘不确定和进程中断没有自动恢复。
+
+本轮结果、管理员替换说明退步与下载证据仍被cap1排除的案例见[第27轮交接](../doc/customer-service-hybrid-round27-handoff.md)。生产策略未推广，人工仍pending，候选无自动GC。
