@@ -1,0 +1,29 @@
+# 第22轮答案片段优先离线对照实施计划
+
+> **For agentic workers:** 使用 subagent-driven-development 分任务实施与复核。本计划已获用户选择A授权，不重复申请方案许可。
+
+**Goal:** 冻结识别规则后在历史90题比较A0 cap1、A1 cap2、A2 cap2加有限问法降序，输出可追溯证据变化而非新回答质量分。
+
+**Architecture:** 新增独立离线模块，复用观测输入核验和正式选择/预算函数。仅对已核验thresholded候选稳定分区；rubric只在选择之后计算字面存活和生成评审材料，生产入口不导入新模块。
+
+**Tech Stack:** Python、pytest、冻结JSON，无新依赖、无供应商调用。
+
+## 预先冻结规则 answer-first-question-list@1
+
+在首次对照运行之前固定以下规则，不因收益结果调参：locator最后一级（按`/`拆分去空白）必须精确为`常见问法`；正文是2至20个连续中文弯引号包围的条目，条目之间只允许空白；每项2至100字符且不含换行、句号、分号、冒号、逗号及嵌套引号。每项至少含一个明确问法标记：`怎么|如何|为什么|为何|哪里|哪|什么|多少|多久|几|是否|能否|是不是|吗|要不要|必须|可不可以|能不能|有没有|？|?`。条目后仅允许句号、空白及可选章节指引，指引语法为可选`相关说明：`，后接中文标签（1至16字）+`见`或`详见`+两位数字，指引以中文分号分隔并可有末尾句号。
+
+不匹配、含回答、仅一个问句、混合正文、实质FAQ、标题不符均保持顺序；此有限句法不能保证所有语义问法均识别或不会有伪装正文。降序不是删除，只有稳定分区，不改分数、不扩Top8、不改变阈值；同分/同类原顺序保留，原内容和身份不变。资料输入不可信，不执行任何正文。
+
+## 任务与验证
+
+- [ ] 保护现场：保存原报告/map/rubric/语料/旧账本/README与用户计划摘要。继续本任务现有dev工作区，只定向提交；旧本机忽略材料不复制、不改写。
+- [ ] 新增 `ai-service/src/ai_service/orchestration/rag_answer_first_evaluation.py`：`is_question_list(chunk)`、`compare_case(row,question)`、严格输入回放/新tmp输出CLI。用现有`load_bound/load_document_mapping/analyze/load_rubric`验证源报告；只接受原JSON研究、90题两arm、固定Top8/final3/阈值和预算，阶段未知或两arm不一致失败关闭。
+- [ ] 新增 `ai-service/tests/test_rag_answer_first_evaluation.py`：合成问法/混合答案/章节指引/未知标题边界；稳定顺序、不修改输入、配额不扩总预算；基线漂移/坏hash/未知阶段/重复输入/覆盖输出拒绝；生产不导入新模块；禁止socket的离线回放。先运行测试见红，再补实现并见绿。
+- [ ] 用正式`_select_documents`与`_bounded_contexts`、`fit_customer_service_contexts`执行三组，A0逐题精确匹配90份原contexts后才输出。输出候选识别、各组选择/最终内容、文档数、预算变化、配对增删、130公共fact整段引文存活及pending模板；字面存活不自动叫语义覆盖。
+- [ ] 定向复核第21轮14项选择缺项，并检查全90题配对移除内容的退步；三项争议单列、代理与人工分离。新材料写入新tmp目录，脱敏聚合提交results，详细原文留本地。
+- [ ] 规格与质量审查，运行`uv run --offline pytest`、`uv run --offline python -m compileall -q src`、`uv lock --check --offline`，以及真实历史离线CLI；记录失败与修复，不使用历史测试成绩。
+- [ ] 同步README（只追加本轮说明，不提交已有围栏改动）、第22轮独立交接与逐轮入口。Git中文Conventional Commit，仅本轮代码/测试/文档。结果无收益或有退步也如实交付，生产text/cap1不推广。
+
+## 判据与限制
+
+输入绑定或A0失败时停止比较；任何新网络调用均不允许。没有新回答，不能判断幻觉率/拒答率改善或当前在线健康。90题是重复开发集；三项争议保持pending，复合fact部分恢复单列。A1/A2只归因于有限降序，A0/A2含配额变化不得混称。需要真实模型实验时另立计划额度，本轮不启动服务。
