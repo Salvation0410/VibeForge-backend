@@ -187,3 +187,13 @@ uv run --offline python ../tmp/rag-failure-observation-20261120/verify-replay.py
 新增Chat/Embedding/BGE/INDEX/生产写入均0，无服务启停，无生产推广。真实额度已耗尽的第23轮账本未复用；旧语料、标签及60份历史保护文件不变。最终验证、失败边界、复现和人工模板见 [第24轮独立交接](customer-service-qa-linked-cap-round24-handoff.md)，逐题身份、统计和代理理由见 [第24轮结构化结果](knowledge/product/evaluation/results/qa-linked-cap-selection-20261120-v1.json)。
 
 建议下一轮先冻结5道关键题cap1/cap2并做10次真实回答对照，需新的Chat计划与授权；可选择零调用人工裁决材料。混合检索仅直接针对剩余6项Top8引文缺项，不能解决已召回未选中，本轮未增加该策略。未知执行状态、无自动GC与幻觉边界不变，用户既有修改保留；提交哈希由最终回复报告。
+
+## 第25轮：真实回答的协议失败与语义遗漏（2026-11-20）
+
+固定5题两组最多10次Chat，实际9次预占并发送，8次通过正式答案解析；community-007:cap1返回HTTP200/stop，但citedChunkIds键缺起始引号，报ANSWER_CONTRACT_INVALID。按冻结首错停止规则，cap2未运行、剩余额度不续跑；未修补原文或追加模型调用。离线正式解析回放8接受/1拒绝。供应商报告7815 tokens；请求deepseek-chat、9次响应自报deepseek-flash，身份限制与第19轮一致。
+
+4题9事实配对的代理完整覆盖1/9→5/9，其中017:02宽松等价口径仍需真人裁决；003:02保守提醒在cap2消失，存在局部退步。003最终已有可用源码/构建检查，模型未采用；缺明确Vue条件又是证据不足，须分开归因。8次契约通过不能视为语义验收；社区4个判断不可评分。真人pending，已准备带实际答案和上下文的human-review-ready.json，不把代理评分写成人工结论。
+
+本轮30项定向、2297通过/26跳过的完整pytest、compileall/lock通过。55项冻结绑定、68份历史保护文件不变；22判断槽位、43精确摘录和4类坏材料拒绝验证完成。无新Embedding/BGE/INDEX/生产写入，无服务启停/部署，不增加自动恢复或GC。计划606f9b9、实现0f2f097，收尾提交由最终回复报告。
+
+具体方法、故障、两处语义争议、验证命令和下一轮可选方案见[第25轮独立交接](customer-service-qa-linked-answer-round25-handoff.md)及[结构化结果](knowledge/product/evaluation/results/qa-linked-answer-validation-20261120-v1.json)。建议先人工裁决，再选择必要条件/例外同块的离线候选验证；混合检索不直接解决坏JSON或入选证据未采用，未自动实施任何优化。
