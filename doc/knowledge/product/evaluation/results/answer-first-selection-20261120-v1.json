@@ -1,0 +1,1792 @@
+{
+  "schemaVersion": "rag-answer-first-round22-summary/v1",
+  "date": "2026-11-20",
+  "status": "offline-evidence-reviewed-human-pending",
+  "deterministic": {
+    "schemaVersion": "rag-answer-first-selection/v1",
+    "ruleVersion": "answer-first-question-list@2",
+    "sourceStudyId": "rag-json-answer-20261119-v1",
+    "baselineExactMatches": 90,
+    "publicFactCount": 130,
+    "humanReview": "pending",
+    "newProviderCalls": 0,
+    "boundary": "重复开发集离线选择对照；整段引文字面存活不等于语义覆盖，不生成新回答，不证明质量提升。",
+    "bindings": {
+      "reportSha256": "7fa940447c2553431974c342519ec233395932ca72d7b43b18a005149b325579",
+      "reportCanonicalSha256": "d293dc02e57b858cf0b724ec3d475dee10f22924fca3cd4a7d0d246ca068fcfd",
+      "rubricSha256": "79d2cf63949c8de69877f9c49d4b66c1f834f5ee9b64ce9fcb48d70e1aa54363",
+      "rubricFileSha256": "51bb77aeab3c8bd1635aa3bd23dcfcecf4ace0ded72bb42aef3098ddb9edae68",
+      "documentMapSha256": "258796527d7ab85f6922941dc8a554cdd767f950615506a21b9d7a26d44da2c4",
+      "ruleVersion": "answer-first-question-list@2",
+      "moduleSha256": "cd104c46104ef2126d8de2e6e48dd536fa4690466d78294241a9e5302ac306e3",
+      "planSha256": "b965200f921cd49b7302d868e7402d6800ef4f3c21d43450a360fbae935344d0"
+    },
+    "networkAudit": {
+      "enabled": true,
+      "attempts": 0
+    },
+    "arms": {
+      "A0": {
+        "wholeQuoteSurvived": 96,
+        "totalDocumentDiversity": 264
+      },
+      "A1": {
+        "wholeQuoteSurvived": 112,
+        "totalDocumentDiversity": 205
+      },
+      "A2": {
+        "wholeQuoteSurvived": 112,
+        "totalDocumentDiversity": 206
+      }
+    },
+    "pairs": {
+      "A0_A1": {
+        "changedCases": 65,
+        "quoteGains": 16,
+        "quoteLosses": 0
+      },
+      "A1_A2": {
+        "changedCases": 7,
+        "quoteGains": 0,
+        "quoteLosses": 0
+      },
+      "A0_A2": {
+        "changedCases": 64,
+        "quoteGains": 16,
+        "quoteLosses": 0
+      }
+    }
+  },
+  "semantic": {
+    "reviewerType": "agent",
+    "humanReview": "pending",
+    "cases": 90,
+    "publicFacts": 130,
+    "exactExcerptsChecked": 384,
+    "protectedFilesUnchanged": 30,
+    "arms": {
+      "A0": {
+        "missing": 12,
+        "partial": 13,
+        "covered": 102,
+        "disputed": 3
+      },
+      "A1": {
+        "covered": 113,
+        "missing": 7,
+        "partial": 7,
+        "disputed": 3
+      },
+      "A2": {
+        "covered": 113,
+        "missing": 7,
+        "partial": 7,
+        "disputed": 3
+      }
+    },
+    "target14": [
+      {
+        "factId": "platform-account-001:required:01",
+        "verdicts": {
+          "A0": "missing",
+          "A1": "covered",
+          "A2": "covered"
+        }
+      },
+      {
+        "factId": "platform-account-001:required:02",
+        "verdicts": {
+          "A0": "partial",
+          "A1": "covered",
+          "A2": "covered"
+        }
+      },
+      {
+        "factId": "app-generation-005:required:01",
+        "verdicts": {
+          "A0": "missing",
+          "A1": "missing",
+          "A2": "missing"
+        }
+      },
+      {
+        "factId": "app-generation-005:required:02",
+        "verdicts": {
+          "A0": "missing",
+          "A1": "covered",
+          "A2": "covered"
+        }
+      },
+      {
+        "factId": "app-generation-005:required:03",
+        "verdicts": {
+          "A0": "partial",
+          "A1": "partial",
+          "A2": "partial"
+        }
+      },
+      {
+        "factId": "community-004:required:02",
+        "verdicts": {
+          "A0": "missing",
+          "A1": "missing",
+          "A2": "missing"
+        }
+      },
+      {
+        "factId": "community-007:required:01",
+        "verdicts": {
+          "A0": "partial",
+          "A1": "covered",
+          "A2": "covered"
+        }
+      },
+      {
+        "factId": "community-013:required:01",
+        "verdicts": {
+          "A0": "missing",
+          "A1": "covered",
+          "A2": "covered"
+        }
+      },
+      {
+        "factId": "community-013:required:02",
+        "verdicts": {
+          "A0": "partial",
+          "A1": "covered",
+          "A2": "covered"
+        }
+      },
+      {
+        "factId": "admin-knowledge-002:required:01",
+        "verdicts": {
+          "A0": "missing",
+          "A1": "missing",
+          "A2": "missing"
+        }
+      },
+      {
+        "factId": "admin-knowledge-002:required:02",
+        "verdicts": {
+          "A0": "missing",
+          "A1": "missing",
+          "A2": "missing"
+        }
+      },
+      {
+        "factId": "admin-knowledge-002:required:03",
+        "verdicts": {
+          "A0": "missing",
+          "A1": "missing",
+          "A2": "missing"
+        }
+      },
+      {
+        "factId": "admin-knowledge-005:required:01",
+        "verdicts": {
+          "A0": "missing",
+          "A1": "partial",
+          "A2": "partial"
+        }
+      },
+      {
+        "factId": "admin-knowledge-005:required:02",
+        "verdicts": {
+          "A0": "missing",
+          "A1": "covered",
+          "A2": "covered"
+        }
+      }
+    ],
+    "transitions": {
+      "A0_A1": {
+        "missing->covered": 4,
+        "partial->covered": 7,
+        "covered->covered": 102,
+        "missing->missing": 7,
+        "partial->partial": 6,
+        "disputed->disputed": 3,
+        "missing->partial": 1
+      },
+      "A1_A2": {
+        "covered->covered": 113,
+        "missing->missing": 7,
+        "partial->partial": 7,
+        "disputed->disputed": 3
+      }
+    },
+    "semanticCorrectnessCertified": false,
+    "newAnswersGenerated": 0
+  },
+  "sensitivity": {
+    "excludedPriorDisputes": [
+      "app-generation-006:required:01",
+      "app-generation-007:required:01",
+      "deployment-download-009:required:01"
+    ],
+    "excludedReviewDisagreements": [
+      "preview-history-006:required:01",
+      "deployment-download-013:required:01",
+      "community-006:required:01",
+      "community-013:required:03"
+    ],
+    "factDenominator": 123,
+    "arms": {
+      "A0": {
+        "missing": 12,
+        "partial": 9,
+        "covered": 102
+      },
+      "A1": {
+        "covered": 109,
+        "missing": 7,
+        "partial": 7
+      },
+      "A2": {
+        "covered": 109,
+        "missing": 7,
+        "partial": 7
+      }
+    },
+    "meaning": "只作评审口径敏感性分析，不修改原标注或原始代理裁决；不是人工金标。"
+  },
+  "changedA1A2Cases": [
+    "app-generation-002",
+    "app-generation-011",
+    "app-generation-012",
+    "app-generation-014",
+    "community-014",
+    "admin-knowledge-001",
+    "admin-knowledge-005"
+  ],
+  "regressionNotes": {
+    "deployment-download-003:required:02": "A0到A1丢失创建记录不等于生成完成的子项，三组总判定仍partial，不能据总等级不变声称没有退步。",
+    "A1_A2": "130项代理判定不变；7题新增说明仍可能偏题或造成跨操作误用，尚无生成验证。"
+  },
+  "baselineReproduction": {
+    "A0OriginalContexts": 90,
+    "historicalCap1Contexts": 90,
+    "historicalCap2Contexts": 90
+  },
+  "semanticSourceHashes": {
+    "semantic-review-1.json": "18e733dc338b4ad72afc280eff66fa01b6938a7f30d12f36fd0b46d96e1734da",
+    "semantic-review-2.json": "031e6cd68f256898a56c0bd66b29650eb4ea5f66ef5eb82d4da7d42e5660b2f2",
+    "semantic-review-3.json": "1960c20d6e8ebac50c03b3ef123396e2d7c064380e5c63152bb37f0fc76b1e43"
+  },
+  "comparisonSha256": "4eb80106425d3e14ac144175ac51b0e21ac7a4ae80da14f9ade86b3890163b2d",
+  "firstRunComparisonSha256": "6c0212fe70ff18bbcc02a86a17efa0d067afe0020a3e7eb736230c0ff3ed585d",
+  "firstAndFinalSelectionsEqual": true,
+  "newChatCalls": 0,
+  "newEmbeddingCalls": 0,
+  "newBgeCalls": 0,
+  "productionWrites": 0,
+  "newAnswersGenerated": 0,
+  "humanReview": "pending",
+  "productionStrategyChanged": false,
+  "recommendation": "不推广A2，不为此版本追加真实回答成本；可另选cap1加相同降序的单变量试验或知识分块/问答关联，须单独选择。",
+  "caseVerdicts": [
+    {
+      "id": "platform-account-001",
+      "facts": [
+        {
+          "factId": "platform-account-001:required:01",
+          "arms": {
+            "A0": "missing",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "platform-account-001:required:02",
+          "arms": {
+            "A0": "partial",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "platform-account-002",
+      "facts": [
+        {
+          "factId": "platform-account-002:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "platform-account-002:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "platform-account-003",
+      "facts": [
+        {
+          "factId": "platform-account-003:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "platform-account-003:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "platform-account-004",
+      "facts": [
+        {
+          "factId": "platform-account-004:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "platform-account-004:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "platform-account-005",
+      "facts": [
+        {
+          "factId": "platform-account-005:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "platform-account-006",
+      "facts": [
+        {
+          "factId": "platform-account-006:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "platform-account-007",
+      "facts": [
+        {
+          "factId": "platform-account-007:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "platform-account-008",
+      "facts": [
+        {
+          "factId": "platform-account-008:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "platform-account-008:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-001",
+      "facts": [
+        {
+          "factId": "app-generation-001:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "app-generation-001:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-002",
+      "facts": [
+        {
+          "factId": "app-generation-002:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-003",
+      "facts": [
+        {
+          "factId": "app-generation-003:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "app-generation-003:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-004",
+      "facts": [
+        {
+          "factId": "app-generation-004:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "app-generation-004:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-005",
+      "facts": [
+        {
+          "factId": "app-generation-005:required:01",
+          "arms": {
+            "A0": "missing",
+            "A1": "missing",
+            "A2": "missing"
+          }
+        },
+        {
+          "factId": "app-generation-005:required:02",
+          "arms": {
+            "A0": "missing",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "app-generation-005:required:03",
+          "arms": {
+            "A0": "partial",
+            "A1": "partial",
+            "A2": "partial"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-006",
+      "facts": [
+        {
+          "factId": "app-generation-006:required:01",
+          "arms": {
+            "A0": "disputed",
+            "A1": "disputed",
+            "A2": "disputed"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-007",
+      "facts": [
+        {
+          "factId": "app-generation-007:required:01",
+          "arms": {
+            "A0": "disputed",
+            "A1": "disputed",
+            "A2": "disputed"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-008",
+      "facts": [
+        {
+          "factId": "app-generation-008:required:01",
+          "arms": {
+            "A0": "partial",
+            "A1": "partial",
+            "A2": "partial"
+          }
+        },
+        {
+          "factId": "app-generation-008:required:02",
+          "arms": {
+            "A0": "missing",
+            "A1": "missing",
+            "A2": "missing"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-009",
+      "facts": [
+        {
+          "factId": "app-generation-009:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "app-generation-009:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-010",
+      "facts": [
+        {
+          "factId": "app-generation-010:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-011",
+      "facts": [
+        {
+          "factId": "app-generation-011:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-012",
+      "facts": [
+        {
+          "factId": "app-generation-012:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "app-generation-012:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-013",
+      "facts": [
+        {
+          "factId": "app-generation-013:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-014",
+      "facts": [
+        {
+          "factId": "app-generation-014:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "app-generation-014:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-015",
+      "facts": [
+        {
+          "factId": "app-generation-015:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "app-generation-015:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-016",
+      "facts": [
+        {
+          "factId": "app-generation-016:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-017",
+      "facts": [
+        {
+          "factId": "app-generation-017:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "app-generation-017:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-018",
+      "facts": [
+        {
+          "factId": "app-generation-018:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "app-generation-018:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-019",
+      "facts": [
+        {
+          "factId": "app-generation-019:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-020",
+      "facts": [
+        {
+          "factId": "app-generation-020:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "app-generation-020:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-021",
+      "facts": [
+        {
+          "factId": "app-generation-021:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "app-generation-021:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-022",
+      "facts": [
+        {
+          "factId": "app-generation-022:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "app-generation-022:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-023",
+      "facts": [
+        {
+          "factId": "app-generation-023:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "app-generation-023:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "app-generation-024",
+      "facts": [
+        {
+          "factId": "app-generation-024:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "app-generation-024:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "preview-history-001",
+      "facts": [
+        {
+          "factId": "preview-history-001:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "preview-history-002",
+      "facts": [
+        {
+          "factId": "preview-history-002:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "preview-history-002:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "preview-history-003",
+      "facts": [
+        {
+          "factId": "preview-history-003:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "preview-history-004",
+      "facts": [
+        {
+          "factId": "preview-history-004:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "preview-history-005",
+      "facts": [
+        {
+          "factId": "preview-history-005:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "preview-history-006",
+      "facts": [
+        {
+          "factId": "preview-history-006:required:01",
+          "arms": {
+            "A0": "partial",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "preview-history-007",
+      "facts": [
+        {
+          "factId": "preview-history-007:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "preview-history-007:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "preview-history-008",
+      "facts": [
+        {
+          "factId": "preview-history-008:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "preview-history-009",
+      "facts": [
+        {
+          "factId": "preview-history-009:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "preview-history-010",
+      "facts": [
+        {
+          "factId": "preview-history-010:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "deployment-download-001",
+      "facts": [
+        {
+          "factId": "deployment-download-001:required:01",
+          "arms": {
+            "A0": "missing",
+            "A1": "missing",
+            "A2": "missing"
+          }
+        },
+        {
+          "factId": "deployment-download-001:required:02",
+          "arms": {
+            "A0": "partial",
+            "A1": "partial",
+            "A2": "partial"
+          }
+        }
+      ]
+    },
+    {
+      "id": "deployment-download-002",
+      "facts": [
+        {
+          "factId": "deployment-download-002:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "deployment-download-003",
+      "facts": [
+        {
+          "factId": "deployment-download-003:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "deployment-download-003:required:02",
+          "arms": {
+            "A0": "partial",
+            "A1": "partial",
+            "A2": "partial"
+          }
+        }
+      ]
+    },
+    {
+      "id": "deployment-download-004",
+      "facts": [
+        {
+          "factId": "deployment-download-004:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "deployment-download-004:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "deployment-download-005",
+      "facts": [
+        {
+          "factId": "deployment-download-005:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "deployment-download-005:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "deployment-download-006",
+      "facts": [
+        {
+          "factId": "deployment-download-006:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "deployment-download-007",
+      "facts": [
+        {
+          "factId": "deployment-download-007:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "deployment-download-008",
+      "facts": [
+        {
+          "factId": "deployment-download-008:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "deployment-download-009",
+      "facts": [
+        {
+          "factId": "deployment-download-009:required:01",
+          "arms": {
+            "A0": "disputed",
+            "A1": "disputed",
+            "A2": "disputed"
+          }
+        },
+        {
+          "factId": "deployment-download-009:required:02",
+          "arms": {
+            "A0": "partial",
+            "A1": "partial",
+            "A2": "partial"
+          }
+        }
+      ]
+    },
+    {
+      "id": "deployment-download-010",
+      "facts": [
+        {
+          "factId": "deployment-download-010:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "deployment-download-011",
+      "facts": [
+        {
+          "factId": "deployment-download-011:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "deployment-download-011:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "deployment-download-012",
+      "facts": [
+        {
+          "factId": "deployment-download-012:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "deployment-download-012:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "deployment-download-013",
+      "facts": [
+        {
+          "factId": "deployment-download-013:required:01",
+          "arms": {
+            "A0": "partial",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "deployment-download-013:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "deployment-download-014",
+      "facts": [
+        {
+          "factId": "deployment-download-014:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "community-001",
+      "facts": [
+        {
+          "factId": "community-001:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "community-002",
+      "facts": [
+        {
+          "factId": "community-002:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "community-003",
+      "facts": [
+        {
+          "factId": "community-003:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "community-004",
+      "facts": [
+        {
+          "factId": "community-004:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "community-004:required:02",
+          "arms": {
+            "A0": "missing",
+            "A1": "missing",
+            "A2": "missing"
+          }
+        }
+      ]
+    },
+    {
+      "id": "community-005",
+      "facts": [
+        {
+          "factId": "community-005:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "community-006",
+      "facts": [
+        {
+          "factId": "community-006:required:01",
+          "arms": {
+            "A0": "partial",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "community-006:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "community-007",
+      "facts": [
+        {
+          "factId": "community-007:required:01",
+          "arms": {
+            "A0": "partial",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "community-007:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "community-008",
+      "facts": [
+        {
+          "factId": "community-008:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "community-008:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "community-009",
+      "facts": [
+        {
+          "factId": "community-009:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "community-009:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "community-010",
+      "facts": [
+        {
+          "factId": "community-010:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "community-010:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "community-011",
+      "facts": [
+        {
+          "factId": "community-011:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "community-011:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "community-012",
+      "facts": [
+        {
+          "factId": "community-012:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "community-013",
+      "facts": [
+        {
+          "factId": "community-013:required:01",
+          "arms": {
+            "A0": "missing",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "community-013:required:02",
+          "arms": {
+            "A0": "partial",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "community-013:required:03",
+          "arms": {
+            "A0": "partial",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "community-014",
+      "facts": [
+        {
+          "factId": "community-014:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "community-014:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "admin-knowledge-001",
+      "facts": [
+        {
+          "factId": "admin-knowledge-001:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "admin-knowledge-002",
+      "facts": [
+        {
+          "factId": "admin-knowledge-002:required:01",
+          "arms": {
+            "A0": "missing",
+            "A1": "missing",
+            "A2": "missing"
+          }
+        },
+        {
+          "factId": "admin-knowledge-002:required:02",
+          "arms": {
+            "A0": "missing",
+            "A1": "missing",
+            "A2": "missing"
+          }
+        },
+        {
+          "factId": "admin-knowledge-002:required:03",
+          "arms": {
+            "A0": "missing",
+            "A1": "missing",
+            "A2": "missing"
+          }
+        }
+      ]
+    },
+    {
+      "id": "admin-knowledge-003",
+      "facts": [
+        {
+          "factId": "admin-knowledge-003:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "admin-knowledge-003:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "admin-knowledge-003:required:03",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "admin-knowledge-004",
+      "facts": [
+        {
+          "factId": "admin-knowledge-004:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "admin-knowledge-005",
+      "facts": [
+        {
+          "factId": "admin-knowledge-005:required:01",
+          "arms": {
+            "A0": "missing",
+            "A1": "partial",
+            "A2": "partial"
+          }
+        },
+        {
+          "factId": "admin-knowledge-005:required:02",
+          "arms": {
+            "A0": "missing",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "boundaries-safety-001",
+      "facts": [
+        {
+          "factId": "boundaries-safety-001:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "boundaries-safety-001:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "boundaries-safety-002",
+      "facts": [
+        {
+          "factId": "boundaries-safety-002:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "boundaries-safety-003",
+      "facts": [
+        {
+          "factId": "boundaries-safety-003:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "boundaries-safety-004",
+      "facts": [
+        {
+          "factId": "boundaries-safety-004:required:01",
+          "arms": {
+            "A0": "partial",
+            "A1": "partial",
+            "A2": "partial"
+          }
+        }
+      ]
+    },
+    {
+      "id": "boundaries-safety-005",
+      "facts": [
+        {
+          "factId": "boundaries-safety-005:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "boundaries-safety-006",
+      "facts": [
+        {
+          "factId": "boundaries-safety-006:required:01",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        },
+        {
+          "factId": "boundaries-safety-006:required:02",
+          "arms": {
+            "A0": "covered",
+            "A1": "covered",
+            "A2": "covered"
+          }
+        }
+      ]
+    },
+    {
+      "id": "boundaries-safety-007",
+      "facts": []
+    },
+    {
+      "id": "boundaries-safety-008",
+      "facts": []
+    },
+    {
+      "id": "boundaries-safety-009",
+      "facts": []
+    },
+    {
+      "id": "boundaries-safety-010",
+      "facts": []
+    },
+    {
+      "id": "boundaries-safety-011",
+      "facts": []
+    },
+    {
+      "id": "boundaries-safety-012",
+      "facts": []
+    },
+    {
+      "id": "boundaries-safety-013",
+      "facts": []
+    },
+    {
+      "id": "boundaries-safety-014",
+      "facts": []
+    },
+    {
+      "id": "boundaries-safety-015",
+      "facts": []
+    }
+  ],
+  "verification": {
+    "tests": {
+      "target-final": {
+        "passed": 44,
+        "skipped": 0,
+        "xmlSha256": "c74103f82e2561fa82532d17c1e9dfab1758c2506b0b34d9e4916a3b1ebe3e2e"
+      },
+      "python-final": {
+        "passed": 2204,
+        "skipped": 25,
+        "xmlSha256": "b666faaf196630db539a703a1a6d69f76ca414573c1803dd2c31abb88290f2d6"
+      }
+    },
+    "fullSuiteWarnings": 2,
+    "compileallExitCode": 0,
+    "uvLockCheckExitCode": 0,
+    "finalReplayBoundFilesUnchanged": 27,
+    "protectedHistoricalFilesUnchanged": 29,
+    "readmeOriginalPrefixPreserved": true,
+    "initialFinalSelectionEquivalentCases": 90,
+    "boundary": "测试与本轮离线材料核验；非真实模型、浏览器或生产验收。"
+  }
+}

@@ -789,3 +789,20 @@ uv run --offline python -m ai_service.orchestration.rag_json_answer_experiment -
 默认创建新的匿名包和全量 pending 人工模板；已有材料用 `--package --reviews --reviews-sha256` 严格导入。代理评审不会变为人工完成；未评时人工质量改善为 null，human 字段只是评审人声明。输出只允许新的仓库 tmp 子目录，不覆盖旧报告、评审或耗尽账本，写入失败可能留下部分目录。单输入上限 64 MiB，拒绝重复 JSON 键及非有限数值；原文/答案仅留本地评测材料，不进入常规诊断日志。
 
 本轮只读复核第十九轮 180 份回答，两组共享的每组 130 条公共标注支持片段中，96 条最终存活、10 条在已记录 Top8 中未找到、24 条在选择阶段因单文档配额丢失。该统计不等同于 34 个错误答案，不支持自动推广混合检索或 cap2；人工验收仍 pending。实际命令、可填写材料、验证及限制见[失败原因观测交接](../doc/customer-service-failure-observation-handoff.md)。未知执行状态、无自动 GC 和模型幻觉边界保持。
+
+
+## 客服第22轮离线证据选择观测
+
+`ai_service.orchestration.rag_answer_first_evaluation` 仅回放绑定历史报告，比较cap1、cap2及cap2加有限纯问法降序；线上请求不使用此模块。它冻结候选/分数/阈值/预算，检查阶段身份与分数、90题基线精确复现，输出逐题变化、预算、引文字面存活及独立人工证据评审模板。
+
+```powershell
+uv run --offline python -m ai_service.orchestration.rag_answer_first_evaluation `
+  --report ../tmp/rag-json-answer-20261119/prepared/live/report.json `
+  --report-sha256 7fa940447c2553431974c342519ec233395932ca72d7b43b18a005149b325579 `
+  --document-map ../tmp/rag-verification-20261118/live/document-map.json `
+  --output ../tmp/rag-answer-first-20261120/reproduction-01
+```
+
+输出必须是仓库tmp下新目录，拒绝覆盖；多文件写出非事务，中断残缺包不能视为成功。CLI拦截常见socket网络入口，不提供真实调用模式，也不是系统级网络沙箱。有限问法语法不是通用语义识别；引文存活不是回答正确率，模板为 `rag-answer-first-evidence-review/v1`，不能直接使用旧盲评导入器。需本机保存绑定的历史报告与映射。
+
+第22轮A2相对cap2改变7题但无新增事实覆盖；代理评审与人工pending分开，未推广生产。规则、结果、分歧、人工入口及验证见 [第22轮交接](../doc/customer-service-answer-first-round22-handoff.md)。

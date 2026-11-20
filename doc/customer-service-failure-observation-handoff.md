@@ -156,3 +156,12 @@ uv run --offline python ../tmp/rag-failure-observation-20261120/verify-replay.py
 本轮重新离线回放180行，并验证19题34fact、53处原文摘录、25份保护文件不变；重复fact与虚构摘录负例均被拒绝。没有新真实模型调用或服务启动、没有生产策略修改或部署，没有沿用历史全量测试作为本轮成绩。建议先人工裁决三项争议，再做固定Top8的证据选择离线对照；混合检索单独处理真实候选缺项，尚未实施。
 
 问题证据、处理流程、逐题结果、标注争议、验证命令、方案取舍与失败边界见 [第21轮独立交接](customer-service-semantic-observation-round21-handoff.md)；完整事实理由见 [结构化复核](knowledge/product/evaluation/results/semantic-observation-20261120-v1.json)。本轮只提交文档/评审数据，提交哈希由最终回复报告；原README和未跟踪计划保留，未知执行状态与候选GC边界不变。
+
+
+## 第22轮完成：有限问法片段降序（2026-11-20）
+
+用户已选择A并完成离线三组对照：A0=cap1、A1=cap2、A2=cap2加有限纯问法降序。90题A0精确重现；与第13轮旧cap1/cap2各90题一致。整段事实引文存活为96/112/112，A1→A2改变7题，130项代理语义判定完全相同，无新增事实覆盖。第21轮14项选择缺项中7项恢复完整、1项部分改善、6项仍不完整，收益均已存在于cap2。
+
+三项旧争议继续保留；另4项与第21轮评审尺度不同，不算稳健收益。cap1→cap2有一处复合fact子项证据退步，即使总等级仍partial也必须记录。90题/130事实/384摘录核验通过；人工仍pending。新增供应商、Embedding、BGE、INDEX及生产写入均0，未启停服务或修改生产策略。未知执行状态、候选GC与幻觉边界不变。
+
+新增独立离线脚本、44项定向测试和人工证据评审模板。完整方法、结果、分歧、重放命令、最终测试记录与下一轮选项见 [第22轮独立交接](customer-service-answer-first-round22-handoff.md)，逐事实判定见 [结构化结果](knowledge/product/evaluation/results/answer-first-selection-20261120-v1.json)。不建议推广A2；cap1加同规则的独立对照、知识分块关联或混合检索均待用户决定，本轮未实施。提交哈希由最终回复报告，用户既有修改保留。
