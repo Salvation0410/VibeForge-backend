@@ -904,3 +904,12 @@ uv run --offline python -m ai_service.orchestration.rag_hybrid_cap_evaluation --
 在ai-service运行`uv run --offline python -m ai_service.orchestration.rag_hybrid_append_evaluation --output ../tmp/<新的输出目录>`。要求本地冻结的第28轮原comparison及绑定文件齐备；CLI和默认库调用屏蔽常见socket连接，不调用模型、服务或加载向量重算。只能写tmp内新目录，已有目录拒绝覆盖；多文件输出非事务，失败残片不能冒充成功。comparison记录完整阶段和原上下文保留，summary为统计，input-integrity记录运行绑定，reviews-template为真人pending模板。
 
 正式结果完整引文114→122/130，新增8、丢失0，90题原上下文均保留，提示字节增加31.43%。追加段含9题代理判定偏题，8项新增引文中5项已有等价支持，不代表回答质量提升；下载证据采用问题仍未解决。本轮新Chat/Embedding/BGE及生产写入为0，未推广四块策略。测试、审计、材料及下一轮建议见[第30轮交接](../doc/customer-service-hybrid-append-round30-handoff.md)。
+
+
+## 客服第31轮追加证据真实回答对照
+
+`rag_hybrid_append_answer_experiment`冻结第30轮cap1/append1四题最终上下文，核验固定双摘要与168份输入，再冻结本轮177项绑定、消息和模型配置。每题两组交替共8次Chat，证据分别三/四段，正式提示/字节预算和最多三个引用保持。事实与预评仅供观测，不进入模型。
+
+`--prepare`仅准备本地固定计划；`--live --plan-sha256 <实际摘要> --authorization "继续执行下一轮"`才发送。独立固定账本位于`tmp/rag-hybrid-append-answer-20261120/authorization.jsonl`，排他创建，fsync预占先于发送，首错停止、失败取消占额度、不重试，旧账本/结果拒绝重跑；多文件输出不具事务性，未知状态不自动恢复。原HTTP仅留tmp，凭据不写计划；无需启动双服务，非生产链路验收。
+
+本轮实际8次已用完，不能再次运行live。答案完整覆盖5/8→5/8，多文件定义改善、下载条件遗漏，008保留Vue建议；更多证据与有效引用未保证答案采用所需条件。定向76通过、全量2601通过/26跳过。逐题证据、token、局限及下一轮建议见[第31轮交接](../doc/customer-service-hybrid-append-answer-round31-handoff.md)，生产未推广，真人评审pending。

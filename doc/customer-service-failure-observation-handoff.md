@@ -255,3 +255,14 @@ uv run --offline python ../tmp/rag-failure-observation-20261120/verify-replay.py
 独立参考逐题核对，1820项阶段事实与423处摘录通过，428份保护材料和168份实际绑定未漂移。新模块与测试已提交99b534e，设计0c2fbec；完整测试统计及归档见[第30轮交接](customer-service-hybrid-append-round30-handoff.md)和[结构化结果](knowledge/product/evaluation/results/hybrid-append-selection-20261120-v1.json)。真人保持pending，答案和拒答质量未测，未自动推广。
 
 下一轮建议冻结本轮上下文，对005/008/admin004/download009做cap1/append1共8次有界Chat，提示与引用协议保持，分别判断答案、上下文和实际引用支持；本轮没有执行。若仍是已选证据未被采用，再由用户决定单独验证回答完整性约束。未知状态人工处理、无自动GC及引用不能消除幻觉的边界不变。
+
+
+## 第31轮：追加证据的四题真实回答对照（2026-11-20）
+
+用户按第30轮建议继续，固定cap1/append1最终证据，四题两组8次真实Chat全部HTTP200/stop且正式解析通过，原HTTP离线重放8/8一致。独立账本预占8次，额度已用完；新Embedding/BGE/INDEX/服务调用/生产写入0。请求deepseek-chat、响应均自报deepseek-flash，供应商报告7402 tokens，不认证底层身份或精确费用。
+
+完整必要事实覆盖5/8→5/8，005多文件定义增加1项、download009源码/权限条件损失1项；008页面/组件/导航/状态和Vue建议保留，admin答案等价覆盖保持、直接依据改善。全部上下文及实际引用集合完整支持均3→5/8，同时答案与证据/引用均完整支持3→4/8。下载append1已引用含权限/目录的段落，却写部署排查条件，属于证据已入选并引用但答案遗漏所问条件；没有错误要求先部署，负前置支持仍有争议。
+
+本轮cap1与第29轮提示和配置一致，下载条件却由遗漏变成表达，说明旧轮结果不能当同期基线。四题单次开发样本不证明稳定收益；追加组总tokens3434→3968但覆盖未净增，不推广生产。冻结预评16项/22摘录，485份保护材料及177绑定无漂移；定向76通过，全量2601通过/26跳过，compileall/lock通过。设计1e73cbd、实现1a00630、调用冻结7623d00，收尾哈希见交付。
+
+[第31轮交接](customer-service-hybrid-append-answer-round31-handoff.md)及[结构化结果](knowledge/product/evaluation/results/hybrid-append-answer-validation-20261120-v1.json)记录独立评分、逐字摘录和故障边界，人工pending。下一轮建议单独验证通用“所问操作与必要条件归属”的回答约束：固定append1证据，当前/候选提示四题8次，先离线反例再真实验证，由用户决定。可能引入冗长、过度保守和条件误升级，不能同时改检索/选择或据此自动上线。未知状态人工处理、无自动GC及引用不能消除幻觉的边界不变。
