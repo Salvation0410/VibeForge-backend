@@ -819,3 +819,16 @@ uv run --offline python -m ai_service.orchestration.rag_qa_linked_corpus --outpu
 独立真实实验 `rag_qa_linked_experiment` 默认需显式 `--prepare` 冻结计划，再 `--live --plan-sha256 <摘要>` 执行。第23轮新授权上限8次Embedding/225输入、180次本地BGE，Chat/INDEX/生产写入0；固定锚点发送前预占，失败/取消占额度，禁止重试、恢复或换目录绕过账本。使用本地穷举COSINE，保留原过滤、cap1/final3及预算；不代表Milvus、双服务、发布或回答质量验收。
 
 候选、人工关联模板和来源映射见 [第23轮候选说明](../doc/knowledge/product/experiments/qa-linked-20261120-v1/README.md)。这些模块不接入在线请求，未推广生产。
+
+
+## 客服第24轮冻结候选文档配额对照
+
+独立入口 `rag_qa_linked_cap_evaluation` 只重放第23轮冻结新语料的90题Top8/BGE结果，精确核对cap1全阶段和丢弃原因，再比较cap2；最终3块、1200/3000字符及16384字节预算不变。读取已绑定候选文件，纯参数调用正式解析/分块，不初始化Settings或模型客户端。报告、耗尽账本、真实计划与全部文件绑定不一致时失败关闭。
+
+```powershell
+uv run --offline python -m ai_service.orchestration.rag_qa_linked_cap_evaluation --output ../tmp/rag-qa-linked-cap-reproduction-01
+```
+
+需保留本机第23轮report与authorization账本，不能删除账本或重跑真实实验补输入。仅写仓库tmp下新非链接目录，拒绝覆盖；多文件输出非事务，残缺包不能视为成功。CLI阻断常见Python socket入口，非系统级网络隔离。输出comparison、summary、reviews-template和input-integrity；人工模板为独立 `rag-qa-linked-cap-review/v1`，不直接使用旧回答盲评导入器。
+
+本轮引文111→118/130，66题改变且62题文档数减少；保留可能的部分措辞退步，未生成答案或推广生产。Chat/Embedding/BGE/INDEX均0，真人pending。详细结论、复核范围及未解决项见 [第24轮交接](../doc/customer-service-qa-linked-cap-round24-handoff.md)。
