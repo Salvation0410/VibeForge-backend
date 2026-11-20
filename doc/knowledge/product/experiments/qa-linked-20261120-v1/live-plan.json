@@ -1,0 +1,853 @@
+{
+  "schemaVersion": "rag-qa-linked-live-plan/v1",
+  "studyId": "qa-linked-20261120-v1",
+  "authorization": "用户明确批准8次Embedding/225输入/180次BGE，Chat与生产索引写入0",
+  "config": {
+    "embeddingModel": "openai:text-embedding-3-large",
+    "dimension": 3072,
+    "topK": 8,
+    "finalK": 3,
+    "perDocument": 1,
+    "minRerankScore": null,
+    "maxPromptBytes": 16384,
+    "maxContextChars": 1200,
+    "maxTotalContextChars": 3000,
+    "batchSize": 32,
+    "retrieval": "local-exhaustive-cosine-f32",
+    "rerankBatchSize": 4,
+    "rerankTimeoutSeconds": 5,
+    "concurrency": 1,
+    "automaticRetries": 0,
+    "endpointSha256": "55ce33cebd4e3701366460041a6adf4680a90b489d4ed66f642dd2ef6c5c36c0",
+    "chatCalls": 0,
+    "indexWrites": 0
+  },
+  "bge": {
+    "model": "BAAI/bge-reranker-v2-m3",
+    "revision": "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e",
+    "filesSha256": {
+      "config.json": "13dcd6c31d9fec9d1d8e158702072f62d7fa7d312a64b9fe057bec9a08cfe41a",
+      "model.safetensors": "d9e3e081faff1eefb84019509b2f5558fd74c1a05a2c7db22f74174fcedb5286",
+      "sentencepiece.bpe.model": "cfc8146abe2a0488e9e2a0c56de7952f7c11ab059eca145a0a727afce0db2865",
+      "special_tokens_map.json": "8c785abebea9ae3257b61681b4e6fd8365ceafde980c21970d001e834cf10835",
+      "tokenizer.json": "69564b696052886ed0ac63fa393e928384e0f8caada38c1f4864a9bfbf379c15",
+      "tokenizer_config.json": "7e4c1cc848840aeccdd763458c18dd525eb0f795c992e00ebe9c28554e7db2d4"
+    },
+    "gpu": "NVIDIA GeForce RTX 4050 Laptop GPU",
+    "cudaRuntime": "12.4",
+    "torch": "2.6.0+cu124",
+    "gpuTotalBytes": 6438780928,
+    "precision": "fp16",
+    "normalization": false
+  },
+  "bindings": {
+    "doc/knowledge/product/evaluation/rubric-20261118-v1.json": "51bb77aeab3c8bd1635aa3bd23dcfcecf4ace0ded72bb42aef3098ddb9edae68",
+    "doc/knowledge/product/manifest.json": "837b694bbc6846ce9dc0d96e5257383c97abb4fded0aa7d150a592bcbb01e175",
+    "doc/knowledge/product/evaluation/dataset.json": "2aa97999d3187964472732596c74d593a2b6e5bdbe1cb4663a930c57abcb87d8",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/associations.json": "2ea9f0e7937976516405c1180c51c590f9e8592b7a02424ba5809e91d06f2e84",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/manifest.json": "738aa71190bc4ea87d18798ddd1c53d66221e2aa86f2c3d0f84047fba9222133",
+    "ai-service/uv.lock": "21139139838c0a6bf79b8c4b00ce57db7805bb10960d00e89ce106ec2e4017de",
+    "docs/superpowers/plans/2026-11-20-rag-qa-linked-corpus.md": "bb8cda23361f201d2da7c64362192e1ee3487a558390b0105c4385a3274d0266",
+    "doc/knowledge/product/documents/01-platform-account.md": "4d1349e34637e48b9eb2bcc989b3ffd27bacb55b1beee5b3e16a77fdafd62d3c",
+    "doc/knowledge/product/documents/02-app-generation.md": "cd44a128f9f4d43c616e402704804d68987bc5eff2dc8bbe700eb93a235e5a47",
+    "doc/knowledge/product/documents/03-generation-requirements.md": "c6dcb046cc78dcdc05de3819c8571c85d6aa601611cc6dc1a24527088cfad803",
+    "doc/knowledge/product/documents/04-generation-types.md": "4878524fc969c37768b82ea28fe4677089c97d6b2b6bba3e1e5d99772f828471",
+    "doc/knowledge/product/documents/05-images-preservation.md": "18581fa60a8c558782c7d04ec49a244779cd7af5fe30e8692a903e5810c01ae5",
+    "doc/knowledge/product/documents/06-preview-history.md": "2f338ca62725adc4114c067408f365a3217b4a2db6a8f2dacc54cbea4d66314e",
+    "doc/knowledge/product/documents/07-deployment-download.md": "bcc6b4845419722cd4e1a536e7c772a275b0443c9d694f770feef53c7f20e2e6",
+    "doc/knowledge/product/documents/08-community-features.md": "b6413180929bf749eabec0f6c90e681afd6f4f50681a0c373b67d415210f4e25",
+    "doc/knowledge/product/documents/09-community-guidelines.md": "f78f773742f50d9b87c97a46bbe8fd9419025b210112a3228fdbe8b0c8dd3d9f",
+    "doc/knowledge/product/documents/10-admin-knowledge.md": "7d597b54aa80d55cae5d42feba59da6edf54505b697375ebd73da8c176075981",
+    "doc/knowledge/product/documents/11-faq.md": "e44b5c0fb6a8e07721fe4b780a0a9c28a421235b70569d90438f85b97c7ea6c9",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/documents/01-platform-account.md": "b6aa011a40d688d41fce582a95d23d4abc290e610aaacef6f6d7b930024e542c",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/documents/02-app-generation.md": "7cc950aa2b20d881be38d8b75fb15a61a6d6d9bae444a7ea336737386e3029f6",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/documents/03-generation-requirements.md": "22a06ac52b23f90b5bc487c02efaf91c585fefdff55594bd899749916215edeb",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/documents/04-generation-types.md": "909d33f0e9235d9500e2dbfb41838a386664daad7dbc164a830e8a1f3601315a",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/documents/05-images-preservation.md": "85f39be5e6f91cdffe12c5194cd11faefe08fc39a0a735c17ed9c9f53bda2ca5",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/documents/06-preview-history.md": "c0e49bc68eab2ed2b7761e63755e258cf70651a6c223e78eadc4d496ef8d8da5",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/documents/07-deployment-download.md": "9b20c00b1657828586c4e118f92f5a67b57e3dd8f3c727fc0980bb1d303b6dd7",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/documents/08-community-features.md": "cafd87f5805a17b2f0f3022c2477641afe3414b21ca66dc3225c0b8a28ed8115",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/documents/09-community-guidelines.md": "ed5ba61d63e683eda1934024c2716184bbbc865b5e8311fe2031579015ee0bbf",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/documents/10-admin-knowledge.md": "6674aa09c302d2e027588a6cae75cf6007e96b3fb7e2eb610e0f461c5844c6f2",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/documents/11-faq.md": "e44b5c0fb6a8e07721fe4b780a0a9c28a421235b70569d90438f85b97c7ea6c9",
+    "ai-service/src/ai_service/orchestration/rag_qa_linked_corpus.py": "c26c4bf11c02915ce285a676f628c3c144987e20913305b3381ba15339ba52b7",
+    "ai-service/src/ai_service/orchestration/rag_qa_linked_experiment.py": "bdd4631734ac8598a388331f4cb39b5fa84737f0bf402945c370a7145ae5ceba",
+    "ai-service/src/ai_service/orchestration/rag_qa_linked_budget.py": "4b73b2419644454237f07213a531d8be718391ce219fb923e19eaa40fd2f2a78",
+    "ai-service/src/ai_service/orchestration/document_etl.py": "b1fd61d0e041b457101d9b3847e6cfaf30d9b8f59fb9193eb347860fed2d3299",
+    "ai-service/src/ai_service/orchestration/customer_service_rag.py": "6376b3f1f9e818887dc379627f01c5c608d8ef94a380891887b937f0fb6380d7",
+    "ai-service/src/ai_service/orchestration/rag_rerank_experiment.py": "9533773ee47b8b5f47bb6308726d21c8536861e18104d83300d8e800e036564f",
+    "ai-service/src/ai_service/models/reranker.py": "0fd27d6414926e512c7b601ad51be06be193dfb30e593169962c3a1f25102cfa",
+    "ai-service/src/ai_service/prompts/customer_service.py": "f689650c3541075ae93d967b27bb4af20db094bd817538ff94bd0c38cc32a30c"
+  },
+  "schedule": [
+    {
+      "kind": "embedding",
+      "key": "before:0",
+      "inputs": 32,
+      "inputSha256": "2f7f64711e27e6e83ed2407cc98eae66af552cb8227436c5708bd2abfb37a7ed"
+    },
+    {
+      "kind": "embedding",
+      "key": "before:32",
+      "inputs": 32,
+      "inputSha256": "a4174bfc01794d7bcea370ad76227091f8f411271532fd8536fabcd74122fd71"
+    },
+    {
+      "kind": "embedding",
+      "key": "before:64",
+      "inputs": 8,
+      "inputSha256": "b7815fbccabbcb842d4000e612666e9f3181049a9890372c998909b7176cda41"
+    },
+    {
+      "kind": "embedding",
+      "key": "after:0",
+      "inputs": 32,
+      "inputSha256": "ccce3400d77547da6bbccbe0446c54febe02dc880165b91907669e7fd4208ec1"
+    },
+    {
+      "kind": "embedding",
+      "key": "after:32",
+      "inputs": 31,
+      "inputSha256": "203ae09f51802049fbb9d586a2f9308bacd7c33fcbc572ab17d9bdadacb3f246"
+    },
+    {
+      "kind": "embedding",
+      "key": "queries:0",
+      "inputs": 32,
+      "inputSha256": "fe13ff684fd074725023a78b4dfa143ba885939deb4b1bbd7b0cd7ee0e71591e"
+    },
+    {
+      "kind": "embedding",
+      "key": "queries:32",
+      "inputs": 32,
+      "inputSha256": "905476efb89424306d0a3fd90c582bbcf3c0e806d7e1be1d4089465631ed6aa3"
+    },
+    {
+      "kind": "embedding",
+      "key": "queries:64",
+      "inputs": 26,
+      "inputSha256": "024543ec9925875e0faddda4087849444536e3da67f01c1d1a9593ee03719663"
+    },
+    {
+      "kind": "bge",
+      "key": "platform-account-001:before"
+    },
+    {
+      "kind": "bge",
+      "key": "platform-account-001:after"
+    },
+    {
+      "kind": "bge",
+      "key": "platform-account-002:after"
+    },
+    {
+      "kind": "bge",
+      "key": "platform-account-002:before"
+    },
+    {
+      "kind": "bge",
+      "key": "platform-account-003:before"
+    },
+    {
+      "kind": "bge",
+      "key": "platform-account-003:after"
+    },
+    {
+      "kind": "bge",
+      "key": "platform-account-004:after"
+    },
+    {
+      "kind": "bge",
+      "key": "platform-account-004:before"
+    },
+    {
+      "kind": "bge",
+      "key": "platform-account-005:before"
+    },
+    {
+      "kind": "bge",
+      "key": "platform-account-005:after"
+    },
+    {
+      "kind": "bge",
+      "key": "platform-account-006:after"
+    },
+    {
+      "kind": "bge",
+      "key": "platform-account-006:before"
+    },
+    {
+      "kind": "bge",
+      "key": "platform-account-007:before"
+    },
+    {
+      "kind": "bge",
+      "key": "platform-account-007:after"
+    },
+    {
+      "kind": "bge",
+      "key": "platform-account-008:after"
+    },
+    {
+      "kind": "bge",
+      "key": "platform-account-008:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-001:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-001:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-002:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-002:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-003:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-003:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-004:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-004:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-005:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-005:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-006:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-006:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-007:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-007:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-008:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-008:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-009:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-009:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-010:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-010:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-011:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-011:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-012:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-012:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-013:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-013:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-014:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-014:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-015:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-015:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-016:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-016:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-017:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-017:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-018:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-018:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-019:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-019:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-020:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-020:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-021:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-021:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-022:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-022:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-023:before"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-023:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-024:after"
+    },
+    {
+      "kind": "bge",
+      "key": "app-generation-024:before"
+    },
+    {
+      "kind": "bge",
+      "key": "preview-history-001:before"
+    },
+    {
+      "kind": "bge",
+      "key": "preview-history-001:after"
+    },
+    {
+      "kind": "bge",
+      "key": "preview-history-002:after"
+    },
+    {
+      "kind": "bge",
+      "key": "preview-history-002:before"
+    },
+    {
+      "kind": "bge",
+      "key": "preview-history-003:before"
+    },
+    {
+      "kind": "bge",
+      "key": "preview-history-003:after"
+    },
+    {
+      "kind": "bge",
+      "key": "preview-history-004:after"
+    },
+    {
+      "kind": "bge",
+      "key": "preview-history-004:before"
+    },
+    {
+      "kind": "bge",
+      "key": "preview-history-005:before"
+    },
+    {
+      "kind": "bge",
+      "key": "preview-history-005:after"
+    },
+    {
+      "kind": "bge",
+      "key": "preview-history-006:after"
+    },
+    {
+      "kind": "bge",
+      "key": "preview-history-006:before"
+    },
+    {
+      "kind": "bge",
+      "key": "preview-history-007:before"
+    },
+    {
+      "kind": "bge",
+      "key": "preview-history-007:after"
+    },
+    {
+      "kind": "bge",
+      "key": "preview-history-008:after"
+    },
+    {
+      "kind": "bge",
+      "key": "preview-history-008:before"
+    },
+    {
+      "kind": "bge",
+      "key": "preview-history-009:before"
+    },
+    {
+      "kind": "bge",
+      "key": "preview-history-009:after"
+    },
+    {
+      "kind": "bge",
+      "key": "preview-history-010:after"
+    },
+    {
+      "kind": "bge",
+      "key": "preview-history-010:before"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-001:before"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-001:after"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-002:after"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-002:before"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-003:before"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-003:after"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-004:after"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-004:before"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-005:before"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-005:after"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-006:after"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-006:before"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-007:before"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-007:after"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-008:after"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-008:before"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-009:before"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-009:after"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-010:after"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-010:before"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-011:before"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-011:after"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-012:after"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-012:before"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-013:before"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-013:after"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-014:after"
+    },
+    {
+      "kind": "bge",
+      "key": "deployment-download-014:before"
+    },
+    {
+      "kind": "bge",
+      "key": "community-001:before"
+    },
+    {
+      "kind": "bge",
+      "key": "community-001:after"
+    },
+    {
+      "kind": "bge",
+      "key": "community-002:after"
+    },
+    {
+      "kind": "bge",
+      "key": "community-002:before"
+    },
+    {
+      "kind": "bge",
+      "key": "community-003:before"
+    },
+    {
+      "kind": "bge",
+      "key": "community-003:after"
+    },
+    {
+      "kind": "bge",
+      "key": "community-004:after"
+    },
+    {
+      "kind": "bge",
+      "key": "community-004:before"
+    },
+    {
+      "kind": "bge",
+      "key": "community-005:before"
+    },
+    {
+      "kind": "bge",
+      "key": "community-005:after"
+    },
+    {
+      "kind": "bge",
+      "key": "community-006:after"
+    },
+    {
+      "kind": "bge",
+      "key": "community-006:before"
+    },
+    {
+      "kind": "bge",
+      "key": "community-007:before"
+    },
+    {
+      "kind": "bge",
+      "key": "community-007:after"
+    },
+    {
+      "kind": "bge",
+      "key": "community-008:after"
+    },
+    {
+      "kind": "bge",
+      "key": "community-008:before"
+    },
+    {
+      "kind": "bge",
+      "key": "community-009:before"
+    },
+    {
+      "kind": "bge",
+      "key": "community-009:after"
+    },
+    {
+      "kind": "bge",
+      "key": "community-010:after"
+    },
+    {
+      "kind": "bge",
+      "key": "community-010:before"
+    },
+    {
+      "kind": "bge",
+      "key": "community-011:before"
+    },
+    {
+      "kind": "bge",
+      "key": "community-011:after"
+    },
+    {
+      "kind": "bge",
+      "key": "community-012:after"
+    },
+    {
+      "kind": "bge",
+      "key": "community-012:before"
+    },
+    {
+      "kind": "bge",
+      "key": "community-013:before"
+    },
+    {
+      "kind": "bge",
+      "key": "community-013:after"
+    },
+    {
+      "kind": "bge",
+      "key": "community-014:after"
+    },
+    {
+      "kind": "bge",
+      "key": "community-014:before"
+    },
+    {
+      "kind": "bge",
+      "key": "admin-knowledge-001:before"
+    },
+    {
+      "kind": "bge",
+      "key": "admin-knowledge-001:after"
+    },
+    {
+      "kind": "bge",
+      "key": "admin-knowledge-002:after"
+    },
+    {
+      "kind": "bge",
+      "key": "admin-knowledge-002:before"
+    },
+    {
+      "kind": "bge",
+      "key": "admin-knowledge-003:before"
+    },
+    {
+      "kind": "bge",
+      "key": "admin-knowledge-003:after"
+    },
+    {
+      "kind": "bge",
+      "key": "admin-knowledge-004:after"
+    },
+    {
+      "kind": "bge",
+      "key": "admin-knowledge-004:before"
+    },
+    {
+      "kind": "bge",
+      "key": "admin-knowledge-005:before"
+    },
+    {
+      "kind": "bge",
+      "key": "admin-knowledge-005:after"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-001:after"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-001:before"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-002:before"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-002:after"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-003:after"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-003:before"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-004:before"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-004:after"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-005:after"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-005:before"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-006:before"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-006:after"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-007:after"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-007:before"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-008:before"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-008:after"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-009:after"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-009:before"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-010:before"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-010:after"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-011:after"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-011:before"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-012:before"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-012:after"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-013:after"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-013:before"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-014:before"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-014:after"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-015:after"
+    },
+    {
+      "kind": "bge",
+      "key": "boundaries-safety-015:before"
+    }
+  ],
+  "boundary": "真实模型检索实验；本地穷举非Milvus、非权威发布、非生成回答验收。"
+}

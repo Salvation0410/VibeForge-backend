@@ -1,0 +1,1122 @@
+{
+  "schemaVersion": "rag-qa-candidate/v1",
+  "candidateVersion": "qa-linked-20261120-v1",
+  "summary": {
+    "documents": 11,
+    "questions": 61,
+    "linkedQuestions": 60,
+    "unresolvedQuestions": 1,
+    "associationPairs": 65,
+    "beforeChunks": 72,
+    "afterChunks": 63,
+    "chunkSize": 1000,
+    "overlap": 150,
+    "liveMetrics": null,
+    "humanReview": "pending",
+    "newProviderCalls": 0,
+    "productionWrites": 0
+  },
+  "factAvailability": {
+    "cases": [
+      {
+        "id": "platform-account-001",
+        "facts": [
+          {
+            "factId": "platform-account-001:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "platform-account-001:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "platform-account-002",
+        "facts": [
+          {
+            "factId": "platform-account-002:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "platform-account-002:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "platform-account-003",
+        "facts": [
+          {
+            "factId": "platform-account-003:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "platform-account-003:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "platform-account-004",
+        "facts": [
+          {
+            "factId": "platform-account-004:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "platform-account-004:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "platform-account-005",
+        "facts": [
+          {
+            "factId": "platform-account-005:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "platform-account-006",
+        "facts": [
+          {
+            "factId": "platform-account-006:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "platform-account-007",
+        "facts": [
+          {
+            "factId": "platform-account-007:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "platform-account-008",
+        "facts": [
+          {
+            "factId": "platform-account-008:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "platform-account-008:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-001",
+        "facts": [
+          {
+            "factId": "app-generation-001:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "app-generation-001:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-002",
+        "facts": [
+          {
+            "factId": "app-generation-002:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-003",
+        "facts": [
+          {
+            "factId": "app-generation-003:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "app-generation-003:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-004",
+        "facts": [
+          {
+            "factId": "app-generation-004:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "app-generation-004:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-005",
+        "facts": [
+          {
+            "factId": "app-generation-005:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "app-generation-005:required:02",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "app-generation-005:required:03",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-006",
+        "facts": [
+          {
+            "factId": "app-generation-006:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-007",
+        "facts": [
+          {
+            "factId": "app-generation-007:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-008",
+        "facts": [
+          {
+            "factId": "app-generation-008:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "app-generation-008:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-009",
+        "facts": [
+          {
+            "factId": "app-generation-009:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "app-generation-009:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-010",
+        "facts": [
+          {
+            "factId": "app-generation-010:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-011",
+        "facts": [
+          {
+            "factId": "app-generation-011:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-012",
+        "facts": [
+          {
+            "factId": "app-generation-012:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "app-generation-012:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-013",
+        "facts": [
+          {
+            "factId": "app-generation-013:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-014",
+        "facts": [
+          {
+            "factId": "app-generation-014:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "app-generation-014:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-015",
+        "facts": [
+          {
+            "factId": "app-generation-015:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "app-generation-015:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-016",
+        "facts": [
+          {
+            "factId": "app-generation-016:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-017",
+        "facts": [
+          {
+            "factId": "app-generation-017:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "app-generation-017:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-018",
+        "facts": [
+          {
+            "factId": "app-generation-018:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "app-generation-018:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-019",
+        "facts": [
+          {
+            "factId": "app-generation-019:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-020",
+        "facts": [
+          {
+            "factId": "app-generation-020:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "app-generation-020:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-021",
+        "facts": [
+          {
+            "factId": "app-generation-021:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "app-generation-021:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-022",
+        "facts": [
+          {
+            "factId": "app-generation-022:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "app-generation-022:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-023",
+        "facts": [
+          {
+            "factId": "app-generation-023:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "app-generation-023:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "app-generation-024",
+        "facts": [
+          {
+            "factId": "app-generation-024:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "app-generation-024:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "preview-history-001",
+        "facts": [
+          {
+            "factId": "preview-history-001:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "preview-history-002",
+        "facts": [
+          {
+            "factId": "preview-history-002:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "preview-history-002:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "preview-history-003",
+        "facts": [
+          {
+            "factId": "preview-history-003:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "preview-history-004",
+        "facts": [
+          {
+            "factId": "preview-history-004:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "preview-history-005",
+        "facts": [
+          {
+            "factId": "preview-history-005:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "preview-history-006",
+        "facts": [
+          {
+            "factId": "preview-history-006:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "preview-history-007",
+        "facts": [
+          {
+            "factId": "preview-history-007:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "preview-history-007:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "preview-history-008",
+        "facts": [
+          {
+            "factId": "preview-history-008:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "preview-history-009",
+        "facts": [
+          {
+            "factId": "preview-history-009:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "preview-history-010",
+        "facts": [
+          {
+            "factId": "preview-history-010:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "deployment-download-001",
+        "facts": [
+          {
+            "factId": "deployment-download-001:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "deployment-download-001:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "deployment-download-002",
+        "facts": [
+          {
+            "factId": "deployment-download-002:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "deployment-download-003",
+        "facts": [
+          {
+            "factId": "deployment-download-003:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "deployment-download-003:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "deployment-download-004",
+        "facts": [
+          {
+            "factId": "deployment-download-004:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "deployment-download-004:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "deployment-download-005",
+        "facts": [
+          {
+            "factId": "deployment-download-005:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "deployment-download-005:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "deployment-download-006",
+        "facts": [
+          {
+            "factId": "deployment-download-006:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "deployment-download-007",
+        "facts": [
+          {
+            "factId": "deployment-download-007:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "deployment-download-008",
+        "facts": [
+          {
+            "factId": "deployment-download-008:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "deployment-download-009",
+        "facts": [
+          {
+            "factId": "deployment-download-009:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "deployment-download-009:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "deployment-download-010",
+        "facts": [
+          {
+            "factId": "deployment-download-010:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "deployment-download-011",
+        "facts": [
+          {
+            "factId": "deployment-download-011:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "deployment-download-011:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "deployment-download-012",
+        "facts": [
+          {
+            "factId": "deployment-download-012:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "deployment-download-012:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "deployment-download-013",
+        "facts": [
+          {
+            "factId": "deployment-download-013:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "deployment-download-013:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "deployment-download-014",
+        "facts": [
+          {
+            "factId": "deployment-download-014:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "community-001",
+        "facts": [
+          {
+            "factId": "community-001:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "community-002",
+        "facts": [
+          {
+            "factId": "community-002:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "community-003",
+        "facts": [
+          {
+            "factId": "community-003:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "community-004",
+        "facts": [
+          {
+            "factId": "community-004:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "community-004:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "community-005",
+        "facts": [
+          {
+            "factId": "community-005:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "community-006",
+        "facts": [
+          {
+            "factId": "community-006:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "community-006:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "community-007",
+        "facts": [
+          {
+            "factId": "community-007:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "community-007:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "community-008",
+        "facts": [
+          {
+            "factId": "community-008:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "community-008:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "community-009",
+        "facts": [
+          {
+            "factId": "community-009:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "community-009:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "community-010",
+        "facts": [
+          {
+            "factId": "community-010:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "community-010:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "community-011",
+        "facts": [
+          {
+            "factId": "community-011:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "community-011:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "community-012",
+        "facts": [
+          {
+            "factId": "community-012:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "community-013",
+        "facts": [
+          {
+            "factId": "community-013:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "community-013:required:02",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "community-013:required:03",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "community-014",
+        "facts": [
+          {
+            "factId": "community-014:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "community-014:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "admin-knowledge-001",
+        "facts": [
+          {
+            "factId": "admin-knowledge-001:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "admin-knowledge-002",
+        "facts": [
+          {
+            "factId": "admin-knowledge-002:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "admin-knowledge-002:required:02",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "admin-knowledge-002:required:03",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "admin-knowledge-003",
+        "facts": [
+          {
+            "factId": "admin-knowledge-003:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "admin-knowledge-003:required:02",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "admin-knowledge-003:required:03",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "admin-knowledge-004",
+        "facts": [
+          {
+            "factId": "admin-knowledge-004:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "admin-knowledge-005",
+        "facts": [
+          {
+            "factId": "admin-knowledge-005:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "admin-knowledge-005:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "boundaries-safety-001",
+        "facts": [
+          {
+            "factId": "boundaries-safety-001:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "boundaries-safety-001:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "boundaries-safety-002",
+        "facts": [
+          {
+            "factId": "boundaries-safety-002:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "boundaries-safety-003",
+        "facts": [
+          {
+            "factId": "boundaries-safety-003:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "boundaries-safety-004",
+        "facts": [
+          {
+            "factId": "boundaries-safety-004:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "boundaries-safety-005",
+        "facts": [
+          {
+            "factId": "boundaries-safety-005:required:01",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "boundaries-safety-006",
+        "facts": [
+          {
+            "factId": "boundaries-safety-006:required:01",
+            "before": true,
+            "after": true
+          },
+          {
+            "factId": "boundaries-safety-006:required:02",
+            "before": true,
+            "after": true
+          }
+        ]
+      },
+      {
+        "id": "boundaries-safety-007",
+        "facts": []
+      },
+      {
+        "id": "boundaries-safety-008",
+        "facts": []
+      },
+      {
+        "id": "boundaries-safety-009",
+        "facts": []
+      },
+      {
+        "id": "boundaries-safety-010",
+        "facts": []
+      },
+      {
+        "id": "boundaries-safety-011",
+        "facts": []
+      },
+      {
+        "id": "boundaries-safety-012",
+        "facts": []
+      },
+      {
+        "id": "boundaries-safety-013",
+        "facts": []
+      },
+      {
+        "id": "boundaries-safety-014",
+        "facts": []
+      },
+      {
+        "id": "boundaries-safety-015",
+        "facts": []
+      }
+    ],
+    "publicFacts": 130,
+    "beforeAvailable": 130,
+    "afterAvailable": 130,
+    "boundary": "全库标注原文字面可用性，非Top8召回、证据选择、语义正确率或回答质量。"
+  },
+  "bindings": {
+    "manifestSha256": "738aa71190bc4ea87d18798ddd1c53d66221e2aa86f2c3d0f84047fba9222133",
+    "rubricSha256": "51bb77aeab3c8bd1635aa3bd23dcfcecf4ace0ded72bb42aef3098ddb9edae68"
+  }
+}

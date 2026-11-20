@@ -1,0 +1,601 @@
+{
+  "schemaVersion": "rag-qa-link-review/v1",
+  "reviewer": null,
+  "status": "pending",
+  "manifestSha256": "738aa71190bc4ea87d18798ddd1c53d66221e2aa86f2c3d0f84047fba9222133",
+  "links": [
+    {
+      "documentId": "01-platform-account",
+      "question": "平台怎么用",
+      "target": "平台用途【当前功能】",
+      "chunkId": "01-platform-account:2:0",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "01-platform-account",
+      "question": "用邮箱登不进去",
+      "target": "登录异常与退出【当前功能】",
+      "chunkId": "01-platform-account:2:2",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "01-platform-account",
+      "question": "注册完去哪里",
+      "target": "注册与登录【当前功能】",
+      "chunkId": "01-platform-account:2:1",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "01-platform-account",
+      "question": "验证码看不清",
+      "target": "注册与登录【当前功能】",
+      "chunkId": "01-platform-account:2:1",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "01-platform-account",
+      "question": "我的资料在哪里改",
+      "target": "个人中心与公开主页【当前功能】",
+      "chunkId": "01-platform-account:2:3",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "01-platform-account",
+      "question": "别人主页能不能修改",
+      "target": "个人中心与公开主页【当前功能】",
+      "chunkId": "01-platform-account:2:3",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "01-platform-account",
+      "question": "客服能查我的任务吗",
+      "target": "客服与功能边界【当前功能】",
+      "chunkId": "01-platform-account:2:4",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "02-app-generation",
+      "question": "开始生成在哪里",
+      "target": "创建应用【当前功能】",
+      "chunkId": "02-app-generation:2:0",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "02-app-generation",
+      "question": "创建了为什么还没网页",
+      "target": "创建应用【当前功能】",
+      "chunkId": "02-app-generation:2:0",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "02-app-generation",
+      "question": "如何改原来的页面",
+      "target": "继续修改与应用管理【当前功能】",
+      "chunkId": "02-app-generation:2:2",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "02-app-generation",
+      "question": "优化提示会马上发出去吗",
+      "target": "优化提示【当前功能】",
+      "chunkId": "02-app-generation:2:3",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "02-app-generation",
+      "question": "改应用名字会改网页吗",
+      "target": "继续修改与应用管理【当前功能】",
+      "chunkId": "02-app-generation:2:2",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "02-app-generation",
+      "question": "生成中能再发一条吗",
+      "target": "失败与并发【当前功能】",
+      "chunkId": "02-app-generation:2:5",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "03-generation-requirements",
+      "question": "需求怎么写",
+      "target": "描述对象与目标【推荐规范】",
+      "chunkId": "03-generation-requirements:2:0",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "03-generation-requirements",
+      "question": "提示词模板",
+      "target": "可复制需求模板【推荐规范】",
+      "chunkId": "03-generation-requirements:2:3",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "03-generation-requirements",
+      "question": "为什么结果不具体",
+      "target": "描述对象与目标【推荐规范】",
+      "chunkId": "03-generation-requirements:2:0",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "03-generation-requirements",
+      "question": "为什么结果不具体",
+      "target": "页面与视觉【推荐规范】",
+      "chunkId": "03-generation-requirements:2:2",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "03-generation-requirements",
+      "question": "要不要写异常提示",
+      "target": "功能、状态与数据【推荐规范】",
+      "chunkId": "03-generation-requirements:2:1",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "03-generation-requirements",
+      "question": "怎么验收页面",
+      "target": "拆分需求与验收【推荐规范】",
+      "chunkId": "03-generation-requirements:2:4",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "03-generation-requirements",
+      "question": "必须按模板才能生成吗",
+      "target": "描述对象与目标【推荐规范】",
+      "chunkId": "03-generation-requirements:2:0",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "04-generation-types",
+      "question": "三种生成方式有什么不同",
+      "target": "HTML 单文件【当前功能与推荐规范】",
+      "chunkId": "04-generation-types:2:1",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "04-generation-types",
+      "question": "三种生成方式有什么不同",
+      "target": "MULTI_FILE 多文件【当前功能与推荐规范】",
+      "chunkId": "04-generation-types:2:2",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "04-generation-types",
+      "question": "三种生成方式有什么不同",
+      "target": "VUE_PROJECT Vue 工程【当前功能与推荐规范】",
+      "chunkId": "04-generation-types:2:3",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "04-generation-types",
+      "question": "单页用什么",
+      "target": "HTML 单文件【当前功能与推荐规范】",
+      "chunkId": "04-generation-types:2:1",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "04-generation-types",
+      "question": "多文件是不是 Vue",
+      "target": "MULTI_FILE 多文件【当前功能与推荐规范】",
+      "chunkId": "04-generation-types:2:2",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "04-generation-types",
+      "question": "能不能手动改生成类型",
+      "target": "类型如何确定【当前功能】",
+      "chunkId": "04-generation-types:2:0",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "04-generation-types",
+      "question": "HTML 修改能只给一段代码吗",
+      "target": "HTML 单文件【当前功能与推荐规范】",
+      "chunkId": "04-generation-types:2:1",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "05-images-preservation",
+      "question": "优化会删图片吗",
+      "target": "保留已有内容【当前功能与推荐规范】",
+      "chunkId": "05-images-preservation:2:0",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "05-images-preservation",
+      "question": "怎么保留原来的文字和按钮",
+      "target": "保留已有内容【当前功能与推荐规范】",
+      "chunkId": "05-images-preservation:2:0",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "05-images-preservation",
+      "question": "图片生成后打不开",
+      "target": "不能加载图片时【推荐规范】",
+      "chunkId": "05-images-preservation:2:2",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "05-images-preservation",
+      "question": "能保证搜索图片免费商用吗",
+      "target": "素材合规【推荐规范】",
+      "chunkId": "05-images-preservation:2:4",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "05-images-preservation",
+      "question": "社区上传图片会自动放进应用吗",
+      "target": "素材合规【推荐规范】",
+      "chunkId": "05-images-preservation:2:4",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "06-preview-history",
+      "question": "为什么生成时还显示旧页面",
+      "target": "预览刷新时机【当前功能】",
+      "chunkId": "06-preview-history:2:0",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "06-preview-history",
+      "question": "我停止后页面没变",
+      "target": "停止生成【当前功能】",
+      "chunkId": "06-preview-history:2:1",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "06-preview-history",
+      "question": "输出只剩一小段是不是丢了",
+      "target": "输出窗口与完整记录【当前功能】",
+      "chunkId": "06-preview-history:2:2",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "06-preview-history",
+      "question": "2000 字是不是上限",
+      "target": "输出窗口与完整记录【当前功能】",
+      "chunkId": "06-preview-history:2:2",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "06-preview-history",
+      "question": "怎么导出聊天记录",
+      "target": "历史查看与导出【当前功能】",
+      "chunkId": "06-preview-history:2:3",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "06-preview-history",
+      "question": "页面空白怎么办",
+      "target": "空白预览排查【推荐规范】",
+      "chunkId": "06-preview-history:2:4",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "07-deployment-download",
+      "question": "怎么发布网站",
+      "target": "部署前提与步骤【当前功能】",
+      "chunkId": "07-deployment-download:2:0",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "07-deployment-download",
+      "question": "改完网页需要再部署吗",
+      "target": "部署与预览区别【当前功能】",
+      "chunkId": "07-deployment-download:2:1",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "07-deployment-download",
+      "question": "管理员能部署别人的应用吗",
+      "target": "部署前提与步骤【当前功能】",
+      "chunkId": "07-deployment-download:2:0",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "07-deployment-download",
+      "question": "下载缺 node_modules 是不是出错",
+      "target": "下载代码【当前功能】",
+      "chunkId": "07-deployment-download:2:3",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "07-deployment-download",
+      "question": "部署链接和源码包有何不同",
+      "target": "部署与预览区别【当前功能】",
+      "chunkId": "07-deployment-download:2:1",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "07-deployment-download",
+      "question": "部署链接和源码包有何不同",
+      "target": "三类产物【当前功能】",
+      "chunkId": "07-deployment-download:2:2",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "07-deployment-download",
+      "question": "图片预览正常上线失效怎么办",
+      "target": "失败排查【推荐规范】",
+      "chunkId": "07-deployment-download:2:4",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "08-community-features",
+      "question": "帖子怎么发",
+      "target": "发布帖子【当前功能】",
+      "chunkId": "08-community-features:2:1",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "08-community-features",
+      "question": "发完广场没有",
+      "target": "发布帖子【当前功能】",
+      "chunkId": "08-community-features:2:1",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "08-community-features",
+      "question": "最多几张图",
+      "target": "发布帖子【当前功能】",
+      "chunkId": "08-community-features:2:1",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "08-community-features",
+      "question": "评论也要等审核吗",
+      "target": "评论与回复【当前功能】",
+      "chunkId": "08-community-features:2:3",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "08-community-features",
+      "question": "怎么取消点赞",
+      "target": "点赞与审核【当前功能】",
+      "chunkId": "08-community-features:2:4",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "08-community-features",
+      "question": "回复怎么只有两层",
+      "target": "评论与回复【当前功能】",
+      "chunkId": "08-community-features:2:3",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "08-community-features",
+      "question": "谁能置顶",
+      "target": "点赞与审核【当前功能】",
+      "chunkId": "08-community-features:2:4",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "09-community-guidelines",
+      "question": "求助怎么写清楚",
+      "target": "求助模板【推荐规范】",
+      "chunkId": "09-community-guidelines:2:1",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "09-community-guidelines",
+      "question": "分享作品写什么",
+      "target": "分享作品【推荐规范】",
+      "chunkId": "09-community-guidelines:2:0",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "09-community-guidelines",
+      "question": "发帖必须用模板吗",
+      "target": "审核与发布边界【当前功能与推荐规范】",
+      "chunkId": "09-community-guidelines:2:4",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "09-community-guidelines",
+      "question": "审核多久保证通过",
+      "target": "审核与发布边界【当前功能与推荐规范】",
+      "chunkId": "09-community-guidelines:2:4",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "09-community-guidelines",
+      "question": "怎么避免截图泄露信息",
+      "target": "求助模板【推荐规范】",
+      "chunkId": "09-community-guidelines:2:1",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "09-community-guidelines",
+      "question": "怎么避免截图泄露信息",
+      "target": "标签与图片【推荐规范】",
+      "chunkId": "09-community-guidelines:2:2",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "09-community-guidelines",
+      "question": "评论回复怎么提建议",
+      "target": "评论与讨论【推荐规范】",
+      "chunkId": "09-community-guidelines:2:3",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "10-admin-knowledge",
+      "question": "哪些文件能上传",
+      "target": "上传与索引【当前功能】",
+      "chunkId": "10-admin-knowledge:2:1",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "10-admin-knowledge",
+      "question": "上传成功为什么客服找不到",
+      "target": "上传与索引【当前功能】",
+      "chunkId": "10-admin-knowledge:2:1",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "10-admin-knowledge",
+      "question": "ACTIVE 是什么",
+      "target": "状态、禁用与删除【当前功能】",
+      "chunkId": "10-admin-knowledge:2:3",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "10-admin-knowledge",
+      "question": "禁用马上就完全删了吗",
+      "target": "状态、禁用与删除【当前功能】",
+      "chunkId": "10-admin-knowledge:2:3",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "10-admin-knowledge",
+      "question": "什么时候用重建",
+      "target": "替换与重建【当前功能】",
+      "chunkId": "10-admin-knowledge:2:2",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    },
+    {
+      "documentId": "10-admin-knowledge",
+      "question": "普通用户能上传客服知识吗",
+      "target": "权限与入口【当前功能】",
+      "chunkId": "10-admin-knowledge:2:0",
+      "humanReview": "pending",
+      "verdict": null,
+      "reason": ""
+    }
+  ],
+  "unresolved": [
+    {
+      "documentId": "04-generation-types",
+      "question": "Vue 下载后为什么还要装依赖",
+      "verdict": null,
+      "reason": ""
+    }
+  ]
+}

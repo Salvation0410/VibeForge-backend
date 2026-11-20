@@ -1,0 +1,692 @@
+{
+  "schemaVersion": "rag-qa-candidate-manifest/v1",
+  "candidateVersion": "qa-linked-20261120-v1",
+  "identityScope": "offline-logical-identities-not-spring-versions",
+  "humanReview": "pending",
+  "sourceManifestSha256": "837b694bbc6846ce9dc0d96e5257383c97abb4fded0aa7d150a592bcbb01e175",
+  "associationsSha256": "2ea9f0e7937976516405c1180c51c590f9e8592b7a02424ba5809e91d06f2e84",
+  "documents": [
+    {
+      "documentId": "01-platform-account",
+      "sourceMetadata": {
+        "id": "01-platform-account",
+        "title": "平台使用说明与账号基础",
+        "path": "documents/01-platform-account.md",
+        "category": "platform-account",
+        "subcategory": "platform-account",
+        "contentStatus": "current",
+        "sectionStatusLabels": true,
+        "sourceType": "actual-product",
+        "audience": "user",
+        "version": 1,
+        "lastReviewed": "2026-10-12",
+        "sources": [
+          "frontend:src/pages/RegisterView.vue",
+          "frontend:src/pages/LoginView.vue",
+          "frontend:src/pages/ProfileView.vue",
+          "backend:src/main/java/com/yupi/yuaicodemother/controller/CustomerServiceController.java"
+        ]
+      },
+      "sourceSha256": "4d1349e34637e48b9eb2bcc989b3ffd27bacb55b1beee5b3e16a77fdafd62d3c",
+      "candidateSha256": "b6aa011a40d688d41fce582a95d23d4abc290e610aaacef6f6d7b930024e542c",
+      "navigationText": "相关说明：应用生成见 02；部署下载见 07；社区见 08。",
+      "unresolvedQuestions": [],
+      "associations": [
+        {
+          "question": "平台怎么用",
+          "target": "平台用途【当前功能】",
+          "chunkId": "01-platform-account:2:0",
+          "humanReview": "pending"
+        },
+        {
+          "question": "用邮箱登不进去",
+          "target": "登录异常与退出【当前功能】",
+          "chunkId": "01-platform-account:2:2",
+          "humanReview": "pending"
+        },
+        {
+          "question": "注册完去哪里",
+          "target": "注册与登录【当前功能】",
+          "chunkId": "01-platform-account:2:1",
+          "humanReview": "pending"
+        },
+        {
+          "question": "验证码看不清",
+          "target": "注册与登录【当前功能】",
+          "chunkId": "01-platform-account:2:1",
+          "humanReview": "pending"
+        },
+        {
+          "question": "我的资料在哪里改",
+          "target": "个人中心与公开主页【当前功能】",
+          "chunkId": "01-platform-account:2:3",
+          "humanReview": "pending"
+        },
+        {
+          "question": "别人主页能不能修改",
+          "target": "个人中心与公开主页【当前功能】",
+          "chunkId": "01-platform-account:2:3",
+          "humanReview": "pending"
+        },
+        {
+          "question": "客服能查我的任务吗",
+          "target": "客服与功能边界【当前功能】",
+          "chunkId": "01-platform-account:2:4",
+          "humanReview": "pending"
+        }
+      ]
+    },
+    {
+      "documentId": "02-app-generation",
+      "sourceMetadata": {
+        "id": "02-app-generation",
+        "title": "应用生成与增量修改",
+        "path": "documents/02-app-generation.md",
+        "category": "app-generation",
+        "subcategory": "app-generation",
+        "contentStatus": "current",
+        "sectionStatusLabels": true,
+        "sourceType": "actual-product",
+        "audience": "user",
+        "version": 1,
+        "lastReviewed": "2026-10-12",
+        "sources": [
+          "backend:src/main/java/com/yupi/yuaicodemother/service/impl/AppServiceImpl.java",
+          "frontend:src/pages/AppChatView.vue"
+        ]
+      },
+      "sourceSha256": "cd44a128f9f4d43c616e402704804d68987bc5eff2dc8bbe700eb93a235e5a47",
+      "candidateSha256": "7cc950aa2b20d881be38d8b75fb15a61a6d6d9bae444a7ea336737386e3029f6",
+      "navigationText": "三种类型详见 04；停止和预览详见 06。",
+      "unresolvedQuestions": [],
+      "associations": [
+        {
+          "question": "开始生成在哪里",
+          "target": "创建应用【当前功能】",
+          "chunkId": "02-app-generation:2:0",
+          "humanReview": "pending"
+        },
+        {
+          "question": "创建了为什么还没网页",
+          "target": "创建应用【当前功能】",
+          "chunkId": "02-app-generation:2:0",
+          "humanReview": "pending"
+        },
+        {
+          "question": "如何改原来的页面",
+          "target": "继续修改与应用管理【当前功能】",
+          "chunkId": "02-app-generation:2:2",
+          "humanReview": "pending"
+        },
+        {
+          "question": "优化提示会马上发出去吗",
+          "target": "优化提示【当前功能】",
+          "chunkId": "02-app-generation:2:3",
+          "humanReview": "pending"
+        },
+        {
+          "question": "改应用名字会改网页吗",
+          "target": "继续修改与应用管理【当前功能】",
+          "chunkId": "02-app-generation:2:2",
+          "humanReview": "pending"
+        },
+        {
+          "question": "生成中能再发一条吗",
+          "target": "失败与并发【当前功能】",
+          "chunkId": "02-app-generation:2:5",
+          "humanReview": "pending"
+        }
+      ]
+    },
+    {
+      "documentId": "03-generation-requirements",
+      "sourceMetadata": {
+        "id": "03-generation-requirements",
+        "title": "应用需求编写规范",
+        "path": "documents/03-generation-requirements.md",
+        "category": "app-generation",
+        "subcategory": "generation-requirements",
+        "contentStatus": "recommended",
+        "sectionStatusLabels": true,
+        "sourceType": "usage-recommendation",
+        "audience": "user",
+        "version": 1,
+        "lastReviewed": "2026-10-12",
+        "sources": [
+          "frontend:src/pages/DocsView.vue",
+          "backend:src/main/java/com/yupi/yuaicodemother/service/impl/AppServiceImpl.java"
+        ]
+      },
+      "sourceSha256": "c6dcb046cc78dcdc05de3819c8571c85d6aa601611cc6dc1a24527088cfad803",
+      "candidateSha256": "22a06ac52b23f90b5bc487c02efaf91c585fefdff55594bd899749916215edeb",
+      "navigationText": "类型选择见 04；图片保留见 05。",
+      "unresolvedQuestions": [],
+      "associations": [
+        {
+          "question": "需求怎么写",
+          "target": "描述对象与目标【推荐规范】",
+          "chunkId": "03-generation-requirements:2:0",
+          "humanReview": "pending"
+        },
+        {
+          "question": "提示词模板",
+          "target": "可复制需求模板【推荐规范】",
+          "chunkId": "03-generation-requirements:2:3",
+          "humanReview": "pending"
+        },
+        {
+          "question": "为什么结果不具体",
+          "target": "描述对象与目标【推荐规范】",
+          "chunkId": "03-generation-requirements:2:0",
+          "humanReview": "pending"
+        },
+        {
+          "question": "为什么结果不具体",
+          "target": "页面与视觉【推荐规范】",
+          "chunkId": "03-generation-requirements:2:2",
+          "humanReview": "pending"
+        },
+        {
+          "question": "要不要写异常提示",
+          "target": "功能、状态与数据【推荐规范】",
+          "chunkId": "03-generation-requirements:2:1",
+          "humanReview": "pending"
+        },
+        {
+          "question": "怎么验收页面",
+          "target": "拆分需求与验收【推荐规范】",
+          "chunkId": "03-generation-requirements:2:4",
+          "humanReview": "pending"
+        },
+        {
+          "question": "必须按模板才能生成吗",
+          "target": "描述对象与目标【推荐规范】",
+          "chunkId": "03-generation-requirements:2:0",
+          "humanReview": "pending"
+        }
+      ]
+    },
+    {
+      "documentId": "04-generation-types",
+      "sourceMetadata": {
+        "id": "04-generation-types",
+        "title": "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南",
+        "path": "documents/04-generation-types.md",
+        "category": "app-generation",
+        "subcategory": "generation-types",
+        "contentStatus": "current",
+        "sectionStatusLabels": true,
+        "sourceType": "actual-product",
+        "audience": "user",
+        "version": 1,
+        "lastReviewed": "2026-10-12",
+        "sources": [
+          "backend:src/main/java/com/yupi/yuaicodemother/enums/CodeGenTypeEnum.java",
+          "backend:ai-service/src/ai_service/orchestration/workflow.py"
+        ]
+      },
+      "sourceSha256": "4878524fc969c37768b82ea28fe4677089c97d6b2b6bba3e1e5d99772f828471",
+      "candidateSha256": "909d33f0e9235d9500e2dbfb41838a386664daad7dbc164a830e8a1f3601315a",
+      "navigationText": "部署下载见 07。",
+      "unresolvedQuestions": [
+        "Vue 下载后为什么还要装依赖"
+      ],
+      "associations": [
+        {
+          "question": "三种生成方式有什么不同",
+          "target": "HTML 单文件【当前功能与推荐规范】",
+          "chunkId": "04-generation-types:2:1",
+          "humanReview": "pending"
+        },
+        {
+          "question": "三种生成方式有什么不同",
+          "target": "MULTI_FILE 多文件【当前功能与推荐规范】",
+          "chunkId": "04-generation-types:2:2",
+          "humanReview": "pending"
+        },
+        {
+          "question": "三种生成方式有什么不同",
+          "target": "VUE_PROJECT Vue 工程【当前功能与推荐规范】",
+          "chunkId": "04-generation-types:2:3",
+          "humanReview": "pending"
+        },
+        {
+          "question": "单页用什么",
+          "target": "HTML 单文件【当前功能与推荐规范】",
+          "chunkId": "04-generation-types:2:1",
+          "humanReview": "pending"
+        },
+        {
+          "question": "多文件是不是 Vue",
+          "target": "MULTI_FILE 多文件【当前功能与推荐规范】",
+          "chunkId": "04-generation-types:2:2",
+          "humanReview": "pending"
+        },
+        {
+          "question": "能不能手动改生成类型",
+          "target": "类型如何确定【当前功能】",
+          "chunkId": "04-generation-types:2:0",
+          "humanReview": "pending"
+        },
+        {
+          "question": "HTML 修改能只给一段代码吗",
+          "target": "HTML 单文件【当前功能与推荐规范】",
+          "chunkId": "04-generation-types:2:1",
+          "humanReview": "pending"
+        }
+      ]
+    },
+    {
+      "documentId": "05-images-preservation",
+      "sourceMetadata": {
+        "id": "05-images-preservation",
+        "title": "图片、素材与已有功能保留",
+        "path": "documents/05-images-preservation.md",
+        "category": "app-generation",
+        "subcategory": "images-preservation",
+        "contentStatus": "current",
+        "sectionStatusLabels": true,
+        "sourceType": "actual-product",
+        "audience": "user",
+        "version": 1,
+        "lastReviewed": "2026-10-12",
+        "sources": [
+          "backend:ai-service/src/ai_service/prompts/generation.py",
+          "frontend:src/utils/optimizePrompt.ts"
+        ]
+      },
+      "sourceSha256": "18581fa60a8c558782c7d04ec49a244779cd7af5fe30e8692a903e5810c01ae5",
+      "candidateSha256": "85f39be5e6f91cdffe12c5194cd11faefe08fc39a0a735c17ed9c9f53bda2ca5",
+      "navigationText": "部署资源问题见 07；社区上传见 08。",
+      "unresolvedQuestions": [],
+      "associations": [
+        {
+          "question": "优化会删图片吗",
+          "target": "保留已有内容【当前功能与推荐规范】",
+          "chunkId": "05-images-preservation:2:0",
+          "humanReview": "pending"
+        },
+        {
+          "question": "怎么保留原来的文字和按钮",
+          "target": "保留已有内容【当前功能与推荐规范】",
+          "chunkId": "05-images-preservation:2:0",
+          "humanReview": "pending"
+        },
+        {
+          "question": "图片生成后打不开",
+          "target": "不能加载图片时【推荐规范】",
+          "chunkId": "05-images-preservation:2:2",
+          "humanReview": "pending"
+        },
+        {
+          "question": "能保证搜索图片免费商用吗",
+          "target": "素材合规【推荐规范】",
+          "chunkId": "05-images-preservation:2:4",
+          "humanReview": "pending"
+        },
+        {
+          "question": "社区上传图片会自动放进应用吗",
+          "target": "素材合规【推荐规范】",
+          "chunkId": "05-images-preservation:2:4",
+          "humanReview": "pending"
+        }
+      ]
+    },
+    {
+      "documentId": "06-preview-history",
+      "sourceMetadata": {
+        "id": "06-preview-history",
+        "title": "预览、停止与聊天历史",
+        "path": "documents/06-preview-history.md",
+        "category": "preview-history",
+        "subcategory": "preview-history",
+        "contentStatus": "current",
+        "sectionStatusLabels": true,
+        "sourceType": "actual-product",
+        "audience": "user",
+        "version": 1,
+        "lastReviewed": "2026-10-12",
+        "sources": [
+          "frontend:src/utils/generationStreamProgress.ts",
+          "frontend:src/utils/previewRefreshCoordinator.ts",
+          "frontend:src/pages/AppChatView.vue"
+        ]
+      },
+      "sourceSha256": "2f338ca62725adc4114c067408f365a3217b4a2db6a8f2dacc54cbea4d66314e",
+      "candidateSha256": "c0e49bc68eab2ed2b7761e63755e258cf70651a6c223e78eadc4d496ef8d8da5",
+      "navigationText": "生成需求见 03；发布后访问见 07。",
+      "unresolvedQuestions": [],
+      "associations": [
+        {
+          "question": "为什么生成时还显示旧页面",
+          "target": "预览刷新时机【当前功能】",
+          "chunkId": "06-preview-history:2:0",
+          "humanReview": "pending"
+        },
+        {
+          "question": "我停止后页面没变",
+          "target": "停止生成【当前功能】",
+          "chunkId": "06-preview-history:2:1",
+          "humanReview": "pending"
+        },
+        {
+          "question": "输出只剩一小段是不是丢了",
+          "target": "输出窗口与完整记录【当前功能】",
+          "chunkId": "06-preview-history:2:2",
+          "humanReview": "pending"
+        },
+        {
+          "question": "2000 字是不是上限",
+          "target": "输出窗口与完整记录【当前功能】",
+          "chunkId": "06-preview-history:2:2",
+          "humanReview": "pending"
+        },
+        {
+          "question": "怎么导出聊天记录",
+          "target": "历史查看与导出【当前功能】",
+          "chunkId": "06-preview-history:2:3",
+          "humanReview": "pending"
+        },
+        {
+          "question": "页面空白怎么办",
+          "target": "空白预览排查【推荐规范】",
+          "chunkId": "06-preview-history:2:4",
+          "humanReview": "pending"
+        }
+      ]
+    },
+    {
+      "documentId": "07-deployment-download",
+      "sourceMetadata": {
+        "id": "07-deployment-download",
+        "title": "部署、访问与代码下载",
+        "path": "documents/07-deployment-download.md",
+        "category": "deployment-download",
+        "subcategory": "deployment-download",
+        "contentStatus": "current",
+        "sectionStatusLabels": true,
+        "sourceType": "actual-product",
+        "audience": "user",
+        "version": 1,
+        "lastReviewed": "2026-10-12",
+        "sources": [
+          "backend:src/main/java/com/yupi/yuaicodemother/service/impl/AppServiceImpl.java",
+          "backend:src/main/java/com/yupi/yuaicodemother/controller/AppController.java",
+          "backend:src/main/java/com/yupi/yuaicodemother/service/impl/ProjectDownloadServiceImpl.java"
+        ]
+      },
+      "sourceSha256": "bcc6b4845419722cd4e1a536e7c772a275b0443c9d694f770feef53c7f20e2e6",
+      "candidateSha256": "9b20c00b1657828586c4e118f92f5a67b57e3dd8f3c727fc0980bb1d303b6dd7",
+      "navigationText": "预览见 06；素材见 05。",
+      "unresolvedQuestions": [],
+      "associations": [
+        {
+          "question": "怎么发布网站",
+          "target": "部署前提与步骤【当前功能】",
+          "chunkId": "07-deployment-download:2:0",
+          "humanReview": "pending"
+        },
+        {
+          "question": "改完网页需要再部署吗",
+          "target": "部署与预览区别【当前功能】",
+          "chunkId": "07-deployment-download:2:1",
+          "humanReview": "pending"
+        },
+        {
+          "question": "管理员能部署别人的应用吗",
+          "target": "部署前提与步骤【当前功能】",
+          "chunkId": "07-deployment-download:2:0",
+          "humanReview": "pending"
+        },
+        {
+          "question": "下载缺 node_modules 是不是出错",
+          "target": "下载代码【当前功能】",
+          "chunkId": "07-deployment-download:2:3",
+          "humanReview": "pending"
+        },
+        {
+          "question": "部署链接和源码包有何不同",
+          "target": "部署与预览区别【当前功能】",
+          "chunkId": "07-deployment-download:2:1",
+          "humanReview": "pending"
+        },
+        {
+          "question": "部署链接和源码包有何不同",
+          "target": "三类产物【当前功能】",
+          "chunkId": "07-deployment-download:2:2",
+          "humanReview": "pending"
+        },
+        {
+          "question": "图片预览正常上线失效怎么办",
+          "target": "失败排查【推荐规范】",
+          "chunkId": "07-deployment-download:2:4",
+          "humanReview": "pending"
+        }
+      ]
+    },
+    {
+      "documentId": "08-community-features",
+      "sourceMetadata": {
+        "id": "08-community-features",
+        "title": "社区浏览、发帖与互动",
+        "path": "documents/08-community-features.md",
+        "category": "community",
+        "subcategory": "community-features",
+        "contentStatus": "current",
+        "sectionStatusLabels": true,
+        "sourceType": "actual-product",
+        "audience": "user",
+        "version": 1,
+        "lastReviewed": "2026-10-12",
+        "sources": [
+          "backend:src/main/java/com/yupi/yuaicodemother/service/impl/CommunityPostServiceImpl.java",
+          "backend:src/main/java/com/yupi/yuaicodemother/service/impl/CommunityCommentServiceImpl.java"
+        ]
+      },
+      "sourceSha256": "b6413180929bf749eabec0f6c90e681afd6f4f50681a0c373b67d415210f4e25",
+      "candidateSha256": "cafd87f5805a17b2f0f3022c2477641afe3414b21ca66dc3225c0b8a28ed8115",
+      "navigationText": "内容规范见 09。",
+      "unresolvedQuestions": [],
+      "associations": [
+        {
+          "question": "帖子怎么发",
+          "target": "发布帖子【当前功能】",
+          "chunkId": "08-community-features:2:1",
+          "humanReview": "pending"
+        },
+        {
+          "question": "发完广场没有",
+          "target": "发布帖子【当前功能】",
+          "chunkId": "08-community-features:2:1",
+          "humanReview": "pending"
+        },
+        {
+          "question": "最多几张图",
+          "target": "发布帖子【当前功能】",
+          "chunkId": "08-community-features:2:1",
+          "humanReview": "pending"
+        },
+        {
+          "question": "评论也要等审核吗",
+          "target": "评论与回复【当前功能】",
+          "chunkId": "08-community-features:2:3",
+          "humanReview": "pending"
+        },
+        {
+          "question": "怎么取消点赞",
+          "target": "点赞与审核【当前功能】",
+          "chunkId": "08-community-features:2:4",
+          "humanReview": "pending"
+        },
+        {
+          "question": "回复怎么只有两层",
+          "target": "评论与回复【当前功能】",
+          "chunkId": "08-community-features:2:3",
+          "humanReview": "pending"
+        },
+        {
+          "question": "谁能置顶",
+          "target": "点赞与审核【当前功能】",
+          "chunkId": "08-community-features:2:4",
+          "humanReview": "pending"
+        }
+      ]
+    },
+    {
+      "documentId": "09-community-guidelines",
+      "sourceMetadata": {
+        "id": "09-community-guidelines",
+        "title": "社区发帖与互动规范",
+        "path": "documents/09-community-guidelines.md",
+        "category": "community",
+        "subcategory": "community-guidelines",
+        "contentStatus": "recommended",
+        "sectionStatusLabels": true,
+        "sourceType": "usage-recommendation",
+        "audience": "user",
+        "version": 1,
+        "lastReviewed": "2026-10-12",
+        "sources": [
+          "frontend:src/views/community/PostCreateView.vue",
+          "backend:src/main/java/com/yupi/yuaicodemother/controller/CommunityPostController.java"
+        ]
+      },
+      "sourceSha256": "f78f773742f50d9b87c97a46bbe8fd9419025b210112a3228fdbe8b0c8dd3d9f",
+      "candidateSha256": "ed5ba61d63e683eda1934024c2716184bbbc865b5e8311fe2031579015ee0bbf",
+      "navigationText": "发布和审核实际规则见 08。",
+      "unresolvedQuestions": [],
+      "associations": [
+        {
+          "question": "求助怎么写清楚",
+          "target": "求助模板【推荐规范】",
+          "chunkId": "09-community-guidelines:2:1",
+          "humanReview": "pending"
+        },
+        {
+          "question": "分享作品写什么",
+          "target": "分享作品【推荐规范】",
+          "chunkId": "09-community-guidelines:2:0",
+          "humanReview": "pending"
+        },
+        {
+          "question": "发帖必须用模板吗",
+          "target": "审核与发布边界【当前功能与推荐规范】",
+          "chunkId": "09-community-guidelines:2:4",
+          "humanReview": "pending"
+        },
+        {
+          "question": "审核多久保证通过",
+          "target": "审核与发布边界【当前功能与推荐规范】",
+          "chunkId": "09-community-guidelines:2:4",
+          "humanReview": "pending"
+        },
+        {
+          "question": "怎么避免截图泄露信息",
+          "target": "求助模板【推荐规范】",
+          "chunkId": "09-community-guidelines:2:1",
+          "humanReview": "pending"
+        },
+        {
+          "question": "怎么避免截图泄露信息",
+          "target": "标签与图片【推荐规范】",
+          "chunkId": "09-community-guidelines:2:2",
+          "humanReview": "pending"
+        },
+        {
+          "question": "评论回复怎么提建议",
+          "target": "评论与讨论【推荐规范】",
+          "chunkId": "09-community-guidelines:2:3",
+          "humanReview": "pending"
+        }
+      ]
+    },
+    {
+      "documentId": "10-admin-knowledge",
+      "sourceMetadata": {
+        "id": "10-admin-knowledge",
+        "title": "管理后台与知识库维护",
+        "path": "documents/10-admin-knowledge.md",
+        "category": "admin-knowledge",
+        "subcategory": "admin-knowledge",
+        "contentStatus": "current",
+        "sectionStatusLabels": true,
+        "sourceType": "actual-product",
+        "audience": "admin",
+        "version": 1,
+        "lastReviewed": "2026-10-12",
+        "sources": [
+          "backend:src/main/java/com/yupi/yuaicodemother/controller/CustomerServiceKnowledgeAdminController.java",
+          "backend:src/main/java/com/yupi/yuaicodemother/mapper/CustomerServiceKnowledgeDocumentMapper.java",
+          "backend:ai-service/README.md"
+        ]
+      },
+      "sourceSha256": "7d597b54aa80d55cae5d42feba59da6edf54505b697375ebd73da8c176075981",
+      "candidateSha256": "6674aa09c302d2e027588a6cae75cf6007e96b3fb7e2eb610e0f461c5844c6f2",
+      "navigationText": "",
+      "unresolvedQuestions": [],
+      "associations": [
+        {
+          "question": "哪些文件能上传",
+          "target": "上传与索引【当前功能】",
+          "chunkId": "10-admin-knowledge:2:1",
+          "humanReview": "pending"
+        },
+        {
+          "question": "上传成功为什么客服找不到",
+          "target": "上传与索引【当前功能】",
+          "chunkId": "10-admin-knowledge:2:1",
+          "humanReview": "pending"
+        },
+        {
+          "question": "ACTIVE 是什么",
+          "target": "状态、禁用与删除【当前功能】",
+          "chunkId": "10-admin-knowledge:2:3",
+          "humanReview": "pending"
+        },
+        {
+          "question": "禁用马上就完全删了吗",
+          "target": "状态、禁用与删除【当前功能】",
+          "chunkId": "10-admin-knowledge:2:3",
+          "humanReview": "pending"
+        },
+        {
+          "question": "什么时候用重建",
+          "target": "替换与重建【当前功能】",
+          "chunkId": "10-admin-knowledge:2:2",
+          "humanReview": "pending"
+        },
+        {
+          "question": "普通用户能上传客服知识吗",
+          "target": "权限与入口【当前功能】",
+          "chunkId": "10-admin-knowledge:2:0",
+          "humanReview": "pending"
+        }
+      ]
+    },
+    {
+      "documentId": "11-faq",
+      "sourceMetadata": {
+        "id": "11-faq",
+        "title": "功能边界与常见问题",
+        "path": "documents/11-faq.md",
+        "category": "platform-account",
+        "subcategory": "faq",
+        "contentStatus": "current",
+        "sectionStatusLabels": true,
+        "sourceType": "actual-product",
+        "audience": "user",
+        "version": 1,
+        "lastReviewed": "2026-10-12",
+        "sources": [
+          "backend:ai-service/src/ai_service/orchestration/customer_service_rag.py",
+          "backend:docs/superpowers/specs/2026-09-30-customer-service-rag-design.md"
+        ]
+      },
+      "sourceSha256": "e44b5c0fb6a8e07721fe4b780a0a9c28a421235b70569d90438f85b97c7ea6c9",
+      "candidateSha256": "e44b5c0fb6a8e07721fe4b780a0a9c28a421235b70569d90438f85b97c7ea6c9",
+      "navigationText": "",
+      "unresolvedQuestions": [],
+      "associations": []
+    }
+  ]
+}

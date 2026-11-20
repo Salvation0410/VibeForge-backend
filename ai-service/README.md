@@ -806,3 +806,16 @@ uv run --offline python -m ai_service.orchestration.rag_answer_first_evaluation 
 输出必须是仓库tmp下新目录，拒绝覆盖；多文件写出非事务，中断残缺包不能视为成功。CLI拦截常见socket网络入口，不提供真实调用模式，也不是系统级网络沙箱。有限问法语法不是通用语义识别；引文存活不是回答正确率，模板为 `rag-answer-first-evidence-review/v1`，不能直接使用旧盲评导入器。需本机保存绑定的历史报告与映射。
 
 第22轮A2相对cap2改变7题但无新增事实覆盖；代理评审与人工pending分开，未推广生产。规则、结果、分歧、人工入口及验证见 [第22轮交接](../doc/customer-service-answer-first-round22-handoff.md)。
+
+
+## 客服第23轮问答关联语料实验
+
+独立离线入口 `rag_qa_linked_corpus` 根据冻结源文档和显式关联表，把原问法追加到同文档实质小节，用原ETL验证问法与完整说明同块；保持原知识库文件不变。未解决问法保留，不跨文档复制答案。候选身份仅供实验，不是Spring真实版本。输出为新tmp目录，不覆盖已有包。
+
+```powershell
+uv run --offline python -m ai_service.orchestration.rag_qa_linked_corpus --output ../tmp/rag-qa-linked-reproduction-01
+```
+
+独立真实实验 `rag_qa_linked_experiment` 默认需显式 `--prepare` 冻结计划，再 `--live --plan-sha256 <摘要>` 执行。第23轮新授权上限8次Embedding/225输入、180次本地BGE，Chat/INDEX/生产写入0；固定锚点发送前预占，失败/取消占额度，禁止重试、恢复或换目录绕过账本。使用本地穷举COSINE，保留原过滤、cap1/final3及预算；不代表Milvus、双服务、发布或回答质量验收。
+
+候选、人工关联模板和来源映射见 [第23轮候选说明](../doc/knowledge/product/experiments/qa-linked-20261120-v1/README.md)。这些模块不接入在线请求，未推广生产。

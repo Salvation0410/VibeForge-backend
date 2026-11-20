@@ -1,0 +1,565 @@
+{
+  "schemaVersion": "rag-qa-links/v1",
+  "candidateVersion": "qa-linked-20261120-v1",
+  "sourceManifestSha256": "837b694bbc6846ce9dc0d96e5257383c97abb4fded0aa7d150a592bcbb01e175",
+  "reviewerType": "agent",
+  "humanReview": "pending",
+  "documents": [
+    {
+      "documentId": "01-platform-account",
+      "sourceSha256": "4d1349e34637e48b9eb2bcc989b3ffd27bacb55b1beee5b3e16a77fdafd62d3c",
+      "links": [
+        {
+          "question": "平台怎么用",
+          "targets": [
+            "平台用途【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "用邮箱登不进去",
+          "targets": [
+            "登录异常与退出【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "注册完去哪里",
+          "targets": [
+            "注册与登录【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "验证码看不清",
+          "targets": [
+            "注册与登录【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "我的资料在哪里改",
+          "targets": [
+            "个人中心与公开主页【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "别人主页能不能修改",
+          "targets": [
+            "个人中心与公开主页【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "客服能查我的任务吗",
+          "targets": [
+            "客服与功能边界【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        }
+      ]
+    },
+    {
+      "documentId": "02-app-generation",
+      "sourceSha256": "cd44a128f9f4d43c616e402704804d68987bc5eff2dc8bbe700eb93a235e5a47",
+      "links": [
+        {
+          "question": "开始生成在哪里",
+          "targets": [
+            "创建应用【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "创建了为什么还没网页",
+          "targets": [
+            "创建应用【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "如何改原来的页面",
+          "targets": [
+            "继续修改与应用管理【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "优化提示会马上发出去吗",
+          "targets": [
+            "优化提示【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "改应用名字会改网页吗",
+          "targets": [
+            "继续修改与应用管理【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "生成中能再发一条吗",
+          "targets": [
+            "失败与并发【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        }
+      ]
+    },
+    {
+      "documentId": "03-generation-requirements",
+      "sourceSha256": "c6dcb046cc78dcdc05de3819c8571c85d6aa601611cc6dc1a24527088cfad803",
+      "links": [
+        {
+          "question": "需求怎么写",
+          "targets": [
+            "描述对象与目标【推荐规范】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "提示词模板",
+          "targets": [
+            "可复制需求模板【推荐规范】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "为什么结果不具体",
+          "targets": [
+            "描述对象与目标【推荐规范】",
+            "页面与视觉【推荐规范】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "要不要写异常提示",
+          "targets": [
+            "功能、状态与数据【推荐规范】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "怎么验收页面",
+          "targets": [
+            "拆分需求与验收【推荐规范】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "必须按模板才能生成吗",
+          "targets": [
+            "描述对象与目标【推荐规范】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        }
+      ]
+    },
+    {
+      "documentId": "04-generation-types",
+      "sourceSha256": "4878524fc969c37768b82ea28fe4677089c97d6b2b6bba3e1e5d99772f828471",
+      "links": [
+        {
+          "question": "三种生成方式有什么不同",
+          "targets": [
+            "HTML 单文件【当前功能与推荐规范】",
+            "MULTI_FILE 多文件【当前功能与推荐规范】",
+            "VUE_PROJECT Vue 工程【当前功能与推荐规范】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "单页用什么",
+          "targets": [
+            "HTML 单文件【当前功能与推荐规范】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "多文件是不是 Vue",
+          "targets": [
+            "MULTI_FILE 多文件【当前功能与推荐规范】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "Vue 下载后为什么还要装依赖",
+          "targets": [],
+          "status": "unresolved",
+          "reason": "本篇Vue小节未说明下载包依赖过滤，直接说明在07；为保持文档来源边界暂不跨文档复制。"
+        },
+        {
+          "question": "能不能手动改生成类型",
+          "targets": [
+            "类型如何确定【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "HTML 修改能只给一段代码吗",
+          "targets": [
+            "HTML 单文件【当前功能与推荐规范】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        }
+      ]
+    },
+    {
+      "documentId": "05-images-preservation",
+      "sourceSha256": "18581fa60a8c558782c7d04ec49a244779cd7af5fe30e8692a903e5810c01ae5",
+      "links": [
+        {
+          "question": "优化会删图片吗",
+          "targets": [
+            "保留已有内容【当前功能与推荐规范】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "怎么保留原来的文字和按钮",
+          "targets": [
+            "保留已有内容【当前功能与推荐规范】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "图片生成后打不开",
+          "targets": [
+            "不能加载图片时【推荐规范】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "能保证搜索图片免费商用吗",
+          "targets": [
+            "素材合规【推荐规范】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "社区上传图片会自动放进应用吗",
+          "targets": [
+            "素材合规【推荐规范】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        }
+      ]
+    },
+    {
+      "documentId": "06-preview-history",
+      "sourceSha256": "2f338ca62725adc4114c067408f365a3217b4a2db6a8f2dacc54cbea4d66314e",
+      "links": [
+        {
+          "question": "为什么生成时还显示旧页面",
+          "targets": [
+            "预览刷新时机【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "我停止后页面没变",
+          "targets": [
+            "停止生成【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "输出只剩一小段是不是丢了",
+          "targets": [
+            "输出窗口与完整记录【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "2000 字是不是上限",
+          "targets": [
+            "输出窗口与完整记录【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "怎么导出聊天记录",
+          "targets": [
+            "历史查看与导出【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "页面空白怎么办",
+          "targets": [
+            "空白预览排查【推荐规范】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        }
+      ]
+    },
+    {
+      "documentId": "07-deployment-download",
+      "sourceSha256": "bcc6b4845419722cd4e1a536e7c772a275b0443c9d694f770feef53c7f20e2e6",
+      "links": [
+        {
+          "question": "怎么发布网站",
+          "targets": [
+            "部署前提与步骤【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "改完网页需要再部署吗",
+          "targets": [
+            "部署与预览区别【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "管理员能部署别人的应用吗",
+          "targets": [
+            "部署前提与步骤【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "下载缺 node_modules 是不是出错",
+          "targets": [
+            "下载代码【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "部署链接和源码包有何不同",
+          "targets": [
+            "部署与预览区别【当前功能】",
+            "三类产物【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "图片预览正常上线失效怎么办",
+          "targets": [
+            "失败排查【推荐规范】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        }
+      ]
+    },
+    {
+      "documentId": "08-community-features",
+      "sourceSha256": "b6413180929bf749eabec0f6c90e681afd6f4f50681a0c373b67d415210f4e25",
+      "links": [
+        {
+          "question": "帖子怎么发",
+          "targets": [
+            "发布帖子【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "发完广场没有",
+          "targets": [
+            "发布帖子【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "最多几张图",
+          "targets": [
+            "发布帖子【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "评论也要等审核吗",
+          "targets": [
+            "评论与回复【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "怎么取消点赞",
+          "targets": [
+            "点赞与审核【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "回复怎么只有两层",
+          "targets": [
+            "评论与回复【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "谁能置顶",
+          "targets": [
+            "点赞与审核【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        }
+      ]
+    },
+    {
+      "documentId": "09-community-guidelines",
+      "sourceSha256": "f78f773742f50d9b87c97a46bbe8fd9419025b210112a3228fdbe8b0c8dd3d9f",
+      "links": [
+        {
+          "question": "求助怎么写清楚",
+          "targets": [
+            "求助模板【推荐规范】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "分享作品写什么",
+          "targets": [
+            "分享作品【推荐规范】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "发帖必须用模板吗",
+          "targets": [
+            "审核与发布边界【当前功能与推荐规范】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "审核多久保证通过",
+          "targets": [
+            "审核与发布边界【当前功能与推荐规范】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "怎么避免截图泄露信息",
+          "targets": [
+            "求助模板【推荐规范】",
+            "标签与图片【推荐规范】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "评论回复怎么提建议",
+          "targets": [
+            "评论与讨论【推荐规范】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        }
+      ]
+    },
+    {
+      "documentId": "10-admin-knowledge",
+      "sourceSha256": "7d597b54aa80d55cae5d42feba59da6edf54505b697375ebd73da8c176075981",
+      "links": [
+        {
+          "question": "哪些文件能上传",
+          "targets": [
+            "上传与索引【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "上传成功为什么客服找不到",
+          "targets": [
+            "上传与索引【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "ACTIVE 是什么",
+          "targets": [
+            "状态、禁用与删除【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "禁用马上就完全删了吗",
+          "targets": [
+            "状态、禁用与删除【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "什么时候用重建",
+          "targets": [
+            "替换与重建【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        },
+        {
+          "question": "普通用户能上传客服知识吗",
+          "targets": [
+            "权限与入口【当前功能】"
+          ],
+          "status": "linked",
+          "reason": "同文档小节包含此问法的相关说明；完整性仍待人工核对。"
+        }
+      ]
+    },
+    {
+      "documentId": "11-faq",
+      "sourceSha256": "e44b5c0fb6a8e07721fe4b780a0a9c28a421235b70569d90438f85b97c7ea6c9",
+      "links": []
+    }
+  ]
+}
