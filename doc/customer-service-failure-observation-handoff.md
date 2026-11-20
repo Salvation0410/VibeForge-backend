@@ -197,3 +197,13 @@ uv run --offline python ../tmp/rag-failure-observation-20261120/verify-replay.py
 本轮30项定向、2297通过/26跳过的完整pytest、compileall/lock通过。55项冻结绑定、68份历史保护文件不变；22判断槽位、43精确摘录和4类坏材料拒绝验证完成。无新Embedding/BGE/INDEX/生产写入，无服务启停/部署，不增加自动恢复或GC。计划606f9b9、实现0f2f097，收尾提交由最终回复报告。
 
 具体方法、故障、两处语义争议、验证命令和下一轮可选方案见[第25轮独立交接](customer-service-qa-linked-answer-round25-handoff.md)及[结构化结果](knowledge/product/evaluation/results/qa-linked-answer-validation-20261120-v1.json)。建议先人工裁决，再选择必要条件/例外同块的离线候选验证；混合检索不直接解决坏JSON或入选证据未采用，未自动实施任何优化。
+
+## 第26轮：局部人工裁决与同块条件性观测（2026-11-20）
+
+用户明确接受017:02视觉区域等价表达及003:02保守部署结论为完整覆盖。仅两项旧cap1有人工裁决，历史敏感性3/9→5/9、3增益1退步，其他标签及新候选仍未全量人工验收；旧评分保留，[裁决记录](knowledge/product/evaluation/results/answer-unit-human-adjudication-20261120-v1.json)另存。
+
+新增纯离线答案单元候选：三组完整同文档小节合并，原文/问法/功能与建议标签保留。63→58块、11文档中8篇字节不变；全库130事实原文保持。在第24轮旧最终来源仍入选的假设下，90题两组引文111→118、118→124，未丢失/截断，cap2有4题去重不补位。没有新召回或重排分数，累计提示字节增加19.41%/21.91%，零字面丢失不能当零语义风险。
+
+005cap1未选定义来源仍缺3项；部署/下载混合排查可能把相邻建议错用，登录、私有应用及私信题也有额外噪声。坏JSON、模型忽略已入选证据、引用合法但语义不完整均未被本轮修复。Chat/Embedding/BGE/INDEX/生产写入0，无服务启动/部署/混合检索，98份历史保护与本轮47项输入摘要核对。
+
+完整方法、范围、最终测试、逐题条件性结果及下一轮选择见[第26轮交接](customer-service-answer-unit-round26-handoff.md)和[结构化结果](knowledge/product/evaluation/results/answer-unit-offline-validation-20261120-v1.json)。设计提交28e24f3，收尾提交由最终回复报告；用户原修改保留，未知执行状态仍人工处理、候选无自动GC。

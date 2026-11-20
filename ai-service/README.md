@@ -843,3 +843,18 @@ uv run --offline python -m ai_service.orchestration.rag_qa_linked_cap_evaluation
 预占持久化不确定标为unknown且不发送HTTP；确认占额次数不是供应商精确计费证明。每槽位记录输入摘要、预占/发送状态、HTTP状态、结束原因、耗时和白名单用量，原始响应仅留tmp。响应上限2MiB且须stop结束。prepare不联网，不初始化模型SDK；live直接实验进程调用现有Chat配置，不代表Spring/Python双服务、Milvus或权威快照验收。
 
 详细范围、实际结果和人工复核入口见 [第25轮交接](../doc/customer-service-qa-linked-answer-round25-handoff.md)。真人复核模板独立保存，合法引用不证明语义支持，单次5题对照不证明稳定质量收益。
+
+
+## 客服第26轮答案单元离线验证
+
+`rag_answer_unit_evaluation` 生成独立的同文档小节合并候选：三类生成定义、部署前提与排查、发帖与查看权限。保留原正文、问法及功能/建议标签，正式1000/150分块；完整单元放不进同一块则失败，不改变生产分块或检索配置。
+
+```powershell
+uv run --offline python -m ai_service.orchestration.rag_answer_unit_evaluation --output ../tmp/rag-answer-unit-reproduction-01
+```
+
+入口仅离线，输出限仓库tmp下新非链接目录，不覆盖旧文件；CLI阻断常见socket连接，不读取模型配置或初始化客户端。来源manifest、文档与第24轮comparison绑定校验，输入漂移失败关闭。多文件结果非事务，失败残片不能当成功结果或覆盖恢复。
+
+全库检查130项公共事实的整段原文可用性；90题诊断仅将旧最终来源映射到新块，首次出现去重、不补位，再应用1200/3000字符及16384字节预算。它假设旧来源仍入选，没有新向量或BGE分数，不能解释为新Top8召回、排序或回答质量。人工模板独立，不直接用于旧回答评审导入器。
+
+实际结果、两项局部人工裁决及未测项见[第26轮交接](../doc/customer-service-answer-unit-round26-handoff.md)。新候选未推广生产，真实Chat/Embedding/BGE/INDEX为0；同块不能消除坏JSON、模型遗漏或幻觉。

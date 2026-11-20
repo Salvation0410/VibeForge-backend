@@ -1,0 +1,2 @@
+documents/*.md -text whitespace=cr-at-eol,-blank-at-eof
+manifest.json -text whitespace=cr-at-eol

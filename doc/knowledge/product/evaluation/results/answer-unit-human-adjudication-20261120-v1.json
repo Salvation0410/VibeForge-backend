@@ -1,0 +1,295 @@
+{
+  "schemaVersion": "answer-unit-sensitivity/v1",
+  "sourceSha256": "eacd837070051e094b81b58f736d4051b0808c25ca29e95765028375f14a4932",
+  "humanReview": "two-disputes-adjudicated-rest-pending",
+  "historicalScoresChanged": false,
+  "scenarios": [
+    {
+      "accept017AsFull": false,
+      "accept003AsFull": false,
+      "completeFacts": {
+        "cap1": 1,
+        "cap2": 5
+      },
+      "pairedFactDenominator": 9,
+      "gains": [
+        "app-generation-005:required:02",
+        "app-generation-017:required:01",
+        "app-generation-017:required:02",
+        "deployment-download-013:required:02"
+      ],
+      "losses": [],
+      "netCompleteFactDifference": 4
+    },
+    {
+      "accept017AsFull": false,
+      "accept003AsFull": true,
+      "completeFacts": {
+        "cap1": 2,
+        "cap2": 5
+      },
+      "pairedFactDenominator": 9,
+      "gains": [
+        "app-generation-005:required:02",
+        "app-generation-017:required:01",
+        "app-generation-017:required:02",
+        "deployment-download-013:required:02"
+      ],
+      "losses": [
+        "deployment-download-003:required:02"
+      ],
+      "netCompleteFactDifference": 3
+    },
+    {
+      "accept017AsFull": true,
+      "accept003AsFull": false,
+      "completeFacts": {
+        "cap1": 2,
+        "cap2": 5
+      },
+      "pairedFactDenominator": 9,
+      "gains": [
+        "app-generation-005:required:02",
+        "app-generation-017:required:01",
+        "deployment-download-013:required:02"
+      ],
+      "losses": [],
+      "netCompleteFactDifference": 3
+    },
+    {
+      "accept017AsFull": true,
+      "accept003AsFull": true,
+      "completeFacts": {
+        "cap1": 3,
+        "cap2": 5
+      },
+      "pairedFactDenominator": 9,
+      "gains": [
+        "app-generation-005:required:02",
+        "app-generation-017:required:01",
+        "deployment-download-013:required:02"
+      ],
+      "losses": [
+        "deployment-download-003:required:02"
+      ],
+      "netCompleteFactDifference": 2
+    }
+  ],
+  "cases": [
+    {
+      "id": "app-generation-017",
+      "question": "只写做个网站为什么不具体，要补充哪些信息？",
+      "fact": {
+        "factId": "app-generation-017:required:02",
+        "statement": "补充主要页面或区域",
+        "equivalentExpressions": [
+          "列出主要功能区域，明确范围"
+        ],
+        "applicableConditions": [
+          "限题干描述的当前公共产品使用场景，不执行私人操作。"
+        ],
+        "evidence": [
+          {
+            "documentId": "03-generation-requirements",
+            "documentPath": "documents/03-generation-requirements.md",
+            "heading": "描述对象与目标",
+            "quote": "先说给谁使用、要完成什么事。例如“给小餐厅顾客使用的点餐页面”，比“做个网站”更容易明确范围。再列出主要页面或区域：菜品分类、菜品列表、购物车、订单确认。需求规范是帮助生成的建议，不是系统强制要求每次填写的表单。",
+            "quoteStart": 36,
+            "quoteEnd": 142,
+            "offsetUnit": "unicode-code-points",
+            "documentSha256": "c6dcb046cc78dcdc05de3819c8571c85d6aa601611cc6dc1a24527088cfad803"
+          }
+        ],
+        "basisType": "public-document",
+        "reviewStatus": "agent-source-reviewed-human-pending"
+      },
+      "answers": [
+        {
+          "key": "app-generation-017:cap2",
+          "inputSha256": "20d6fab9b81c125367bc9f66381636dde90bea1d12113a6a0bdf1298f02756d0",
+          "status": "completed",
+          "reserved": true,
+          "reservationState": "confirmed",
+          "attemptedSend": true,
+          "httpStatus": 200,
+          "finishReason": "stop",
+          "usage": {
+            "prompt_tokens": 752,
+            "completion_tokens": 186,
+            "total_tokens": 938
+          },
+          "latencyMs": 1938,
+          "errorCode": null,
+          "answer": {
+            "answered": true,
+            "answer": "“做个网站”太笼统，缺少可验收的范围和标准。应补充：1）给谁使用、要完成什么事，例如“给小餐厅顾客使用的点餐页面”；2）主要页面或区域，如菜品分类、菜品列表、购物车、订单确认；3）页面数量、导航关系、主要文字、希望保留的图片以及移动端要求；4）视觉描述可写浅色/深色、主色、卡片密度和参考风格，并尽量结合具体区域，例如“标题下留出简介，列表支持手机单列”。像“高级一点”这类说法缺少可验收标准，应补充布局和信息优先级。需求规范只是帮助生成的建议，不是系统强制要求每次填写的表单。",
+            "cited_chunk_ids": [
+              "03-generation-requirements:2:0",
+              "03-generation-requirements:2:2"
+            ]
+          },
+          "contractValid": true
+        },
+        {
+          "key": "app-generation-017:cap1",
+          "inputSha256": "e43ab4a8629b8b2a211403d2396b863f7006b1567c9898f9a232a8c077a96ae1",
+          "status": "completed",
+          "reserved": true,
+          "reservationState": "confirmed",
+          "attemptedSend": true,
+          "httpStatus": 200,
+          "finishReason": "stop",
+          "usage": {
+            "prompt_tokens": 774,
+            "completion_tokens": 120,
+            "total_tokens": 894
+          },
+          "latencyMs": 1234,
+          "errorCode": null,
+          "answer": {
+            "answered": true,
+            "answer": "只写“做个网站”之所以不具体，是因为缺少可验收的标准。应补充页面数量、导航关系、主要文字、希望保留的图片和移动端要求；视觉方面可写浅色/深色、主色、卡片密度和参考风格，并尽量结合具体区域，例如“标题下留出简介，列表支持手机单列”。像“高级一点”这类说法缺少可验收标准，应补充布局和信息优先级。",
+            "cited_chunk_ids": [
+              "03-generation-requirements:2:2"
+            ]
+          },
+          "contractValid": true
+        }
+      ],
+      "historicalAgentVerdict": "partial",
+      "humanVerdict": "full",
+      "humanReviewer": "current-user",
+      "humanReason": "已充分覆盖，可视为等价表达",
+      "arm": "cap1"
+    },
+    {
+      "id": "deployment-download-003",
+      "question": "第一次生成没成功，可以正常部署吗？",
+      "fact": {
+        "factId": "deployment-download-003:required:02",
+        "statement": "第一次生成失败不能仅凭创建记录或残缺输出保证可部署",
+        "equivalentExpressions": [
+          "应先确认是否有可用结果"
+        ],
+        "applicableConditions": [
+          "首次生成未成功；需另行确认实际可用产物，不能仅由状态推断目录内容。"
+        ],
+        "evidence": [
+          {
+            "documentId": "07-deployment-download",
+            "documentPath": "documents/07-deployment-download.md",
+            "heading": "部署前提与步骤",
+            "quote": "使用创建应用的账号登录，进入该应用对话页，先确认已有可用生成结果并验收页面，然后点击“部署应用”。部署成功后得到访问链接，可以打开新标签页验证。后端部署操作只允许应用创建者；管理员能管理应用不意味着可以直接部署别人创建的应用。没有源码目录或 Vue 构建产物时部署可能失败。",
+            "quoteStart": 38,
+            "quoteEnd": 175,
+            "offsetUnit": "unicode-code-points",
+            "documentSha256": "bcc6b4845419722cd4e1a536e7c772a275b0443c9d694f770feef53c7f20e2e6"
+          }
+        ],
+        "basisType": "public-document",
+        "reviewStatus": "agent-source-reviewed-human-pending"
+      },
+      "answers": [
+        {
+          "key": "deployment-download-003:cap1",
+          "inputSha256": "880b3ae90995c30b07e8d0bc8e70037a8086e68ac3e8a8a22099ffd9b8501aad",
+          "status": "completed",
+          "reserved": true,
+          "reservationState": "confirmed",
+          "attemptedSend": true,
+          "httpStatus": 200,
+          "finishReason": "stop",
+          "usage": {
+            "prompt_tokens": 770,
+            "completion_tokens": 95,
+            "total_tokens": 865
+          },
+          "latencyMs": 1078,
+          "errorCode": null,
+          "answer": {
+            "answered": true,
+            "answer": "第一次生成未成功时，不能保证可以正常部署。若没有成功版本，新应用可能没有可用预览；HTML 与多文件发布未通过校验时会保留上一成功版本。建议先读取错误信息、缩小本轮修改范围后重试，不要连续重复部署来掩盖构建错误。",
+            "cited_chunk_ids": [
+              "02-app-generation:2:5",
+              "07-deployment-download:2:4"
+            ]
+          },
+          "contractValid": true
+        },
+        {
+          "key": "deployment-download-003:cap2",
+          "inputSha256": "022e99a2c5123fed0c4639dc31563776b7b8ece8c7b4efc8ad28cf5e1ed8b462",
+          "status": "completed",
+          "reserved": true,
+          "reservationState": "confirmed",
+          "attemptedSend": true,
+          "httpStatus": 200,
+          "finishReason": "stop",
+          "usage": {
+            "prompt_tokens": 780,
+            "completion_tokens": 88,
+            "total_tokens": 868
+          },
+          "latencyMs": 1047,
+          "errorCode": null,
+          "answer": {
+            "answered": true,
+            "answer": "第一次生成失败后，需要先读取错误信息、缩小本轮修改范围再重试；如果新应用没有成功版本，可能没有可用预览。后续生成成功也不会自动重新部署，修改后想让部署链接显示新内容，应再次点击“部署应用”。",
+            "cited_chunk_ids": [
+              "02-app-generation:2:5",
+              "07-deployment-download:2:1"
+            ]
+          },
+          "contractValid": true
+        }
+      ],
+      "historicalAgentVerdict": "partial",
+      "humanVerdict": "full",
+      "humanReviewer": "current-user",
+      "humanReason": "保守结论已足够，可算完整覆盖",
+      "arm": "cap1"
+    }
+  ],
+  "limitations": [
+    "只比较既有8个有效回答中两项事实评分，不重判其余事实。",
+    "四种组合是后置敏感性，不是四次模型试验或新的独立质量分。",
+    "003提醒消失的局部退步在严格口径仍存在；宽松口径只是将其显为full到partial。",
+    "用户未回复时保留pending，不因默认选项或超时产生人工结论。"
+  ],
+  "humanAdjudication": {
+    "reviewer": "current-user",
+    "source": "explicit-user-message",
+    "date": "2026-11-20",
+    "decisions": [
+      {
+        "factId": "app-generation-017:required:02",
+        "answer": "已充分覆盖，可视为等价表达",
+        "verdict": "full"
+      },
+      {
+        "factId": "deployment-download-003:required:02",
+        "answer": "保守结论已足够，可算完整覆盖",
+        "verdict": "full"
+      }
+    ],
+    "selectedScenario": {
+      "accept017AsFull": true,
+      "accept003AsFull": true,
+      "completeFacts": {
+        "cap1": 3,
+        "cap2": 5
+      },
+      "pairedFactDenominator": 9,
+      "gains": [
+        "app-generation-005:required:02",
+        "app-generation-017:required:01",
+        "deployment-download-013:required:02"
+      ],
+      "losses": [
+        "deployment-download-003:required:02"
+      ],
+      "netCompleteFactDifference": 2
+    },
+    "scope": "仅两处cap1争议获人工裁决；其余事实仍沿用代理判断，3/9与5/9不是全量人工质量评分。"
+  }
+}

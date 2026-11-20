@@ -1,0 +1,780 @@
+{
+  "schemaVersion": "rag-answer-unit-candidate-manifest/v1",
+  "candidateVersion": "answer-unit-20261120-v1",
+  "identityScope": "offline-logical-identities-not-spring-versions",
+  "documentVersion": 3,
+  "humanReview": "pending",
+  "sourceManifestSha256": "738aa71190bc4ea87d18798ddd1c53d66221e2aa86f2c3d0f84047fba9222133",
+  "documents": [
+    {
+      "documentId": "01-platform-account",
+      "sourceMetadata": {
+        "id": "01-platform-account",
+        "title": "平台使用说明与账号基础",
+        "path": "documents/01-platform-account.md",
+        "category": "platform-account",
+        "subcategory": "platform-account",
+        "contentStatus": "current",
+        "sectionStatusLabels": true,
+        "sourceType": "actual-product",
+        "audience": "user",
+        "version": 1,
+        "lastReviewed": "2026-10-12",
+        "sources": [
+          "frontend:src/pages/RegisterView.vue",
+          "frontend:src/pages/LoginView.vue",
+          "frontend:src/pages/ProfileView.vue",
+          "backend:src/main/java/com/yupi/yuaicodemother/controller/CustomerServiceController.java"
+        ]
+      },
+      "sourceSha256": "b6aa011a40d688d41fce582a95d23d4abc290e610aaacef6f6d7b930024e542c",
+      "candidateSha256": "b6aa011a40d688d41fce582a95d23d4abc290e610aaacef6f6d7b930024e542c",
+      "changed": false,
+      "provenance": [
+        {
+          "targetHeading": "平台用途【当前功能】",
+          "sourceHeadings": [
+            "平台用途【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "注册与登录【当前功能】",
+          "sourceHeadings": [
+            "注册与登录【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "登录异常与退出【当前功能】",
+          "sourceHeadings": [
+            "登录异常与退出【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "个人中心与公开主页【当前功能】",
+          "sourceHeadings": [
+            "个人中心与公开主页【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "客服与功能边界【当前功能】",
+          "sourceHeadings": [
+            "客服与功能边界【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "快速上手【推荐规范】",
+          "sourceHeadings": [
+            "快速上手【推荐规范】"
+          ]
+        }
+      ],
+      "fidelity": {
+        "allSourceBodiesPreserved": true,
+        "sourceSectionCount": 6,
+        "questionLineCountBefore": 5,
+        "questionLineCountAfter": 5
+      }
+    },
+    {
+      "documentId": "02-app-generation",
+      "sourceMetadata": {
+        "id": "02-app-generation",
+        "title": "应用生成与增量修改",
+        "path": "documents/02-app-generation.md",
+        "category": "app-generation",
+        "subcategory": "app-generation",
+        "contentStatus": "current",
+        "sectionStatusLabels": true,
+        "sourceType": "actual-product",
+        "audience": "user",
+        "version": 1,
+        "lastReviewed": "2026-10-12",
+        "sources": [
+          "backend:src/main/java/com/yupi/yuaicodemother/service/impl/AppServiceImpl.java",
+          "frontend:src/pages/AppChatView.vue"
+        ]
+      },
+      "sourceSha256": "7cc950aa2b20d881be38d8b75fb15a61a6d6d9bae444a7ea336737386e3029f6",
+      "candidateSha256": "7cc950aa2b20d881be38d8b75fb15a61a6d6d9bae444a7ea336737386e3029f6",
+      "changed": false,
+      "provenance": [
+        {
+          "targetHeading": "创建应用【当前功能】",
+          "sourceHeadings": [
+            "创建应用【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "对话生成【当前功能】",
+          "sourceHeadings": [
+            "对话生成【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "继续修改与应用管理【当前功能】",
+          "sourceHeadings": [
+            "继续修改与应用管理【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "优化提示【当前功能】",
+          "sourceHeadings": [
+            "优化提示【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "增量修改写法【推荐规范】",
+          "sourceHeadings": [
+            "增量修改写法【推荐规范】"
+          ]
+        },
+        {
+          "targetHeading": "失败与并发【当前功能】",
+          "sourceHeadings": [
+            "失败与并发【当前功能】"
+          ]
+        }
+      ],
+      "fidelity": {
+        "allSourceBodiesPreserved": true,
+        "sourceSectionCount": 6,
+        "questionLineCountBefore": 4,
+        "questionLineCountAfter": 4
+      }
+    },
+    {
+      "documentId": "03-generation-requirements",
+      "sourceMetadata": {
+        "id": "03-generation-requirements",
+        "title": "应用需求编写规范",
+        "path": "documents/03-generation-requirements.md",
+        "category": "app-generation",
+        "subcategory": "generation-requirements",
+        "contentStatus": "recommended",
+        "sectionStatusLabels": true,
+        "sourceType": "usage-recommendation",
+        "audience": "user",
+        "version": 1,
+        "lastReviewed": "2026-10-12",
+        "sources": [
+          "frontend:src/pages/DocsView.vue",
+          "backend:src/main/java/com/yupi/yuaicodemother/service/impl/AppServiceImpl.java"
+        ]
+      },
+      "sourceSha256": "22a06ac52b23f90b5bc487c02efaf91c585fefdff55594bd899749916215edeb",
+      "candidateSha256": "22a06ac52b23f90b5bc487c02efaf91c585fefdff55594bd899749916215edeb",
+      "changed": false,
+      "provenance": [
+        {
+          "targetHeading": "描述对象与目标【推荐规范】",
+          "sourceHeadings": [
+            "描述对象与目标【推荐规范】"
+          ]
+        },
+        {
+          "targetHeading": "功能、状态与数据【推荐规范】",
+          "sourceHeadings": [
+            "功能、状态与数据【推荐规范】"
+          ]
+        },
+        {
+          "targetHeading": "页面与视觉【推荐规范】",
+          "sourceHeadings": [
+            "页面与视觉【推荐规范】"
+          ]
+        },
+        {
+          "targetHeading": "可复制需求模板【推荐规范】",
+          "sourceHeadings": [
+            "可复制需求模板【推荐规范】"
+          ]
+        },
+        {
+          "targetHeading": "拆分需求与验收【推荐规范】",
+          "sourceHeadings": [
+            "拆分需求与验收【推荐规范】"
+          ]
+        },
+        {
+          "targetHeading": "反例与改写【推荐规范】",
+          "sourceHeadings": [
+            "反例与改写【推荐规范】"
+          ]
+        }
+      ],
+      "fidelity": {
+        "allSourceBodiesPreserved": true,
+        "sourceSectionCount": 6,
+        "questionLineCountBefore": 5,
+        "questionLineCountAfter": 5
+      }
+    },
+    {
+      "documentId": "04-generation-types",
+      "sourceMetadata": {
+        "id": "04-generation-types",
+        "title": "HTML、MULTI_FILE 与 VUE_PROJECT 使用指南",
+        "path": "documents/04-generation-types.md",
+        "category": "app-generation",
+        "subcategory": "generation-types",
+        "contentStatus": "current",
+        "sectionStatusLabels": true,
+        "sourceType": "actual-product",
+        "audience": "user",
+        "version": 1,
+        "lastReviewed": "2026-10-12",
+        "sources": [
+          "backend:src/main/java/com/yupi/yuaicodemother/enums/CodeGenTypeEnum.java",
+          "backend:ai-service/src/ai_service/orchestration/workflow.py"
+        ]
+      },
+      "sourceSha256": "909d33f0e9235d9500e2dbfb41838a386664daad7dbc164a830e8a1f3601315a",
+      "candidateSha256": "cb3d420c7bf1875b37decf55ca483b1c08dd1b3d72406eb7b29c933cffc60347",
+      "changed": true,
+      "provenance": [
+        {
+          "targetHeading": "类型如何确定【当前功能】",
+          "sourceHeadings": [
+            "类型如何确定【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "三类生成方式与适用边界【当前功能与推荐规范】",
+          "sourceHeadings": [
+            "HTML 单文件【当前功能与推荐规范】",
+            "MULTI_FILE 多文件【当前功能与推荐规范】",
+            "VUE_PROJECT Vue 工程【当前功能与推荐规范】"
+          ]
+        },
+        {
+          "targetHeading": "类型边界与完整性【当前功能】",
+          "sourceHeadings": [
+            "类型边界与完整性【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "常见问法",
+          "sourceHeadings": [
+            "常见问法"
+          ]
+        }
+      ],
+      "fidelity": {
+        "allSourceBodiesPreserved": true,
+        "sourceSectionCount": 6,
+        "questionLineCountBefore": 4,
+        "questionLineCountAfter": 4
+      }
+    },
+    {
+      "documentId": "05-images-preservation",
+      "sourceMetadata": {
+        "id": "05-images-preservation",
+        "title": "图片、素材与已有功能保留",
+        "path": "documents/05-images-preservation.md",
+        "category": "app-generation",
+        "subcategory": "images-preservation",
+        "contentStatus": "current",
+        "sectionStatusLabels": true,
+        "sourceType": "actual-product",
+        "audience": "user",
+        "version": 1,
+        "lastReviewed": "2026-10-12",
+        "sources": [
+          "backend:ai-service/src/ai_service/prompts/generation.py",
+          "frontend:src/utils/optimizePrompt.ts"
+        ]
+      },
+      "sourceSha256": "85f39be5e6f91cdffe12c5194cd11faefe08fc39a0a735c17ed9c9f53bda2ca5",
+      "candidateSha256": "85f39be5e6f91cdffe12c5194cd11faefe08fc39a0a735c17ed9c9f53bda2ca5",
+      "changed": false,
+      "provenance": [
+        {
+          "targetHeading": "保留已有内容【当前功能与推荐规范】",
+          "sourceHeadings": [
+            "保留已有内容【当前功能与推荐规范】"
+          ]
+        },
+        {
+          "targetHeading": "图片需求【当前功能与推荐规范】",
+          "sourceHeadings": [
+            "图片需求【当前功能与推荐规范】"
+          ]
+        },
+        {
+          "targetHeading": "不能加载图片时【推荐规范】",
+          "sourceHeadings": [
+            "不能加载图片时【推荐规范】"
+          ]
+        },
+        {
+          "targetHeading": "优化请求模板【推荐规范】",
+          "sourceHeadings": [
+            "优化请求模板【推荐规范】"
+          ]
+        },
+        {
+          "targetHeading": "素材合规【推荐规范】",
+          "sourceHeadings": [
+            "素材合规【推荐规范】"
+          ]
+        }
+      ],
+      "fidelity": {
+        "allSourceBodiesPreserved": true,
+        "sourceSectionCount": 5,
+        "questionLineCountBefore": 3,
+        "questionLineCountAfter": 3
+      }
+    },
+    {
+      "documentId": "06-preview-history",
+      "sourceMetadata": {
+        "id": "06-preview-history",
+        "title": "预览、停止与聊天历史",
+        "path": "documents/06-preview-history.md",
+        "category": "preview-history",
+        "subcategory": "preview-history",
+        "contentStatus": "current",
+        "sectionStatusLabels": true,
+        "sourceType": "actual-product",
+        "audience": "user",
+        "version": 1,
+        "lastReviewed": "2026-10-12",
+        "sources": [
+          "frontend:src/utils/generationStreamProgress.ts",
+          "frontend:src/utils/previewRefreshCoordinator.ts",
+          "frontend:src/pages/AppChatView.vue"
+        ]
+      },
+      "sourceSha256": "c0e49bc68eab2ed2b7761e63755e258cf70651a6c223e78eadc4d496ef8d8da5",
+      "candidateSha256": "c0e49bc68eab2ed2b7761e63755e258cf70651a6c223e78eadc4d496ef8d8da5",
+      "changed": false,
+      "provenance": [
+        {
+          "targetHeading": "预览刷新时机【当前功能】",
+          "sourceHeadings": [
+            "预览刷新时机【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "停止生成【当前功能】",
+          "sourceHeadings": [
+            "停止生成【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "输出窗口与完整记录【当前功能】",
+          "sourceHeadings": [
+            "输出窗口与完整记录【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "历史查看与导出【当前功能】",
+          "sourceHeadings": [
+            "历史查看与导出【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "空白预览排查【推荐规范】",
+          "sourceHeadings": [
+            "空白预览排查【推荐规范】"
+          ]
+        }
+      ],
+      "fidelity": {
+        "allSourceBodiesPreserved": true,
+        "sourceSectionCount": 5,
+        "questionLineCountBefore": 5,
+        "questionLineCountAfter": 5
+      }
+    },
+    {
+      "documentId": "07-deployment-download",
+      "sourceMetadata": {
+        "id": "07-deployment-download",
+        "title": "部署、访问与代码下载",
+        "path": "documents/07-deployment-download.md",
+        "category": "deployment-download",
+        "subcategory": "deployment-download",
+        "contentStatus": "current",
+        "sectionStatusLabels": true,
+        "sourceType": "actual-product",
+        "audience": "user",
+        "version": 1,
+        "lastReviewed": "2026-10-12",
+        "sources": [
+          "backend:src/main/java/com/yupi/yuaicodemother/service/impl/AppServiceImpl.java",
+          "backend:src/main/java/com/yupi/yuaicodemother/controller/AppController.java",
+          "backend:src/main/java/com/yupi/yuaicodemother/service/impl/ProjectDownloadServiceImpl.java"
+        ]
+      },
+      "sourceSha256": "9b20c00b1657828586c4e118f92f5a67b57e3dd8f3c727fc0980bb1d303b6dd7",
+      "candidateSha256": "398b05a67a609884b7057c1c930d1252227e6b80f05bb51028a8a5d3050b39e4",
+      "changed": true,
+      "provenance": [
+        {
+          "targetHeading": "部署前提、产物与失败排查【当前功能与推荐规范】",
+          "sourceHeadings": [
+            "部署前提与步骤【当前功能】",
+            "三类产物【当前功能】",
+            "失败排查【推荐规范】"
+          ]
+        },
+        {
+          "targetHeading": "部署与预览区别【当前功能】",
+          "sourceHeadings": [
+            "部署与预览区别【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "下载代码【当前功能】",
+          "sourceHeadings": [
+            "下载代码【当前功能】"
+          ]
+        }
+      ],
+      "fidelity": {
+        "allSourceBodiesPreserved": true,
+        "sourceSectionCount": 5,
+        "questionLineCountBefore": 5,
+        "questionLineCountAfter": 5
+      }
+    },
+    {
+      "documentId": "08-community-features",
+      "sourceMetadata": {
+        "id": "08-community-features",
+        "title": "社区浏览、发帖与互动",
+        "path": "documents/08-community-features.md",
+        "category": "community",
+        "subcategory": "community-features",
+        "contentStatus": "current",
+        "sectionStatusLabels": true,
+        "sourceType": "actual-product",
+        "audience": "user",
+        "version": 1,
+        "lastReviewed": "2026-10-12",
+        "sources": [
+          "backend:src/main/java/com/yupi/yuaicodemother/service/impl/CommunityPostServiceImpl.java",
+          "backend:src/main/java/com/yupi/yuaicodemother/service/impl/CommunityCommentServiceImpl.java"
+        ]
+      },
+      "sourceSha256": "cafd87f5805a17b2f0f3022c2477641afe3414b21ca66dc3225c0b8a28ed8115",
+      "candidateSha256": "e4f68d88c582445b39a99b0205caf16d18769a6629642bdf3d1ed3a7a0a76d86",
+      "changed": true,
+      "provenance": [
+        {
+          "targetHeading": "浏览与筛选【当前功能】",
+          "sourceHeadings": [
+            "浏览与筛选【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "发帖、审核状态与查看权限【当前功能】",
+          "sourceHeadings": [
+            "发布帖子【当前功能】",
+            "我的帖子与他人主页【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "发帖失败【当前功能与推荐规范】",
+          "sourceHeadings": [
+            "发帖失败【当前功能与推荐规范】"
+          ]
+        },
+        {
+          "targetHeading": "评论与回复【当前功能】",
+          "sourceHeadings": [
+            "评论与回复【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "点赞与审核【当前功能】",
+          "sourceHeadings": [
+            "点赞与审核【当前功能】"
+          ]
+        }
+      ],
+      "fidelity": {
+        "allSourceBodiesPreserved": true,
+        "sourceSectionCount": 6,
+        "questionLineCountBefore": 3,
+        "questionLineCountAfter": 3
+      }
+    },
+    {
+      "documentId": "09-community-guidelines",
+      "sourceMetadata": {
+        "id": "09-community-guidelines",
+        "title": "社区发帖与互动规范",
+        "path": "documents/09-community-guidelines.md",
+        "category": "community",
+        "subcategory": "community-guidelines",
+        "contentStatus": "recommended",
+        "sectionStatusLabels": true,
+        "sourceType": "usage-recommendation",
+        "audience": "user",
+        "version": 1,
+        "lastReviewed": "2026-10-12",
+        "sources": [
+          "frontend:src/views/community/PostCreateView.vue",
+          "backend:src/main/java/com/yupi/yuaicodemother/controller/CommunityPostController.java"
+        ]
+      },
+      "sourceSha256": "ed5ba61d63e683eda1934024c2716184bbbc865b5e8311fe2031579015ee0bbf",
+      "candidateSha256": "ed5ba61d63e683eda1934024c2716184bbbc865b5e8311fe2031579015ee0bbf",
+      "changed": false,
+      "provenance": [
+        {
+          "targetHeading": "分享作品【推荐规范】",
+          "sourceHeadings": [
+            "分享作品【推荐规范】"
+          ]
+        },
+        {
+          "targetHeading": "求助模板【推荐规范】",
+          "sourceHeadings": [
+            "求助模板【推荐规范】"
+          ]
+        },
+        {
+          "targetHeading": "标签与图片【推荐规范】",
+          "sourceHeadings": [
+            "标签与图片【推荐规范】"
+          ]
+        },
+        {
+          "targetHeading": "评论与讨论【推荐规范】",
+          "sourceHeadings": [
+            "评论与讨论【推荐规范】"
+          ]
+        },
+        {
+          "targetHeading": "审核与发布边界【当前功能与推荐规范】",
+          "sourceHeadings": [
+            "审核与发布边界【当前功能与推荐规范】"
+          ]
+        }
+      ],
+      "fidelity": {
+        "allSourceBodiesPreserved": true,
+        "sourceSectionCount": 5,
+        "questionLineCountBefore": 5,
+        "questionLineCountAfter": 5
+      }
+    },
+    {
+      "documentId": "10-admin-knowledge",
+      "sourceMetadata": {
+        "id": "10-admin-knowledge",
+        "title": "管理后台与知识库维护",
+        "path": "documents/10-admin-knowledge.md",
+        "category": "admin-knowledge",
+        "subcategory": "admin-knowledge",
+        "contentStatus": "current",
+        "sectionStatusLabels": true,
+        "sourceType": "actual-product",
+        "audience": "admin",
+        "version": 1,
+        "lastReviewed": "2026-10-12",
+        "sources": [
+          "backend:src/main/java/com/yupi/yuaicodemother/controller/CustomerServiceKnowledgeAdminController.java",
+          "backend:src/main/java/com/yupi/yuaicodemother/mapper/CustomerServiceKnowledgeDocumentMapper.java",
+          "backend:ai-service/README.md"
+        ]
+      },
+      "sourceSha256": "6674aa09c302d2e027588a6cae75cf6007e96b3fb7e2eb610e0f461c5844c6f2",
+      "candidateSha256": "6674aa09c302d2e027588a6cae75cf6007e96b3fb7e2eb610e0f461c5844c6f2",
+      "changed": false,
+      "provenance": [
+        {
+          "targetHeading": "权限与入口【当前功能】",
+          "sourceHeadings": [
+            "权限与入口【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "上传与索引【当前功能】",
+          "sourceHeadings": [
+            "上传与索引【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "替换与重建【当前功能】",
+          "sourceHeadings": [
+            "替换与重建【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "状态、禁用与删除【当前功能】",
+          "sourceHeadings": [
+            "状态、禁用与删除【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "运维故障【推荐规范】",
+          "sourceHeadings": [
+            "运维故障【推荐规范】"
+          ]
+        },
+        {
+          "targetHeading": "内容发布【推荐规范】",
+          "sourceHeadings": [
+            "内容发布【推荐规范】"
+          ]
+        }
+      ],
+      "fidelity": {
+        "allSourceBodiesPreserved": true,
+        "sourceSectionCount": 6,
+        "questionLineCountBefore": 4,
+        "questionLineCountAfter": 4
+      }
+    },
+    {
+      "documentId": "11-faq",
+      "sourceMetadata": {
+        "id": "11-faq",
+        "title": "功能边界与常见问题",
+        "path": "documents/11-faq.md",
+        "category": "platform-account",
+        "subcategory": "faq",
+        "contentStatus": "current",
+        "sectionStatusLabels": true,
+        "sourceType": "actual-product",
+        "audience": "user",
+        "version": 1,
+        "lastReviewed": "2026-10-12",
+        "sources": [
+          "backend:ai-service/src/ai_service/orchestration/customer_service_rag.py",
+          "backend:docs/superpowers/specs/2026-09-30-customer-service-rag-design.md"
+        ]
+      },
+      "sourceSha256": "e44b5c0fb6a8e07721fe4b780a0a9c28a421235b70569d90438f85b97c7ea6c9",
+      "candidateSha256": "e44b5c0fb6a8e07721fe4b780a0a9c28a421235b70569d90438f85b97c7ea6c9",
+      "changed": false,
+      "provenance": [
+        {
+          "targetHeading": "当前能力与推荐方法的区别【当前功能】",
+          "sourceHeadings": [
+            "当前能力与推荐方法的区别【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "生成成功能当作真实业务系统吗【当前功能】",
+          "sourceHeadings": [
+            "生成成功能当作真实业务系统吗【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "客服可以查询私有业务数据吗【当前功能】",
+          "sourceHeadings": [
+            "客服可以查询私有业务数据吗【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "没有知识和服务失败有什么区别【当前功能】",
+          "sourceHeadings": [
+            "没有知识和服务失败有什么区别【当前功能】"
+          ]
+        },
+        {
+          "targetHeading": "规划能力询问【当前功能与推荐规范】",
+          "sourceHeadings": [
+            "规划能力询问【当前功能与推荐规范】"
+          ]
+        },
+        {
+          "targetHeading": "安全与来源【当前功能与推荐规范】",
+          "sourceHeadings": [
+            "安全与来源【当前功能与推荐规范】"
+          ]
+        },
+        {
+          "targetHeading": "用户口语与正式名称",
+          "sourceHeadings": [
+            "用户口语与正式名称"
+          ]
+        }
+      ],
+      "fidelity": {
+        "allSourceBodiesPreserved": true,
+        "sourceSectionCount": 7,
+        "questionLineCountBefore": 0,
+        "questionLineCountAfter": 0
+      }
+    }
+  ],
+  "oldChunkCount": 63,
+  "newChunkCount": 58,
+  "oldToNew": {
+    "01-platform-account:2:0": "01-platform-account:3:0",
+    "01-platform-account:2:1": "01-platform-account:3:1",
+    "01-platform-account:2:2": "01-platform-account:3:2",
+    "01-platform-account:2:3": "01-platform-account:3:3",
+    "01-platform-account:2:4": "01-platform-account:3:4",
+    "01-platform-account:2:5": "01-platform-account:3:5",
+    "02-app-generation:2:0": "02-app-generation:3:0",
+    "02-app-generation:2:1": "02-app-generation:3:1",
+    "02-app-generation:2:2": "02-app-generation:3:2",
+    "02-app-generation:2:3": "02-app-generation:3:3",
+    "02-app-generation:2:4": "02-app-generation:3:4",
+    "02-app-generation:2:5": "02-app-generation:3:5",
+    "03-generation-requirements:2:0": "03-generation-requirements:3:0",
+    "03-generation-requirements:2:1": "03-generation-requirements:3:1",
+    "03-generation-requirements:2:2": "03-generation-requirements:3:2",
+    "03-generation-requirements:2:3": "03-generation-requirements:3:3",
+    "03-generation-requirements:2:4": "03-generation-requirements:3:4",
+    "03-generation-requirements:2:5": "03-generation-requirements:3:5",
+    "04-generation-types:2:0": "04-generation-types:3:0",
+    "04-generation-types:2:1": "04-generation-types:3:1",
+    "04-generation-types:2:2": "04-generation-types:3:1",
+    "04-generation-types:2:3": "04-generation-types:3:1",
+    "04-generation-types:2:4": "04-generation-types:3:2",
+    "04-generation-types:2:5": "04-generation-types:3:3",
+    "05-images-preservation:2:0": "05-images-preservation:3:0",
+    "05-images-preservation:2:1": "05-images-preservation:3:1",
+    "05-images-preservation:2:2": "05-images-preservation:3:2",
+    "05-images-preservation:2:3": "05-images-preservation:3:3",
+    "05-images-preservation:2:4": "05-images-preservation:3:4",
+    "06-preview-history:2:0": "06-preview-history:3:0",
+    "06-preview-history:2:1": "06-preview-history:3:1",
+    "06-preview-history:2:2": "06-preview-history:3:2",
+    "06-preview-history:2:3": "06-preview-history:3:3",
+    "06-preview-history:2:4": "06-preview-history:3:4",
+    "07-deployment-download:2:0": "07-deployment-download:3:0",
+    "07-deployment-download:2:1": "07-deployment-download:3:1",
+    "07-deployment-download:2:2": "07-deployment-download:3:0",
+    "07-deployment-download:2:3": "07-deployment-download:3:2",
+    "07-deployment-download:2:4": "07-deployment-download:3:0",
+    "08-community-features:2:0": "08-community-features:3:0",
+    "08-community-features:2:1": "08-community-features:3:1",
+    "08-community-features:2:2": "08-community-features:3:2",
+    "08-community-features:2:3": "08-community-features:3:3",
+    "08-community-features:2:4": "08-community-features:3:4",
+    "08-community-features:2:5": "08-community-features:3:1",
+    "09-community-guidelines:2:0": "09-community-guidelines:3:0",
+    "09-community-guidelines:2:1": "09-community-guidelines:3:1",
+    "09-community-guidelines:2:2": "09-community-guidelines:3:2",
+    "09-community-guidelines:2:3": "09-community-guidelines:3:3",
+    "09-community-guidelines:2:4": "09-community-guidelines:3:4",
+    "10-admin-knowledge:2:0": "10-admin-knowledge:3:0",
+    "10-admin-knowledge:2:1": "10-admin-knowledge:3:1",
+    "10-admin-knowledge:2:2": "10-admin-knowledge:3:2",
+    "10-admin-knowledge:2:3": "10-admin-knowledge:3:3",
+    "10-admin-knowledge:2:4": "10-admin-knowledge:3:4",
+    "10-admin-knowledge:2:5": "10-admin-knowledge:3:5",
+    "11-faq:2:0": "11-faq:3:0",
+    "11-faq:2:1": "11-faq:3:1",
+    "11-faq:2:2": "11-faq:3:2",
+    "11-faq:2:3": "11-faq:3:3",
+    "11-faq:2:4": "11-faq:3:4",
+    "11-faq:2:5": "11-faq:3:5",
+    "11-faq:2:6": "11-faq:3:6"
+  },
+  "chunkConfig": {
+    "size": 1000,
+    "overlap": 150
+  }
+}
