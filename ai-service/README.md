@@ -871,3 +871,16 @@ uv run --offline python -m ai_service.orchestration.rag_answer_unit_evaluation -
 逐项记录候选、重排、选择、字符与提示预算、耗时及固定故障阶段；推理后才读事实标签，输出逐事实引文缺失位置及独立人工模板。引文存活不是语义覆盖或回答正确率；无公共事实标注题不计算拒答质量。未知预占、落盘不确定和进程中断没有自动恢复。
 
 本轮结果、管理员替换说明退步与下载证据仍被cap1排除的案例见[第27轮交接](../doc/customer-service-hybrid-round27-handoff.md)。生产策略未推广，人工仍pending，候选无自动GC。
+
+
+## 客服第28轮混合检索配额离线验证
+
+`rag_hybrid_cap_evaluation`只读第27轮冻结归档、报告、账本与63块语料，重建混合Top8及BGE顺序，对照每文档cap1/cap2，复用正式选择与1200/3000字符、16384提示字节预算。全部选择完成后才读取公共事实标签；不重算检索，不初始化模型客户端，不修改生产策略。
+
+```powershell
+uv run --offline python -m ai_service.orchestration.rag_hybrid_cap_evaluation --output ../tmp/rag-hybrid-cap-reproduction-01
+```
+
+输出限仓库tmp内新非链接目录，禁止覆盖；固定归档/计划摘要、原47份绑定及本轮输入漂移时失败关闭。CLI阻断常见socket连接；多文件输出非事务，失败残片不得冒充成功结果。完整审计查看comparison.json和input-integrity.json，summary.json只包含统计，reviews-template.json保持真人pending。
+
+本轮cap1精确重现90/90，最终完整引文114→120/130，但新增8项同时丢失2项，59题文档多样性下降；引文存活不是回答质量，已含等价依据的新增原段也不是新增语义覆盖。无新Chat/Embedding/BGE或服务调用。结果与下一轮建议见[第28轮交接](../doc/customer-service-hybrid-cap-round28-handoff.md)，不自动推广cap2或执行真实回答验证。
