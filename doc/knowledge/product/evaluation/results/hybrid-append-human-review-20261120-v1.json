@@ -1,0 +1,1670 @@
+{
+  "schemaVersion": "rag-hybrid-append-review/v1",
+  "status": "pending",
+  "reviewer": null,
+  "evidencePackageSha256": "8bd1fd765ebf95364f9873f1873505c546773dc0bf4c877c7a5a75fe4c7643ed",
+  "boundary": "真人复核待填写；代理语义复核另存。",
+  "cases": [
+    {
+      "id": "platform-account-001",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "platform-account-001:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "platform-account-001:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "platform-account-002",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "platform-account-002:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "platform-account-002:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "platform-account-003",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "platform-account-003:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "platform-account-003:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "platform-account-004",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "platform-account-004:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "platform-account-004:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "platform-account-005",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "platform-account-005:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "platform-account-006",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "platform-account-006:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "platform-account-007",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "platform-account-007:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "platform-account-008",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "platform-account-008:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "platform-account-008:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-001",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-001:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "app-generation-001:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-002",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-002:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-003",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-003:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "app-generation-003:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-004",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-004:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "app-generation-004:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-005",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-005:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "app-generation-005:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "app-generation-005:required:03",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-006",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-006:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-007",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-007:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-008",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-008:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "app-generation-008:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-009",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-009:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "app-generation-009:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-010",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-010:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-011",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-011:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-012",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-012:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "app-generation-012:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-013",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-013:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-014",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-014:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "app-generation-014:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-015",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-015:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "app-generation-015:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-016",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-016:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-017",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-017:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "app-generation-017:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-018",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-018:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "app-generation-018:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-019",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-019:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-020",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-020:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "app-generation-020:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-021",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-021:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "app-generation-021:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-022",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-022:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "app-generation-022:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-023",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-023:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "app-generation-023:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "app-generation-024",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "app-generation-024:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "app-generation-024:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "preview-history-001",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "preview-history-001:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "preview-history-002",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "preview-history-002:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "preview-history-002:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "preview-history-003",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "preview-history-003:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "preview-history-004",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "preview-history-004:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "preview-history-005",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "preview-history-005:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "preview-history-006",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "preview-history-006:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "preview-history-007",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "preview-history-007:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "preview-history-007:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "preview-history-008",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "preview-history-008:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "preview-history-009",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "preview-history-009:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "preview-history-010",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "preview-history-010:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "deployment-download-001",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "deployment-download-001:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "deployment-download-001:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "deployment-download-002",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "deployment-download-002:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "deployment-download-003",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "deployment-download-003:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "deployment-download-003:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "deployment-download-004",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "deployment-download-004:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "deployment-download-004:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "deployment-download-005",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "deployment-download-005:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "deployment-download-005:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "deployment-download-006",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "deployment-download-006:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "deployment-download-007",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "deployment-download-007:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "deployment-download-008",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "deployment-download-008:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "deployment-download-009",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "deployment-download-009:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "deployment-download-009:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "deployment-download-010",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "deployment-download-010:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "deployment-download-011",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "deployment-download-011:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "deployment-download-011:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "deployment-download-012",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "deployment-download-012:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "deployment-download-012:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "deployment-download-013",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "deployment-download-013:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "deployment-download-013:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "deployment-download-014",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "deployment-download-014:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "community-001",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "community-001:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "community-002",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "community-002:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "community-003",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "community-003:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "community-004",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "community-004:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "community-004:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "community-005",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "community-005:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "community-006",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "community-006:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "community-006:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "community-007",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "community-007:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "community-007:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "community-008",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "community-008:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "community-008:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "community-009",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "community-009:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "community-009:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "community-010",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "community-010:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "community-010:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "community-011",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "community-011:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "community-011:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "community-012",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "community-012:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "community-013",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "community-013:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "community-013:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "community-013:required:03",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "community-014",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "community-014:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "community-014:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "admin-knowledge-001",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "admin-knowledge-001:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "admin-knowledge-002",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "admin-knowledge-002:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "admin-knowledge-002:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "admin-knowledge-002:required:03",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "admin-knowledge-003",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "admin-knowledge-003:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "admin-knowledge-003:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "admin-knowledge-003:required:03",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "admin-knowledge-004",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "admin-knowledge-004:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "admin-knowledge-005",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "admin-knowledge-005:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "admin-knowledge-005:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "boundaries-safety-001",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "boundaries-safety-001:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "boundaries-safety-001:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "boundaries-safety-002",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "boundaries-safety-002:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "boundaries-safety-003",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "boundaries-safety-003:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "boundaries-safety-004",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "boundaries-safety-004:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "boundaries-safety-005",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "boundaries-safety-005:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "boundaries-safety-006",
+      "status": "pending",
+      "facts": [
+        {
+          "factId": "boundaries-safety-006:required:01",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        },
+        {
+          "factId": "boundaries-safety-006:required:02",
+          "semanticSupportByArm": {
+            "cap1": null,
+            "append1": null
+          },
+          "notes": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "id": "boundaries-safety-007",
+      "status": "pending",
+      "facts": [],
+      "notes": ""
+    },
+    {
+      "id": "boundaries-safety-008",
+      "status": "pending",
+      "facts": [],
+      "notes": ""
+    },
+    {
+      "id": "boundaries-safety-009",
+      "status": "pending",
+      "facts": [],
+      "notes": ""
+    },
+    {
+      "id": "boundaries-safety-010",
+      "status": "pending",
+      "facts": [],
+      "notes": ""
+    },
+    {
+      "id": "boundaries-safety-011",
+      "status": "pending",
+      "facts": [],
+      "notes": ""
+    },
+    {
+      "id": "boundaries-safety-012",
+      "status": "pending",
+      "facts": [],
+      "notes": ""
+    },
+    {
+      "id": "boundaries-safety-013",
+      "status": "pending",
+      "facts": [],
+      "notes": ""
+    },
+    {
+      "id": "boundaries-safety-014",
+      "status": "pending",
+      "facts": [],
+      "notes": ""
+    },
+    {
+      "id": "boundaries-safety-015",
+      "status": "pending",
+      "facts": [],
+      "notes": ""
+    }
+  ]
+}

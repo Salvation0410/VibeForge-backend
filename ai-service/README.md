@@ -895,3 +895,12 @@ uv run --offline python -m ai_service.orchestration.rag_hybrid_cap_evaluation --
 原始响应仅保存完整有界且UTF-8可解码的HTTP200结果，其他失败可能只有状态/固定码。responseModel只记录供应商自报的非空、可打印、最长128字符名称，不认证实际模型身份。计划不保存密钥或端点原文；未知预占与多文件落盘失败没有自动恢复。
 
 答案覆盖、上下文支持和实际引用支持分开评审；合法引用不证明语义正确，真人意见另存。本轮实际调用、收益与退步见[第29轮交接](../doc/customer-service-hybrid-answer-round29-handoff.md)。本轮已执行后不得直接重跑live，后续真实实验需另行冻结范围与总额度。
+
+
+## 客服第30轮保留基线追加证据的离线对照
+
+`rag_hybrid_append_evaluation`固定第28轮归档摘要及55项历史输入，逐值重建90题cap1，再按原BGE顺序最多追加一个未选块，每文档最多两块。实验内四块适配器沿用正式清洗、单块1200/总3000字符、16384 JSON字节预算，生产三块限制及最多三个引用协议不变；所有选择完成后才消费事实标签。
+
+在ai-service运行`uv run --offline python -m ai_service.orchestration.rag_hybrid_append_evaluation --output ../tmp/<新的输出目录>`。要求本地冻结的第28轮原comparison及绑定文件齐备；CLI和默认库调用屏蔽常见socket连接，不调用模型、服务或加载向量重算。只能写tmp内新目录，已有目录拒绝覆盖；多文件输出非事务，失败残片不能冒充成功。comparison记录完整阶段和原上下文保留，summary为统计，input-integrity记录运行绑定，reviews-template为真人pending模板。
+
+正式结果完整引文114→122/130，新增8、丢失0，90题原上下文均保留，提示字节增加31.43%。追加段含9题代理判定偏题，8项新增引文中5项已有等价支持，不代表回答质量提升；下载证据采用问题仍未解决。本轮新Chat/Embedding/BGE及生产写入为0，未推广四块策略。测试、审计、材料及下一轮建议见[第30轮交接](../doc/customer-service-hybrid-append-round30-handoff.md)。
