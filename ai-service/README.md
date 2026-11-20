@@ -832,3 +832,14 @@ uv run --offline python -m ai_service.orchestration.rag_qa_linked_cap_evaluation
 需保留本机第23轮report与authorization账本，不能删除账本或重跑真实实验补输入。仅写仓库tmp下新非链接目录，拒绝覆盖；多文件输出非事务，残缺包不能视为成功。CLI阻断常见Python socket入口，非系统级网络隔离。输出comparison、summary、reviews-template和input-integrity；人工模板为独立 `rag-qa-linked-cap-review/v1`，不直接使用旧回答盲评导入器。
 
 本轮引文111→118/130，66题改变且62题文档数减少；保留可能的部分措辞退步，未生成答案或推广生产。Chat/Embedding/BGE/INDEX均0，真人pending。详细结论、复核范围及未解决项见 [第24轮交接](../doc/customer-service-qa-linked-cap-round24-handoff.md)。
+
+
+## 客服第25轮五题真实回答验证入口
+
+`rag_qa_linked_answer_experiment` 是独立实验，读取第24轮冻结的5题cap1/cap2最终证据，固定顺序最多10次Chat。复用正式客服提示、预算及严格回答/引用解析，HTTP直接发送且无自动重试、不重定向，不运行新Embedding/BGE或生产写入。
+
+必须先显式 `--prepare` 绑定输入/配置/实现，再 `--live --plan-sha256 <摘要> --authorization "按照建议继续执行下一轮验证"`；参数只记录本轮可信用户授权，不能替代未来新调用的真实批准。固定新账本位于 `tmp/rag-qa-linked-answer-20261120/authorization.jsonl`，发送前flush/fsync，失败和取消占额，旧账本或输出不覆盖，首次异常停止，禁止换目录恢复。
+
+预占持久化不确定标为unknown且不发送HTTP；确认占额次数不是供应商精确计费证明。每槽位记录输入摘要、预占/发送状态、HTTP状态、结束原因、耗时和白名单用量，原始响应仅留tmp。响应上限2MiB且须stop结束。prepare不联网，不初始化模型SDK；live直接实验进程调用现有Chat配置，不代表Spring/Python双服务、Milvus或权威快照验收。
+
+详细范围、实际结果和人工复核入口见 [第25轮交接](../doc/customer-service-qa-linked-answer-round25-handoff.md)。真人复核模板独立保存，合法引用不证明语义支持，单次5题对照不证明稳定质量收益。

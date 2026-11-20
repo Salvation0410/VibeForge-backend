@@ -1,0 +1,119 @@
+{
+  "schemaVersion": "rag-qa-linked-answer-plan/v1",
+  "planSha256": "484a9ab5f3c368982f3c73f4d737bf7b51792010df10bea85167f310c11642c7",
+  "config": {
+    "model": "deepseek-chat",
+    "temperature": 0.1,
+    "maxTokens": 8192,
+    "timeoutSeconds": 60.0,
+    "responseFormat": "text",
+    "promptBytes": 16384,
+    "contextWindowTokens": 200000,
+    "overheadTokens": 4096,
+    "endpointSha256": "5abe20d7d3d56ed5cd86f95d28d3e712ce59ab9161922170c78a4cfc18eaaf0f",
+    "automaticRetries": 0,
+    "chatLimit": 10,
+    "embeddingCalls": 0,
+    "bgeCalls": 0,
+    "productionWrites": 0
+  },
+  "bindings": {
+    "tmp/rag-qa-linked-cap-20261120/run-final/comparison.json": "6161c703be46ad0f004279784edf3d9110725ca18d96df6c36a1c190d501cc3a",
+    "tmp/rag-qa-linked-cap-20261120/run-final/input-integrity.json": "a40ed0871f1ede7c161ddc0f280b861429e5316e5c59be92572096a84f28a08c",
+    "doc/knowledge/product/evaluation/results/qa-linked-cap-selection-20261120-v1.json": "24341db820dad9dfa75c1d72d071f8b5faea9631e65a429ad0675d228aa1bdfc",
+    "doc/knowledge/product/evaluation/rubric-20261118-v1.json": "51bb77aeab3c8bd1635aa3bd23dcfcecf4ace0ded72bb42aef3098ddb9edae68",
+    "ai-service/src/ai_service/orchestration/rag_qa_linked_answer_experiment.py": "278a4781b702b33fa3158c683f186fda418474378bf505f6576dd04602664757",
+    "ai-service/tests/test_rag_qa_linked_answer_experiment.py": "6ff3ea68cbafe200ffcf90332b23e6bf7fe2e58b493ab40b0b3034de212922f9",
+    "docs/superpowers/plans/2026-11-20-rag-qa-linked-answer-validation.md": "261483716cc16d8498413338b16af82507c029dcbb0bff0c35dca51480ee7aac",
+    "ai-service/src/ai_service/config.py": "7386226b853cffa9e4ca1d2c8a57f30d5f75a3054407850af2315917ea36af1a",
+    "ai-service/src/ai_service/models/base.py": "d7f841f35ff62d8abf126820508162b1cf626c38164d07683f5ecec4886eb023",
+    "ai-service/src/ai_service/models/openai_compatible.py": "706d116303e16e501b3137452e4088f06111308babe15eaea06ab5d8b6853f64",
+    "ai-service/src/ai_service/models/input_review.py": "1238b8356d45f97afaa23ed632e89589451727caff9a89ed262f5ab518af9e02",
+    "ai-service/src/ai_service/prompts/__init__.py": "d3f4664d89db4506a5bc65a30b44746aafc54bd45f04f159a2dfda31b1c62517",
+    "ai-service/src/ai_service/prompts/customer_service.py": "f689650c3541075ae93d967b27bb4af20db094bd817538ff94bd0c38cc32a30c",
+    "ai-service/src/ai_service/orchestration/rag_qa_linked_budget.py": "4b73b2419644454237f07213a531d8be718391ce219fb923e19eaa40fd2f2a78",
+    "ai-service/src/ai_service/orchestration/rag_qa_linked_corpus.py": "c26c4bf11c02915ce285a676f628c3c144987e20913305b3381ba15339ba52b7",
+    "tmp/rag-qa-linked-20261120/live/report.json": "2fca0c8dcaff6c48be185488e97c350679ebbb75b4a40838ffc198d30b3ac1fb",
+    "tmp/rag-qa-linked-20261120/authorization.jsonl": "fe4f69f22ea406a87efc6bc2abbb3947c6214fef5f589ff90c942d48fc49a805",
+    "doc/knowledge/product/manifest.json": "837b694bbc6846ce9dc0d96e5257383c97abb4fded0aa7d150a592bcbb01e175",
+    "doc/knowledge/product/evaluation/dataset.json": "2aa97999d3187964472732596c74d593a2b6e5bdbe1cb4663a930c57abcb87d8",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/associations.json": "2ea9f0e7937976516405c1180c51c590f9e8592b7a02424ba5809e91d06f2e84",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/manifest.json": "738aa71190bc4ea87d18798ddd1c53d66221e2aa86f2c3d0f84047fba9222133",
+    "ai-service/uv.lock": "21139139838c0a6bf79b8c4b00ce57db7805bb10960d00e89ce106ec2e4017de",
+    "docs/superpowers/plans/2026-11-20-rag-qa-linked-corpus.md": "bb8cda23361f201d2da7c64362192e1ee3487a558390b0105c4385a3274d0266",
+    "doc/knowledge/product/documents/01-platform-account.md": "4d1349e34637e48b9eb2bcc989b3ffd27bacb55b1beee5b3e16a77fdafd62d3c",
+    "doc/knowledge/product/documents/02-app-generation.md": "cd44a128f9f4d43c616e402704804d68987bc5eff2dc8bbe700eb93a235e5a47",
+    "doc/knowledge/product/documents/03-generation-requirements.md": "c6dcb046cc78dcdc05de3819c8571c85d6aa601611cc6dc1a24527088cfad803",
+    "doc/knowledge/product/documents/04-generation-types.md": "4878524fc969c37768b82ea28fe4677089c97d6b2b6bba3e1e5d99772f828471",
+    "doc/knowledge/product/documents/05-images-preservation.md": "18581fa60a8c558782c7d04ec49a244779cd7af5fe30e8692a903e5810c01ae5",
+    "doc/knowledge/product/documents/06-preview-history.md": "2f338ca62725adc4114c067408f365a3217b4a2db6a8f2dacc54cbea4d66314e",
+    "doc/knowledge/product/documents/07-deployment-download.md": "bcc6b4845419722cd4e1a536e7c772a275b0443c9d694f770feef53c7f20e2e6",
+    "doc/knowledge/product/documents/08-community-features.md": "b6413180929bf749eabec0f6c90e681afd6f4f50681a0c373b67d415210f4e25",
+    "doc/knowledge/product/documents/09-community-guidelines.md": "f78f773742f50d9b87c97a46bbe8fd9419025b210112a3228fdbe8b0c8dd3d9f",
+    "doc/knowledge/product/documents/10-admin-knowledge.md": "7d597b54aa80d55cae5d42feba59da6edf54505b697375ebd73da8c176075981",
+    "doc/knowledge/product/documents/11-faq.md": "e44b5c0fb6a8e07721fe4b780a0a9c28a421235b70569d90438f85b97c7ea6c9",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/documents/01-platform-account.md": "b6aa011a40d688d41fce582a95d23d4abc290e610aaacef6f6d7b930024e542c",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/documents/02-app-generation.md": "7cc950aa2b20d881be38d8b75fb15a61a6d6d9bae444a7ea336737386e3029f6",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/documents/03-generation-requirements.md": "22a06ac52b23f90b5bc487c02efaf91c585fefdff55594bd899749916215edeb",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/documents/04-generation-types.md": "909d33f0e9235d9500e2dbfb41838a386664daad7dbc164a830e8a1f3601315a",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/documents/05-images-preservation.md": "85f39be5e6f91cdffe12c5194cd11faefe08fc39a0a735c17ed9c9f53bda2ca5",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/documents/06-preview-history.md": "c0e49bc68eab2ed2b7761e63755e258cf70651a6c223e78eadc4d496ef8d8da5",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/documents/07-deployment-download.md": "9b20c00b1657828586c4e118f92f5a67b57e3dd8f3c727fc0980bb1d303b6dd7",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/documents/08-community-features.md": "cafd87f5805a17b2f0f3022c2477641afe3414b21ca66dc3225c0b8a28ed8115",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/documents/09-community-guidelines.md": "ed5ba61d63e683eda1934024c2716184bbbc865b5e8311fe2031579015ee0bbf",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/documents/10-admin-knowledge.md": "6674aa09c302d2e027588a6cae75cf6007e96b3fb7e2eb610e0f461c5844c6f2",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/documents/11-faq.md": "e44b5c0fb6a8e07721fe4b780a0a9c28a421235b70569d90438f85b97c7ea6c9",
+    "ai-service/src/ai_service/orchestration/rag_qa_linked_experiment.py": "bdd4631734ac8598a388331f4cb39b5fa84737f0bf402945c370a7145ae5ceba",
+    "ai-service/src/ai_service/orchestration/document_etl.py": "b1fd61d0e041b457101d9b3847e6cfaf30d9b8f59fb9193eb347860fed2d3299",
+    "ai-service/src/ai_service/orchestration/customer_service_rag.py": "6376b3f1f9e818887dc379627f01c5c608d8ef94a380891887b937f0fb6380d7",
+    "ai-service/src/ai_service/orchestration/rag_rerank_experiment.py": "9533773ee47b8b5f47bb6308726d21c8536861e18104d83300d8e800e036564f",
+    "ai-service/src/ai_service/models/reranker.py": "0fd27d6414926e512c7b601ad51be06be193dfb30e593169962c3a1f25102cfa",
+    "doc/knowledge/product/experiments/qa-linked-20261120-v1/live-plan.json": "58ff9f63bf40d6f8490dfd929728193e42165e3b12b8a31494610526f9f75de7",
+    "doc/knowledge/product/evaluation/results/qa-linked-retrieval-20261120-v1.json": "de6cca620c9b1382710605ce1950c0059a879ded720ab218e46daa2b234cb432",
+    "ai-service/src/ai_service/orchestration/rag_qa_linked_cap_evaluation.py": "f84c3e1659519505b88b2fd5fae9fe41e343dbc5b9620ce8fa394786ae744482",
+    "docs/superpowers/plans/2026-11-20-rag-qa-linked-cap-selection.md": "0a23481dbc435a293c605cb6481784c828751d31ce65194980c8b5bf82472bf5",
+    "ai-service/src/ai_service/orchestration/rag_answer_first_evaluation.py": "cd104c46104ef2126d8de2e6e48dd536fa4690466d78294241a9e5302ac306e3"
+  },
+  "slots": [
+    {
+      "key": "app-generation-005:cap1",
+      "inputSha256": "0bafe093bdea1f6f6f71a4e526fcbb4e42a7fe12760afca7a8f4d8f8aeddb4d9"
+    },
+    {
+      "key": "app-generation-005:cap2",
+      "inputSha256": "192a165bf0aca32636c7c8fb4a4db5b62ce24ad7c60dbaea8466f559fa24088d"
+    },
+    {
+      "key": "app-generation-017:cap2",
+      "inputSha256": "20d6fab9b81c125367bc9f66381636dde90bea1d12113a6a0bdf1298f02756d0"
+    },
+    {
+      "key": "app-generation-017:cap1",
+      "inputSha256": "e43ab4a8629b8b2a211403d2396b863f7006b1567c9898f9a232a8c077a96ae1"
+    },
+    {
+      "key": "deployment-download-003:cap1",
+      "inputSha256": "880b3ae90995c30b07e8d0bc8e70037a8086e68ac3e8a8a22099ffd9b8501aad"
+    },
+    {
+      "key": "deployment-download-003:cap2",
+      "inputSha256": "022e99a2c5123fed0c4639dc31563776b7b8ece8c7b4efc8ad28cf5e1ed8b462"
+    },
+    {
+      "key": "deployment-download-013:cap2",
+      "inputSha256": "e7378ee3b99f9fb0f3dea3394c72baca21bbc79f0dc87b882b140925b4fe9e91"
+    },
+    {
+      "key": "deployment-download-013:cap1",
+      "inputSha256": "e7c2dd4692569e3bd8b73b68bfc953bdcb32fa1548f39a3b8647805f7e8d7b9b"
+    },
+    {
+      "key": "community-007:cap1",
+      "inputSha256": "b6615be986926cfa67bfe110b9baeb9ed9df7182a82cc5abc5464efd25467a70"
+    },
+    {
+      "key": "community-007:cap2",
+      "inputSha256": "272e278adc719a889a39636b96b4ad494647bf68992396c814ac155574f2e460"
+    }
+  ]
+}
