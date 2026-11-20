@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "rag-answer-unit-rules/v1",
+  "candidateVersion": "answer-unit-20261120-v1",
+  "sourceManifestSha256": "738aa71190bc4ea87d18798ddd1c53d66221e2aa86f2c3d0f84047fba9222133",
+  "humanReview": "pending",
+  "documents": [
+    {"documentId": "04-generation-types", "groups": [{"title": "三类生成方式与适用边界【当前功能与推荐规范】", "headings": ["HTML 单文件【当前功能与推荐规范】", "MULTI_FILE 多文件【当前功能与推荐规范】", "VUE_PROJECT Vue 工程【当前功能与推荐规范】"]}]},
+    {"documentId": "07-deployment-download", "groups": [{"title": "部署前提、产物与失败排查【当前功能与推荐规范】", "headings": ["部署前提与步骤【当前功能】", "三类产物【当前功能】", "失败排查【推荐规范】"]}]},
+    {"documentId": "08-community-features", "groups": [{"title": "发帖、审核状态与查看权限【当前功能】", "headings": ["发布帖子【当前功能】", "我的帖子与他人主页【当前功能】"]}]}
+  ]
+}
