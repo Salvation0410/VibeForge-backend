@@ -10,7 +10,7 @@ from typing import Any, TYPE_CHECKING, TypedDict
 from ai_service.models.tool_contract import validate_vue_tool_call
 from ai_service.orchestration.routing import _raise_for_incomplete_model_turn
 from ai_service.orchestration.repair_progress import vue_snapshot_fingerprint
-from ai_service.orchestration.vue_read_stall import repair_reads_stalled
+from ai_service.orchestration.vue_read_stall import repair_reads_stalled, read_repetition_stats, phase_has_successful_write
 from ai_service.orchestration.vue_budget import (
     REPAIR_READ_BATCH_LIMIT, REPAIR_TOOL_RESERVE, budget_counts, is_complete_file_read,
 )
@@ -45,6 +45,8 @@ class VueLoopProgress(TypedDict):
     write_fingerprints: list[str]
     successful_write: bool
     read_only_batches: int
+    prewrite_warning: bool
+    prewrite_warning_ordinal: int
 
 
 class VueLoopState(RepairState, total=False):
@@ -64,6 +66,7 @@ def initial_progress(context: dict[str, Any], prefix: str, started_at: str) -> V
         "call_id_prefix": prefix, "started_at": started_at,
         "batch_has_successful_write": False, "write_fingerprints": [],
         "successful_write": False, "read_only_batches": 0,
+        "prewrite_warning": False, "prewrite_warning_ordinal": 0,
     }
 
 
@@ -74,17 +77,18 @@ def create_vue_loop_nodes(
     """生成和修复仅在模型入口不同，批次规则和工具执行路径完全共用。"""
     def log_budget(state, loop, *, reason, requested_count=0):
         counts = budget_counts(state["vue_tool_results"], loop["call_id_prefix"])
+        repeats = read_repetition_stats(state["vue_tool_results"], loop["call_id_prefix"])
         # 终态摘要可能停在上个已完成节点，失败现场必须使用子图真实累计数。
-        log = logger.warning if reason == "TOOL_BUDGET_EXHAUSTED" else logger.info
+        log = logger.warning if reason in {"TOOL_BUDGET_EXHAUSTED", "PREWRITE_READ_STALLED"} else logger.info
         log("Vue tool budget request_id=%s node=%s reason=%s repair_count=%d tool_count=%d "
             "read_count=%d write_count=%d other_count=%d phase_tool_count=%d "
             "phase_read_count=%d phase_write_count=%d phase_other_count=%d "
-            "remaining=%d requested_count=%d read_batches=%d",
+            "remaining=%d requested_count=%d read_batches=%d repeated_read_count=%d",
             state["request_id"], node, reason, state.get("repair_count", 0), state.get("tool_call_count", 0),
             counts["read_count"], counts["write_count"], counts["other_count"], counts["phase_tool_count"],
             counts["phase_read_count"], counts["phase_write_count"], counts["phase_other_count"],
             max(0, workflow.settings.vue_max_tool_calls - state.get("tool_call_count", 0)),
-            requested_count, loop.get("read_only_batches", 0))
+            requested_count, loop.get("read_only_batches", 0), repeats["total"])
 
     async def model_turn(state: VueLoopState):
         workflow._raise_if_cancelled(thread_id)
@@ -173,6 +177,9 @@ def create_vue_loop_nodes(
         if planning:
             loop["next_step"] = "model_turn"
         elif not calls:
+            if repair_read_guard and loop.get("prewrite_warning", False) and not loop.get("successful_write", False):
+                log_budget(state, loop, reason="PREWRITE_READ_STALLED")
+                raise ValueError("VUE_REPAIR_READ_STALLED: 重复读取纠偏后未成功写入，不能宣告修复完成")
             if not loop["image_used"]:
                 if loop["image_retries"] >= 2:
                     raise ValueError("VUE_IMAGE_USAGE_MISSING: searched images were not written into the page")
@@ -242,6 +249,27 @@ def create_vue_loop_nodes(
         if loop["tool_cursor"] < len(loop["pending_tools"]):
             loop["next_step"] = "execute_tool"
         else:
+            batch = loop["pending_tools"]
+            # 只在完整纯读批次结束后纠偏，不丢弃已请求工具，也不将旧候选直接交回验证。
+            prewrite = repair_read_guard and batch and all(call["name"] == "file_read" for call in batch)
+            if prewrite and not loop.get("successful_write", False) and not phase_has_successful_write(
+                state["vue_tool_results"], loop["call_id_prefix"],
+            ):
+                repeated = read_repetition_stats(state["vue_tool_results"], loop["call_id_prefix"])["consecutive"]
+                if repeated >= 4:
+                    if not loop.get("prewrite_warning", False):
+                        loop.update(prewrite_warning=True, prewrite_warning_ordinal=loop["ordinal"])
+                        log_budget(state, loop, reason="PREWRITE_READ_WARNING")
+                        context = {**state["context"], "repairReadFeedback": (
+                            "本阶段已连续重复读取相同完整源码。请依据当前可见的最新结果修复具体问题，"
+                            "核对事件发出方、中间转发、父级监听和状态更新的整条调用链；"
+                            "不要为确认重复读取。确实缺少必要依赖时才读取新文件。修复后交回验证。"
+                        )}
+                        loop.update(pending_tools=[], tool_cursor=0, next_step="model_turn")
+                        return {"vue_loop": loop, "context": context}
+                    if loop["ordinal"] - loop.get("prewrite_warning_ordinal", 0) >= 4:
+                        log_budget(state, loop, reason="PREWRITE_READ_STALLED")
+                        raise ValueError("VUE_REPAIR_READ_STALLED: 修复持续重复读取且尚未成功写入，本轮已停止")
             if repair_budget_guard:
                 batch = loop["pending_tools"]
                 results = state["vue_tool_results"][-len(batch):] if batch else []

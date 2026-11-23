@@ -167,6 +167,125 @@ function analyzeFiles(files, compiler, partial = false) {
   return result
 }
 
+// 事件分析独立于 props；默认属性透传允许 DOM 自定义事件，不能仅因未声明 emits 就硬拒绝。
+function eventContract(description, content, compiler) {
+  if (!description?.template || description.required === null ||
+      /\$attrs|\$emit|\b(useAttrs|useSlots|getCurrentInstance|defineModel)\b/.test(content)) return null
+  let events = null, emitter = null, closed = false, supported = true
+  for (const statement of description.scriptAst) {
+    if (statement.type === 'ImportDeclaration' && statement.specifiers.some(s =>
+      ['defineEmits', 'defineOptions'].includes(s.local.name))) return null
+    const declarations = statement.type === 'VariableDeclaration' ? statement.declarations : []
+    for (const call of statement.type === 'ExpressionStatement' ? [statement.expression] : declarations.map(d => d.init)) {
+      if (call?.type !== 'CallExpression' || call.callee.type !== 'Identifier') continue
+      if (call.callee.name === 'defineEmits') {
+        const array = call.arguments[0]
+        if (events || call.typeParameters || call.typeArguments || call.arguments.length !== 1 ||
+            array?.type !== 'ArrayExpression' || !array.elements.every(e => e?.type === 'StringLiteral' && identifier(e.value))) return null
+        events = new Set(array.elements.map(e => normalizeProp(e.value)))
+        const declaration = declarations.find(d => d.init === call)
+        if (declaration && declaration.id.type !== 'Identifier') return null
+        emitter = declaration?.id.name
+      }
+      if (call.callee.name === 'defineOptions') {
+        const options = fields(call.arguments[0])
+        if (!options || options.size !== 1 || options.get('inheritAttrs')?.type !== 'BooleanLiteral') return null
+        closed = options.get('inheritAttrs').value === false
+      }
+    }
+  }
+  if (!events) return null
+  function inspect(node, parent, key) {
+    if (!node || typeof node !== 'object') return
+    if (node.type === 'Identifier' && node.name === emitter) {
+      const declaration = parent?.type === 'VariableDeclarator' && key === 'id'
+      const call = parent?.type === 'CallExpression' && key === 'callee'
+      if (!declaration && !call) supported = false
+      if (call && (parent.arguments[0]?.type !== 'StringLiteral' || !events.has(normalizeProp(parent.arguments[0].value)))) supported = false
+    }
+    for (const [k, value] of Object.entries(node)) {
+      if (['loc', 'start', 'end', 'comments'].includes(k)) continue
+      if (Array.isArray(value)) value.forEach(child => inspect(child, node, k))
+      else if (value && typeof value === 'object') inspect(value, node, k)
+    }
+  }
+  description.scriptAst.forEach(node => inspect(node))
+  function visit(node) {
+    if (node?.type === 5 && emitter) {
+      try { inspect(compiler.babelParse(node.content.content, { sourceType: 'module', plugins: ['typescript'] })) }
+      catch { supported = false }
+    }
+    const props = node?.props || []
+    for (const p of props) {
+      if (p.type !== 7) continue
+      if ((['bind', 'on'].includes(p.name) && (!p.arg || !p.arg.isStatic)) ||
+          !['if', 'else', 'else-if', 'for', 'show', 'on', 'model', 'bind', 'once', 'memo', 'text'].includes(p.name)) supported = false
+      if (p.exp?.content && emitter && !['for', 'slot'].includes(p.name)) {
+        try { inspect(compiler.babelParse(p.exp.content, { sourceType: 'module', plugins: ['typescript'] })) }
+        catch { supported = false }
+      }
+    }
+    for (const child of node?.children || []) visit(child)
+  }
+  visit(description.template)
+  return supported ? { events, closed } : null
+}
+
+function analyzeEvents(files, compiler, partial = false) {
+  const result = { version: 1, status: 'ok', checkedUsages: 0, skippedUsages: 0,
+    truncated: Boolean(partial), reason: 'NONE', issues: [], advisories: [] }
+  const skip = () => ({ ...result, reason: 'INCOMPLETE', truncated: true })
+  if (partial || files.length > LIMITS.files) return skip()
+  const descriptions = new Map()
+  let total = 0
+  for (const file of files) {
+    if (!file || typeof file.path !== 'string' || file.path.length > 180 || /[\x00-\x1f\x7f:\\]/.test(file.path) ||
+        path.posix.isAbsolute(file.path) || file.path.split('/').includes('..') || !file.path.endsWith('.vue') ||
+        descriptions.has(file.path) || file.truncated || typeof file.content !== 'string' ||
+        file.content.length > LIMITS.chars || (total += file.content.length) > LIMITS.totalChars) return skip()
+    const description = describe(file, compiler)
+    descriptions.set(file.path, { ...description, contract: eventContract(description, file.content, compiler) })
+  }
+  // 原生事件和 v-model 不在本期硬判定范围；未消费的已声明事件本身也不构成错误。
+  const native = new Set(('click dblclick auxclick contextmenu input change submit reset focus blur focusin focusout ' +
+    'keydown keyup keypress mousedown mouseup mousemove mouseenter mouseleave mouseover mouseout wheel scroll load error ' +
+    'touchstart touchend touchmove touchcancel pointerdown pointerup pointermove pointerenter pointerleave pointerover pointerout pointercancel ' +
+    'drag dragstart dragend dragenter dragleave dragover drop animationstart animationend animationiteration transitionend ' +
+    'copy paste cut compositionstart compositionend compositionupdate beforeinput invalid resize').split(' '))
+  for (const [file, description] of descriptions) {
+    const aliases = new Map()
+    for (const [name, target] of description.imports || []) {
+      for (const tag of [name, kebab(name)]) aliases.set(tag, aliases.has(tag) && aliases.get(tag) !== target ? null : target)
+    }
+    function visit(node, scoped = false) {
+      if (!node) return
+      const props = node.props || []
+      scoped ||= props.some(p => p.type === 7 && ['for', 'slot', 'pre'].includes(p.name))
+      if (node.type === 1 && node.tagType === 1) {
+        const contract = descriptions.get(aliases.get(node.tag))?.contract
+        const listeners = props.filter(p => p.type === 7 && p.name === 'on')
+        const uncertain = scoped || !contract || node.tag.length > 80 || props.some(p => p.type === 7 &&
+          (p.name === 'model' || (['on', 'bind'].includes(p.name) && (!p.arg || !p.arg.isStatic))))
+        if (uncertain) result.skippedUsages++
+        else {
+          result.checkedUsages++
+          for (const listener of listeners) {
+            const event = listener.arg.content
+            if (!identifier(event) || native.has(event.toLowerCase()) || /^vue:|^update:/.test(event) ||
+                contract.events.has(normalizeProp(event))) continue
+            const evidence = contract.closed ? result.issues : result.advisories
+            if (evidence.length < LIMITS.issues) evidence.push({ file, component: node.tag, event })
+          }
+        }
+      }
+      for (const child of node.children || []) visit(child, scoped)
+    }
+    visit(description.template)
+  }
+  if (result.issues.length) result.status = 'failed'
+  return result
+}
+
 function collectFiles(root) {
   if (fs.lstatSync(root).isSymbolicLink()) throw Error('Symbolic root')
   root = fs.realpathSync(root)
@@ -395,10 +514,11 @@ if (require.main === module) {
     const compiler = input.files.length ? loadCompiler(root) : {}
     const anchors = process.argv[3] === '--anchors'
     const documentContent = anchors ? collectDocument(root) : null
-    const result = anchors ? analyzeAnchors(input.files, compiler, input.truncated, documentContent,
+    const result = process.argv[3] === '--events' ? analyzeEvents(input.files, compiler, input.truncated)
+      : anchors ? analyzeAnchors(input.files, compiler, input.truncated, documentContent,
       staticBootstrap(root, compiler, documentContent))
       : analyzeFiles(input.files, compiler, input.truncated)
-    if (!anchors) result.skippedFiles += input.skippedFiles
+    if (!anchors && process.argv[3] !== '--events') result.skippedFiles += input.skippedFiles
     process.stdout.write(JSON.stringify(result))
   } catch {
     // 不返回异常正文，路径、源码和供应商数据不能经构建错误泄露。
@@ -406,4 +526,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { analyzeFiles, analyzeAnchors, collectFiles, collectDocument, staticBootstrap, loadCompiler, LIMITS }
+module.exports = { analyzeFiles, analyzeAnchors, analyzeEvents, collectFiles, collectDocument, staticBootstrap, loadCompiler, LIMITS }

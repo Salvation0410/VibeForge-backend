@@ -13,6 +13,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from ai_service.models.review_diagnostics import safe_review_diagnostics
+from ai_service.models.verification_diagnostics import safe_verification_history
 from ai_service.models.preparation_diagnostics import safe_preparation_diagnostics
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,7 @@ STATUS_FIELDS = frozenset(
         "toolCallCount",
         "preparation_diagnostics",
         "review_diagnostics",
+        "verification_history",
     }
 )
 REQUIRED_STATUS_FIELDS = frozenset(
@@ -53,6 +55,7 @@ STATUS_INDEX_SQL = """
 CREATE INDEX IF NOT EXISTS idx_ai_workflow_status_expires_at
 ON ai_workflow_status (expires_at)
 """
+# 历史只由验证子图投影；父图后续摘要缺字段时保留它，不能用整份 JSON 替换将其抹掉。
 STATUS_UPSERT_SQL = """
 INSERT INTO ai_workflow_status (
     thread_id, app_id, request_id, code_gen_type, node, quality_passed,
@@ -66,7 +69,11 @@ ON CONFLICT (thread_id) DO UPDATE SET
     quality_passed = EXCLUDED.quality_passed,
     repair_count = EXCLUDED.repair_count,
     tool_call_count = EXCLUDED.tool_call_count,
-    status_payload = EXCLUDED.status_payload,
+    status_payload = EXCLUDED.status_payload || CASE
+        WHEN NOT (EXCLUDED.status_payload ? 'verification_history')
+            AND ai_workflow_status.status_payload ? 'verification_history'
+        THEN jsonb_build_object('verification_history', ai_workflow_status.status_payload->'verification_history')
+        ELSE '{}'::jsonb END,
     updated_at = now(),
     expires_at = EXCLUDED.expires_at
 """
@@ -287,4 +294,7 @@ class PostgresCheckpoint:
         review = safe_review_diagnostics(state.get("review_diagnostics"))
         if review is not None:
             normalized["review_diagnostics"] = review
+        history = safe_verification_history(state.get("verification_history"))
+        if history is not None:
+            normalized["verification_history"] = history
         return normalized

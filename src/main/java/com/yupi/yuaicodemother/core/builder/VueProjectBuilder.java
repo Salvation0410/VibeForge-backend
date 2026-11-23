@@ -215,18 +215,28 @@ public class VueProjectBuilder {
         }
         if (activeBuild.cancelled()) return cancelledBuild();
         VueBuildResult contract;
-        boolean checkingAnchors = false;
+        String checkStage = "props";
         try {
             contract = VueComponentContractCheck.verify(projectDir, commandRunner);
+            List<String> checkSummaries = new ArrayList<>();
+            checkSummaries.add(contract.message());
             if (contract.built() && !activeBuild.cancelled()) {
-                // 仅在编译、dist 和必填属性检查成功后检查可确定的静态链接。
-                checkingAnchors = true;
-                contract = VueComponentContractCheck.verifyAnchors(projectDir, commandRunner);
+                checkStage = "events";
+                contract = VueComponentContractCheck.verifyEvents(projectDir, commandRunner);
+                checkSummaries.add(contract.message());
             }
+            if (contract.built() && !activeBuild.cancelled()) {
+                // 仅在前置检查成功后检查静态链接，不能以最后一项覆盖事件提示和属性检查范围。
+                checkStage = "anchors";
+                contract = VueComponentContractCheck.verifyAnchors(projectDir, commandRunner);
+                checkSummaries.add(contract.message());
+            }
+            if (contract.built()) contract = new VueBuildResult(true, "", String.join("；", checkSummaries));
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             return activeBuild.cancelled() ? cancelledBuild()
-                    : checkingAnchors ? VueAnchorCheck.unavailable()
+                    : checkStage.equals("anchors") ? VueAnchorCheck.unavailable()
+                    : checkStage.equals("events") ? VueEventCheck.unavailable()
                     : VueBuildResult.failure("VUE_COMPONENT_CHECK_UNAVAILABLE", "Vue 组件检查被中断");
         }
         if (activeBuild.cancelled()) return cancelledBuild();

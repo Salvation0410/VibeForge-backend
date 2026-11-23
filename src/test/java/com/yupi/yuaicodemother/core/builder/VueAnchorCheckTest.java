@@ -53,14 +53,14 @@ class VueAnchorCheckTest {
         var builder = new VueProjectBuilder((cwd, command, timeout) -> {
             commands.add(command);
             return new VueProjectBuilder.CommandResult(0, command.getFirst().equals("node")
-                    ? command.contains("--anchors") ? missing() : COMPONENT_OK : "ok", "");
+                    ? command.contains("--anchors") ? missing() : command.contains("--events") ? VueEventCheckTest.OK : COMPONENT_OK : "ok", "");
         });
         assertEquals("VUE_ANCHOR_TARGET_MISSING", builder.buildProjectDetailed(directory.toString()).errorCode());
-        assertEquals(4, commands.size());
+        assertEquals(5, commands.size());
         assertTrue(commands.getLast().contains("--anchors"));
         // 已有 dist 的兼容快路径仍不重检，不能冒充重新验收成功。
         assertTrue(builder.ensureProjectBuiltDetailed(directory.toString()).built());
-        assertEquals(4, commands.size());
+        assertEquals(5, commands.size());
     }
 
     @Test
@@ -72,7 +72,8 @@ class VueAnchorCheckTest {
                 checking.countDown();
                 new CountDownLatch(1).await();
             }
-            return new VueProjectBuilder.CommandResult(0, command.getFirst().equals("node") ? COMPONENT_OK : "ok", "");
+            return new VueProjectBuilder.CommandResult(0, command.getFirst().equals("node")
+                    ? command.contains("--events") ? VueEventCheckTest.OK : COMPONENT_OK : "ok", "");
         });
         var task = CompletableFuture.supplyAsync(() -> builder.buildProjectDetailed(directory.toString(), "anchor-cancel"));
         assertTrue(checking.await(2, TimeUnit.SECONDS));

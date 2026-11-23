@@ -27,7 +27,7 @@ def build_vue_tool_subgraph(workflow, emitter, thread_id, terminal, *, node="vue
         count = state.get("repair_count", 0) + (node == "repair" and not legacy)
         if node == "repair" and not legacy:
             # 新阶段重置了规划和重试计数，模型反馈也须同步清除；工具历史与业务约束仍完整保留。
-            for key in ("planningFeedback", "batchRetryFeedback", "vueFormatFeedback"):
+            for key in ("planningFeedback", "batchRetryFeedback", "vueFormatFeedback", "repairReadFeedback"):
                 context.pop(key, None)
             context.update(codeGenType=state["code_gen_type"], repairCount=count,
                            validation=state.get("validation"), build=state.get("build"))
@@ -49,7 +49,8 @@ def build_vue_tool_subgraph(workflow, emitter, thread_id, terminal, *, node="vue
             "finish_reason": state.get("finish_reason"), "token_usage": state.get("token_usage", {}),
         }
         if node == "repair" and not legacy:
-            update.update(context={key: value for key, value in update["context"].items() if key != "qualityReview"},
+            update.update(context={key: value for key, value in update["context"].items()
+                                   if key not in {"qualityReview", "repairReadFeedback"}},
                           build={}, repair_count=state["repair_count"], repair_feedback="")
         else:
             update["artifact"] = "\n".join(state["vue_loop"]["content_parts"])

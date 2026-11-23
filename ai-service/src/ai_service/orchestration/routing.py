@@ -29,6 +29,7 @@ def _after_build(state: WorkflowState, max_attempts: int) -> str:
         "VUE_PACKAGE_JSON_MISSING",
         "VUE_COMPONENT_CHECK_UNAVAILABLE",
         "VUE_ANCHOR_CHECK_UNAVAILABLE",
+        "VUE_EVENT_CHECK_UNAVAILABLE",
     }:
         return "fail"
     return "fail" if state.get("repair_count", 0) >= max_attempts else "repair"

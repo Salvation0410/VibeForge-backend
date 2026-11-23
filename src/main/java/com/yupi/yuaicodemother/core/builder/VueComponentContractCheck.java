@@ -22,31 +22,47 @@ final class VueComponentContractCheck {
             .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
 
     static VueBuildResult verify(File directory, VueProjectBuilder.CommandRunner runner) throws InterruptedException {
-        return verify(directory, runner, false);
+        return verify(directory, runner, "");
     }
 
     static VueBuildResult verifyAnchors(File directory, VueProjectBuilder.CommandRunner runner) throws InterruptedException {
-        return verify(directory, runner, true);
+        return verify(directory, runner, "--anchors");
     }
 
-    private static VueBuildResult verify(File directory, VueProjectBuilder.CommandRunner runner, boolean anchors) throws InterruptedException {
+    static VueBuildResult verifyEvents(File directory, VueProjectBuilder.CommandRunner runner) throws InterruptedException {
+        return verify(directory, runner, "--events");
+    }
+
+    private static VueBuildResult unavailable(String mode) {
+        return switch (mode) {
+            case "--anchors" -> VueAnchorCheck.unavailable();
+            case "--events" -> VueEventCheck.unavailable();
+            default -> unavailable();
+        };
+    }
+
+    private static VueBuildResult verify(File directory, VueProjectBuilder.CommandRunner runner, String mode) throws InterruptedException {
         Path script = null;
         try (var resource = VueComponentContractCheck.class.getResourceAsStream("/vue/component-contract-check.cjs")) {
-            if (resource == null) return anchors ? VueAnchorCheck.unavailable() : unavailable();
+            if (resource == null) return unavailable(mode);
             script = Files.createTempFile("vue-component-contract-", ".cjs");
             Files.copy(resource, script, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             // Node 直接接收参数，不经 cmd 拼接；中断及进程树清理由原 CommandRunner 负责。
             var command = new ArrayList<>(List.of("node", script.toString(), directory.getAbsolutePath()));
-            if (anchors) command.add("--anchors");
+            if (!mode.isEmpty()) command.add(mode);
             var output = runner.run(directory, command, 15);
             if (!output.succeeded() || output.stdout().length() > 8000 || !output.stderr().isBlank()) {
-                return anchors ? VueAnchorCheck.unavailable() : unavailable();
+                return unavailable(mode);
             }
-            return anchors ? VueAnchorCheck.parse(output.stdout()) : parse(output.stdout());
+            return switch (mode) {
+                case "--anchors" -> VueAnchorCheck.parse(output.stdout());
+                case "--events" -> VueEventCheck.parse(output.stdout());
+                default -> parse(output.stdout());
+            };
         } catch (InterruptedException exception) {
             throw exception;
         } catch (Exception exception) {
-            return anchors ? VueAnchorCheck.unavailable() : unavailable();
+            return unavailable(mode);
         } finally {
             if (script != null) {
                 try { Files.deleteIfExists(script); }

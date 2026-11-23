@@ -35,7 +35,7 @@ async def test_repair_phase_discards_previous_feedback_but_keeps_current_retry(
         "generationPreparation": {"version": "1", "rewriteStatus": "disabled"},
         "toolResults": history,
         "planningFeedback": "上一阶段规划", "batchRetryFeedback": "上一阶段批次",
-        "vueFormatFeedback": "上一阶段格式",
+        "vueFormatFeedback": "上一阶段格式", "repairReadFeedback": "上一阶段读取纠偏",
     }
     before = deepcopy(context)
     build = {"built": False, "errorCode": "VUE_COMPONENT_CONTRACT_FAILED",
@@ -54,7 +54,7 @@ async def test_repair_phase_discards_previous_feedback_but_keeps_current_retry(
     assert len(contexts) == 3
     assert all(data["vueGeneration"]["phase"] == "modify_files" for data in contexts)
     assert all(key not in contexts[0] for key in (
-        "planningFeedback", "batchRetryFeedback", "vueFormatFeedback",
+        "planningFeedback", "batchRetryFeedback", "vueFormatFeedback", "repairReadFeedback",
     ))
     # 只清除阶段入口的过期反馈，不吞掉本阶段真正发生的格式重试。
     assert "上一轮格式错误" in contexts[1]["vueFormatFeedback"]

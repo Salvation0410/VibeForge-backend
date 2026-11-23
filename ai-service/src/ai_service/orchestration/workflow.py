@@ -20,6 +20,7 @@ from ai_service.orchestration.events import EventEmitter
 from ai_service.orchestration.input_review import InputReviewer
 from ai_service.models.input_review import InputReviewError
 from ai_service.models.review_diagnostics import safe_review_diagnostics
+from ai_service.models.verification_diagnostics import safe_verification_history
 from ai_service.models.preparation_diagnostics import safe_preparation_diagnostics
 from ai_service.infrastructure.langsmith_tracing import LangSmithTracer
 
@@ -367,4 +368,7 @@ class GenerationWorkflow:
         review = safe_review_diagnostics(state.get("review_diagnostics"))
         if review is not None:
             payload["review_diagnostics"] = review
+        history = safe_verification_history(state.get("verification_history"))
+        if history is not None:
+            payload["verification_history"] = history
         return payload

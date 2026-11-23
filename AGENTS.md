@@ -247,6 +247,9 @@ Python AI_SERVICE_INTERNAL_BEARER_TOKEN
 - 固定尺寸加载图位于 Flex 容器时必须禁止收缩并保持 1:1 比例，避免长提示文字将圆形挤成椭圆。
 - 前端白名单新增control-consistency@2，指导新增控件沿用基础样式及窄屏按钮组间距；原文和结构化单属性范围优先，不是视觉门禁。选择器版本3含中文“电商”，已有准备结果不追补规则，旧规则版本保留。
 - 部署封面截图每次独占WebDriver并在finally尝试quit，不恢复虚拟线程ThreadLocal复用。app.screenshot.driver-path优先于原JVM属性和CHROMEDRIVER_PATH，显式错误失败、未配置保留Selenium解析；个人驱动路径不入库。固定阶段耗时不输出URL/路径/异常正文，异步封面失败不撤销部署；OSS键包含独立UUID，禁止同名临时文件覆盖其他封面。关闭失败不等于已强制清理，未新增池、恢复或自动重试。
+- Vue 强制构建的必填属性检查之后、锚点检查之前执行可信脚本 --events。仅对完整运行时字面 defineEmits 且显式 inheritAttrs:false 的可支持组件阻断未知自定义监听，返回 VUE_EVENT_CONTRACT_FAILED 进入原修复；默认透传疑似错接只形成有限 Reviewer 提示，不能单独判错。原生事件、动态/类型/展开/attrs、作用域、未知组件及不完整扫描保守跳过，不强制已声明事件必须被监听；环境/协议失败 VUE_EVENT_CHECK_UNAVAILABLE 直接失败。成功摘要组合各项覆盖与跳过原因，不代表完整事件链或浏览器功能通过。
+- 正式 Vue 修复首次成功写入前，连续四次同路径同内容完整重读触发每阶段一次固定纠偏；纠偏后继续四次重复且仍未写入返回 VUE_REPAIR_READ_STALLED，纠偏后仅声称完成也失败。只在完整纯读批次末判断，工具照常执行计入预算；新路径/内容、非读取、未知/截断结果打断连续计数。纠偏标志为 Vue 子图私有状态，阶段重置、checkpoint 恢复保留；旧字段缺失按未纠偏处理。不能将提前停止解释为修复成功或真实模型一定收敛。
+- 验证子图私有 verification_history 最多 36 项，仅固定轮次/阶段/判定/错误码/工具计数/问题码，经两次白名单进入 PostgreSQL JSONB，后续缺字段节点保留已存历史，同轮同阶段重放替换。沿用原 TTL，无 schema 迁移，不入模型/父图/公共事件；不保存理由正文或源码路径，不能还原完整 Reviewer 意见。修复内异常现场可能晚于最后摘要，预算日志补充固定原因和计数。
 - 不大面积重写历史乱码注释，不进行无关重构。
 - 不提交生成文件、日志、下载产物、`.venv`、`.env` 或 `projects/`。
 - Git 提交信息必须使用中文，并符合 Conventional Commits 规范；格式为 `type(scope): 中文说明`，例如 `feat(ai): 接入LangSmith脱敏追踪`。提交前检查 `git log -1 --pretty=%s` 和 `git diff --check`，禁止使用无意义或纯英文提交信息。

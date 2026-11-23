@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -12,6 +14,7 @@ import java.util.Set;
 
 /** 仅接收可信检查器的有界协议，不将脚本原始输出放入公共失败信息。 */
 final class VueAnchorCheck {
+    private static final Logger log = LoggerFactory.getLogger(VueAnchorCheck.class);
     private static final ObjectMapper JSON = new ObjectMapper()
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
@@ -25,7 +28,7 @@ final class VueAnchorCheck {
                     || !result.path("version").isIntegralNumber() || !result.path("version").canConvertToInt()
                     || result.path("version").intValue() != 1 || !result.path("truncated").isBoolean()) return unavailable();
             int checked = count(result, "checkedLinks");
-            count(result, "skippedLinks");
+            int skipped = count(result, "skippedLinks");
             String reason = result.path("reason").asText("");
             if (!REASONS.contains(reason)) return unavailable();
             var issues = result.path("issues");
@@ -34,9 +37,10 @@ final class VueAnchorCheck {
             if (status.equals("ok") && issues.isEmpty()) {
                 if (!reason.equals("NONE") && checked != 0) return unavailable();
                 if (result.path("truncated").booleanValue() && !reason.equals("INCOMPLETE")) return unavailable();
+                log.info("Vue 锚点检查 status=ok checkedLinks={} skippedLinks={} reason={}", checked, skipped, reason);
                 return new VueBuildResult(true, "", reason.equals("NONE")
                         ? "静态锚点检查未发现缺失目标；不代表目标唯一、可见或浏览器交互通过"
-                        : "静态锚点检查已跳过不支持或不完整的页面，不能据此证明导航可用");
+                        : "静态锚点检查已跳过（" + reason + "），不能据此证明导航可用");
             }
             if (!status.equals("failed") || issues.isEmpty() || !reason.equals("NONE")
                     || result.path("truncated").booleanValue()) return unavailable();

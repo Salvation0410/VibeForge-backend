@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, TYPE_CHECKING
 
 from ai_service.orchestration.events import EventEmitter
@@ -11,6 +12,9 @@ from ai_service.orchestration.static_generation import invoke_static_model
 from ai_service.models.generation_brief import rewrite_context
 from ai_service.models.single_quality_review import SingleReviewResult, SingleReviewOutputError
 from ai_service.models.review_diagnostics import review_diagnostics
+from ai_service.models.verification_diagnostics import ERROR_CODES, MAX_VERIFICATION_RECORDS, safe_verification_history
+from ai_service.orchestration.vue_budget import budget_counts
+from ai_service.orchestration.vue_read_stall import read_repetition_stats
 from ai_service.models.input_review import InputReviewError
 from ai_service.orchestration.repair_progress import candidate_fingerprint, record_candidate, vue_snapshot_fingerprint
 from ai_service.orchestration.subgraphs.schemas import VerificationState
@@ -18,6 +22,34 @@ from ai_service.orchestration.cancellation import GenerationCancelled
 
 if TYPE_CHECKING:
     from ai_service.orchestration.workflow import GenerationWorkflow
+
+logger = logging.getLogger(__name__)
+
+
+def _with_diagnostics(state, stage, update, passed, code="NONE", review=None):
+    """只将当前阶段固定统计追加到私有历史；反馈正文始终走原修复通道。"""
+    count = state.get("repair_count", 0)
+    prefix = (f"{state['request_id']}:vue-repair:{count}" if count else f"{state['request_id']}:vue-generate")
+    history = state.get("context", {}).get("toolResults", [])
+    counts = budget_counts(history, prefix)
+    record = {
+        "round": count, "stage": stage, "verdict": "PASS" if passed else "REPAIR",
+        "errorCode": "NONE" if passed else code if type(code) is str and code in ERROR_CODES else "UNCLASSIFIED",
+        "toolCount": state.get("tool_call_count", 0), "phaseReadCount": counts["phase_read_count"],
+        "phaseWriteCount": counts["phase_write_count"], "repeatedReadCount": read_repetition_stats(history, prefix)["total"],
+        "issueCount": review["issueCount"] if review else 0, "issueCodes": review["issueCodes"] if review else [],
+    }
+    records = safe_verification_history(state.get("verification_history")) or []
+    # 节点恢复重放同一轮时替换同阶段记录，不无限追加；不宣称业务 exactly-once。
+    records = [r for r in records if (r["round"], r["stage"]) != (count, stage)]
+    records = safe_verification_history([*records, record][-MAX_VERIFICATION_RECORDS:])
+    if records is None:
+        return update
+    logger.info("Generation verification request_id=%s round=%d stage=%s verdict=%s error_code=%s "
+                "tool_count=%d phase_read_count=%d phase_write_count=%d repeated_read_count=%d issue_count=%d",
+                state["request_id"], count, stage, record["verdict"], record["errorCode"], record["toolCount"],
+                record["phaseReadCount"], record["phaseWriteCount"], record["repeatedReadCount"], record["issueCount"])
+    return {**update, "verification_history": records}
 
 
 def _vue_snapshot_artifact(snapshot: dict[str, Any]) -> str:
@@ -60,8 +92,10 @@ def create_verification_nodes(
             call_id,
         )
         # 新候选不能沿用上轮模型诊断；硬校验失败的修复只使用本轮硬校验结果。
-        return {"validation": result, "repair_feedback": "", "quality_passed": False, "review_diagnostics": {},
-                "candidate_fingerprints": fingerprints}
+        return _with_diagnostics(state, "artifact_validation", {
+            "validation": result, "repair_feedback": "", "quality_passed": False, "review_diagnostics": {},
+            "candidate_fingerprints": fingerprints,
+        }, result.get("valid") is True, "ARTIFACT_VALIDATION_FAILED")
 
     async def project_build(state: WorkflowState) -> dict[str, Any]:
         call_id = f"{state['request_id']}:project_build:{state.get('repair_count', 0)}"
@@ -74,7 +108,8 @@ def create_verification_nodes(
             state["request_id"],
             call_id,
         )
-        return {"build": result}
+        return _with_diagnostics(state, "project_build", {"build": result}, result.get("built") is True,
+                                 result.get("errorCode") or "VUE_BUILD_FAILED")
 
     async def quality_review(state: VerificationState) -> dict[str, Any]:
         """仅对已通过确定性硬校验的候选执行模型质量检查。"""
@@ -140,12 +175,13 @@ def create_verification_nodes(
                 timeout_seconds=workflow.settings.multi_agent_review_timeout_seconds,
             )
             workflow._raise_if_cancelled(thread_id)
-            return {
+            diagnostic = review_diagnostics(result.passed, result.blocking_issues)
+            return _with_diagnostics(state, "quality_review", {
                 "quality_passed": result.passed,
                 "repair_feedback": result.repair_feedback,
-                "review_diagnostics": review_diagnostics(result.passed, result.blocking_issues),
+                "review_diagnostics": diagnostic,
                 "candidate_fingerprints": fingerprints,
-            }
+            }, result.passed, "QUALITY_REVIEW_FAILED", diagnostic)
         review_context = {
             **state["context"],
             "codeGenType": state["code_gen_type"],
@@ -170,8 +206,10 @@ def create_verification_nodes(
         else:
             raise SingleReviewOutputError()
         diagnostic = review_diagnostics(passed, result.issues if isinstance(result, SingleReviewResult) else ())
-        return {"quality_passed": passed, "repair_feedback": feedback, "review_diagnostics": diagnostic,
-                "candidate_fingerprints": fingerprints}
+        return _with_diagnostics(state, "quality_review", {
+            "quality_passed": passed, "repair_feedback": feedback, "review_diagnostics": diagnostic,
+            "candidate_fingerprints": fingerprints,
+        }, passed, "QUALITY_REVIEW_FAILED", diagnostic)
 
     async def repair(state: WorkflowState) -> dict[str, Any]:
         """生成完整修复候选并更新结束元数据，供下一轮重新校验。"""

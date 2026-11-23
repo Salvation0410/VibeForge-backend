@@ -114,7 +114,8 @@ def test_checkpoint_projection_and_trace_filter_reject_untrusted_diagnostic_cont
                            "review_issue_codes": "private"}) == {}
 
 
-@pytest.mark.parametrize("error_code", ["VUE_ANCHOR_TARGET_MISSING", "VUE_ANCHOR_CHECK_UNAVAILABLE"])
+@pytest.mark.parametrize("error_code", ["VUE_ANCHOR_TARGET_MISSING", "VUE_ANCHOR_CHECK_UNAVAILABLE",
+                                        "VUE_EVENT_CONTRACT_FAILED", "VUE_EVENT_CHECK_UNAVAILABLE"])
 async def test_anchor_failure_uses_original_repair_or_environment_failure_route(settings, error_code):
     class AnchorGateway(FakeToolGateway):
         async def invoke(self, name, arguments, **kwargs):
