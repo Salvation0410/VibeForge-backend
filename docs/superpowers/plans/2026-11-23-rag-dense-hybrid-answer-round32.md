@@ -15,4 +15,5 @@
 - [ ] 隐藏臂标签审阅实际完成卡；未执行/协议错误按失败保留，运行前事实标签不调整。审阅后核对摘录，解盲并分开发/新题统计；建立独立真人填写材料。
 - [ ] 全量pytest、compileall及uv lock --check，核对旧保护摘要、唯一账本/实际调用、资源清理；README与两交接同步，中文提交不推送，报告实际失败和未测。
 
-预定命令：`uv run --offline pytest tests/test_rag_dense_hybrid_answer_experiment.py`；`uv run --offline python -m ai_service.orchestration.rag_dense_hybrid_answer_experiment --prepare`；后续真实阶段必须传冻结摘要，命令由prepare产物生成，不能重跑耗尽账本。完整回归`uv run --offline pytest -ra --tb=short`、`uv run --offline python -m compileall -q src`、`uv lock --check --offline`。不启动下一项生产改动或重用旧真实额度。
+预定命令：`uv run --offline pytest tests/test_rag_dense_hybrid_answer_experiment.py`；`uv run --offline python -m ai_service.orchestration.rag_dense_hybrid_answer_experiment prepare`；后续真实阶段必须传冻结摘要，命令由prepare产物生成，不能重跑耗尽账本。完整回归`uv run --offline pytest -ra --tb=short`、`uv run --offline python -m compileall -q src`、`uv lock --check --offline`。不启动下一项生产改动或重用旧真实额度。
+
