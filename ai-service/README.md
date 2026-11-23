@@ -41,7 +41,11 @@ AI_SERVICE_SPRING_GATEWAY_BEARER_TOKEN=replace-with-shared-internal-token
 
 两个内部令牌必须与 Spring 的 `ai.token` 相同。Spring 默认通过 `AI_SERVICE_INTERNAL_BEARER_TOKEN` 环境变量读取该值；Spring 服务地址 `AI_SERVICE_URL` 默认为 `http://localhost:8000`。
 
-Spring 不读取 Python 的 `.env`，两端需分别配置。样例中的 `host.docker.internal` 用于容器访问宿主机，本机直接运行时应改为 `localhost` 或实际服务地址。
+Spring 不读取 Python 的 `.env`，两端需分别配置。样例默认使用宿主机直启地址 `localhost`；Docker 容器访问宿主机时，工具网关和 PostgreSQL 地址需改为 `host.docker.internal` 或实际服务地址。
+
+从原项目迁移时，优先复用原项目的私有 `.env`，不要用 `.env.example` 覆盖有效配置。Spring 的私有 `application-local.yml` 复用原业务配置，去除旧 Java AI 框架配置，并将 `ai.token` 与原 Python 的两个内部令牌统一。修改后重启两端；IDE 的环境变量会覆盖文件中的同名配置。私有配置及备份均不提交 Git。
+
+若 `/internal/v1/route` 返回 503，先检查模型凭据及输入审核失败原因：示例密钥会被供应商拒绝，这与 checkpoint 连接超时是两个独立问题。`/health/ready` 返回 200 仅证明就绪条件满足，不能证明模型凭据有效。PostgreSQL 超时应检查实际运行位置、主机地址和端口，不要通过关闭输入审核或 checkpoint 掩盖配置错误。
 
 ### 3. 选择是否启用 checkpoint
 

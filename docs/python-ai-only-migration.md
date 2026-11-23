@@ -54,9 +54,9 @@ uv run python -m ai_service.server
 
 两个方向的 Bearer 令牌必须一致。默认服务端口与原项目一致，启动新版本前停止占用相同端口的旧实例，或显式调整端口及对应服务地址。使用已有数据库时不会自动迁移表；生产数据迁移、发布权威和回退限制继续遵循根 README 及生成任务说明。
 
-本次未复制 `.env`、`application-local.yml`、生成应用、日志或用户数据。目标 `.venv` 在本机从锁文件独立安装，不提交 Git。Vue 前端仍使用同级独立仓库 `D:/VibeForge/yu-ai-code-mother-frontend`，不在本次改动范围。
+首次迁移未复制 `.env`、`application-local.yml`、生成应用、日志或用户数据。后续按用户要求复用了原项目私有配置并完成真实生成验证，见 [配置修复与运行验证](python-ai-only-runtime-validation.md)。目标 `.venv` 在本机从锁文件独立安装，不提交 Git。Vue 前端仍使用同级独立仓库 `D:/VibeForge/yu-ai-code-mother-frontend`，不在迁移改动范围。
 
-## 验证范围
+## 首次迁移验证范围
 
 本轮实际执行结果：
 

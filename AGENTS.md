@@ -58,7 +58,7 @@ uv run pytest
 uv lock --check
 ```
 
-Windows 优先使用 `ai_service.server`，它为 psycopg 异步 checkpoint 配置 SelectorEventLoop。只在 `.env` 不存在时复制样例，避免覆盖已有配置；本机运行还需把样例的 `host.docker.internal` 工具网关地址改成 `localhost`，并统一双向令牌。
+Windows 优先使用 `ai_service.server`，它为 psycopg 异步 checkpoint 配置 SelectorEventLoop。只在 `.env` 不存在时复制样例，避免覆盖已有配置；样例默认使用宿主机 `localhost` 地址，Docker 内连接宿主机时需改为 `host.docker.internal`，并统一双向令牌。从原项目迁移时优先复用有效私有配置，不用样例覆盖真实配置。
 
 健康检查：
 

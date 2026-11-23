@@ -72,7 +72,7 @@ if (-not (Test-Path ai-service/.env)) {
 | `AI_SERVICE_SPRING_GATEWAY_BEARER_TOKEN` | 与 Spring 的 `ai.token` 一致 |
 | `AI_SERVICE_SPRING_GATEWAY_BASE_URL` | 本机运行填写 `http://localhost:8123/api/internal/ai-tools` |
 
-样例默认开启 PostgreSQL checkpoint。首次本地体验可将 `AI_SERVICE_CHECKPOINT_ENABLED=false`；需要持久化工作流状态时，按 [Python AI 服务说明](ai-service/README.md) 配置独立 PostgreSQL 数据库。本机运行时，样例中的 `host.docker.internal` 地址需改为对应的本机地址。
+样例默认开启 PostgreSQL checkpoint，并使用宿主机 `localhost` 地址；按 [Python AI 服务说明](ai-service/README.md) 配置独立 PostgreSQL 数据库。Docker 容器连接宿主机时需改用 `host.docker.internal` 或实际可达地址。从原项目迁移时优先复用原私有配置，不要以样例占位密钥覆盖有效配置；两端配置核对与本轮测试结果见 [配置修复与运行验证](docs/python-ai-only-runtime-validation.md)。
 
 模型密钥只需配置在 Python 服务。Spring 不会读取 `ai-service/.env`，两端的共享令牌需要分别填写。
 
