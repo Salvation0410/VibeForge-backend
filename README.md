@@ -78,6 +78,8 @@ if (-not (Test-Path ai-service/.env)) {
 
 按需补充外部服务：邮件注册验证码需要 SMTP，头像、封面及文档上传需要 OSS，图片搜索需要 Pexels API Key。客服功能默认关闭，启用方式见 [Python AI 服务说明](ai-service/README.md)。
 
+启动时需保留样例中的 `spring.mail` 配置，至少提供 `host` 和 `username`；发送验证码还需真实的 SMTP 凭据。若提示缺少 `JavaMailSender`，先检查 `application-local.yml` 是否存在且已加载，`.example.yml` 不会自动生效。
+
 ### 3. 启动后端与 AI 服务
 
 在仓库根目录启动 Spring：

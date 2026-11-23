@@ -98,7 +98,11 @@
             <version>3.18.5</version>
         </dependency>
 
-        <!-- Spring Session + Redis -->
+        <!-- 会话与缓存独立依赖 Redis 客户端，不再借助旧 Java AI 集成的传递依赖。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.session</groupId>
             <artifactId>spring-session-data-redis</artifactId>
