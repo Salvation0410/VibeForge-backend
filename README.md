@@ -118,6 +118,47 @@ npm run dev
 
 Python 健康检查不调用真实模型；服务启动后，还需通过前端实际生成应用来验证模型和跨服务配置。
 
+## LangSmith 监控与图调试
+
+本版本已接入 Python LangSmith 脱敏追踪，也提供 LangGraph Studio 图入口，无需增加 Java AI 框架。两者用途不同：LangSmith 查看正常业务请求的节点耗时和结果摘要；Studio 在独立本地 Agent Server 中查看图、设置断点及检查状态。
+
+### 启动业务监控
+
+复用 `ai-service/.env` 中原有的 LangSmith 配置，确认以下四项；已有真实密钥不要替换成占位值：
+
+```dotenv
+LANGSMITH_TRACING=true
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+LANGSMITH_API_KEY=填写已有的LangSmith密钥
+LANGSMITH_PROJECT=Yuki
+```
+
+`Yuki` 是本次复用的本地项目名；其他环境以自己的配置为准。endpoint 必须与密钥所属区域一致。随后重启 Python，Spring 和前端按前文启动：
+
+```powershell
+Set-Location D:/VibeForge/yu-ai-code-mother-pythonAIOnly-version/ai-service
+uv sync --frozen --python 3.12
+uv run python -m ai_service.server
+```
+
+在前端生成一次应用，再进入 [LangSmith](https://smith.langchain.com) 的 Tracing，选择 `LANGSMITH_PROJECT` 对应项目，按元数据 `request_id` / `app_id` 找到相关节点和 `generation` 记录。当前记录是独立的脱敏摘要，输入/输出为空，不包含提示词、源码或完整模型消息，也不提供完整父子调用树和模型费用统计。
+
+### 启动 Studio 图调试
+
+保留正常业务服务，另开终端执行：
+
+```powershell
+Set-Location D:/VibeForge/yu-ai-code-mother-pythonAIOnly-version/ai-service
+uv sync --frozen --python 3.12
+uv run --no-sync --with "langgraph-cli[inmem]==0.4.43" --with "langgraph-api==0.5.42" python -m ai_service.studio_server
+```
+
+CLI 使用独立临时依赖环境，不修改业务依赖锁；这组版本已在当前锁定的 LangGraph 0.6.11 上验证。首次执行需下载依赖。等日志显示图 `yu_ai_generation` 注册完成，打开 [Studio](https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024)，选择该图；本地接口文档在 `http://127.0.0.1:2024/docs`。终端按 Ctrl+C 停止调试服务。
+
+Studio 使用 2024 端口，正常 Python 服务仍是 8000；不要把 Spring 的 `ai.service-url` 改成 2024。Studio 不会自动显示前端生成任务，也不会读取业务 PostgreSQL 中的已有任务。它的启动入口在当前进程关闭云端自动追踪，不修改 `.env` 或另一个业务进程的追踪配置。
+
+图输入字段、断点操作和发布限制见 [Python AI 服务：监控与图调试](ai-service/README.md#langsmith-监控与-studio-图调试)。首次调试建议在生成准备前暂停，只核对输入审核与上下文读取；不要直接对已有业务应用运行完整写文件/发布流程。
+
 ## 使用说明
 
 登录后创建应用，输入页面需求，等待生成完成即可预览。继续发送需求可修改应用，完成后可部署或下载源码。

@@ -166,7 +166,89 @@ uv lock --check
 
 常规测试使用 Fake 或注入式 Provider，不调用真实模型。PostgreSQL 等集成测试需显式启用并准备对应资源；离线测试通过不等于真实模型或端到端验收通过。资源测试要求见 [开发协作规范](../AGENTS.md)。
 
-需要可视化调试时，参考 [LangGraph Studio 入口](src/ai_service/studio_server.py) 或 [PyCharm 调试说明](../doc/knowledge-pycharm-debug.md)。Studio 会调用实际模型和工具，应使用隔离测试应用。
+需要可视化调试时使用下文的 Studio；IDE 调试另见 [PyCharm 调试说明](../doc/knowledge-pycharm-debug.md)。
+
+## LangSmith 监控与 Studio 图调试
+
+### 已有接入及配置
+
+业务服务在 `app.py` 组装 [LangSmithTracer](src/ai_service/infrastructure/langsmith_tracing.py)，由生成工作流和节点记录有限元数据。SDK 已在 `pyproject.toml` / `uv.lock` 中，无需重新接入。复用原私有 `.env` 的配置：
+
+```dotenv
+LANGSMITH_TRACING=true
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+LANGSMITH_API_KEY=填写已有的LangSmith密钥
+LANGSMITH_PROJECT=Yuki
+```
+
+这里的 `Yuki` 对应本次本地配置；可以选择自己的项目名，endpoint 必须匹配账号区域。业务追踪器要求 tracing、endpoint、key 同时有效；仅配置 key 不会启用。`LANGGRAPH_API_KEY` 兼容别名只在 Studio 启动入口中处理，业务监控使用 `LANGSMITH_API_KEY`。
+
+在 `ai-service/` 运行并保持 Spring、前端可用：
+
+```powershell
+uv sync --frozen --python 3.12
+uv run python -m ai_service.server
+```
+
+修改配置后需重启 Python。前端实际生成应用后，到 [LangSmith](https://smith.langchain.com) 的 Tracing 中选择配置项目。通过 `request_id` / `app_id` 元数据关联 `input_guard`、`context_prepare`、生成/审查/修复节点与请求级 `generation` 记录。业务成功/失败以元数据 `status`、`error_code` 判断，不把 LangSmith 行本身没有 SDK 异常等同于业务成功。
+
+当前实现通过官方 `RunTree` API 发送独立摘要，并显式关闭业务图的自动全量追踪。可以查看节点耗时、生成类型、修复/工具次数及白名单诊断；inputs/outputs 有意为空，不上传原始需求、源码或完整模型对话。不是嵌套的完整调用树，不保证每个节点都有记录，也没有模型 token/费用明细。旁路队列饱和或网络超时可能丢记录，不改变业务终态。
+
+若界面没有记录，依次检查项目名、密钥所属区域/权限、进程环境变量覆盖、Python 重启，以及日志中的 `LangSmith tracing failed`。现有发送超时较短（连接/读取各 1 秒），网络慢时可能丢追踪；`/health/ready` 不验证 LangSmith。不要通过关闭脱敏或打印密钥排查网络。
+
+### 启动本地图调试服务
+
+项目已提供 [langgraph.json](langgraph.json)、[studio_server.py](src/ai_service/studio_server.py) 和 [studio_graph.py](src/ai_service/studio_graph.py)。CLI 不在常规业务依赖中；以下命令在临时覆盖环境提供已验证版本，保留现有业务锁：
+
+```powershell
+Set-Location D:/VibeForge/yu-ai-code-mother-pythonAIOnly-version/ai-service
+uv sync --frozen --python 3.12
+uv run --no-sync --with "langgraph-cli[inmem]==0.4.43" --with "langgraph-api==0.5.42" python -m ai_service.studio_server
+```
+
+入口读取当前目录 `.env`，配置 Windows 子进程 UTF-8，监听 `127.0.0.1:2024`，关闭自动打开浏览器和热重载。修改图源码后需重启该命令。不要使用 `langgraph up` 的默认 8123 端口，它与本项目 Spring 冲突。
+
+- 健康检查：`Invoke-RestMethod http://127.0.0.1:2024/ok`。
+- 本地 API 文档：`http://127.0.0.1:2024/docs`。
+- [打开 Studio](https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024)，登录 LangSmith 后选择 `yu_ai_generation`，使用 Graph 模式。
+- 本地开发服务只监听回环地址；使用同一台电脑的浏览器连接，浏览器询问本地网络访问时按实际调试需要允许。
+- 正常业务仍运行在 8000，Spring 仍指向 8000。Studio 使用自己的线程和本地开发存储 `.langgraph_api/`，不加载业务 PostgreSQL 的历史任务，不会自动捕获前端请求。
+
+该入口和 `langgraph.json` 都将 Studio 进程的 `LANGSMITH_TRACING` 设为 false，用于本地图调试；这不改变业务进程的脱敏监控。关闭自动 trace 不代表 Agent Server 完全无网络通信：CLI 仍可能进行鉴权和产品元数据通信。Studio 可见完整状态，调试目录不得提交。
+
+### 节点断点、状态与继续执行
+
+1. 在前端创建专用测试应用，记下其 appId。不要复用正在生成的应用。
+2. Studio 选择 `yu_ai_generation` → 新建 Thread → Input 的 **View Raw**，填入下方状态。字段使用 snake_case，不是 FastAPI 请求的 camelCase，也不是通用聊天模板的 `messages`。
+3. 点击 **Interrupt**，设置在 `input_guard` **之前**暂停，再 Submit。此时尚未调用审核模型。
+4. 将下一个断点设在 `generation_prepare` **之前**，点击 **Continue**。这一步会调用真实输入审核模型和只读 Spring `artifact_context`，可检查 `input_review`、`context.currentArtifact`。
+5. 如只核对接线与上下文，到此停止继续执行。修改状态可用 **Edit node state → Fork**，从检查点重跑可用 **Re-run from here**；重跑可能重复执行模型或工具。
+
+```json
+{
+  "app_id": "替换为专用测试应用ID",
+  "request_id": "studio-替换为本次唯一UUID",
+  "thread_id": "替换为Studio当前线程ID",
+  "prompt": "检查这个现有 HTML 计数页面。",
+  "code_gen_type": "HTML",
+  "conversation": [],
+  "metadata": {},
+  "repair_count": 0,
+  "tool_call_count": 0
+}
+```
+
+`code_gen_type` 可为 `HTML`、`MULTI_FILE`、`VUE_PROJECT`，应与测试应用一致。上例采用 HTML，避免 Vue 初次上下文准备自动搜索图片。`request_id` 每次新执行应唯一，同一断点续跑保留该值；`thread_id` 使用 Studio 当前线程 ID，与适配器的请求上下文一致。
+
+图适配器直接运行父图，未经过 Spring 创建任务、持久化仲裁与租约登记。继续执行生成节点会使用真实模型，Vue 工具会修改项目文件；静态发布仍受 Spring 的任务仲裁限制，手填 requestId 不能获得合法发布资格。不要伪造任务记录或绕过网关来让 Studio 发布成功。完整业务生成/发布验收仍从前端或 Spring 入口发起；Studio 的取消、Fork 和本地 checkpoint 不等同于业务任务恢复。
+
+### 本次验证及官方参考
+
+2026-11-23 已使用现有配置读取 LangSmith 项目及近期节点记录，HTTP 200，记录 inputs/outputs 为空；追踪专项 13 项测试通过。已用上述版本启动 Studio，`/ok`、图结构与 schema 返回 200，并验证 `input_guard` 前暂停、继续到 `generation_prepare` 前暂停；没有执行写文件/发布节点。本次验证的是本地 Agent Server API，未替用户完成 Studio 网页登录。
+
+- [官方：手动 RunTree 追踪](https://docs.langchain.com/langsmith/annotate-code#use-the-runtree-api)
+- [官方：本地 Agent Server 开发](https://docs.langchain.com/langsmith/local-server)
+- [官方：Studio 输入、断点与线程操作](https://docs.langchain.com/langsmith/use-studio)
 
 ## 目录与专题文档
 
