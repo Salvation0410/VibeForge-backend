@@ -22,10 +22,14 @@ def basis():
     entries = {}
     for e in old:
         entries[e['id']] = dict(question=e['question'], expectedAnswerable=e['expectedAnswerable'],
-            facts=[dict(id=f['factId'], statement=f['statement'], evidence=f['evidence']) for f in e['requiredFacts']])
+            facts=[dict(id=f['factId'], statement=f['statement'], evidence=f['evidence'],
+                equivalentExpressions=f['equivalentExpressions'],
+                applicableConditions=f['applicableConditions'], basisType=f['basisType']) for f in e['requiredFacts']])
     for e in new:
         entries[e['id']] = dict(question=e['question'], expectedAnswerable=e['expectedAnswerable'],
-            facts=[dict(id=f'fact-{i+1}', statement=quote, evidence=[dict(documentId=doc, quote=quote)])
+            facts=[dict(id=f'fact-{i+1}', statement=quote, equivalentExpressions=[],
+                applicableConditions=['限题目所问公共产品行为'], basisType='public-document',
+                evidence=[dict(documentId=doc, quote=quote)])
                 for i, (doc, quote) in enumerate(e['facts'])])
     return entries
 

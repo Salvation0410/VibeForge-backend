@@ -913,3 +913,12 @@ uv run --offline python -m ai_service.orchestration.rag_hybrid_cap_evaluation --
 `--prepare`仅准备本地固定计划；`--live --plan-sha256 <实际摘要> --authorization "继续执行下一轮"`才发送。独立固定账本位于`tmp/rag-hybrid-append-answer-20261120/authorization.jsonl`，排他创建，fsync预占先于发送，首错停止、失败取消占额度、不重试，旧账本/结果拒绝重跑；多文件输出不具事务性，未知状态不自动恢复。原HTTP仅留tmp，凭据不写计划；无需启动双服务，非生产链路验收。
 
 本轮实际8次已用完，不能再次运行live。答案完整覆盖5/8→5/8，多文件定义改善、下载条件遗漏，008保留Vue建议；更多证据与有效引用未保证答案采用所需条件。定向76通过、全量2601通过/26跳过。逐题证据、token、局限及下一轮建议见[第31轮交接](../doc/customer-service-hybrid-append-answer-round31-handoff.md)，生产未推广，真人评审pending。
+
+
+### 第32轮：dense／hybrid同期回答实验
+
+独立实验 `rag_dense_hybrid_answer_experiment` 固定第27轮63块语料、cap1/三块预算、正式提示与模型；90道旧题重新回答，另冻结24道新编未调试题。`prepare` 不调用供应商，`retrieve` 至多1批查询Embedding和48次本地BGE，`freeze-answers` 固定消息，`answer` 至多228次Chat，发送前唯一账本预占、首错停止、无重试或续跑。不得重新执行2026-11-23已停止的本轮账本。
+
+`rag_dense_hybrid_review` 仅生成匿名材料及题级配对统计，不做自动语义评分；事实包含原rubric的等价表达/适用条件。实际本轮在第48次Chat遇到非法JSON停止，47有效、1失败、180未运行；新题和应拒答题没有回答。23对开发题的初评、解盲后等价表达校正、完整分母及真人pending分别保留，不能声称已完成全量盲测或证明稳定提升。
+
+本地离线测试：`uv run --offline pytest tests/test_rag_dense_hybrid_answer_experiment.py -q`。匿名卡和真人模板可另存审阅；开始评审前不要打开包含映射/代理评分的完整结果包。详情见[第32轮交接](../doc/customer-service-dense-hybrid-answer-round32-handoff.md)。生产检索、提示、回答格式和服务链路不变。

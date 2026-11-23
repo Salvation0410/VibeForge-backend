@@ -16,6 +16,9 @@ def test_new_cases_and_basis_frozen():
     entries = exp.new_entries()
     assert len(entries)==24 and sum(e['expectedAnswerable'] for e in entries)==18
     assert len(review.basis()) == 114
+    facts=review.basis()['app-generation-012']['facts']
+    assert facts[0]['equivalentExpressions']==['点击后先填入输入文字']
+    assert facts[0]['basisType']=='public-document' and facts[0]['applicableConditions']
     ops = exp.schedule(entries,'bge')
     assert len(ops)==48 and ops[:4]==[
         dict(kind='bge',key='new-01:dense'),dict(kind='bge',key='new-01:hybrid'),
