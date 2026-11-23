@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$Execute,
     [string]$EnvironmentName = 'local',
     [string]$SpringBaseUrl = 'http://localhost:8123/api',
@@ -43,7 +43,7 @@ function New-ValidationScenario(
 
 if (-not $Execute) {
     Write-Host 'Dry run only. No validation record will be created.'
-    Write-Host 'Rerun with -Execute to create a 13-scenario P0 record under target/ai-validation.'
+    Write-Host 'Rerun with -Execute to create a 12-scenario P0 record under target/ai-validation.'
     return
 }
 
@@ -66,8 +66,7 @@ $scenarios = @(
     (New-ValidationScenario 'model-timeout' 'failure' '' 'model-timeout' 'Exactly one stable failed terminal state and the old preview remains active'),
     (New-ValidationScenario 'spring-tool-failure' 'failure' '' 'tool-failure' 'Stable business error, no unsafe retry, and no new active version'),
     (New-ValidationScenario 'long-build-cancel' 'failure' 'VUE_PROJECT' 'long-build' 'Build process tree is released and the old preview remains active'),
-    (New-ValidationScenario 'dual-spring-tool-contention' 'competition' 'VUE_PROJECT' 'two-spring' 'One side effect, shared replay result, and isolated fresh scope'),
-    (New-ValidationScenario 'legacy-rollback' 'rollback' '' 'legacy' 'Stable route, successful switch to Legacy, and compatible cancellation semantics')
+    (New-ValidationScenario 'dual-spring-tool-contention' 'competition' 'VUE_PROJECT' 'two-spring' 'One side effect, shared replay result, and isolated fresh scope')
 )
 
 $record = [ordered]@{
@@ -84,8 +83,7 @@ $record = [ordered]@{
     automatedEvidenceFiles = @(
         'target/ai-validation/langgraph-real-gate.json',
         'target/ai-validation/test-ai-phase-two-e2e.json',
-        'target/ai-validation/tool-controller-competition.json',
-        'target/ai-validation/compare-ai-generation-engines.json'
+        'target/ai-validation/tool-controller-competition.json'
     )
     scenarios = $scenarios
 }

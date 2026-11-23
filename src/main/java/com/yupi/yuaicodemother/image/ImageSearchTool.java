@@ -1,14 +1,10 @@
-package com.yupi.yuaicodemother.langraph4j.tools;
+package com.yupi.yuaicodemother.image;
 
 import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpResponse;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
-import com.yupi.yuaicodemother.langraph4j.enums.ImageCategoryEnum;
-import com.yupi.yuaicodemother.langraph4j.model.ImageResource;
-import dev.langchain4j.agent.tool.P;
-import dev.langchain4j.agent.tool.Tool;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -25,11 +21,10 @@ public class ImageSearchTool {
 
     private static final String PEXELS_API_URL = "https://api.pexels.com/v1/search";
 
-    @Value("${pexels.api-key}")
+    @Value("${pexels.api-key:}")
     private String pexelsApiKey;
 
-    @Tool("搜索内容相关的图片，用于网站内容展示")
-    public List<ImageResource> searchContentImages(@P("搜索关键词") String query) {
+    public List<ImageResource> searchContentImages(String query) {
         List<ImageResource> imageList = new ArrayList<>();
         if (pexelsApiKey == null || pexelsApiKey.isBlank()) {
             log.warn("Pexels 搜图未配置密钥，返回空图片列表");

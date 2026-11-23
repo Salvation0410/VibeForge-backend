@@ -1,6 +1,5 @@
-package com.yupi.yuaicodemother.langraph4j.model;
+package com.yupi.yuaicodemother.image;
 
-import com.yupi.yuaicodemother.langraph4j.enums.ImageCategoryEnum;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;

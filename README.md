@@ -1,10 +1,10 @@
-# yu-ai-code-mother 后端
+# yu-ai-code-mother — Python AI 专用版本
 
 AI 应用生成平台的后端仓库，包含 Spring Boot 业务服务和 `ai-service/` 下的 Python AI 服务。Vue 前端使用独立仓库，本仓库不包含前端页面。
 
 本文以当前源码和配置为准，面向本地启动、服务联调和 Git 仓库交付。
 
-最近一次源码核对：2026-10-29。运行能力以源码为准，历史验收记录不代表当前环境已重新验收。
+架构迁移日期：2026-11-23。运行能力以源码为准，历史验收记录不代表当前环境已重新验收。
 
 ## 已实现功能
 
@@ -14,7 +14,7 @@ AI 应用生成平台的后端仓库，包含 Spring Boot 业务服务和 `ai-se
 - Markdown 对话导出附带当前项目的文本源码与锁文件，遍历时排除依赖、构建结果及本地工具配置目录（如 `node_modules`、`dist`、`.git`），不跟随符号链接。
 - 社区帖子、评论、点赞、标签与管理后台。
 - 客服问答和知识文档管理；启用 RAG 需要单独配置模型、OSS、Milvus 和重排器。
-- AI 引擎切换：Legacy LangChain4j、Python LangGraph，以及按白名单或比例灰度。
+- AI 统一由 Python 服务执行：类型路由、生成、审查、修复和客服模型调用。Spring 只提供业务与工具能力。
 - 生成任务持久化查询、执行心跳观测，以及 HTML / MULTI_FILE 的数据库代际防护和取消/提交资格仲裁。
 
 HTML 和多文件产物经过校验及不可变版本发布后才成为活动版本；HTML 默认还需通过浏览器烟测。失败或取消不应覆盖上一活动版本。
@@ -29,8 +29,7 @@ Vue 强制构建在 npm 成功后增加有限的本地组件必填属性检查�
 Vue 前端（独立仓库）
   -> Spring Boot：权限 / 业务数据 / 对外 SSE / 项目文件 / 构建与发布
      -> AiGenerationGateway
-        -> Legacy LangChain4j
-        或 Python FastAPI -> LangGraph -> 模型 / Spring 内部工具网关
+        -> Python FastAPI -> LangGraph -> 模型 / Spring 内部工具网关
 ```
 
 | 组件 | 当前技术与职责 |
@@ -38,14 +37,14 @@ Vue 前端（独立仓库）
 | Spring 业务后端 | Java 21、Spring Boot 3.5.4、MyBatis-Flex 1.11.0、MySQL |
 | 会话与缓存 | Redis、Spring Session、Redisson、Caffeine |
 | Python AI 服务 | Python 3.12、FastAPI、LangChain、LangGraph、uv |
-| 模型接入 | DeepSeek / OpenAI 兼容接口，Java 保留 LangChain4j |
+| 模型接入 | Python 中的 DeepSeek / OpenAI 兼容接口 |
 | 文件与浏览器 | 阿里云 OSS、Selenium、WebDriverManager、Chrome |
 | 接口文档 | Knife4j、springdoc-openapi |
 | 可选基础设施 | PostgreSQL checkpoint、Milvus、Embedding、Reranker、LangSmith |
 
 Spring 是业务数据库和项目文件的唯一所有者。Python 不连接业务 MySQL，不直接操作生成项目目录，文件与构建操作通过 Spring 内部工具网关完成。服务间流使用 NDJSON，对前端仍提供 SSE。
 
-`src/main/java/com/yupi/yuaicodemother/langraph4j/` 中的 Java 图工作流是历史实验，不是当前 Python LangGraph 主链路；其中图片搜索等工具仍被内部网关复用。PostgreSQL checkpoint 用于短期工作流状态，不是跨请求长期记忆库。
+Java 的模型执行链路和框架依赖已移除，图片搜索保留为 Spring 内部网关的普通业务工具。PostgreSQL checkpoint 用于短期工作流状态，不是跨请求长期记忆库。
 
 ## 仓库目录
 
@@ -55,16 +54,16 @@ src/main/java/com/yupi/yuaicodemother/
   service/           业务逻辑
   mapper/            MyBatis-Flex 数据访问
   model/             Entity、DTO、VO
-  ai/gateway/        AI 引擎统一边界与路由
+  ai/gateway/        Python AI HTTP 适配与内部工具协议
+  image/             普通图片搜索工具及资源 DTO
   core/artifact/     不可变产物、数据库代际与活动指针
   core/              解析、保存、构建、产物发布、流处理
   config/            Spring 配置
 src/main/resources/
-  application.yml                  公共配置，当前默认 local + langgraph
+  application.yml                  公共配置，默认 local；AI 固定调用 Python
   application-local.example.yml    可提交的本地配置样例
   application-local.yml            私有本地配置，不提交
   mapper/                          Mapper XML
-  prompt/                          Legacy 提示词
 src/test/            Java 测试
 ai-service/          Python AI 服务、测试、Dockerfile、uv.lock 与 .env.example
 sql/                 数据库初始化与增量 SQL
@@ -82,7 +81,7 @@ tmp/                 生成源码、发布产物等运行数据，不提交
 | Maven | 可使用仓库 Maven Wrapper，固定 3.9.11 | 首次使用需下载依赖 |
 | MySQL | 建议 8.x，并创建业务表 | `localhost:3306/yu_ai_code_mother` |
 | Redis | 会话、限流、生成状态及内部工具幂等依赖 | `localhost:6379`，Spring database 1 |
-| Python + uv | Python 严格使用 3.12，默认 LangGraph 引擎需要 | `localhost:8000` |
+| Python + uv | Python 严格使用 3.12，AI 功能必需 | `localhost:8000` |
 | Node.js + npm | Vue 生成项目的依赖安装和构建需要，须在 Spring 进程 PATH 中可用 | 由生成项目决定具体版本要求 |
 | Chrome / WebDriver | HTML 默认浏览器烟测、截图功能需要 | 无头运行 |
 | PostgreSQL | 开启 checkpoint 时使用，建议 15+ | `localhost:5432/yu_ai_checkpoint` |
@@ -116,7 +115,7 @@ SOURCE sql/alter_generation_arbitration.sql;
 SOURCE sql/alter_generation_execution_heartbeat.sql;
 ```
 
-Spring 不自动执行这些迁移。缺表或缺列会在模型调用前阻止生成，切换到 Legacy 也不能绕过这项依赖。所有 Spring 实例应统一升级，不能混跑仍以文件 `.current` 为权威的旧版本。回退旧代码前需停止生成，并依据数据库活动指针核对文件镜像，详见 [生成任务账本与升级边界](doc/generation-task-ledger.md)。
+Spring 不自动执行这些迁移。缺表或缺列会在模型调用前阻止生成。所有 Spring 实例应统一升级，不能混跑仍以文件 `.current` 为权威的旧版本。回退旧代码前需停止生成，并依据数据库活动指针核对文件镜像，详见 [生成任务账本与升级边界](doc/generation-task-ledger.md)。
 
 ### 2. 准备 Spring 私有配置
 
@@ -127,25 +126,23 @@ if (-not (Test-Path src/main/resources/application-local.yml)) {
 }
 ```
 
-编辑 `application-local.yml`，填写数据库密码、模型密钥和需要启用的外部服务配置。也可通过样例中对应的环境变量注入。当前公共配置默认激活 `local`，样例文件本身不会被 Spring 自动加载。
+编辑 `application-local.yml`，填写数据库密码、内部共享令牌和需要启用的外部服务配置；模型密钥仅配置在 Python 服务。也可通过样例中对应的环境变量注入。当前公共配置默认激活 `local`，样例文件本身不会被 Spring 自动加载。
 
 | 配置 | 样例中的环境变量 | 说明 |
 | --- | --- | --- |
 | MySQL | `MYSQL_URL`、`MYSQL_USERNAME`、`MYSQL_PASSWORD` | 必须连接已初始化的数据库 |
 | Redis | `REDIS_HOST`、`REDIS_PORT`、`REDIS_PASSWORD`、`REDIS_DATABASE` | 默认不设密码；有认证时填写 |
-| Java 模型 | `MODEL_BASE_URL`、`MODEL_API_KEY`、`MODEL_NAME` | Java 模型 Bean 和辅助服务仍保留，不能因切到 Python 就删除整段配置 |
-| Java 推理模型 | `REASONING_MODEL_BASE_URL`、`REASONING_MODEL_API_KEY`、`REASONING_MODEL_NAME` | Legacy Vue 推理模型；密钥需单独填写 |
-| AI 引擎 | `AI_ENGINE`、`AI_SERVICE_URL` | 当前默认 `langgraph`；也支持 `legacy`、`gray`、`auto` |
+| Python 服务 | `AI_SERVICE_URL` | 所有 AI 请求的唯一服务地址，默认 `http://localhost:8000` |
 | 内部鉴权 | `AI_SERVICE_INTERNAL_BEARER_TOKEN` | Spring / Python 共用的高强度随机令牌 |
 | SMTP | `MAIL_HOST`、`MAIL_PORT`、`MAIL_USERNAME`、`MAIL_PASSWORD` | 样例按 SSL 465 配置，其他协议需同步调整 |
 | OSS | `OSS_BUCKET_NAME`、`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET`、`OSS_ENDPOINT`、`OSS_WEB_SITE` | 按实际地域、Bucket 和访问域名填写 |
 | 客服开关 | `AI_CUSTOMER_SERVICE_ENABLED` | 样例默认关闭，按需联调 |
 
-样例默认关闭模型请求、响应日志，减少聊天内容及源码进入日志的风险。公共配置中的数据库密码是开发默认值，应在私有配置覆盖。Spring 不会自动读取 `ai-service/.env`；上述自定义环境变量通过复制后的 YAML 占位符绑定。
+Java 配置无需模型供应商密钥；模型参数和可选追踪均在 Python 配置中管理。公共配置中的数据库密码是开发默认值，应在私有配置覆盖。Spring 不会自动读取 `ai-service/.env`；上述自定义环境变量通过复制后的 YAML 占位符绑定。
 
 ### 3. 准备 Python AI 服务
 
-默认 `langgraph` 引擎需要 Python 服务。新开一个终端：
+AI 功能需要 Python 服务。新开一个终端：
 
 ```powershell
 Set-Location ai-service
@@ -177,13 +174,12 @@ Windows 使用 `ai_service.server`，该入口配置适合 psycopg 异步 checkp
 如果使用环境变量，需在启动 Spring 的同一终端设置；例如：
 
 ```powershell
-$env:AI_ENGINE = "langgraph"
 $env:AI_SERVICE_URL = "http://localhost:8000"
 # 内部令牌从私有配置或安全渠道注入。
 .\mvnw.cmd spring-boot:run
 ```
 
-切换到 `legacy` 可不启动 Python 生成服务，但仍需要 Java 模型密钥、MySQL、Redis 及所用功能的依赖。
+此版本没有 Java AI 回退或灰度分流。Python 不可用时 AI 请求按既有错误协议失败；旧的 `AI_ENGINE` 环境变量不再控制路由。
 
 ### 5. 检查服务
 
@@ -233,7 +229,7 @@ HTML / MULTI_FILE 的模型文本使用流式调用，展示分片与完整候�
 
 ### 任务、取消与发布
 
-- `generation_task` 覆盖两种引擎、三类生成的执行记录，终态查询保留 30 天；当前没有物理清理调度。
+- `generation_task` 覆盖 Python AI 三类生成的执行记录，终态查询保留 30 天；当前没有物理清理调度。
 - Redis 应用租约负责入口串行化与实时发现；MySQL `generation_arbitration` 决定取消或静态提交资格谁先获胜。`COMMITTING` 仅表示取得提交资格，不能作为发布成功证据。
 - 静态产物先写不可变 release，再由 MySQL 校验当前代际并写入 `generation_publication` 与 `generation_active_artifact`。启用数据库指针的项目以数据库为权威，`.current` 仅为兼容镜像；数据库不可用时不回退到该镜像。
 - Spring 独立调度器每 15 秒续写已登记执行的心跳，数据库观测期限为 90 秒。`LIVE` 不证明模型有进展，`EXPIRED` 不自动改成失败或授权恢复。
@@ -247,14 +243,15 @@ HTML / MULTI_FILE 的模型文本使用流式调用，展示分片与完整候�
 
 Vue 模型消息中的工具历史另限 24 KiB，优先保留近期完整结果、对旧结果提供省略摘要，原始图状态和工具记录不因此裁剪。最新结果或固定上下文无法完整容纳时返回 `VUE_CONTEXT_BUDGET_EXCEEDED`。通用上下文窗口默认 65536、输出额度 8192、协议预留 4096；按供应商实际能力覆盖 `AI_SERVICE_MODEL_CONTEXT_WINDOW_TOKENS`，不能把本地覆盖值当作仓库默认值。预算以 UTF-8 字节数作保守上界，扩容不会同步提高 24 KiB 工具历史上限。
 
-输入语义审核默认开启，仅对 LangGraph 路由和生成生效；关闭语义审核仍保留规则检查。Vue 多 Reviewer 审查默认关闭，开启后读取有界真实源码快照；快照最多 24 文件、单文件 12000 字符、合计 60000 字符，不能保证任意规模项目都被完整审查。详细开关、错误码和限制见 [AI 服务说明](ai-service/README.md)。
+输入语义审核默认开启，在 Python 路由和生成入口生效；关闭语义审核仍保留规则检查。Vue 多 Reviewer 审查默认关闭，开启后读取有界真实源码快照；快照最多 24 文件、单文件 12000 字符、合计 60000 字符，不能保证任意规模项目都被完整审查。详细开关、错误码和限制见 [AI 服务说明](ai-service/README.md)。
 
 ## 构建与验证
 
 ```powershell
 # Java 干净编译、指定测试、打包
 .\mvnw.cmd clean compile -DskipTests
-.\mvnw.cmd test "-Dtest=InternalAiToolsControllerTest"
+# 广泛离线回归；真实资源测试需显式开关，完整 Spring 上下文另行启动验证。
+.\mvnw.cmd test "-Dtest=*Test"
 .\mvnw.cmd package -DskipTests
 
 # 运行 JAR，继续使用 local 配置或外部注入配置
@@ -270,7 +267,7 @@ uv run pytest
 uv lock --check
 ```
 
-Java 全量测试可运行 `.\mvnw.cmd test`，其中部分测试依赖真实模型、邮件、OSS、Chrome 或本地基础设施。Python 常规测试使用 Fake / 注入式 Provider；真实 PostgreSQL、模型与跨服务端到端效果需另外验证。构建跳过测试不等于测试通过。
+Java 全量测试可运行 `.\mvnw.cmd test`，其中部分测试依赖邮件、OSS、Chrome 或本地基础设施。Python 常规测试使用 Fake / 注入式 Provider；真实 PostgreSQL、模型与跨服务端到端效果需另外验证。构建跳过测试不等于测试通过。
 
 ## 上传 Git 前
 
@@ -288,6 +285,10 @@ git ls-files src/main/resources/application-local.yml ai-service/.env
 仓库可能存在与本次任务无关的修改或删除，提交前逐项检查，避免直接使用 `git add .` 混入无关内容。提交使用 `type(scope): 中文说明`；Agent 涉及代码改动时按 [协作规范](AGENTS.md) 完成验证并提交，远程推送按维护者授权执行。
 
 ## 相关文档
+
+当前架构以本 README、AGENTS.md 和 ai-service/README.md 为准。`doc/` 与 `docs/superpowers/` 中早于本次迁移的设计、验收记录为历史档案，其中双引擎和 Java AI 回退描述不适用于本版本。
+
+- [Python AI 专用版本迁移说明](docs/python-ai-only-migration.md)
 
 - [Python AI 服务完整说明](ai-service/README.md)
 - [AI 服务启动与联调](doc/ai-service-startup.md)

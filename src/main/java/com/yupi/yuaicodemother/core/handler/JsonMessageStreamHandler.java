@@ -1,27 +1,21 @@
 package com.yupi.yuaicodemother.core.handler;
 
-import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.yupi.yuaicodemother.ai.model.message.*;
-import com.yupi.yuaicodemother.ai.tools.BaseTool;
-import com.yupi.yuaicodemother.ai.tools.ToolManager;
-import com.yupi.yuaicodemother.constant.AppConstant;
-import com.yupi.yuaicodemother.core.builder.VueProjectBuilder;
 import com.yupi.yuaicodemother.enums.ChatHistoryMessageTypeEnum;
 import com.yupi.yuaicodemother.model.entity.ChatHistoryOriginal;
 import com.yupi.yuaicodemother.model.entity.SysUser;
 import com.yupi.yuaicodemother.service.ChatHistoryOriginalService;
 import com.yupi.yuaicodemother.service.ChatHistoryService;
-import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
+import java.util.HashSet;
 import java.util.Set;
 
 /**
@@ -32,14 +26,8 @@ import java.util.Set;
 @Component
 public class JsonMessageStreamHandler {
 
-    @Resource
-    private VueProjectBuilder vueProjectBuilder;
-
-    @Resource
-    private ToolManager toolManager;
-
     /**
-     * 处理 TokenStream（VUE_PROJECT）
+     * 处理 Python 工具事件流（VUE_PROJECT）
      * 解析 JSON 消息并重组为完整的响应格式
      *
      * @param originFlux         原始流
@@ -54,11 +42,11 @@ public class JsonMessageStreamHandler {
                                long appId, SysUser loginUser) {
         // 收集数据用于前端展示(对话历史)
         StringBuilder chatHistoryStringBuilder = new StringBuilder();
-        //收集用于恢复对话记忆的数据
+        // 收集用于保存原始聊天记录的文本
         StringBuilder aiResponseStringBuilder = new StringBuilder();
         //每个 Flux 流可能包含多条工具调用和 AI_RESPONSE 响应信息，统一收集之后批量入库
         List<ChatHistoryOriginal> originalChatHistoryList = new ArrayList<>();
-        // 用于跟踪已经见过的工具ID，判断是否是第一次调用
+        // 同一请求内的重复开始事件只提示一次，不写入最终展示历史。
         Set<String> seenToolIds = new HashSet<>();
         return originFlux
                 .map(chunk -> {
@@ -95,95 +83,57 @@ public class JsonMessageStreamHandler {
     }
 
     /**
-     * 解析并收集 TokenStream 数据
+     * 解析并收集 Python 工具事件
      */
     private String handleJsonMessageChunk(String chunk,
                                           StringBuilder chatHistoryStringBuilder,
                                           StringBuilder aiResponseStringBuilder,
                                           List<ChatHistoryOriginal> originalChatHistoryList,
                                           Set<String> seenToolIds) {
-        // 先解析公共消息类型，再按 type 转换为具体消息对象。
         StreamMessage streamMessage = JSONUtil.toBean(chunk, StreamMessage.class);
         StreamMessageTypeEnum typeEnum = StreamMessageTypeEnum.getEnumByValue(streamMessage.getType());
         switch (typeEnum) {
             case AI_RESPONSE -> {
-                AiResponseMessage aiMessage = JSONUtil.toBean(chunk, AiResponseMessage.class);
-                String data = aiMessage.getData();
-                // 文本片段同时写入展示消息和最终聊天记录。
+                String data = JSONUtil.toBean(chunk, AiResponseMessage.class).getData();
                 chatHistoryStringBuilder.append(data);
-                // 记录AI响应内容
                 aiResponseStringBuilder.append(data);
-                // 只把当前片段返回给前端，避免重复发送历史内容。
+                // 仅返回当前分片，避免客户端重复拼接历史文本。
                 return data;
             }
             case TOOL_REQUEST -> {
-                ToolRequestMessage toolRequestMessage = JSONUtil.toBean(chunk, ToolRequestMessage.class);
-                String toolId = toolRequestMessage.getId();
-                String toolName = toolRequestMessage.getName();
-                // 检查是否是第一次看到这个工具 ID
-                if (toolId != null && !seenToolIds.contains(toolId)) {
-                    // 第一次调用这个工具，记录 ID 并返回工具信息
-                    seenToolIds.add(toolId);
-                    // 根据工具名称获取工具实例
-                    BaseTool tool = toolManager.getTool(toolName);
-                    if (tool == null) {
-                        // LangGraph 的内部工具事件也会经过旧版展示处理器；这些工具由 Python 工作流执行，不能当作 Legacy 工具告警。
-                        if (isLangGraphInternalTool(toolName)) {
-                            return "";
-                        }
-                        log.warn("未注册的工具请求: {}", toolName);
-                        return String.format("\n\n[执行工具] %s\n\n", toolName);
-                    }
-                    // 返回格式化的工具调用信息
-                    return tool.generateToolRequestResponse();
-                } else {
-                    // 不是第一次调用这个工具，直接返回空
-                    return "";
-                }
+                ToolRequestMessage request = JSONUtil.toBean(chunk, ToolRequestMessage.class);
+                if (request.getId() == null || !seenToolIds.add(request.getId())) return "";
+                String label = switch (request.getName() == null ? "" : request.getName()) {
+                    case "file_write" -> "写入文件";
+                    case "file_read" -> "读取文件";
+                    case "dir_read" -> "读取目录";
+                    case "file_modify" -> "修改文件";
+                    case "file_delete" -> "删除文件";
+                    default -> "";
+                };
+                // 保留文件工具的开始提示；图片搜索与工作流内部工具继续隐藏开始事件。
+                return label.isEmpty() ? "" : "\n\n[选择工具] " + label + "\n\n";
             }
             case TOOL_EXECUTED -> {
-                // Python 工具结果与调用参数分开传输；不能交给要求完整源码的 Legacy 格式化器。
+                processToolExecutionMessage(aiResponseStringBuilder, chunk, originalChatHistoryList);
                 JSONObject envelope = JSONUtil.parseObj(chunk);
-                if ("langgraph".equals(envelope.getStr("engine"))) {
-                    processToolExecutionMessage(aiResponseStringBuilder, chunk, originalChatHistoryList);
-                    JSONObject args = JSONUtil.parseObj(envelope.getStr("arguments", "{}"));
-                    JSONObject toolResult = JSONUtil.parseObj(envelope.getStr("result", "{}"));
-                    String name = envelope.getStr("name", "工具");
-                    String label = switch (name) {
-                        case "file_write" -> "写入文件";
-                        case "file_read" -> "读取文件";
-                        case "dir_read" -> "读取目录";
-                        case "file_modify" -> "修改文件";
-                        case "file_delete" -> "删除文件";
-                        case "image_search" -> "搜索图片";
-                        default -> "";
-                    };
-                    if (label.isEmpty()) return "";
-                    String path = args.getStr("relativeFilePath",
-                            args.getStr("relativeDirPath", args.getStr("query", "")));
-                    String status = Boolean.FALSE.equals(toolResult.getBool("ok")) ? "未完成" : "完成";
-                    String output = "\n\n[工具调用] " + label + " " + path + "（" + status + "）\n\n";
-                    chatHistoryStringBuilder.append(output);
-                    return output;
-                }
-                // 先记录工具请求和结果，保证原始聊天记录可以完整回放。
-                processToolExecutionMessage(aiResponseStringBuilder,chunk,originalChatHistoryList);
-                // 将工具结果转换为用户可读的展示文本。
-                ToolExecutedMessage toolExecutedMessage = JSONUtil.toBean(chunk, ToolExecutedMessage.class);
-                String toolName = toolExecutedMessage.getName();
-                JSONObject jsonObject = JSONUtil.parseObj(toolExecutedMessage.getArguments());
-                // 根据工具名称获取工具实例并生成相应的结果格式
-                BaseTool tool = toolManager.getTool(toolName);
-                if (tool == null) {
-                    if (isLangGraphInternalTool(toolName)) {
-                        return "";
-                    }
-                    log.warn("未注册的工具执行结果: {}", toolName);
-                    return "";
-                }
-                String result = tool.generateToolExecutedResult(jsonObject);
-                // 输出前端和要持久化的内容
-                String output = String.format("\n\n%s\n\n", result);
+                JSONObject args = JSONUtil.parseObj(envelope.getStr("arguments", "{}"));
+                JSONObject toolResult = JSONUtil.parseObj(envelope.getStr("result", "{}"));
+                String label = switch (envelope.getStr("name", "")) {
+                    case "file_write" -> "写入文件";
+                    case "file_read" -> "读取文件";
+                    case "dir_read" -> "读取目录";
+                    case "file_modify" -> "修改文件";
+                    case "file_delete" -> "删除文件";
+                    case "image_search" -> "搜索图片";
+                    default -> "";
+                };
+                // 工作流内部校验、构建和发布事件留存原始记录，不暴露为文件工具展示。
+                if (label.isEmpty()) return "";
+                String path = args.getStr("relativeFilePath",
+                        args.getStr("relativeDirPath", args.getStr("query", "")));
+                String status = Boolean.FALSE.equals(toolResult.getBool("ok")) ? "未完成" : "完成";
+                String output = "\n\n[工具调用] " + label + " " + path + "（" + status + "）\n\n";
                 chatHistoryStringBuilder.append(output);
                 return output;
             }
@@ -203,7 +153,7 @@ public class JsonMessageStreamHandler {
     private void processToolExecutionMessage(StringBuilder aiResponseStringBuilder, String chunk, List<ChatHistoryOriginal> originalChatHistoryList) {
         // 解析 chunk
         ToolExecutedMessage toolExecutedMessage = JSONUtil.toBean(chunk, ToolExecutedMessage.class);
-        // 构造工具调用请求对象(工具调用结果的数据就是从调用请求里拿的，所以直接在这里处理调用请求信息)
+        // 结果事件携带调用参数，用它恢复配对请求记录并保留之前的 AI 文本。
         String aiResponseStr = aiResponseStringBuilder.toString();
         ToolRequestMessage toolRequestMessage = new ToolRequestMessage();
         toolRequestMessage.setId(toolExecutedMessage.getId());
@@ -227,11 +177,4 @@ public class JsonMessageStreamHandler {
         aiResponseStringBuilder.setLength(0);
     }
 
-    private boolean isLangGraphInternalTool(String toolName) {
-        return Set.of("dir_read", "file_read", "file_write", "file_modify", "file_delete",
-                "artifact_context", "artifact_validate", "artifact_publish", "project_build",
-                "vue_source_snapshot", "image_search").contains(toolName);
-    }
-
-    }
-
+}

@@ -52,10 +52,10 @@ class InternalAiToolsControllerTest {
     @Test
     void imageSearchReturnsPexelsResourcesThroughAuthenticatedGateway() {
         var controller = controller(mock(ArtifactPublicationService.class));
-        var search = mock(com.yupi.yuaicodemother.langraph4j.tools.ImageSearchTool.class);
+        var search = mock(com.yupi.yuaicodemother.image.ImageSearchTool.class);
         org.springframework.test.util.ReflectionTestUtils.setField(controller, "imageSearchTool", search);
         when(search.searchContentImages("travel")).thenReturn(java.util.List.of(
-                com.yupi.yuaicodemother.langraph4j.model.ImageResource.builder()
+                com.yupi.yuaicodemother.image.ImageResource.builder()
                         .url("https://images.pexels.com/photos/1/test.jpg").description("景色").build()));
         var result = invokeTool(controller, "image_search", Map.of("query", "travel", "codeGenType", "VUE_PROJECT"));
         assertEquals(true, result.get("ok"));

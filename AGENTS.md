@@ -2,7 +2,7 @@
 
 本文件供后续 AI Agent 和开发协作者使用。修改代码前先阅读本文件，再结合任务查看相关源码、模块 README 和设计文档。不要把规划中的能力当成已经实现的能力。
 
-最近一次源码核对：2026-10-29。根 README 面向使用者，本文件面向开发协作，`ai-service/README.md` 描述 Python 运行细节；修改相关行为时同步对应文档，不将历史验收结果写成本轮已验证。
+Python AI 专用版本迁移：2026-11-23。根 README 面向使用者，本文件面向开发协作，`ai-service/README.md` 描述 Python 运行细节；修改相关行为时同步对应文档，不将历史验收结果写成本轮已验证。
 
 ## 项目概览
 
@@ -18,12 +18,11 @@ Spring 是业务数据和项目文件的唯一所有者。Python 不访问 MySQL
 
 - Java 21、Spring Boot 3.5.4、MyBatis-Flex、MySQL
 - Redis、Spring Session、Redisson、Caffeine
-- LangChain4j（迁移期 Legacy 回退）
 - Python 3.12、FastAPI、LangChain、LangGraph、uv
 - DeepSeek/OpenAI 兼容聊天模型
 - Selenium、WebDriverManager、Knife4j、springdoc-openapi、Lombok
 
-历史目录 `src/main/java/com/yupi/yuaicodemother/langraph4j` 中的 Java LangGraph4j 工作流未接入当前生成主链路，不要与 `ai-service` 的 Python LangGraph 混淆；其中 `tools/ImageSearchTool` 等工具仍被当前内部网关复用，不能将整个目录视为可删除代码。
+本版本所有 AI 执行均由 Python 服务负责。Java AI 框架、旧图实验、模型配置和回退链路已移除；图片搜索迁为普通业务工具继续供内部网关调用。不得重新引入 Java 模型执行或灰度回退。早于迁移的设计与验收文档仅作历史档案。
 
 默认本地服务：
 
@@ -89,14 +88,14 @@ Spring 业务后端：
 - `src/main/java/com/yupi/yuaicodemother/model`：entity、DTO 和 VO。
 - `src/main/java/com/yupi/yuaicodemother/common`、`exception`：通用响应和异常处理。
 - `src/main/java/com/yupi/yuaicodemother/ratelimit`：限流注解、切面和 Redisson 配置。
-- `src/main/java/com/yupi/yuaicodemother/ai`：Legacy LangChain4j 服务、工具和统一生成网关。
-- `src/main/java/com/yupi/yuaicodemother/ai/gateway`：`AiGenerationGateway`、Legacy/LangGraph 实现及灰度委派。
+- `src/main/java/com/yupi/yuaicodemother/ai`：Python AI 服务客户端、协议 DTO 和内部工具边界。
+- `src/main/java/com/yupi/yuaicodemother/ai/gateway`：`AiGenerationGateway` 及唯一 Python HTTP 实现 `LangGraphAiGenerationGateway`。
+- `src/main/java/com/yupi/yuaicodemother/image`：内部网关使用的普通图片搜索工具与资源 DTO，无模型框架依赖。
 - `src/main/java/com/yupi/yuaicodemother/controller/InternalAiToolsController.java`：Python 调用的内部文件与构建工具边界。
 - `src/main/java/com/yupi/yuaicodemother/core`：代码解析、保存、构建和流处理。
 - `src/main/java/com/yupi/yuaicodemother/core/artifact`：不可变产物、校验、源码快照、MySQL 代际与活动指针。
 - `src/main/java/com/yupi/yuaicodemother/service/impl/GenerationTaskServiceImpl.java`：任务台账、执行所有者登记与心跳续写。
 - `src/main/java/com/yupi/yuaicodemother/config/GenerationTaskHeartbeatConfiguration.java`：默认任务和生成心跳的独立调度器。
-- `src/main/resources/prompt`：Legacy AI 系统提示词。
 
 Python AI 服务：
 
@@ -145,9 +144,7 @@ Python AI 服务：
 
 - 对外入口：`AppController` 的 `/apps/chat/gen/code`，实际路径为 `/api/apps/chat/gen/code`。
 - 统一 AI 边界：`AiGenerationGateway`。
-- 引擎选择：`DelegatingAiGenerationGateway`，支持 `legacy`、`langgraph`、`gray`/`auto`。
-- Legacy：`LegacyAiGenerationGateway -> AiCodeGeneratorFacade -> LangChain4j`。
-- 新链路：`LangGraphAiGenerationGateway -> Python /internal/v1/generations:stream`。
+- 唯一链路：`LangGraphAiGenerationGateway -> Python /internal/v1/generations:stream`。
 - 工具边界：Python 通过 `/api/internal/ai-tools/invoke` 调用 Spring 文件和构建能力。
 - 保存、解析、构建：`core/saver`、`core/paser`、`VueProjectBuilder`。
 
@@ -158,8 +155,6 @@ Python AI 服务：
   -> AppController
   -> AppServiceImpl
   -> AiGenerationGateway
-     -> LegacyAiGenerationGateway
-     或
      -> LangGraphAiGenerationGateway
         -> Python FastAPI NDJSON
         -> LangGraph StateGraph
@@ -190,12 +185,11 @@ Spring 配置：
 
 ```yaml
 ai:
-  engine: ${AI_ENGINE:langgraph}
   service-url: ${AI_SERVICE_URL:http://localhost:8000}
   token: ${AI_SERVICE_INTERNAL_BEARER_TOKEN:}
 ```
 
-以上为公共 `application.yml` 默认值，默认 profile 为 `local`；`AiEngineProperties` 类字段的 Legacy 兜底不代表仓库启动默认引擎。本地配置或环境变量可以覆盖公共值。Spring 不自动读取 Python `.env`。
+以上为公共 `application.yml` 默认值，默认 profile 为 `local`。本版本无引擎选择配置，Python 是唯一 AI 执行服务。Spring 不自动读取 Python `.env`，也不创建供应商模型 Bean。
 
 Python 配置从 `ai-service/.env` 加载，示例见 `.env.example`。当前两个调用方向共用 Spring 的 `ai.token`，本地联调时以下三处必须一致：
 
@@ -241,7 +235,7 @@ Python AI_SERVICE_INTERNAL_BEARER_TOKEN
 - 准备诊断默认开启，只在父状态、固定字段日志和可选旁路 trace 中保存状态/原因/耗时/调用标志/大小/可信规则 ID；不得传给模型、子图或公共事件。关闭配置只停止新诊断，不删除旧 checkpoint。异常/取消不因观测而吞掉；完整 checkpoint 仍含业务上下文，不等于脱敏日志。
 - `ai_service.orchestration.preparation_evaluation` 默认离线；真实模式必须显式 `--real-model`，每次运行最多 6 次重写，失败也占额度。固定样本位于 `ai-service/evaluation/generation-preparation-v1.json`。评估不生成/发布应用，不把规则匹配或原文摘录覆盖写成页面视觉质量；重复真实运行仍须符合用户授权总量。
 - `AI_SERVICE_PROMPT_REWRITE_POLICY` 默认 `always`；可选 `conservative` 为完整识别的已有页面单项修改省去辅助摘要，标记 `skipped/SIMPLE_EDIT`、brief 为 null，不能计为重写成功。原文、输入审核、生成预算、规则和工具边界不变。`rewrite_policy_evaluation` 仅做离线分类和预计调用比较，不调用真实模型；开发/诊断集不得重新称为未见过的独立集，默认策略需有真实产物证据再决定推广。
-- 结构化编辑使用可选顶层 `editIntent`，严格四字段并核对 canonical 原文，不能信任 metadata 同名字段。`AI_SERVICE_STRUCTURED_EDIT_ENABLED=true` 默认省去有效单属性编辑的辅助重写，标为 `skipped/STRUCTURED_EDIT`；重写总开关优先。要求已有产物，Vue 还要求有界清单可见页面源码；不代表服务端验证了 DOM 唯一性或产物可构建。Legacy 明确拒绝。前端提交前复核当前 iframe/document/URL、元素连接及唯一定位，保留普通自由输入路径。
+- 结构化编辑使用可选顶层 `editIntent`，严格四字段并核对 canonical 原文，不能信任 metadata 同名字段。`AI_SERVICE_STRUCTURED_EDIT_ENABLED=true` 默认省去有效单属性编辑的辅助重写，标为 `skipped/STRUCTURED_EDIT`；重写总开关优先。要求已有产物，Vue 还要求有界清单可见页面源码；不代表服务端验证了 DOM 唯一性或产物可构建。前端提交前复核当前 iframe/document/URL、元素连接及唯一定位，保留普通自由输入路径。
 - 前端规则开启时，有效顶层结构化意图追加 `structured-edit-scope@1`；当前产物是保留基线，历史需求不作为待补做清单。生成、审查和修复共用准备结果，不能把规则存在视为修改范围已通过验收。PostgreSQL 状态摘要允许可选准备诊断并再次投影。
 - 单 Reviewer 使用严格 JSON verdict/issues，最多四条白名单问题；拒绝证据和建议仅作为有界、不可信修复反馈。日志只记录判定、大小、结束原因、问题数和固定问题码，不输出理由正文。非法/截断审查输出明确失败，不自动重试；旧注入模型布尔兼容不代表真实供应商仍接受裸 PASS。
 - `fail_quality` 区分 `ARTIFACT_VALIDATION_FAILED`、构建错误和 `QUALITY_REVIEW_FAILED`，保留原修复预算。`review_diagnostics` 仅留验证子图，按严格白名单投影到 PostgreSQL 状态摘要和节点旁路；只存阶段、判定、阻断数和问题码，非白名单多审查代码映射 UNCLASSIFIED。新候选清空旧诊断，不进入父图/修复模型/公共事件；终态图清理不删除原 TTL 内的摘要，不能据此还原完整 Reviewer 理由。
@@ -273,7 +267,7 @@ HTML 和 MULTI_FILE 发布使用 `VersionedArtifactStore` 保存不可变 releas
 ## 生成任务、心跳与恢复边界
 
 - `/api/apps/chat/gen/code/task` 查询任务台账；只允许现存应用所有者查询本人任务，省略 requestId 返回最近未过期记录。终态查询窗口为 30 天，无物理清理调度。
-- 台账覆盖 Legacy/LangGraph 与三种生成类型；记录执行状态、稳定错误码和时间，不保存提示词、源码或凭据。MySQL、Redis、文件系统之间没有跨资源事务。
+- 台账覆盖 Python AI 的三种生成类型；记录执行状态、稳定错误码和时间，不保存提示词、源码或凭据。MySQL、Redis、文件系统之间没有跨资源事务。
 - 查询分别展示 `executionState`、`leaseState`、`publicationState` 与 `heartbeatState`，不是原子快照；`COMMITTING` 不等于发布，`COMMITTED` 不等于当前活动版本，Vue 返回 `NOT_VERSIONED`。
 - 随机执行所有者只登记本实例已确认插入的任务。独立调度器每 15 秒按 owner/token/当前代际续写心跳，数据库观测期限为 90 秒；不扫描 RUNNING 行自动认领。
 - `LIVE/EXPIRED/SUPERSEDED/UNKNOWN/TERMINAL` 只用于心跳观测。过期不改执行终态、不触发取消或恢复；原所有者真实终态仍可条件落账。取消请求与浏览器断开不提前结束心跳，需等待引擎真实终态。

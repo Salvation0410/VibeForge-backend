@@ -6,7 +6,6 @@ import com.mybatisflex.core.service.IService;
 import com.yupi.yuaicodemother.model.dto.chathistory.ChatHistoryQueryRequest;
 import com.yupi.yuaicodemother.model.entity.ChatHistory;
 import com.yupi.yuaicodemother.model.entity.SysUser;
-import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 
 import java.time.LocalDateTime;
 
@@ -27,7 +26,6 @@ public interface ChatHistoryService extends IService<ChatHistory> {
      */
     public boolean addChatMessage(Long appId, String message, String messageType, Long userId);
 
-    int loadChatHistoryToMemory(Long appId, MessageWindowChatMemory chatMemory, int maxCount);
 
     /**
      * 根据id删除关联历史记录

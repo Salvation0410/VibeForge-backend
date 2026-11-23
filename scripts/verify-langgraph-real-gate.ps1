@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$Execute,
     [switch]$IncludeRedis,
     [switch]$IncludePostgres,
@@ -8,7 +8,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$focusedTests = 'LangGraphAiGenerationGatewayTest,DelegatingAiGenerationGatewayTest,AppServiceGenerationCancellationTest,VueProjectBuilderTest'
+$focusedTests = 'PythonOnlyGatewayConfigurationTest,LangGraphAiGenerationGatewayTest,AppServiceGenerationCancellationTest,VueProjectBuilderTest'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 
 function Resolve-MavenCommand {
@@ -57,7 +57,7 @@ function Invoke-ValidationStep(
             [Environment]::SetEnvironmentVariable($entry.Key, [string]$entry.Value, 'Process')
         }
 
-        # Native tools legitimately write warnings to stderr; only their exit code decides the step result.
+        # 原生命令可能向标准错误输出警告；以退出码判断步骤是否成功。
         $ErrorActionPreference = 'Continue'
         & $FilePath @ArgumentList 2>&1 | ForEach-Object { Write-Host $_ }
         $exitCode = $LASTEXITCODE
@@ -181,7 +181,6 @@ $report = [ordered]@{
         'HTML, MULTI_FILE, and VUE_PROJECT initial generation and follow-up edits',
         'stop, disconnect, model timeout, tool failure, and long-build terminal states',
         'Controller and Redis tool contention across two real Spring instances',
-        'Legacy and LangGraph summary comparison plus Legacy rollback',
         'real Uvicorn/proxy backpressure and npm wrapper process cleanup'
     )
 }

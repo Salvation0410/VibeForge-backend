@@ -2,7 +2,6 @@
 $ErrorActionPreference = 'Stop'
 
 $expectedScripts = @(
-    'compare-ai-generation-engines.ps1',
     'test-ai-service.ps1',
     'test-ai-phase-two-e2e.ps1',
     'test-ai-tool-controller-competition.ps1',
@@ -52,19 +51,6 @@ foreach ($expected in @(
     }
 }
 
-$comparison = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'compare-ai-generation-engines.ps1')
-foreach ($marker in @('ai-validation-auth.ps1', 'SessionCookie', 'New-AiValidationAuthenticatedSession')) {
-    if ($comparison -notmatch [regex]::Escape($marker)) { throw "Comparison script misses authenticated-session support: $marker" }
-}
-foreach ($field in @('engine','appId','codeGenType','requestId','terminalStatus','toolNames','artifactHashes','buildStatus','errorCode','durationMs')) {
-    if ($comparison -notmatch [regex]::Escape($field)) { throw "Comparison report misses $field" }
-}
-foreach ($forbidden in @('prompt','source','cookie','token','toolArguments')) {
-    if ($comparison -match "(?im)^\s*$([regex]::Escape($forbidden))\s*=") {
-        throw "Comparison report contains forbidden field $forbidden"
-    }
-}
-
 $e2e = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'test-ai-phase-two-e2e.ps1')
 foreach ($marker in @('ai-validation-auth.ps1', 'SessionCookie', 'New-AiValidationAuthenticatedSession')) {
     if ($e2e -notmatch [regex]::Escape($marker)) { throw "E2E script misses authenticated-session support: $marker" }
@@ -72,7 +58,7 @@ foreach ($marker in @('ai-validation-auth.ps1', 'SessionCookie', 'New-AiValidati
 # 三类型验收入口必须同时包含自动终态断言和中文人工检查清单。
 foreach ($marker in @(
     'HTML', 'MULTI_FILE', 'VUE_PROJECT', 'business-error', 'manualChecks',
-    'RunCancellationScenario', 'RunLegacyRollbackScenario', '首次生成', '二次修改',
+    'RunCancellationScenario', '首次生成', '二次修改',
     '未指定的文字、图片、功能和操作方式仍然保留', '旧版本', 'previewUrl',
     'downloadUrl', 'historyUrl', '业务错误'
 )) {
@@ -122,7 +108,7 @@ $verification = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'verify-l
 foreach ($marker in @(
     '[switch]$Execute', '[switch]$IncludeRedis', '[switch]$IncludePostgres',
     'mvn clean -DskipTests compile',
-    'LangGraphAiGenerationGatewayTest,DelegatingAiGenerationGatewayTest,AppServiceGenerationCancellationTest,VueProjectBuilderTest',
+    'PythonOnlyGatewayConfigurationTest,LangGraphAiGenerationGatewayTest,AppServiceGenerationCancellationTest,VueProjectBuilderTest',
     'uv run python -m compileall -q src', 'uv run pytest', 'uv lock --check',
     'ai-validation-scripts.tests.ps1', 'ToolInvocationIdempotencyRedisIT',
     'tests/test_postgres_checkpoint_integration.py', 'AI_SERVICE_POSTGRES_INTEGRATION',
@@ -168,8 +154,8 @@ try {
         throw 'Manual validation record generator must create a record in execute mode'
     }
     $record = Get-Content -Raw -LiteralPath $recordPath | ConvertFrom-Json
-    if ($record.recordVersion -ne 1 -or @($record.scenarios).Count -ne 13) {
-        throw 'Manual validation record must contain version 1 and all 13 P0 scenarios'
+    if ($record.recordVersion -ne 1 -or @($record.scenarios).Count -ne 12) {
+        throw 'Manual validation record must contain version 1 and all 12 P0 scenarios'
     }
     if (@($record.scenarios | Where-Object { $_.status -ne 'pending' }).Count -ne 0) {
         throw 'Manual validation record scenarios must start as pending'

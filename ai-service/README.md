@@ -1,8 +1,12 @@
 # Yu AI Service
 
-`yu-ai-service` 是 `yu-ai-code-mother` 的 Python AI 服务，使用 Python 3.12、FastAPI、LangChain 和 LangGraph，提供代码生成类型路由、流式生成、工具编排、质量审查及有限修复，也提供可选的客服知识库 ETL 与 RAG 问答。
+`yu-ai-service` 是本 Python AI 专用版本中唯一的 AI 执行服务，使用 Python 3.12、FastAPI、LangChain 和 LangGraph，提供代码生成类型路由、流式生成、工具编排、质量审查及有限修复，也提供可选的客服知识库 ETL 与 RAG 问答。
 
 本文按当前源码组织，配置定义见 [config.py](src/ai_service/config.py)，配置样例见 [.env.example](.env.example)。
+
+Java 端仅保留业务、文件工具与 HTTP/SSE 适配，无 Java AI 框架、模型配置或自动回退。供应商密钥仅在本服务配置。知识库历史版本兼容逻辑不属于被删除的 Java AI 链路。
+
+普通离线测试在缺少私有 `.env` 时，由 `tests/conftest.py` 补齐测试令牌和 `spring.test` 工具地址；不补真实模型密钥，不改变生产 Settings 必填校验。显式启用 PostgreSQL/Milvus 集成测试时沿用调用方配置。知识库冻结评估依赖精确字节，仓库 `.gitattributes` 固定相关语料和源码的原始换行。
 
 ## 架构与职责
 
@@ -168,10 +172,9 @@ uv run python -m ai_service.server
 
 默认监听 `0.0.0.0:8000`。Windows 使用此入口选择兼容 psycopg 的 `SelectorEventLoop`。修改 `.env` 后需重启服务。
 
-Spring 公共配置默认使用 `langgraph`；在启动 Spring 的终端中核对：
+Spring 固定调用 Python AI 服务；在启动 Spring 的终端中核对服务地址：
 
 ```powershell
-$env:AI_ENGINE = "langgraph"
 $env:AI_SERVICE_URL = "http://localhost:8000"
 # AI_SERVICE_INTERNAL_BEARER_TOKEN 从私有配置或运行环境注入。
 ```
@@ -249,7 +252,7 @@ input_guard -> context_prepare -> generation_prepare
 
 ### 输入校验与语义审核
 
-输入规则检查与语义审核由类型路由和生成入口共用。审核结果包括放行、带提示放行、需要澄清和拒绝；审核故障不静默放行。关闭语义审核仍保留非空、控制字符、长度和预算检查。Legacy 链路不接入此审核。
+输入规则检查与语义审核由类型路由和生成入口共用。审核结果包括放行、带提示放行、需要澄清和拒绝；审核故障不静默放行。关闭语义审核仍保留非空、控制字符、长度和预算检查。本版本 Spring 的路由和生成均调用这些 Python 入口。
 
 Spring 向 LangGraph 传入最近最多六条用户需求（每条最多 1000 个 UTF-16 字符）及最多 2000 字符的初始需求。每次请求独立建立状态，不自动传递完整历史回复、源码或上一请求的工具历史。Vue 当前产物上下文先提供最多 200 条文件路径，再由模型按需读取。
 
@@ -321,7 +324,7 @@ uv run python -m ai_service.orchestration.rewrite_policy_evaluation --dataset ev
 
 三端生成/核对完全相同的中文原文，不能附加自由文本；Spring 校验权限和原文，Python 在入口及工作流重验。只有顶层意图可触发跳过，metadata 中同名字段不能触发。还要求 Spring 返回已有产物；Vue 的 exists 只表示目录，因此额外要求有界 entries 清单至少包含一份 `.vue/.html/.js/.ts/.jsx/.tsx` 文件。该检查不证明可构建或 DOM 定位存在。前端核对当前 DOM 唯一匹配，后端只校验路径语法，后续模型仍须确认源码定位。
 
-默认 `AI_SERVICE_STRUCTURED_EDIT_ENABLED=true` 时，有效结构化请求标为 `skipped/STRUCTURED_EDIT`、`brief=null`、`modelAttempted=false`，与 conservative 无关。关闭此配置恢复有效请求的辅助重写；关闭总重写开关仍为 disabled。输入审核、硬预算、生成、审查、修复、构建和发布保持原流程。缓存重入复用已有准备结果，开关调整作用于新请求。Legacy 明确拒绝结构化请求（`STRUCTURED_EDIT_UNSUPPORTED`）。
+默认 `AI_SERVICE_STRUCTURED_EDIT_ENABLED=true` 时，有效结构化请求标为 `skipped/STRUCTURED_EDIT`、`brief=null`、`modelAttempted=false`，与 conservative 无关。关闭此配置恢复有效请求的辅助重写；关闭总重写开关仍为 disabled。输入审核、硬预算、生成、审查、修复、构建和发布保持原流程。缓存重入复用已有准备结果，开关调整作用于新请求。
 
 前端规则开启时，经过校验的顶层结构化意图还会选择本地 `structured-edit-scope@1`：本轮指定属性是当前修改范围，当前产物/实际源码是保留基线，历史需求只作背景，不补做旧修改。生成、审查和修复使用同一准备结果；规则是模型约束，不是确定性源码补丁，也不能证明修改范围必然正确。
 

@@ -33,51 +33,13 @@ spring:
       max-file-size: 5MB
       max-request-size: 5MB
 
-# 即使使用 Python 引擎，Java 仍保留模型 Bean 和相关辅助服务配置。
-# 所有密钥默认值均为占位符，实际调用前必须替换或注入环境变量。
-langchain4j:
-  open-ai:
-    chat-model:
-      base-url: ${MODEL_BASE_URL:https://api.deepseek.com/v1}
-      api-key: ${MODEL_API_KEY:replace-with-provider-key}
-      model-name: ${MODEL_NAME:deepseek-chat}
-      max-tokens: 8192
-      response-format: json_object
-      strict-json-schema: true
-      log-requests: false
-      log-responses: false
-    streaming-chat-model:
-      base-url: ${MODEL_BASE_URL:https://api.deepseek.com/v1}
-      api-key: ${MODEL_API_KEY:replace-with-provider-key}
-      model-name: ${MODEL_NAME:deepseek-chat}
-      max-tokens: 8192
-      log-requests: false
-      log-responses: false
-    reasoning-streaming-chat-model:
-      base-url: ${REASONING_MODEL_BASE_URL:https://api.deepseek.com/v1}
-      api-key: ${REASONING_MODEL_API_KEY:replace-with-provider-key}
-      model-name: ${REASONING_MODEL_NAME:deepseek-reasoner}
-      max-tokens: 32768
-      temperature: 0.1
-      log-requests: false
-      log-responses: false
-    routing-chat-model:
-      base-url: ${MODEL_BASE_URL:https://api.deepseek.com/v1}
-      api-key: ${MODEL_API_KEY:replace-with-provider-key}
-      model-name: ${MODEL_NAME:deepseek-chat}
-      log-requests: false
-      log-responses: false
-
 ai:
-  engine: ${AI_ENGINE:langgraph}
   service-url: ${AI_SERVICE_URL:http://localhost:8000}
   # 与 Python 的两个内部令牌保持一致；使用前生成高强度随机值。
   token: ${AI_SERVICE_INTERNAL_BEARER_TOKEN:}
   generation-stream-idle-timeout-seconds: ${AI_GENERATION_STREAM_IDLE_TIMEOUT_SECONDS:600}
   tool-idempotency-ttl-seconds: ${AI_TOOL_IDEMPOTENCY_TTL_SECONDS:86400}
   tool-idempotency-lock-wait-millis: ${AI_TOOL_IDEMPOTENCY_LOCK_WAIT_MILLIS:30000}
-  gray-whitelist: []
-  gray-percentage: 0
   html-artifact:
     enabled: ${AI_HTML_SMOKE_TEST_ENABLED:true}
     required: ${AI_HTML_SMOKE_TEST_REQUIRED:true}
@@ -101,9 +63,6 @@ oss:
   max-knowledge-document-size: ${OSS_MAX_KNOWLEDGE_DOCUMENT_SIZE:20971520}
   knowledge-signed-url-ttl-seconds: ${OSS_KNOWLEDGE_SIGNED_URL_TTL_SECONDS:600}
 
-# 历史 Java 图实验工具仍被组件扫描，保留配置入口；不代表当前主链路启用。
+# Spring 内部图片搜索工具使用的 Pexels 凭据。
 pexels:
   api-key: ${PEXELS_API_KEY:}
-dashscope:
-  api-key: ${DASHSCOPE_API_KEY:}
-  image-model: ${DASHSCOPE_IMAGE_MODEL:wan2.2-t2i-plus}

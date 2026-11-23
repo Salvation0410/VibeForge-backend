@@ -1,7 +1,6 @@
 ﻿param(
     [switch]$Execute,
     [switch]$RunCancellationScenario,
-    [switch]$RunLegacyRollbackScenario,
     [string]$SpringBaseUrl = 'http://localhost:8123/api',
     [string]$FrontendBaseUrl = 'http://localhost:5173',
     [long]$HtmlAppId,
@@ -103,7 +102,7 @@ function Invoke-Scenario([string]$Type, [long]$AppId, [string]$Prompt, $Session,
 
 Assert-Inputs
 if (-not $Execute) {
-    Write-Host '当前为 dry-run：已列出三类应用的首次生成、二次修改、停止/断线和 Legacy 回滚检查；只有增加 -Execute 才会发送真实请求。'
+    Write-Host '当前为 dry-run：已列出三类应用的首次生成、二次修改、停止/断线检查；只有增加 -Execute 才会发送真实请求。'
     return
 }
 
@@ -120,9 +119,8 @@ foreach ($case in $cases) {
     $results.Add((Invoke-Scenario $case.type $case.appId $case.initial $session '首次生成'))
     $results.Add((Invoke-Scenario $case.type $case.appId $case.modify $session '二次修改'))
 }
-# 停止/断线和 Legacy 回滚需要人工控制时点，脚本只提示并要求保留证据。
+# 停止/断线需要人工控制时点，脚本只提示并要求保留证据。
 if ($RunCancellationScenario) { Write-Host '请在前端生成过程中人工停止或断开连接，并记录旧版本、旧预览和后台取消状态证据。' }
-if ($RunLegacyRollbackScenario) { Write-Host '请使用单独配置为 Legacy 的 Spring 环境执行对比脚本，并记录路由与回滚结果。' }
 if ([string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath = Join-Path (Get-Location) 'target/ai-validation/test-ai-phase-two-e2e.json' }
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $OutputPath) | Out-Null
 $results | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 -LiteralPath $OutputPath

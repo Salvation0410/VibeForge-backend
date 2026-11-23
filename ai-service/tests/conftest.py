@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import asyncio
 import sys
 from copy import deepcopy
@@ -178,6 +179,24 @@ class MemoryCheckpoint:
 
     async def ping(self) -> bool:
         return self.available
+
+
+@pytest.fixture(autouse=True)
+def offline_service_environment(monkeypatch):
+    # 离线测试不依赖未提交的私有 .env；仅补齐协议必需项，不配置真实模型密钥。
+    # 显式真实资源验收沿用调用方配置，避免覆盖其 Spring 网关鉴权。
+    if any(os.getenv(name, "").lower() == "true" for name in (
+        "AI_SERVICE_POSTGRES_INTEGRATION", "AI_SERVICE_MILVUS_INTEGRATION",
+    )):
+        return
+    defaults = {
+        "AI_SERVICE_INTERNAL_BEARER_TOKEN": "test-internal-token",
+        "AI_SERVICE_SPRING_GATEWAY_BASE_URL": "http://spring.test/api/internal/ai-tools",
+        "AI_SERVICE_SPRING_GATEWAY_BEARER_TOKEN": "test-gateway-token",
+    }
+    for name, value in defaults.items():
+        if name not in os.environ:
+            monkeypatch.setenv(name, value)
 
 
 @pytest.fixture

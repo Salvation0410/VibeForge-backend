@@ -2,14 +2,13 @@ package com.yupi.yuaicodemother.service;
 
 import com.mybatisflex.core.service.IService;
 import com.yupi.yuaicodemother.model.entity.ChatHistoryOriginal;
-import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 
 import java.util.List;
 
 /**
  * 完整对话历史 服务层
  *
- * 为vue工程模式恢复对话记忆(包含工具调用信息)
+ * 保存 Vue 工程生成的原始消息与工具调用记录
  *
  * @author song
  */
@@ -40,12 +39,4 @@ public interface ChatHistoryOriginalService extends IService<ChatHistoryOriginal
      */
     boolean deleteByAppId(Long appId);
 
-    /**
-     * 将 APP 的对话历史加载到缓存中
-     * @param appId
-     * @param chatMemory
-     * @param maxCount
-     * @return
-     */
-    int loadOriginalChatHistoryToMemory(Long appId, MessageWindowChatMemory chatMemory, int maxCount);
 }

@@ -1,4 +1,4 @@
-package com.yupi.yuaicodemother.langraph4j.enums;
+package com.yupi.yuaicodemother.image;
 
 import cn.hutool.core.util.ObjUtil;
 import lombok.Getter;

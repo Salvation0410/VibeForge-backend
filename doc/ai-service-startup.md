@@ -1,8 +1,8 @@
-# AI 服务启动说明
+# Python AI 专用版本启动说明
 
 需要在 PyCharm Run/Debug 控制台启动并查看知识库处理日志时，见 [知识库 PyCharm 调试说明](knowledge-pycharm-debug.md)。
 
-本文说明 `ai-service` 独立 LangChain + LangGraph 服务的本地启动、Docker 启动及与 Spring Boot 的联调方式。
+本文说明 Python AI 专用版本的本地启动、Docker 启动及与 Spring Boot 的联调方式。Java 仅保留业务与工具网关；模型调用和工作流统一在 `ai-service` 执行。迁移说明见 [Python AI 专用版本](../docs/python-ai-only-migration.md)。
 
 ## 源码目录说明
 
@@ -85,7 +85,6 @@ LangSmith 追踪直接读取 `.env` 中的 `LANGSMITH_*` 变量。将 `LANGSMITH
 Spring Boot 需要指向 Python 服务，并配置相同的内部令牌：
 
 ```powershell
-$env:AI_ENGINE = "langgraph"
 $env:AI_SERVICE_URL = "http://localhost:8000"
 $env:AI_SERVICE_INTERNAL_BEARER_TOKEN = "与Python一致的服务令牌"
 # Spring 内部工具幂等记录的保留时间，单位为秒
@@ -102,18 +101,9 @@ $env:AI_TOOL_IDEMPOTENCY_LOCK_WAIT_MILLIS = "30000"
 .\mvnw.cmd spring-boot:run
 ```
 
-灰度发布时可使用：
+本版本只有 Python AI 执行链路，没有引擎灰度或 Java 模型回退。Python 不可用时生成失败，切换旧环境变量不能恢复 Java 链路。
 
-```yaml
-ai:
-  engine: gray
-  gray-whitelist: [10001, 10002]
-  gray-percentage: 10
-```
-
-`legacy` 为原 LangChain4j 链路，`langgraph` 为 Python 链路，`gray` 按白名单和比例选择。切换配置即可回滚，不需要数据库迁移。
-
-两条生成链路共用 Spring 的不可变安全发布边界：同一应用同一时间只允许一个生成请求；取消和提交通过 Redis 状态锁决定唯一胜者；模型输出因长度或内容策略中止时不发布。`HTML` 只接受唯一闭合代码块或边界完整纯文档，发布前执行确定性 HTML/CSS/JavaScript 校验和 Selenium 烟测；`MULTI_FILE` 必须是严格的三文件协议。成功版本位于 `<类型>_<appId>/.releases/<requestId>`，`.current` 原子指向当前版本，预览、部署、下载和导出都读取该版本。默认保留当前版本及最近两个成功版本，同时持久记录单调提交序号、requestId 墓碑和提交标记；失败请求或已归档旧请求不会覆盖上一成功版本。
+Spring 保留不可变安全发布边界：Redis 租约串行化入口，MySQL `generation_arbitration` 决定取消与静态提交资格，最终激活核对当前代际。HTML 需确定性校验与默认 Selenium 烟测，MULTI_FILE 需严格三文件协议。成功产物位于不可变 release，MySQL `generation_active_artifact` 是启用数据库指针后的权威，`.current` 仅为兼容镜像；新协议没有自动清理 release。失败保留上一活动版本。Vue 直接写入工程，不能保证失败回滚。数据库迁移与协议边界见 [生成任务台账](generation-task-ledger.md)。
 
 HTML 烟测默认由 `AI_HTML_SMOKE_TEST_ENABLED=true` 和 `AI_HTML_SMOKE_TEST_REQUIRED=true` 开启；浏览器不可用、加载超时、脚本错误或骨架屏未消失都会拒绝发布。`AI_HTML_MAX_REWRITE_SOURCE_CHARS` 默认 24000，超过预算的全量重写返回 `HTML_OUTPUT_BUDGET_EXCEEDED`。前端生成期间保留旧预览，进度按 80ms 批处理，成功 `done` 后只刷新一次；`business-error`、取消和截断不会刷新预览。
 
@@ -206,14 +196,11 @@ Spring 工具幂等状态和成功结果保存在现有 Spring Redis 配置中�
 
 截至 2026-10-01，真实 OSS、CloseAI、Docker Milvus、GPU 模型加载/显存/吞吐、浏览器与 Spring-Python E2E 均未在本轮执行，状态保持 pending。
 
-### 稳定灰度与第二阶段验收
-
-灰度模式使用 `graySalt + 稳定业务主体` 计算 SHA-256 桶：优先使用 `userId`，其次使用 `appId`，最后使用 `requestId`。`route`、`generate` 和 `cancel` 使用同一选择逻辑。不要仅凭配置存在提高灰度比例。
+### Python AI 与工具网关验收
 
 本轮提供默认 dry-run 的验收入口。真实执行必须明确传入测试应用、测试账号和 `-Execute`，并且不得使用事故应用或生产应用：
 
 ```powershell
-.\scripts\compare-ai-generation-engines.ps1 -LegacyAppId 101 -LangGraphAppId 102 -Execute
 .\scripts\test-ai-service.ps1 -ReadOnlyAppId 101 -Execute
 .\scripts\test-ai-phase-two-e2e.ps1 -HtmlAppId 101 -MultiFileAppId 102 -VueAppId 103 -Execute
 ```
@@ -284,4 +271,4 @@ $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 
 重启 Python AI 服务和 Spring 后，走 LangGraph 的新建路由及已有应用生成会先审核需求。默认无需新增密钥，审核复用当前聊天模型配置；每轮增加一次独立模型调用，新建应用还会在类型路由时先审核一次。可配置项及稳定错误码见 [AI 服务输入审核说明](../ai-service/README.md#输入校验与语义审核)。
 
-验收时分别尝试普通咖啡店介绍网站、已有项目“保留图片只优化布局”、缺少接口的真实支付以及明确钓鱼窃密需求。前两种应正常生成；真实支付应询问接口或演示选择；窃密需求应拒绝。待澄清或拒绝时确认没有内部文件/构建工具调用，旧预览不刷新。审核服务故障应显示暂不可用，不能直接绕过审核生成。请确认使用 LangGraph 引擎；Legacy 不受本次审核控制。
+验收时分别尝试普通咖啡店介绍网站、已有项目“保留图片只优化布局”、缺少接口的真实支付以及明确钓鱼窃密需求。前两种应正常生成；真实支付应询问接口或演示选择；窃密需求应拒绝。待澄清或拒绝时确认没有内部文件/构建工具调用，旧预览不刷新。审核服务故障应显示暂不可用，不能直接绕过审核生成。本版本全部生成请求均进入 Python 审核入口。

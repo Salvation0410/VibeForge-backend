@@ -19,7 +19,7 @@ import com.yupi.yuaicodemother.core.paser.MultiFileCodeParser;
 import com.yupi.yuaicodemother.enums.CodeGenTypeEnum;
 import com.yupi.yuaicodemother.exception.BusinessException;
 import com.yupi.yuaicodemother.exception.ErrorCode;
-import com.yupi.yuaicodemother.langraph4j.tools.ImageSearchTool;
+import com.yupi.yuaicodemother.image.ImageSearchTool;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
