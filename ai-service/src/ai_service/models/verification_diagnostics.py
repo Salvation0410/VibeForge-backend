@@ -6,6 +6,10 @@ from ai_service.models.review_diagnostics import ISSUE_CODES
 from ai_service.models.single_quality_review import OUTPUT_FAILURE_REASONS
 
 MAX_VERIFICATION_RECORDS = 36
+REPAIR_ERROR_CODES = frozenset({
+    "VUE_REPAIR_READ_STALLED", "VUE_TOOL_CALL_LIMIT_EXCEEDED", "VUE_CONTEXT_BUDGET_EXCEEDED",
+    "VUE_MODEL_INVALID_OUTPUT", "VUE_REPAIR_PLAN_INVALID", "VUE_REPAIR_WORKSET_STALLED",
+})
 ERROR_CODES = frozenset({
     "NONE", "UNCLASSIFIED", "ARTIFACT_VALIDATION_FAILED", "QUALITY_REVIEW_FAILED",
     "QUALITY_REVIEW_INVALID_OUTPUT", "QUALITY_REVIEW_INCOMPLETE",
@@ -15,9 +19,10 @@ ERROR_CODES = frozenset({
     "VUE_PROJECT_DIR_MISSING", "VUE_PACKAGE_JSON_MISSING", "VUE_NPM_INSTALL_FAILED",
     "VUE_NPM_BUILD_FAILED", "VUE_DIST_INDEX_MISSING", "VUE_BUILD_FAILED", "VUE_BUILD_CANCELLED",
     "VUE_BUILD_WAIT_FAILED", "VUE_BUILD_IN_PROGRESS",
-})
+}) | REPAIR_ERROR_CODES
 COUNT_FIELDS = frozenset({"round", "toolCount", "phaseReadCount", "phaseWriteCount", "repeatedReadCount", "issueCount"})
 FIELDS = COUNT_FIELDS | {"stage", "verdict", "errorCode", "issueCodes"}
+REPAIR_COUNT_FIELDS = frozenset({"visibleRepeatCount", "omittedRereadCount"})
 
 
 def safe_verification_history(value: Any) -> list[dict[str, Any]] | None:
@@ -26,13 +31,13 @@ def safe_verification_history(value: Any) -> list[dict[str, Any]] | None:
         return None
     result = []
     for record in value:
-        if not isinstance(record, dict) or set(record) not in (FIELDS, FIELDS | {"outputReason"}):
+        if not isinstance(record, dict) or set(record) not in (FIELDS, FIELDS | {"outputReason"}, FIELDS | REPAIR_COUNT_FIELDS):
             return None
         if any(type(record[key]) is not int or not 0 <= record[key] <= 10000 for key in COUNT_FIELDS):
             return None
         if record["round"] > 5 or record["issueCount"] > 12:
             return None
-        if type(record["stage"]) is not str or record["stage"] not in {"artifact_validation", "project_build", "quality_review"}:
+        if type(record["stage"]) is not str or record["stage"] not in {"artifact_validation", "project_build", "quality_review", "repair"}:
             return None
         if type(record["verdict"]) is not str or record["verdict"] not in {"PASS", "REPAIR", "ERROR"}:
             return None
@@ -41,7 +46,16 @@ def safe_verification_history(value: Any) -> list[dict[str, Any]] | None:
         if (record["verdict"] == "PASS") != (record["errorCode"] == "NONE"):
             return None
         parse_codes = {"QUALITY_REVIEW_INVALID_OUTPUT", "QUALITY_REVIEW_INCOMPLETE"}
-        if record["verdict"] == "ERROR":
+        if record["stage"] == "repair":
+            if (set(record) != FIELDS | REPAIR_COUNT_FIELDS or record["verdict"] != "ERROR"
+                    or record["errorCode"] not in REPAIR_ERROR_CODES or record["issueCount"] or record["issueCodes"]
+                    or any(type(record[key]) is not int or not 0 <= record[key] <= record["phaseReadCount"]
+                           for key in REPAIR_COUNT_FIELDS)
+                    or sum(record[key] for key in REPAIR_COUNT_FIELDS) > record["phaseReadCount"]):
+                return None
+        elif REPAIR_COUNT_FIELDS & set(record) or record["errorCode"] in REPAIR_ERROR_CODES:
+            return None
+        elif record["verdict"] == "ERROR":
             reason = record.get("outputReason")
             if (record["stage"] != "quality_review" or record["errorCode"] not in parse_codes
                     or type(reason) is not str or reason not in OUTPUT_FAILURE_REASONS

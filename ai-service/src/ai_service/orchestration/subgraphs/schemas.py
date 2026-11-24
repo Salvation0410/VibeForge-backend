@@ -67,6 +67,8 @@ class RepairInput(GenerationInput, total=False):
     validation: dict[str, Any]
     build: dict[str, Any]
     repair_feedback: str
+    # 私有诊断仅供异常摘要续写，禁止加入模型上下文或修复输出。
+    verification_history: list[dict[str, Any]]
 
 
 class RepairOutput(GenerationOutput, total=False):

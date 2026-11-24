@@ -8,6 +8,7 @@ import logging
 import pytest
 
 from ai_service.models.base import ModelTurn, ToolCall
+from ai_service.models.vue_context import project_vue_context, visible_file_fingerprints
 from ai_service.orchestration.events import EventEmitter
 from ai_service.orchestration.subgraphs.vue import build_vue_tool_subgraph
 from ai_service.orchestration.vue_tool_loop import create_vue_loop_nodes, initial_progress
@@ -35,7 +36,8 @@ class ReadModel(FakeModel):
             return ModelTurn("修复接线", tool_calls=[ToolCall("file_write", {
                 "relativeFilePath": "src/App.vue", "content": "修复内容",
             })])
-        return ModelTurn("读取", tool_calls=[ToolCall("file_read", {
+        return ModelTurn("读取", vue_visible_files=visible_file_fingerprints(
+            project_vue_context(context, fits=lambda _: True)), tool_calls=[ToolCall("file_read", {
             "relativeFilePath": path,
         }) for path in ("src/App.vue", "src/Card.vue")])
 

@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 import json
+import hashlib
 from pathlib import PurePosixPath
 from typing import Any, Callable
 
@@ -10,6 +11,29 @@ from ai_service.models.input_review import InputReviewError
 
 HISTORY_MESSAGE_BYTES = 24 * 1024
 _PATH_FIELDS = ("relativeFilePath", "relativeDirPath", "query")
+
+
+def file_content_fingerprint(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8", errors="surrogatepass")).hexdigest()
+
+
+def visible_file_fingerprints(projected: dict[str, Any]) -> dict[str, str]:
+    """只提取最终发送投影的完整读取，摘要、失败和未知截断不能证明模型可见。"""
+    visible = {}
+    for item in projected.get("toolResults", []):
+        path = item.get("arguments", {}).get("relativeFilePath")
+        result = item.get("result", {})
+        content = result.get("content")
+        if not isinstance(path, str) or not path:
+            continue
+        path = str(PurePosixPath(path.replace("\\", "/")))
+        if item.get("tool") in {"file_write", "file_modify", "file_delete"} and result.get("ok") is True:
+            visible.pop(path, None)
+        if (item.get("tool") == "file_read" and set(result) <= {"content", "ok"}
+                and result.get("ok", True) is True and isinstance(content, str) and len(content) <= 12000
+                and len(content.encode("utf-8", errors="surrogatepass")) <= 48000):
+            visible[path] = file_content_fingerprint(content)
+    return visible
 
 
 def _message_bytes(value: object) -> int:

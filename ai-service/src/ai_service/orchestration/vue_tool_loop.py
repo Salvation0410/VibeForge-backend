@@ -10,12 +10,14 @@ from typing import Any, TYPE_CHECKING, TypedDict
 from ai_service.models.tool_contract import validate_vue_tool_call
 from ai_service.orchestration.routing import _raise_for_incomplete_model_turn
 from ai_service.orchestration.repair_progress import vue_snapshot_fingerprint
-from ai_service.orchestration.vue_read_stall import repair_reads_stalled, read_repetition_stats, phase_has_successful_write
+from ai_service.orchestration.vue_read_stall import repair_reads_stalled, read_repetition_stats, phase_has_successful_write, record_visible_read
 from ai_service.orchestration.vue_budget import (
     NEXT_REPAIR_TOOL_RESERVE, REPAIR_READ_BATCH_LIMIT, REPAIR_TOOL_RESERVE,
     budget_counts, is_complete_file_read,
 )
 from ai_service.orchestration.subgraphs.schemas import RepairState
+from ai_service.orchestration.repair_diagnostics import save_repair_failure
+from ai_service.models.input_review import InputReviewError
 
 if TYPE_CHECKING:
     from ai_service.orchestration.workflow import GenerationWorkflow
@@ -48,6 +50,10 @@ class VueLoopProgress(TypedDict):
     read_only_batches: int
     prewrite_warning: bool
     prewrite_warning_ordinal: int
+    visible_files: dict[str, str]
+    visible_repeat_count: int
+    visible_repeat_total: int
+    omitted_reread_count: int
 
 
 class VueLoopState(RepairState, total=False):
@@ -68,6 +74,7 @@ def initial_progress(context: dict[str, Any], prefix: str, started_at: str) -> V
         "batch_has_successful_write": False, "write_fingerprints": [],
         "successful_write": False, "read_only_batches": 0,
         "prewrite_warning": False, "prewrite_warning_ordinal": 0,
+        "visible_files": {}, "visible_repeat_count": 0, "visible_repeat_total": 0, "omitted_reread_count": 0,
     }
 
 
@@ -84,12 +91,13 @@ def create_vue_loop_nodes(
         log("Vue tool budget request_id=%s node=%s reason=%s repair_count=%d tool_count=%d "
             "read_count=%d write_count=%d other_count=%d phase_tool_count=%d "
             "phase_read_count=%d phase_write_count=%d phase_other_count=%d "
-            "remaining=%d requested_count=%d read_batches=%d repeated_read_count=%d",
+            "remaining=%d requested_count=%d read_batches=%d repeated_read_count=%d visible_repeat_count=%d omitted_reread_count=%d",
             state["request_id"], node, reason, state.get("repair_count", 0), state.get("tool_call_count", 0),
             counts["read_count"], counts["write_count"], counts["other_count"], counts["phase_tool_count"],
             counts["phase_read_count"], counts["phase_write_count"], counts["phase_other_count"],
             max(0, workflow.settings.vue_max_tool_calls - state.get("tool_call_count", 0)),
-            requested_count, loop.get("read_only_batches", 0), repeats["total"])
+            requested_count, loop.get("read_only_batches", 0), repeats["total"],
+            loop.get("visible_repeat_total", 0), loop.get("omitted_reread_count", 0))
 
     async def model_turn(state: VueLoopState):
         workflow._raise_if_cancelled(thread_id)
@@ -127,7 +135,10 @@ def create_vue_loop_nodes(
             int((asyncio.get_running_loop().time() - started) * 1000), len(turn.tool_calls),
         )
         # 完整响应与待执行工具使用普通字典，避免 checkpoint 依赖模型类反序列化。
-        return {"vue_loop": {**loop, "turn": asdict(turn)}}
+        serialized = asdict(turn)
+        visibility = serialized.pop("vue_visible_files", None)
+        return {"vue_loop": {**loop, "turn": serialized,
+                             "visible_files": dict(visibility) if isinstance(visibility, dict) else {}}}
 
     async def validate_turn(state: VueLoopState):
         workflow._raise_if_cancelled(thread_id)
@@ -218,6 +229,8 @@ def create_vue_loop_nodes(
             emitter, node, call["name"], {**arguments, "codeGenType": state["code_gen_type"]},
             state["app_id"], state["request_id"], tool_call_id,
         )
+        loop = record_visible_read(loop, {"tool": call["name"], "arguments": arguments, "result": result},
+                                   state["vue_tool_results"])
         tool_results = [
             *state["vue_tool_results"],
             {"toolCallId": tool_call_id, "tool": call["name"], "result": result,
@@ -256,10 +269,10 @@ def create_vue_loop_nodes(
             if prewrite and not loop.get("successful_write", False) and not phase_has_successful_write(
                 state["vue_tool_results"], loop["call_id_prefix"],
             ):
-                repeated = read_repetition_stats(state["vue_tool_results"], loop["call_id_prefix"])["consecutive"]
+                repeated = loop.get("visible_repeat_count", 0)
                 if repeated >= 4:
                     if not loop.get("prewrite_warning", False):
-                        loop.update(prewrite_warning=True, prewrite_warning_ordinal=loop["ordinal"])
+                        loop.update(prewrite_warning=True, prewrite_warning_ordinal=loop.get("visible_repeat_total", 0))
                         log_budget(state, loop, reason="PREWRITE_READ_WARNING")
                         context = {**state["context"], "repairReadFeedback": (
                             "本阶段已连续重复读取相同完整源码。请依据当前可见的最新结果修复具体问题，"
@@ -268,7 +281,7 @@ def create_vue_loop_nodes(
                         )}
                         loop.update(pending_tools=[], tool_cursor=0, next_step="model_turn")
                         return {"vue_loop": loop, "context": context}
-                    if loop["ordinal"] - loop.get("prewrite_warning_ordinal", 0) >= 4:
+                    if loop.get("visible_repeat_total", 0) - loop.get("prewrite_warning_ordinal", 0) >= 4:
                         log_budget(state, loop, reason="PREWRITE_READ_STALLED")
                         raise ValueError("VUE_REPAIR_READ_STALLED: 修复持续重复读取且尚未成功写入，本轮已停止")
             if repair_budget_guard:
@@ -332,8 +345,21 @@ def create_vue_loop_nodes(
                         next_step="finish" if stalled else "model_turn")
         return {"vue_loop": loop}
 
-    return {"model_turn": model_turn, "validate_turn": validate_turn,
-            "execute_tool": execute_tool, "continue_loop": continue_loop}
+    def observed(action):
+        async def run(state):
+            try:
+                return await action(state)
+            except (ValueError, InputReviewError) as exc:
+                if repair_read_guard:
+                    code = exc.code if isinstance(exc, InputReviewError) else str(exc).partition(":")[0]
+                    await save_repair_failure(workflow, thread_id, state, code)
+                raise
+        return run
+
+    return {name: observed(action) for name, action in {
+        "model_turn": model_turn, "validate_turn": validate_turn,
+        "execute_tool": execute_tool, "continue_loop": continue_loop,
+    }.items()}
 
 
 async def run_vue_tool_loop(workflow: GenerationWorkflow, *, state, emitter, thread_id,

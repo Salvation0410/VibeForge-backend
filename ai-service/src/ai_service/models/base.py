@@ -29,6 +29,8 @@ class ModelTurn:
     file_plan: list[str] = field(default_factory=list)
     # Vue 协议异常由工具循环有限重试，不能伪装成无工具的正常结束。
     vue_output_invalid: bool = False
+    # 适配器从最终消息提取；只返回编排私有状态，不能序列化进下一次模型载荷。
+    vue_visible_files: dict[str, str] | None = None
 
 
 TextDeltaCallback = Callable[[str], Awaitable[None]]

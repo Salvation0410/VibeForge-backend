@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError
 
 from ai_service.config import Settings
 from ai_service.models.input_review import InputReviewError, InputReviewResult, check_context_budget
-from ai_service.models.vue_context import project_vue_context
+from ai_service.models.vue_context import project_vue_context, visible_file_fingerprints
 from ai_service.models.vue_review_context import vue_review_context
 from ai_service.prompts.review import VUE_REVIEW_EVIDENCE_INSTRUCTIONS
 from ai_service.models.generation_brief import GenerationBrief
@@ -107,7 +107,7 @@ class OpenAICompatibleModel:
                 return await self._client.ainvoke(messages, response_format={"type": "json_object"}, **options)
             return await self._client.ainvoke(messages, **options)
 
-    def _vue_messages(self, instructions: str, context: dict[str, Any], *, generation=False):
+    def _vue_messages(self, instructions: str, context: dict[str, Any], *, generation=False, visibility=None):
         """以实际消息预算选择工具历史，完整生成/修复状态不随模型窗口裁剪。"""
         def messages(payload):
             return [SystemMessage(content=instructions),
@@ -122,7 +122,10 @@ class OpenAICompatibleModel:
                     raise
                 return False
 
-        return messages(project_vue_context(context, fits=fits))
+        projected = project_vue_context(context, fits=fits)
+        if visibility is not None:
+            visibility.update(visible_file_fingerprints(projected))
+        return messages(projected)
 
     async def _stream_static_turn(self, messages, on_delta: TextDeltaCallback) -> ModelTurn:
         """聚合完整响应才返回候选；任务取消、回调异常和供应商失败均关闭响应流。"""
@@ -234,7 +237,8 @@ class OpenAICompatibleModel:
         generation_instructions = generation_system_prompt(branch) + frontend_instructions(context)
         if branch == "VUE_PROJECT":
             generation_instructions = f"{generation_instructions}\n\n{vue_tool_prompt()}"
-        messages = self._vue_messages(generation_instructions, context, generation=True) if branch == "VUE_PROJECT" else [
+        visibility = {}
+        messages = self._vue_messages(generation_instructions, context, generation=True, visibility=visibility) if branch == "VUE_PROJECT" else [
             SystemMessage(content=generation_instructions),
             HumanMessage(content=json.dumps(context, ensure_ascii=False)),
         ]
@@ -242,7 +246,9 @@ class OpenAICompatibleModel:
         raw = str(response.content)
         if branch != "VUE_PROJECT":
             return _model_turn(response, raw)
-        return _vue_model_turn(response)
+        turn = _vue_model_turn(response)
+        turn.vue_visible_files = visibility
+        return turn
 
     async def review(self, artifact: str, context: dict[str, Any]) -> SingleReviewResult:
         """单次调用返回结构化判定与拒绝依据，非法响应不触发额外调用。"""
@@ -317,13 +323,16 @@ class OpenAICompatibleModel:
         if context.get("codeGenType") == "VUE_PROJECT":
             repair_instructions = f"{repair_instructions}\n\n{generation_system_prompt('VUE_PROJECT')}\n\n{vue_tool_prompt()}"
         payload = {"artifact": artifact, **context}
-        messages = self._vue_messages(repair_instructions, payload, generation=True) if context.get("codeGenType") == "VUE_PROJECT" else [
+        visibility = {}
+        messages = self._vue_messages(repair_instructions, payload, generation=True, visibility=visibility) if context.get("codeGenType") == "VUE_PROJECT" else [
             SystemMessage(content=repair_instructions),
             HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
         ]
         response = await self._invoke(messages, generation=True)
         if context.get("codeGenType") == "VUE_PROJECT":
-            return _vue_model_turn(response)
+            turn = _vue_model_turn(response)
+            turn.vue_visible_files = visibility
+            return turn
         return _model_turn(response, str(response.content))
 
     async def answer_customer_service(
