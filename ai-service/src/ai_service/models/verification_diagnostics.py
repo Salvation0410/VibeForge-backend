@@ -4,6 +4,7 @@ from typing import Any
 
 from ai_service.models.review_diagnostics import ISSUE_CODES
 from ai_service.models.single_quality_review import OUTPUT_FAILURE_REASONS
+from ai_service.models.vue_plan_diagnostics import safe_plan_rejection
 
 MAX_VERIFICATION_RECORDS = 36
 REPAIR_ERROR_CODES = frozenset({
@@ -31,7 +32,10 @@ def safe_verification_history(value: Any) -> list[dict[str, Any]] | None:
         return None
     result = []
     for record in value:
-        if not isinstance(record, dict) or set(record) not in (FIELDS, FIELDS | {"outputReason"}, FIELDS | REPAIR_COUNT_FIELDS):
+        if not isinstance(record, dict) or set(record) not in (
+            FIELDS, FIELDS | {"outputReason"}, FIELDS | REPAIR_COUNT_FIELDS,
+            FIELDS | REPAIR_COUNT_FIELDS | {"planRejection"},
+        ):
             return None
         if any(type(record[key]) is not int or not 0 <= record[key] <= 10000 for key in COUNT_FIELDS):
             return None
@@ -47,11 +51,14 @@ def safe_verification_history(value: Any) -> list[dict[str, Any]] | None:
             return None
         parse_codes = {"QUALITY_REVIEW_INVALID_OUTPUT", "QUALITY_REVIEW_INCOMPLETE"}
         if record["stage"] == "repair":
-            if (set(record) != FIELDS | REPAIR_COUNT_FIELDS or record["verdict"] != "ERROR"
+            if (set(record) not in (FIELDS | REPAIR_COUNT_FIELDS, FIELDS | REPAIR_COUNT_FIELDS | {"planRejection"})
+                    or record["verdict"] != "ERROR"
                     or record["errorCode"] not in REPAIR_ERROR_CODES or record["issueCount"] or record["issueCodes"]
                     or any(type(record[key]) is not int or not 0 <= record[key] <= record["phaseReadCount"]
                            for key in REPAIR_COUNT_FIELDS)
                     or sum(record[key] for key in REPAIR_COUNT_FIELDS) > record["phaseReadCount"]):
+                return None
+            if "planRejection" in record and safe_plan_rejection(record["planRejection"], record["errorCode"]) is None:
                 return None
         elif REPAIR_COUNT_FIELDS & set(record) or record["errorCode"] in REPAIR_ERROR_CODES:
             return None

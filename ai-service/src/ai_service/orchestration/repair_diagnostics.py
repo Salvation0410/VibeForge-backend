@@ -8,11 +8,12 @@ from ai_service.models.verification_diagnostics import (
 from ai_service.orchestration.cancellation import GenerationCancelled
 from ai_service.orchestration.vue_budget import budget_counts
 from ai_service.orchestration.vue_read_stall import read_repetition_stats
+from ai_service.models.vue_plan_diagnostics import safe_plan_rejection
 
 logger = logging.getLogger(__name__)
 
 
-async def save_repair_failure(workflow, thread_id, state, code):
+async def save_repair_failure(workflow, thread_id, state, code, *, plan_rejection=None):
     if code not in REPAIR_ERROR_CODES:
         return
     loop = state.get("vue_loop", {})
@@ -27,6 +28,9 @@ async def save_repair_failure(workflow, thread_id, state, code):
         "visibleRepeatCount": loop.get("visible_repeat_total", 0),
         "omittedRereadCount": loop.get("omitted_reread_count", 0), "issueCount": 0, "issueCodes": [],
     }
+    diagnostic = safe_plan_rejection(plan_rejection, code)
+    if diagnostic is not None:
+        record["planRejection"] = diagnostic
     records = safe_verification_history(state.get("verification_history")) or []
     records = [item for item in records if (item["round"], item["stage"]) != (record["round"], "repair")]
     records = safe_verification_history([*records, record][-MAX_VERIFICATION_RECORDS:])

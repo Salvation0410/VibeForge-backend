@@ -18,8 +18,9 @@ from ai_service.orchestration.vue_budget import (
 from ai_service.orchestration.subgraphs.schemas import RepairState
 from ai_service.orchestration.repair_diagnostics import save_repair_failure
 from ai_service.models.input_review import InputReviewError
+from ai_service.models.vue_plan_diagnostics import plan_rejection_snapshot
 from ai_service.orchestration.vue_repair_workset import (
-    repair_work_payload, prepare_work_turn, record_work_result, finish_work_batch, require_write_after_reads,
+    RepairPlanError, repair_work_payload, prepare_work_turn, record_work_result, finish_work_batch, require_write_after_reads,
 )
 
 if TYPE_CHECKING:
@@ -59,6 +60,7 @@ class VueLoopProgress(TypedDict):
     visible_repeat_total: int
     omitted_reread_count: int
     repair_work: dict[str, Any]
+    plan_rejection: dict[str, Any]
 
 
 class VueLoopState(RepairState, total=False):
@@ -81,7 +83,7 @@ def initial_progress(context: dict[str, Any], prefix: str, started_at: str) -> V
         "prewrite_warning": False, "prewrite_warning_ordinal": 0,
         "prewrite_warning_visible_total": 0,
         "visible_files": {}, "visible_repeat_count": 0, "visible_repeat_total": 0, "omitted_reread_count": 0,
-        "repair_work": {},
+        "repair_work": {}, "plan_rejection": {},
     }
 
 
@@ -191,12 +193,28 @@ def create_vue_loop_nodes(
             try:
                 work, work_action = prepare_work_turn(loop["repair_work"], turn)
                 require_write_after_reads(work, calls)
-            except ValueError:
+            except RepairPlanError as exc:
                 retries = loop.get("format_retries", 0)
+                diagnostic = plan_rejection_snapshot(exc.reason, loop["repair_work"], turn, retries)
+                # 失败节点不会提交局部loop，终止现场随受控异常交给原摘要出口。
+                exc.plan_rejection = diagnostic
+                try:
+                    logger.warning(
+                        "Vue repair plan rejected request_id=%s node=%s repair_count=%d tool_count=%d diagnostic=%s",
+                        state["request_id"], node, state.get("repair_count", 0),
+                        state.get("tool_call_count", 0), diagnostic,
+                    )
+                except Exception:
+                    pass
                 if retries >= 2:
                     raise
-                loop.update(format_retries=retries + 1, next_step="model_turn", turn={})
+                loop.update(format_retries=retries + 1, next_step="model_turn", turn={}, plan_rejection=diagnostic)
+                # 活动计划持续生效，定向反馈避免把“返回计划”误读为每轮必须重新规划。
                 context["repairPlanFeedback"] = (
+                    "上一轮整批未执行，当前活动计划尚无成功写入。下一轮省略repairPlan和completedIssueIndex，"
+                    "沿用repairWork.activePlan.files进行必要读取和最小有效写入，不增删或重排活动计划。"
+                    "成功写入后才可按原协议单独声明当前项待验证或切换工作集；禁止为取得资格制造无效写入。"
+                ) if exc.reason == "WORKSET_SWITCH_BEFORE_WRITE" else (
                     "上一轮修复计划未执行。按repairWork中第一个未完成问题返回repairPlan(issueIndex,files)，"
                     "files仅从allowedFiles选择最多3个；整批工具只能操作活动文件，禁止目录扫描。"
                     "已有计划直接继续必要读取及写入；连续三个完整纯读批次后必须先写入。"
@@ -204,6 +222,8 @@ def create_vue_loop_nodes(
                 )
                 return {"vue_loop": loop, "context": context}
             loop["repair_work"] = work
+        # 当前响应已被接受，后续无关异常不能带上上轮拒绝现场；旧checkpoint缺字段也可接续。
+        loop["plan_rejection"] = {}
         usage = dict(state.get("token_usage", {}))
         for key, value in turn["token_usage"].items():
             usage[key] = usage.get(key, 0) + value
@@ -398,7 +418,8 @@ def create_vue_loop_nodes(
             except (ValueError, InputReviewError) as exc:
                 if repair_read_guard:
                     code = exc.code if isinstance(exc, InputReviewError) else str(exc).partition(":")[0]
-                    await save_repair_failure(workflow, thread_id, state, code)
+                    await save_repair_failure(workflow, thread_id, state, code,
+                                              plan_rejection=exc.plan_rejection if isinstance(exc, RepairPlanError) else None)
                 raise
         return run
 
