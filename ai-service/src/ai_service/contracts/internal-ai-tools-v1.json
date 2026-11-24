@@ -284,7 +284,19 @@
         "properties": {
           "built": {"type": "boolean"},
           "errorCode": {"type": "string"},
-          "message": {"type": "string"}
+          "message": {"type": "string"},
+          "componentIssues": {
+            "type": "array", "minItems": 1, "maxItems": 4,
+            "items": {
+              "type": "object",
+              "properties": {
+                "file": {"type": "string", "minLength": 1, "maxLength": 180},
+                "component": {"type": "string", "pattern": "^[$A-Za-z_][\\w$-]{0,79}$"},
+                "prop": {"type": "string", "pattern": "^[$A-Za-z_][\\w$-]{0,79}$"}
+              },
+              "required": ["file", "component", "prop"], "additionalProperties": false
+            }
+          }
         },
         "required": ["built", "errorCode", "message"],
         "additionalProperties": true

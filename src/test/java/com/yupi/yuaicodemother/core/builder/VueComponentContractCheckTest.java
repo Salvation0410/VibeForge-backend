@@ -24,6 +24,8 @@ class VueComponentContractCheckTest {
         assertFalse(result.built());
         assertEquals("VUE_COMPONENT_CONTRACT_FAILED", result.errorCode());
         assertTrue(result.message().contains("Child.value"));
+        assertEquals(List.of(java.util.Map.of("file", "src/App.vue", "component", "Child", "prop", "value")),
+                result.componentIssues());
         assertEquals("VUE_COMPONENT_CHECK_UNAVAILABLE", VueComponentContractCheck.parse(failed.replace("src/App.vue", "../App.vue")).errorCode());
     }
 

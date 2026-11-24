@@ -251,7 +251,7 @@ Python AI_SERVICE_INTERNAL_BEARER_TOKEN
 - Vue 强制构建的必填属性检查之后、锚点检查之前执行可信脚本 --events。仅对完整运行时字面 defineEmits 且显式 inheritAttrs:false 的可支持组件阻断未知自定义监听，返回 VUE_EVENT_CONTRACT_FAILED 进入原修复；默认透传疑似错接只形成有限 Reviewer 提示，不能单独判错。原生事件、动态/类型/展开/attrs、作用域、未知组件及不完整扫描保守跳过，不强制已声明事件必须被监听；环境/协议失败 VUE_EVENT_CHECK_UNAVAILABLE 直接失败。成功摘要组合各项覆盖与跳过原因，不代表完整事件链或浏览器功能通过。
 - 事件协议v2独立记录载荷检查计数及最多四条 MISSING_DESTRUCTURED_KEYS 建议（每条最多四键）。仅支持字面对象、最多两跳单参数原样转发、接收函数顶层对象解构；载荷遍历额外支持不遮蔽组件/顶层函数/emitter的单变量 in/of 单标识符循环及直接监听，名称硬门禁仍跳过循环作用域。动态/展开/默认/类型、slot、复杂循环、未知或不完整信息保守跳过。建议只供 Reviewer 核对源码，不直接失败，不视为完整数据流或浏览器证明；Java严格校验v2协议，错误直接失败。
 - 正式 Vue 修复首次成功写入前，只对请求前最终模型消息中完整可见且内容未变的读取累计无效重复，四次触发每阶段一次固定纠偏；纠偏后继续四次可见重复且仍未写入返回 VUE_REPAIR_READ_STALLED，纠偏后仅声称完成也失败。投影省略后的补读单独计数，仍执行并计入共享40工具预算。只在完整纯读批次末判断；新信息、非读取、未知/截断结果打断连续计数，同批写入失效旧可见指纹。可见性元数据由适配器局部返回，只留Vue子图私有进度、不进模型/日志/事件，恢复保留、旧字段缺失按未知起算。白名单修复异常出口最佳努力保存固定repair/ERROR计数，沿用verification_history双白名单、36项与原TTL，保存故障不替换原错误、不吞取消。不能将提前停止解释为修复成功或真实模型一定收敛。
-- 正式Vue修复取得严格issues及本轮快照安全路径清单后启用repairWork，单/多审查最多4/12问题，按首个未完成问题使用repairPlan(issueIndex,files)，每工作集最多3个清单内文件，整批执行前验证路径和范围。显式成功写入后才能单独completedIssueIndex声明该项待验证或切换同问题工作集；不将声明当验收。工作集完整最新读取必须同时放入24KiB及实际输入预算，否则VUE_CONTEXT_BUDGET_EXCEEDED；连续3个完整纯读批次后须含写操作，每工作集最多一次纯规划，计划错误与JSON错误共享每阶段2次格式纠偏。VUE_REPAIR_PLAN_INVALID/VUE_REPAIR_WORKSET_STALLED保存固定安全repair诊断。工作进度仅留Vue子图，原issues/清单仅验证与修复子图，不进父图/事件/普通日志；缺字段旧checkpoint、硬校验修复及无严格问题/清单沿原路径。保持40工具/2正式修复及原写后交验策略，可能提前交验；不支持清单外新文件，不把有限快照当全工程证明。
+- 正式Vue修复取得严格issues及本轮快照安全路径清单后启用repairWork，单/多审查最多4/12问题，按首个未完成问题使用repairPlan(issueIndex,files)，每工作集最多3个清单内文件，整批执行前验证路径和范围。显式成功写入后才能单独completedIssueIndex声明该项待验证或切换同问题工作集；不将声明当验收。工作集完整最新读取必须同时放入24KiB及实际输入预算，否则VUE_CONTEXT_BUDGET_EXCEEDED；连续3个完整纯读批次后须含写操作，每工作集最多一次纯规划，计划错误与JSON错误共享每阶段2次格式纠偏。VUE_REPAIR_PLAN_INVALID/VUE_REPAIR_WORKSET_STALLED保存固定安全repair诊断。工作进度仅留Vue子图，原issues/清单仅验证与修复子图，不进父图/事件/普通日志；缺字段旧checkpoint、无可用结构化证据的硬校验修复及无严格问题/清单沿原路径；可信必填属性结构化证据见下方补充规则。保持40工具/2正式修复及原写后交验策略，可能提前交验；不支持清单外新文件，不把有限快照当全工程证明。
 - 正式工作集计划拒绝按原校验顺序给出16种固定原因，读取停滞另记WRITE_REQUIRED_AFTER_READS；公开错误码与每阶段两次共享纠偏不变。每次仅日志记录固定原因、布尔和有界计数，终止时可选planRejection经双白名单进入repair/ERROR历史；只允许对应错误码及严格字段，不记录路径、参数、源码或Reviewer正文。最后现场留Vue私有进度、阶段重置、恢复保留、接受响应清除，不进模型/父图/公共事件；失败节点最后现场随受控异常保存。观察/保存故障不替换业务错误，取消传播；沿36项及原TTL，无schema迁移，不从新原因倒推旧失败具体分支。
 - 仅WORKSET_SWITCH_BEFORE_WRITE使用定向固定纠偏：下一轮省略repairPlan及completedIssueIndex，在repairWork.activePlan.files内完成必要读取和最小有效写入；活动计划持续生效，普通后续轮次省略计划。成功写入后才按原协议声明或换集，不制造无效写入凑资格。其他拒绝保持通用反馈，原比较/范围/重试/40工具及两次正式修复不变，不将提示存在视为真实收敛证明。
 - 验证子图私有 verification_history 最多 36 项，仅固定轮次/阶段/判定/错误码/工具计数/问题码，经两次白名单进入 PostgreSQL JSONB，后续缺字段节点保留已存历史，同轮同阶段重放替换。沿用原 TTL，无 schema 迁移，不入模型/父图/公共事件；不保存理由正文或源码路径，不能还原完整 Reviewer 意见。修复内异常现场可能晚于最后摘要，预算日志补充固定原因和计数。
@@ -402,6 +402,8 @@ npm run build-only
 - `docs/superpowers/specs/2026-09-21-circular-preview-spinner-design.md`：预览加载图正圆修复设计。
 
 ## 给后续 Agent 的建议
+
+- 可信必填属性失败的project_build可选componentIssues最多4个file/component/prop，由Java严格解析的既有检查器证据产生。Python仅在有效证据和本轮完整非空安全快照清单下复用repairWork；不从自由错误文本猜路径，结构化证据不进父图/公共事件。旧结果、其他构建错误或不完整清单沿原路径，快照异常及取消传播。工作集首次写入前会耗尽剩余工具的纯读批次按原停滞协议拒绝，复用两次纠偏，不增加40工具或默认两次修复。Java/Python同步部署，清单不是权限或全功能证明。
 
 - Vue事件协议v3严格14字段，新增argumentChecked/argumentSkipped/argumentAdvisories；有限直接父子、零形参普通函数、同事件全部来源均为最多80字符字符串（emit两参数、最多32来源）可产生IGNORED_LITERAL_VARIANTS，最多四条且只输出固定类别和位置。eval、循环重绑定、arguments/this、嵌套/动态/类型/不完整等跳过；不改变原对象载荷与名称门禁。合法忽略可能正确，仅供Reviewer核对实际目标或状态，不能直接阻断。Java和可信脚本同步部署；生成/修复逐问题核对调用链，不把完成声明当成功，不擅加支付订单范围。
 

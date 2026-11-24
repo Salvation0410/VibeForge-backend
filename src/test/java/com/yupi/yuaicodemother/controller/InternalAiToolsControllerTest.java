@@ -281,6 +281,15 @@ class InternalAiToolsControllerTest {
                         "project_build", Map.of("codeGenType", "VUE_PROJECT"))).getData();
         InternalAiToolSchemaAssertions.assertResponseValid("project_build", success);
         assertEquals(Map.of("built", true, "errorCode", "", "message", ""), success);
+
+        var evidence = java.util.List.of(Map.of("file", "src/App.vue", "component", "Card", "prop", "data"));
+        when(builder.buildProjectDetailed(tempDir.toString(), "req-build"))
+                .thenReturn(new VueBuildResult(false, "VUE_COMPONENT_CONTRACT_FAILED", "固定错误", evidence));
+        Map<String, Object> failed = controller.invoke("Bearer test-token",
+                new InternalAiToolsController.ToolRequest(42L, "req-build", "call-build-evidence",
+                        "project_build", Map.of("codeGenType", "VUE_PROJECT"))).getData();
+        InternalAiToolSchemaAssertions.assertResponseValid("project_build", failed);
+        assertEquals(evidence, failed.get("componentIssues"));
     }
 
     @Test

@@ -71,7 +71,7 @@ class RepairInput(GenerationInput, total=False):
     repair_feedback: str
     # 私有诊断仅供异常摘要续写，禁止加入模型上下文或修复输出。
     verification_history: list[dict[str, Any]]
-    # 严格Reviewer问题与当前网关快照路径，仅供修复组织，不回传父图。
+    # 严格Reviewer或可信构建问题与当前网关快照路径，仅供修复组织，不回传父图。
     repair_issues: list[dict[str, str]]
     repair_file_manifest: list[str]
 

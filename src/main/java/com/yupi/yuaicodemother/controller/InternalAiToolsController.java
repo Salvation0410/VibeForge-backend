@@ -305,10 +305,16 @@ public class InternalAiToolsController {
     private Map<String, Object> buildProject(long appId, String requestId, Map<String, Object> args) {
         Path root = projectRoot(appId, text(args.get("codeGenType")));
         VueBuildResult result = projectBuilder.buildProjectDetailed(root.toString(), requestId);
-        return Map.of(
+        Map<String, Object> response = new java.util.HashMap<>(Map.of(
                 "built", result.built(),
                 "errorCode", result.errorCode(),
-                "message", result.message());
+                "message", result.message()));
+        // 只扩展确定的组件契约失败；成功和旧构建错误保持三字段兼容。
+        if (!result.built() && "VUE_COMPONENT_CONTRACT_FAILED".equals(result.errorCode())
+                && !result.componentIssues().isEmpty()) {
+            response.put("componentIssues", result.componentIssues());
+        }
+        return response;
     }
 
     /**

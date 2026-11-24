@@ -180,6 +180,16 @@ def test_response_allows_new_fields_but_checks_declared_fields():
     assert exc_info.value.__cause__ is not None
 
 
+def test_component_build_evidence_is_optional_bounded_and_strict():
+    issue = {"file": "src/App.vue", "component": "Card", "prop": "data"}
+    result = {"built": False, "errorCode": "VUE_COMPONENT_CONTRACT_FAILED", "message": "固定错误",
+              "componentIssues": [issue]}
+    assert validate_tool_result("project_build", result) is result
+    for evidence in ([], [issue] * 5, [{**issue, "extra": "private"}], [{**issue, "prop": "<script>"}]):
+        with pytest.raises(ToolContractValidationError):
+            validate_tool_result("project_build", {**result, "componentIssues": evidence})
+
+
 def test_nested_response_fields_remain_typed_while_allowing_extensions():
     result = {
         "valid": False,

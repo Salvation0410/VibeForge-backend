@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 /** 可信脚本通过现有命令执行边界运行，检查器原始输出不进入日志或公共错误。 */
 final class VueComponentContractCheck {
@@ -90,16 +91,21 @@ final class VueComponentContractCheck {
             }
             if (!status.equals("failed") || issues.isEmpty()) return unavailable();
             List<String> details = new ArrayList<>();
+            List<Map<String, String>> evidence = new ArrayList<>();
             for (JsonNode issue : issues) {
                 if (!issue.isObject() || issue.size() != 3) return unavailable();
                 String file = field(issue, "file", 180);
                 String component = field(issue, "component", 80);
                 String prop = field(issue, "prop", 80);
                 if (file.startsWith("/") || file.contains("\\") || file.contains(":")
-                        || Arrays.asList(file.split("/")).contains("..") || !file.endsWith(".vue")) return unavailable();
+                        || Arrays.stream(file.split("/", -1)).anyMatch(part -> part.isEmpty() || part.equals(".") || part.equals(".."))
+                        || !file.endsWith(".vue") || !component.matches("[$A-Za-z_][\\w$-]{0,79}")
+                        || !prop.matches("[$A-Za-z_][\\w$-]{0,79}")) return unavailable();
                 details.add(file + " -> " + component + "." + prop);
+                evidence.add(Map.of("file", file, "component", component, "prop", prop));
             }
-            return VueBuildResult.failure("VUE_COMPONENT_CONTRACT_FAILED", "本地组件缺少显式必填属性：" + String.join("；", details));
+            return new VueBuildResult(false, "VUE_COMPONENT_CONTRACT_FAILED",
+                    "本地组件缺少显式必填属性：" + String.join("；", details), evidence);
         } catch (Exception exception) {
             return unavailable();
         }

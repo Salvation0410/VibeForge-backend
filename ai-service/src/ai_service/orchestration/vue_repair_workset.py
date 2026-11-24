@@ -124,8 +124,13 @@ def finish_work_batch(previous, results):
     return work
 
 
-def require_write_after_reads(work, calls):
+def require_write_after_reads(work, calls, *, remaining_tools=None):
     # 三个完整纯读批次后只允许包含写操作的批次，无法通过换文件继续读；失败仍受工具预算限制。
     if (work["read_batches"] >= 3 and calls
             and not any(call["name"] in {"file_write", "file_modify"} for call in calls)):
+        raise RepairPlanError(STALLED_REASON)
+    # 首次写入前不能用最后额度继续轮换补读；原纠偏允许利用当前可见源码最小写入。
+    if (not work["active_write"] and calls and remaining_tools is not None
+            and all(call["name"] == "file_read" for call in calls)
+            and len(calls) >= remaining_tools):
         raise RepairPlanError(STALLED_REASON)

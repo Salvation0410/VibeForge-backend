@@ -17,6 +17,7 @@ from ai_service.orchestration.vue_budget import budget_counts
 from ai_service.orchestration.vue_read_stall import read_repetition_stats
 from ai_service.models.input_review import InputReviewError
 from ai_service.models.vue_repair import snapshot_file_manifest
+from ai_service.models.vue_build_repair import component_repair_issues, valid_component_issues
 from ai_service.orchestration.repair_progress import candidate_fingerprint, record_candidate, vue_snapshot_fingerprint
 from ai_service.orchestration.subgraphs.schemas import VerificationState
 from ai_service.orchestration.cancellation import GenerationCancelled
@@ -116,8 +117,21 @@ def create_verification_nodes(
             state["app_id"],
             state["request_id"],
             call_id,
+            event_result=lambda value: {key: value[key] for key in ("built", "errorCode", "message") if key in value},
         )
-        return _with_diagnostics(state, "project_build", {"build": result}, result.get("built") is True,
+        # 硬构建错误也复用工作集；可信证据仅留验证/修复子图，不进父图或公共事件。
+        issues, manifest = [], []
+        if state["code_gen_type"] == "VUE_PROJECT" and valid_component_issues(result):
+            snapshot = await workflow._invoke_tool(
+                emitter, "project_build", "vue_source_snapshot", {"codeGenType": "VUE_PROJECT"},
+                state["app_id"], state["request_id"], f"{call_id}:repair-manifest",
+                event_result=_vue_snapshot_event_result,
+            )
+            workflow._raise_if_cancelled(thread_id)
+            issues, manifest = component_repair_issues(result, snapshot)
+        build = {key: value for key, value in result.items() if key != "componentIssues"}
+        return _with_diagnostics(state, "project_build", {"build": build,
+                                 "repair_issues": issues, "repair_file_manifest": manifest}, result.get("built") is True,
                                  result.get("errorCode") or "VUE_BUILD_FAILED")
 
     async def quality_review(state: VerificationState) -> dict[str, Any]:

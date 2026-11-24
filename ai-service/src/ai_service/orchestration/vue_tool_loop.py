@@ -194,7 +194,8 @@ def create_vue_loop_nodes(
         if loop.get("repair_work"):
             try:
                 work, work_action = prepare_work_turn(loop["repair_work"], turn)
-                require_write_after_reads(work, calls)
+                require_write_after_reads(work, calls, remaining_tools=(
+                    workflow.settings.vue_max_tool_calls - state.get("tool_call_count", 0)))
             except RepairPlanError as exc:
                 retries = loop.get("format_retries", 0)
                 diagnostic = plan_rejection_snapshot(exc.reason, loop["repair_work"], turn, retries)
@@ -221,6 +222,7 @@ def create_vue_loop_nodes(
                     "files仅从allowedFiles选择最多3个；整批工具只能操作活动文件，禁止目录扫描。"
                     "已有计划直接继续必要读取及写入；连续三个完整纯读批次后必须先写入。"
                     "成功写入后用completedIssueIndex单独声明当前项待验证，不能跳项或仅声称全部完成。"
+                    "若剩余工具不足以继续纯读取，请依据当前完整可见结果完成最小有效写入，禁止无效写入凑资格。"
                 )
                 return {"vue_loop": loop, "context": context}
             loop["repair_work"] = work
