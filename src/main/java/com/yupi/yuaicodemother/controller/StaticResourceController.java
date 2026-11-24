@@ -17,6 +17,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.HandlerMapping;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Path;
 
 @RestController
 @RequestMapping("/static")
@@ -67,14 +69,16 @@ public class StaticResourceController {
             return ResponseEntity.ok()
                     .header(HttpHeaders.CONTENT_TYPE, getContentTypeWithCharset(file.getName()))
                     .body(resource);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
         } catch (Exception e) {
             log.error("访问静态资源失败", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
 
-    private File resolvePreviewFile(File projectDir, String resourcePath, boolean isVueProject) {
-        File file = new File(projectDir, trimLeadingSlash(resourcePath));
+    private File resolvePreviewFile(File projectDir, String resourcePath, boolean isVueProject) throws IOException {
+        File file = resolveSandboxFile(projectDir, resourcePath);
         if (file.isFile()) {
             return file;
         }
@@ -82,20 +86,53 @@ public class StaticResourceController {
             return file;
         }
 
-        boolean shouldBuildForPreview = resourcePath.startsWith("/dist/") || "/index.html".equals(resourcePath);
+        // 根入口 HTML 使用 dist 时，其相对资源 URL 仍从工程根发起；仅在原目标不存在时映射。
+        boolean explicitDistPath = resourcePath.startsWith("/dist/");
+        if (!explicitDistPath) {
+            File distFile = resolveSandboxFile(projectDir, "/dist/" + trimLeadingSlash(resourcePath));
+            if (distFile.isFile()) {
+                return distFile;
+            }
+        }
+
+        // 只有入口缺失可以触发构建，未知资源不能启动 npm 或被替换为 HTML。
+        boolean shouldBuildForPreview = "/dist/index.html".equals(resourcePath) || "/index.html".equals(resourcePath);
         if (shouldBuildForPreview && vueProjectBuilder.ensureProjectBuilt(projectDir.getAbsolutePath())) {
-            File rebuiltFile = new File(projectDir, trimLeadingSlash(resourcePath));
+            File rebuiltFile = resolveSandboxFile(projectDir, resourcePath);
             if (rebuiltFile.isFile()) {
                 return rebuiltFile;
             }
             if ("/index.html".equals(resourcePath)) {
-                File distIndexFile = new File(vueProjectBuilder.getDistDirectory(projectDir), "index.html");
+                File distIndexFile = resolveSandboxFile(projectDir, "/dist/index.html");
                 if (distIndexFile.isFile()) {
                     return distIndexFile;
                 }
             }
         }
 
+        return file;
+    }
+
+    /** 直读与 dist 映射共用同一沙箱，拒绝穿越、Windows 分隔符与逃逸符号链接。 */
+    private File resolveSandboxFile(File projectDir, String resourcePath) throws IOException {
+        String relativePath = trimLeadingSlash(resourcePath);
+        if (relativePath.contains("\\") || relativePath.contains(":")) {
+            throw new IllegalArgumentException("非法的预览资源路径");
+        }
+        Path relative = Path.of(relativePath);
+        if (relative.isAbsolute()) {
+            throw new IllegalArgumentException("预览资源必须使用相对路径");
+        }
+        for (Path segment : relative) {
+            if ("..".equals(segment.toString())) {
+                throw new IllegalArgumentException("预览资源不能跨越目录");
+            }
+        }
+        Path sandbox = projectDir.getCanonicalFile().toPath();
+        File file = sandbox.resolve(relative).toFile().getCanonicalFile();
+        if (!file.toPath().startsWith(sandbox)) {
+            throw new IllegalArgumentException("预览资源超出应用沙箱");
+        }
         return file;
     }
 

@@ -5,6 +5,7 @@ from typing import Any
 
 REPAIR_READ_BATCH_LIMIT = 3
 REPAIR_TOOL_RESERVE = 4
+NEXT_REPAIR_TOOL_RESERVE = 12
 
 
 def is_complete_file_read(item: dict[str, Any]) -> bool:

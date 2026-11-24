@@ -302,7 +302,7 @@ async def test_customer_cancellation_propagates_without_another_send(sdk_model, 
 @pytest.mark.parametrize("mode", MODES)
 async def test_customer_budget_rejects_before_http(sdk_model, mode):
     model, requests, _ = sdk_model(mode, model_context_window_tokens=1024,
-                                   model_max_tokens=128, model_context_overhead_tokens=64)
+                                   model_max_tokens=128, generation_max_tokens=128, model_context_overhead_tokens=64)
     with pytest.raises(InputReviewError, match="INPUT_CONTEXT_BUDGET_EXCEEDED"):
         await model.answer_customer_service("问题" * 1500, CONTEXTS)
     assert requests == []
@@ -344,6 +344,8 @@ async def test_concurrent_customer_and_generation_keep_per_request_format_and_sa
     generation = next(body for body in requests if body is not customer)
     assert customer["response_format"] == {"type": "json_object"}
     assert "response_format" not in generation
+    assert generation["max_completion_tokens"] == 40960
+    assert customer["max_completion_tokens"] == 8192
     assert model._client is client and client.root_async_client is root
     assert len(constructors) == 1 and "response_format" not in client.model_kwargs
 
@@ -399,4 +401,7 @@ async def test_other_adapter_entrypoints_never_send_customer_response_format(sdk
         await getattr(model, operation)(context)
     assert len(requests) == len(constructors) == 1
     assert "response_format" not in requests[0]
+    expected_quota = (40960 if operation in {"generate", "repair", "generate_stream", "repair_stream"}
+                      else 1024 if operation == "review_input" else 1500 if operation == "rewrite_requirements" else 8192)
+    assert requests[0]["max_completion_tokens"] == expected_quota
     assert model._client is client and "response_format" not in client.model_kwargs

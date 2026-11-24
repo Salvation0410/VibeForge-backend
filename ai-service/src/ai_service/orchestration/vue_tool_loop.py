@@ -12,7 +12,8 @@ from ai_service.orchestration.routing import _raise_for_incomplete_model_turn
 from ai_service.orchestration.repair_progress import vue_snapshot_fingerprint
 from ai_service.orchestration.vue_read_stall import repair_reads_stalled, read_repetition_stats, phase_has_successful_write
 from ai_service.orchestration.vue_budget import (
-    REPAIR_READ_BATCH_LIMIT, REPAIR_TOOL_RESERVE, budget_counts, is_complete_file_read,
+    NEXT_REPAIR_TOOL_RESERVE, REPAIR_READ_BATCH_LIMIT, REPAIR_TOOL_RESERVE,
+    budget_counts, is_complete_file_read,
 )
 from ai_service.orchestration.subgraphs.schemas import RepairState
 
@@ -311,8 +312,14 @@ def create_vue_loop_nodes(
             )
             budget_reason = None
             if repair_budget_guard and ready and loop.get("successful_write", False):
-                if workflow.settings.vue_max_tool_calls - state.get("tool_call_count", 0) <= REPAIR_TOOL_RESERVE:
-                    budget_reason = "LOW_TOOL_BUDGET"
+                # 当前轮计数已由修复入口递增；缺失旧字段时不推断仍有下一轮修复机会。
+                has_next_repair = (
+                    state.get("repair_count", workflow.settings.max_repair_attempts)
+                    < workflow.settings.max_repair_attempts
+                )
+                reserve = NEXT_REPAIR_TOOL_RESERVE if has_next_repair else REPAIR_TOOL_RESERVE
+                if workflow.settings.vue_max_tool_calls - state.get("tool_call_count", 0) <= reserve:
+                    budget_reason = "NEXT_REPAIR_RESERVE" if has_next_repair else "LOW_TOOL_BUDGET"
                 elif loop.get("read_only_batches", 0) >= REPAIR_READ_BATCH_LIMIT:
                     budget_reason = "READ_BATCH_LIMIT"
             stalled = ready and (write_cycle or read_stall or budget_reason is not None)

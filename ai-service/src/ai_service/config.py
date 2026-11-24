@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     model_name: str = "deepseek-chat"
     model_temperature: float = 0.1
     model_max_tokens: int = Field(default=8192, ge=1)
+    # 代码生成与修复独立预留输出，不能连带扩大审查、路由及客服回答额度。
+    generation_max_tokens: int = Field(default=40_960, ge=1)
 
     # 两项增强可独立关闭；摘要有独立输出/字节上限，不放宽最终消息预算。
     frontend_skills_enabled: bool = True
@@ -146,7 +148,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_input_budget(self) -> "Settings":
-        if self.model_max_tokens + self.model_context_overhead_tokens >= self.model_context_window_tokens:
+        if max(self.model_max_tokens, self.generation_max_tokens) + self.model_context_overhead_tokens >= self.model_context_window_tokens:
             raise ValueError("模型上下文窗口必须大于输出额度与协议预留额度之和")
         return self
 

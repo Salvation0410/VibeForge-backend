@@ -76,30 +76,38 @@ class OpenAICompatibleModel:
         )
 
     def health_ready(self) -> bool:
-        """Report local adapter availability without sending a model request."""
+        """仅检查本地适配器，不向供应商发送健康探测请求。"""
 
         return getattr(self, "_client", None) is not None
 
-    def _check_budget(self, messages):
+    def _output_tokens(self, generation=False):
+        settings = getattr(self, "_settings", None)
+        if settings is None:
+            return None
+        return getattr(settings, "generation_max_tokens", settings.model_max_tokens) if generation else settings.model_max_tokens
+
+    def _check_budget(self, messages, *, generation=False):
         # 当前产物、历史及工具结果会继续增长，实际模型调用前再次检查完整载荷。
         settings = getattr(self, "_settings", None)
         if settings is not None:
             check_context_budget(
                 [{"role": message.type, "content": message.content} for message in messages],
                 context_tokens=settings.model_context_window_tokens,
-                output_tokens=settings.model_max_tokens,
+                output_tokens=self._output_tokens(generation),
                 overhead_tokens=settings.model_context_overhead_tokens,
             )
 
-    async def _invoke(self, messages, *, response_format: Literal["json_object"] | None = None):
-        self._check_budget(messages)
+    async def _invoke(self, messages, *, response_format: Literal["json_object"] | None = None, generation=False):
+        self._check_budget(messages, generation=generation)
+        # 请求级覆盖避免污染共享客户端，生成与客服可并发使用不同输出额度。
+        options = {"max_tokens": self._output_tokens(True)} if generation and self._output_tokens(True) is not None else {}
         with tracing_context(enabled=False):
             if response_format == "json_object":
                 # 格式只约束本次请求，不能修改共享客户端而污染并发生成调用。
-                return await self._client.ainvoke(messages, response_format={"type": "json_object"})
-            return await self._client.ainvoke(messages)
+                return await self._client.ainvoke(messages, response_format={"type": "json_object"}, **options)
+            return await self._client.ainvoke(messages, **options)
 
-    def _vue_messages(self, instructions: str, context: dict[str, Any]):
+    def _vue_messages(self, instructions: str, context: dict[str, Any], *, generation=False):
         """以实际消息预算选择工具历史，完整生成/修复状态不随模型窗口裁剪。"""
         def messages(payload):
             return [SystemMessage(content=instructions),
@@ -107,7 +115,7 @@ class OpenAICompatibleModel:
 
         def fits(payload):
             try:
-                self._check_budget(messages(payload))
+                self._check_budget(messages(payload), generation=generation)
                 return True
             except InputReviewError as exc:
                 if exc.code != "INPUT_CONTEXT_BUDGET_EXCEEDED":
@@ -118,10 +126,11 @@ class OpenAICompatibleModel:
 
     async def _stream_static_turn(self, messages, on_delta: TextDeltaCallback) -> ModelTurn:
         """聚合完整响应才返回候选；任务取消、回调异常和供应商失败均关闭响应流。"""
-        self._check_budget(messages)
+        self._check_budget(messages, generation=True)
+        options = {"max_tokens": self._output_tokens(True)} if self._output_tokens(True) is not None else {}
         combined = None
         with tracing_context(enabled=False):
-            async with aclosing(self._client.astream(messages, stream_usage=True)) as stream:
+            async with aclosing(self._client.astream(messages, stream_usage=True, **options)) as stream:
                 async for chunk in stream:
                     combined = chunk if combined is None else combined + chunk
                     text = chunk.text()
@@ -225,11 +234,11 @@ class OpenAICompatibleModel:
         generation_instructions = generation_system_prompt(branch) + frontend_instructions(context)
         if branch == "VUE_PROJECT":
             generation_instructions = f"{generation_instructions}\n\n{vue_tool_prompt()}"
-        messages = self._vue_messages(generation_instructions, context) if branch == "VUE_PROJECT" else [
+        messages = self._vue_messages(generation_instructions, context, generation=True) if branch == "VUE_PROJECT" else [
             SystemMessage(content=generation_instructions),
             HumanMessage(content=json.dumps(context, ensure_ascii=False)),
         ]
-        response = await self._invoke(messages)
+        response = await self._invoke(messages, generation=True)
         raw = str(response.content)
         if branch != "VUE_PROJECT":
             return _model_turn(response, raw)
@@ -302,11 +311,11 @@ class OpenAICompatibleModel:
         if context.get("codeGenType") == "VUE_PROJECT":
             repair_instructions = f"{repair_instructions}\n\n{generation_system_prompt('VUE_PROJECT')}\n\n{vue_tool_prompt()}"
         payload = {"artifact": artifact, **context}
-        messages = self._vue_messages(repair_instructions, payload) if context.get("codeGenType") == "VUE_PROJECT" else [
+        messages = self._vue_messages(repair_instructions, payload, generation=True) if context.get("codeGenType") == "VUE_PROJECT" else [
             SystemMessage(content=repair_instructions),
             HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
         ]
-        response = await self._invoke(messages)
+        response = await self._invoke(messages, generation=True)
         if context.get("codeGenType") == "VUE_PROJECT":
             return _vue_model_turn(response)
         return _model_turn(response, str(response.content))

@@ -200,7 +200,7 @@ class CaptureClient:
     def __init__(self, raw):
         self.raw, self.messages = raw, None
 
-    async def ainvoke(self, messages):
+    async def ainvoke(self, messages, **options):
         self.messages = messages
         return SimpleNamespace(content=self.raw, response_metadata={"finish_reason": "stop"})
 

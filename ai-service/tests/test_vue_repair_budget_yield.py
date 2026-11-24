@@ -80,7 +80,7 @@ def ready_state():
     loop.update(successful_write=True, read_only_batches=2,
                 pending_tools=[{"name": "file_read", "arguments": {"relativeFilePath": "src/New.vue"}}],
                 tool_cursor=1, ordinal=8)
-    return {**initial(), "vue_loop": loop, "tool_call_count": 20, "vue_tool_results": [{
+    return {**initial(), "repair_count": 2, "vue_loop": loop, "tool_call_count": 20, "vue_tool_results": [{
         "toolCallId": "subgraph-test:vue-repair:1:8", "tool": "file_read",
         "arguments": {"relativeFilePath": "src/New.vue"}, "result": {"content": "新文件"},
     }]}
@@ -123,13 +123,16 @@ async def test_budget_guard_requires_completed_eligible_repair(settings, case, e
         assert result["vue_loop"]["read_only_batches"] == 0
 
 
-async def test_cancel_wins_over_budget_yield(settings):
+@pytest.mark.parametrize("repair_count,tool_count", [(1, 28), (2, 36)])
+async def test_cancel_wins_over_budget_yield(settings, repair_count, tool_count):
     workflow = make_workflow(settings, FakeModel(), MemoryCheckpoint())
     workflow.cancellations.cancel("42:subgraph-test")
     nodes = create_vue_loop_nodes(workflow, EventEmitter("subgraph-test"), "42:subgraph-test",
                                   "repair", repair_budget_guard=True)
+    state = ready_state()
+    state.update(repair_count=repair_count, tool_call_count=tool_count)
     with pytest.raises(GenerationCancelled):
-        await nodes["continue_loop"](ready_state())
+        await nodes["continue_loop"](state)
 
 
 async def test_exhaustion_logs_actual_counts_without_source_or_paths(settings, caplog):
@@ -253,3 +256,159 @@ async def test_failed_repair_logs_current_phase_counts_and_rejects_entire_next_b
     assert "remaining=1 requested_count=2" in caplog.text
     assert "src/" not in caplog.text
     assert len([c for c in gateway.calls if c["name"] in {"file_read", "file_write"}]) == 39
+
+
+@pytest.mark.parametrize("repair_count,remaining,expected", [
+    (0, 12, 1), (0, 13, 2), (1, 4, 1), (1, 5, 2),
+])
+async def test_real_repair_graph_reserves_tools_by_remaining_repair_chances(
+    settings, caplog, repair_count, remaining, expected,
+):
+    class WritingModel(FakeModel):
+        async def repair(self, artifact, context):
+            self.calls.append(("repair", deepcopy(context)))
+            return ModelTurn("修复", tool_calls=[ToolCall("file_write", {
+                "relativeFilePath": "src/App.vue", "content": f"修复{len(self.calls)}",
+            })])
+
+    model, gateway = WritingModel(), BuildGateway()
+    workflow = make_workflow(settings, model, MemoryCheckpoint(), gateway)
+    graph = build_vue_tool_subgraph(workflow, EventEmitter("subgraph-test"),
+                                   "42:subgraph-test", {}, node="repair")
+    # remaining 是首次成功写入后的余额，入口会把上一轮计数推进到本轮。
+    starting_count = settings.vue_max_tool_calls - remaining - 1
+    with caplog.at_level(logging.INFO):
+        result = await graph.ainvoke({**initial(), "repair_count": repair_count,
+                                     "tool_call_count": starting_count},
+                                    {"recursion_limit": vue_recursion_limit(settings)})
+    assert len(model.calls) == expected
+    assert result["tool_call_count"] == starting_count + expected
+    assert result["repair_count"] == repair_count + 1
+    reason = "NEXT_REPAIR_RESERVE" if repair_count == 0 else "LOW_TOOL_BUDGET"
+    assert f"reason={reason}" in caplog.text
+    assert "vue_loop" not in result
+    assert [c["vueGeneration"]["remainingToolCalls"] for _, c in model.calls] == [
+        remaining + 1 - i for i in range(expected)
+    ]
+    assert not any(c["name"] == "project_build" for c in gateway.calls)
+
+
+@pytest.mark.parametrize("case,expected", [
+    ("next_repair", "finish"), ("thirteen_remaining", "model_turn"),
+    ("missing_repair_count", "model_turn"), ("missing_successful_write", "model_turn"),
+    ("no_write", "model_turn"), ("pending_image", "model_turn"),
+    ("pending_file", "model_turn"), ("disabled", "model_turn"),
+])
+async def test_next_repair_reserve_keeps_eligibility_and_old_checkpoint_safety(settings, case, expected):
+    state = ready_state()
+    state.update(repair_count=1, tool_call_count=28)
+    state["vue_loop"]["read_only_batches"] = 0
+    if case == "thirteen_remaining":
+        state["tool_call_count"] = 27
+    if case == "missing_repair_count":
+        state.pop("repair_count")
+    if case == "missing_successful_write":
+        state["vue_loop"].pop("successful_write")
+    if case == "no_write":
+        state["vue_loop"]["successful_write"] = False
+    if case == "pending_image":
+        state["vue_loop"]["image_used"] = False
+    if case == "pending_file":
+        state["vue_loop"]["file_plan"] = ["src/Required.vue"]
+    nodes = create_vue_loop_nodes(make_workflow(settings, FakeModel(), MemoryCheckpoint()),
+                                  EventEmitter("subgraph-test"), "42:subgraph-test", "repair",
+                                  repair_budget_guard=case != "disabled")
+    before = deepcopy(state)
+    result = await nodes["continue_loop"](state)
+    assert result["vue_loop"]["next_step"] == expected
+    assert state == before
+    assert set(result) == {"vue_loop"}
+
+
+@pytest.mark.parametrize("tool_limit", [1, 5, 10])
+async def test_custom_small_budget_yields_only_after_a_successful_write(settings, tool_limit):
+    class OneWrite(FakeModel):
+        async def repair(self, artifact, context):
+            self.calls.append(("repair", context))
+            return ModelTurn("修复", tool_calls=[ToolCall("file_write", {
+                "relativeFilePath": "src/App.vue", "content": "修复",
+            })])
+
+    configured = settings.model_copy(update={"vue_max_tool_calls": tool_limit})
+    model, gateway = OneWrite(), BuildGateway()
+    graph = build_vue_tool_subgraph(make_workflow(configured, model, MemoryCheckpoint(), gateway),
+                                   EventEmitter("subgraph-test"), "42:subgraph-test", {}, node="repair")
+    result = await graph.ainvoke(initial(), {"recursion_limit": vue_recursion_limit(configured)})
+    assert result["tool_call_count"] == 1
+    assert len(model.calls) == 1
+    assert sum(c["name"] == "file_write" for c in gateway.calls) == 1
+
+
+async def test_next_repair_reserve_finishes_whole_read_write_batch(settings, caplog):
+    state = ready_state()
+    state.update(repair_count=1, tool_call_count=28)
+    state["vue_loop"]["read_only_batches"] = 0
+    state["vue_loop"]["pending_tools"].append({"name": "file_write", "arguments": {
+        "relativeFilePath": "src/App.vue", "content": "同批必要写入",
+    }})
+    gateway = BuildGateway()
+    nodes = create_vue_loop_nodes(make_workflow(settings, FakeModel(), MemoryCheckpoint(), gateway),
+                                  EventEmitter("subgraph-test"), "42:subgraph-test", "repair",
+                                  repair_budget_guard=True)
+    state.update(await nodes["continue_loop"](state))
+    assert state["vue_loop"]["next_step"] == "execute_tool"
+    assert not gateway.calls
+    state.update(await nodes["execute_tool"](state))
+    with caplog.at_level(logging.INFO):
+        result = await nodes["continue_loop"](state)
+    assert result["vue_loop"]["next_step"] == "finish"
+    assert state["tool_call_count"] == 29
+    assert [c["name"] for c in gateway.calls] == ["file_write"]
+    assert "reason=NEXT_REPAIR_RESERVE" in caplog.text
+
+
+async def test_checkpoint_resume_applies_next_repair_reserve_without_repeating_write(settings):
+    model, gateway, checkpoint = ReadingModel(), BuildGateway(), CleaningGraphCheckpoint()
+    workflow = make_workflow(settings, model, checkpoint, gateway)
+    emitter = EventEmitter("subgraph-test")
+    graph = build_vue_tool_subgraph(workflow, emitter, "42:subgraph-test", {}, node="repair",
+                                   interrupt_after=["execute_tool"])
+    graph.checkpointer = checkpoint.saver
+    config = {"configurable": {"thread_id": "42:subgraph-test"}}
+    await graph.ainvoke({**initial(), "tool_call_count": 27,
+                         "context": {"requestId": "subgraph-test"}}, config)
+    saved = await graph.aget_state(config)
+    assert saved.values["tool_call_count"] == 28
+    assert saved.values["repair_count"] == 1
+    assert saved.values["vue_loop"]["successful_write"] is True
+    rebuilt = build_vue_tool_subgraph(workflow, emitter, "42:subgraph-test", {}, node="repair")
+    rebuilt.checkpointer = checkpoint.saver
+    result = await rebuilt.ainvoke(None, config)
+    assert result["tool_call_count"] == 28
+    assert result["repair_count"] == 1
+    assert len(model.calls) == 1
+    assert sum(c["name"] == "file_write" for c in gateway.calls) == 1
+
+
+async def test_reserve_returns_to_build_and_keeps_second_repair_and_failure(settings, caplog):
+    class HighGenerationCost(ReadingModel):
+        async def generate(self, branch, context):
+            count = len(context["toolResults"])
+            if count >= 28:
+                return ModelTurn("生成完成")
+            return ModelTurn("写入", tool_calls=[ToolCall("file_write", {
+                "relativeFilePath": f"src/File{i}.vue", "content": "页面",
+            }) for i in range(count, count + 2)])
+
+    model, gateway = HighGenerationCost(), BuildGateway(fixed=False)
+    with caplog.at_level(logging.INFO):
+        events = await make_workflow(settings, model, MemoryCheckpoint(), gateway).run(request_for("VUE_PROJECT"))
+    assert events[-1].type == "failed"
+    assert events[-1].error.code == "VUE_COMPONENT_CONTRACT_FAILED"
+    assert sum(c["name"] == "project_build" for c in gateway.calls) == 3
+    repairs = [context for name, context in model.calls if name == "repair"]
+    assert [context["repairCount"] for context in repairs] == [1, 2, 2, 2, 2]
+    assert [context["vueGeneration"]["remainingToolCalls"] for context in repairs] == [12, 11, 10, 8, 6]
+    assert "reason=NEXT_REPAIR_RESERVE" in caplog.text
+    assert "reason=LOW_TOOL_BUDGET" in caplog.text
+    assert sum(e.type in {"completed", "failed"} for e in events) == 1

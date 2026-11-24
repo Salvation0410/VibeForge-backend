@@ -228,12 +228,225 @@ function eventContract(description, content, compiler) {
     for (const child of node?.children || []) visit(child)
   }
   visit(description.template)
-  return supported ? { events, closed } : null
+  return supported ? { events, closed, emitter } : null
+}
+
+// 载荷只提供审查线索：不推断类型、运行值、可选链或任意 JavaScript 数据流。
+function payloadDescription(description, compiler) {
+  const emitter = description.contract?.emitter
+  if (!description.scriptAst) return null
+  const functions = new Map(), sources = new Map(), seenBindings = new Set()
+  let uncertain = false
+  const walk = (node, visit) => {
+    if (!node || typeof node !== 'object') return
+    visit(node)
+    for (const [key, value] of Object.entries(node)) {
+      if (['loc', 'start', 'end', 'comments'].includes(key)) continue
+      if (Array.isArray(value)) value.forEach(item => walk(item, visit))
+      else if (value && typeof value === 'object') walk(value, visit)
+    }
+  }
+  for (const statement of description.scriptAst || []) {
+    const bindings = statement.type === 'FunctionDeclaration' ? [{ id: statement.id, init: statement }] :
+      statement.type === 'VariableDeclaration' ? statement.declarations :
+        statement.type === 'ImportDeclaration' ? statement.specifiers.map(s => ({ id: s.local })) : []
+    for (const binding of bindings) {
+      if (binding.id?.type !== 'Identifier') { uncertain = true; continue }
+      const name = binding.id.name
+      if (seenBindings.has(name)) uncertain = true
+      seenBindings.add(name)
+      if (['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'].includes(binding.init?.type)) {
+        functions.set(name, binding.init)
+      }
+    }
+  }
+  // 重绑定和局部遮蔽会使监听器或 emit 的词法归属不确定，整份载荷分析跳过。
+  const inspectScope = (node, rootFunction = false) => {
+    if (!node || typeof node !== 'object') return
+    if (['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'].includes(node.type)) {
+      if (!rootFunction) {
+        walk(node, n => { if (n.type === 'Identifier' && (n.name === emitter || functions.has(n.name))) uncertain = true })
+        return
+      }
+      if (node.async || node.generator || node.returnType || node.typeParameters || node.params.some(p => p.typeAnnotation || p.optional)) uncertain = true
+      for (const p of node.params) walk(p, n => { if (n.type === 'Identifier' && (n.name === emitter || functions.has(n.name))) uncertain = true })
+    }
+    if (['AssignmentExpression', 'UpdateExpression'].includes(node.type)) {
+      const target = node.left || node.argument
+      walk(target, n => { if (n.type === 'Identifier' && (n.name === emitter || functions.has(n.name))) uncertain = true })
+    }
+    if (node.type === 'VariableDeclarator') walk(node.id, n => {
+      if (n.type === 'Identifier' && (n.name === emitter || functions.has(n.name))) uncertain = true
+    })
+    for (const [key, value] of Object.entries(node)) {
+      if (['loc', 'start', 'end', 'comments', 'params'].includes(key)) continue
+      if (Array.isArray(value)) value.forEach(item => inspectScope(item))
+      else if (value && typeof value === 'object') inspectScope(value)
+    }
+  }
+  for (const fn of functions.values()) inspectScope(fn, true)
+  for (const statement of description.scriptAst) {
+    if (statement.type === 'VariableDeclaration') for (const declaration of statement.declarations) {
+      if (!functions.has(declaration.id?.name) && declaration.id?.name !== emitter) inspectScope(declaration.init)
+    }
+    else if (!['ImportDeclaration', 'FunctionDeclaration'].includes(statement.type)) inspectScope(statement)
+  }
+  // 只接受无变形的单语句转发，避免赋值、分支或调用副作用改变载荷。
+  const forwarders = new Map()
+  for (const [name, fn] of functions) {
+    const statements = fn.body.type === 'BlockStatement' ? fn.body.body : [{ type: 'ExpressionStatement', expression: fn.body }]
+    const call = statements.length === 1 && statements[0].type === 'ExpressionStatement' ? statements[0].expression : null
+    if (fn.params.length === 1 && fn.params[0].type === 'Identifier' && call?.type === 'CallExpression' &&
+        call.callee.name === emitter && call.arguments.length === 2 && call.arguments[0].type === 'StringLiteral' &&
+        call.arguments[1].type === 'Identifier' && call.arguments[1].name === fn.params[0].name) forwarders.set(call, name)
+  }
+  const capture = node => {
+    if (node.type !== 'CallExpression' || node.callee.type !== 'Identifier' || node.callee.name !== emitter) return
+    const event = node.arguments[0]?.type === 'StringLiteral' ? normalizeProp(node.arguments[0].value) : null
+    if (!event) { uncertain = true; return }
+    const properties = node.arguments.length === 2 && !node.typeParameters && !node.typeArguments ? fields(node.arguments[1]) : null
+    const source = properties && properties.size <= 32 ? { keys: new Set(properties.keys()) } :
+      forwarders.has(node) ? { forward: forwarders.get(node) } : null
+    if (!sources.has(event)) sources.set(event, [])
+    sources.get(event).push(source)
+  }
+  description.scriptAst.forEach(node => walk(node, capture))
+  const templateReferences = new Map(), scriptReferences = new Map()
+  description.scriptAst.forEach(node => walk(node, n => {
+    if (n.type === 'Identifier' && functions.has(n.name)) scriptReferences.set(n.name, (scriptReferences.get(n.name) || 0) + 1)
+  }))
+  const recordReferences = content => {
+    for (const name of functions.keys()) {
+      // 同名出现在动态/原生监听或其他表达式时，不把它遗漏为已知转发来源。
+      if (new RegExp(`(^|[^\\w$])${name.replace(/[$]/g, '\\$&')}([^\\w$]|$)`).test(content)) {
+        templateReferences.set(name, (templateReferences.get(name) || 0) + 1)
+      }
+    }
+  }
+  function template(node, scoped = false) {
+    if (!node) return
+    scoped ||= (node.props || []).some(p => p.type === 7 && ['for', 'slot', 'pre'].includes(p.name))
+    if (node.type === 5 && node.content?.content) recordReferences(node.content.content)
+    if (emitter && node.type === 5 && node.content?.content.includes(emitter)) {
+      if (scoped) uncertain = true
+      else {
+        try { walk(compiler.babelParse(node.content.content, { sourceType: 'module' }), capture) }
+        catch { uncertain = true }
+      }
+    }
+    for (const prop of node.props || []) {
+      if (prop.exp?.content) recordReferences(prop.exp.content)
+      if (!emitter || !prop.exp?.content || !prop.exp.content.includes(emitter)) continue
+      if (scoped) { uncertain = true; continue }
+      try { walk(compiler.babelParse(prop.exp.content, { sourceType: 'module' }), capture) }
+      catch { uncertain = true }
+    }
+    for (const child of node.children || []) template(child, scoped)
+  }
+  template(description.template)
+  // 顶层重赋值也不可假定原始函数仍为实际监听器。
+  for (const statement of description.scriptAst) {
+    if (statement.type === 'ExpressionStatement') walk(statement, n => {
+      if (['AssignmentExpression', 'UpdateExpression'].includes(n.type)) inspectScope(n)
+    })
+  }
+  return uncertain ? null : { functions, sources, templateReferences, scriptReferences }
+}
+
+function analyzePayloads(descriptions, result, compiler, native) {
+  for (const description of descriptions.values()) description.payload = payloadDescription(description, compiler)
+  const edges = []
+  for (const [file, description] of descriptions) {
+    const aliases = new Map(), protectedNames = new Set(description.payload?.functions.keys() || [])
+    if (description.contract?.emitter) protectedNames.add(description.contract.emitter)
+    for (const [name, target] of description.imports || []) {
+      protectedNames.add(name)
+      for (const tag of [name, kebab(name)]) {
+        protectedNames.add(tag)
+        aliases.set(tag, aliases.has(tag) && aliases.get(tag) !== target ? null : target)
+      }
+    }
+    // 此遍历只扩大审查线索的覆盖；事件名硬门禁的作用域策略保持原样。
+    function visit(node, scoped = false) {
+      if (!node) return
+      const props = node.props || []
+      for (const prop of props) {
+        if (prop.type !== 7) continue
+        if (['slot', 'pre'].includes(prop.name)) scoped = true
+        if (prop.name === 'for') {
+          const loop = /^([$A-Za-z_][\w$]*)\s+(?:in|of)\s+([$A-Za-z_][\w$]*)$/.exec(prop.exp?.content?.trim() || '')
+          // 单个无冲突别名不改变组件和直接监听器的词法解析；其余语法不模拟。
+          if (!loop || protectedNames.has(loop[1])) scoped = true
+        }
+      }
+      if (node.type === 1 && node.tagType === 1) {
+        const target = aliases.get(node.tag), contract = descriptions.get(target)?.contract
+        const uncertain = scoped || !contract || node.tag.length > 80 || props.some(p => p.type === 7 &&
+          (p.name === 'model' || (['on', 'bind'].includes(p.name) && (!p.arg || !p.arg.isStatic))))
+        for (const listener of props.filter(p => p.type === 7 && p.name === 'on')) {
+          const event = listener.arg?.content
+          if (listener.arg?.isStatic && identifier(event) && (native.has(event.toLowerCase()) || /^vue:|^update:/.test(event))) continue
+          const handler = listener.exp?.content?.trim()
+          if (uncertain || !identifier(event) || !contract.events.has(normalizeProp(event)) ||
+              !/^[$A-Za-z_][\w$]*$/.test(handler || '') || listener.modifiers?.length) result.payloadSkipped++
+          else edges.push({ file, child: target, component: node.tag, event: normalizeProp(event), rawEvent: event, handler })
+        }
+      }
+      for (const child of node.children || []) visit(child, scoped)
+    }
+    visit(description.template)
+  }
+  // 每个分支都须可证明，未知 emit 或未知来源不能被其他已知分支掩盖。
+  function shapes(file, event, hops, visited = new Set()) {
+    const key = `${file}:${event}`
+    if (visited.has(key)) return null
+    const description = descriptions.get(file), sources = description?.payload?.sources.get(event)
+    if (!sources?.length) return null
+    const next = new Set(visited).add(key), values = []
+    for (const source of sources) {
+      if (!source) return null
+      if (source.keys) values.push(source.keys)
+      else {
+        if (hops >= 2) return null
+        const incoming = edges.filter(edge => edge.file === file && edge.handler === source.forward)
+        if (!incoming.length || description.payload.scriptReferences.get(source.forward) !== 1 ||
+            description.payload.templateReferences.get(source.forward) !== incoming.length) return null
+        for (const edge of incoming) {
+          const forwarded = shapes(edge.child, edge.event, hops + 1, next)
+          if (!forwarded) return null
+          values.push(...forwarded)
+          if (values.length > 32) return null
+        }
+      }
+    }
+    return values
+  }
+  for (const edge of edges) {
+    const fn = descriptions.get(edge.file)?.payload?.functions.get(edge.handler)
+    const param = fn?.params.length === 1 ? fn.params[0] : null
+    // 默认参数、可选字段、嵌套解构和 rest 都跳过，不能把有后备值的读取视为必需键。
+    if (param?.type !== 'ObjectPattern' || param.typeAnnotation || param.optional ||
+        !param.properties.every(p => p.type === 'ObjectProperty' && keyOf(p) && p.value.type === 'Identifier' && !p.value.optional && !p.value.typeAnnotation)) {
+      result.payloadSkipped++; continue
+    }
+    const required = [...new Set(param.properties.map(keyOf))]
+    if (!required.length || required.length > 32) { result.payloadSkipped++; continue }
+    // 对象原型已有键不代表缺少运行值；不模拟原型链或 __proto__ 的特殊语义。
+    if (required.some(key => Object.prototype.hasOwnProperty.call(Object.prototype, key))) { result.payloadSkipped++; continue }
+    const emitted = shapes(edge.child, edge.event, 0)
+    if (!emitted) { result.payloadSkipped++; continue }
+    result.payloadChecked++
+    const missingKeys = required.filter(key => emitted.some(keys => !keys.has(key))).slice(0, 4)
+    if (missingKeys.length && result.payloadAdvisories.length < LIMITS.issues) result.payloadAdvisories.push({
+      kind: 'MISSING_DESTRUCTURED_KEYS', file: edge.file, component: edge.component, event: edge.rawEvent, missingKeys,
+    })
+  }
 }
 
 function analyzeEvents(files, compiler, partial = false) {
-  const result = { version: 1, status: 'ok', checkedUsages: 0, skippedUsages: 0,
-    truncated: Boolean(partial), reason: 'NONE', issues: [], advisories: [] }
+  const result = { version: 2, status: 'ok', checkedUsages: 0, skippedUsages: 0,
+    truncated: Boolean(partial), reason: 'NONE', issues: [], advisories: [],
+    payloadChecked: 0, payloadSkipped: 0, payloadAdvisories: [] }
   const skip = () => ({ ...result, reason: 'INCOMPLETE', truncated: true })
   if (partial || files.length > LIMITS.files) return skip()
   const descriptions = new Map()
@@ -282,6 +495,7 @@ function analyzeEvents(files, compiler, partial = false) {
     }
     visit(description.template)
   }
+  analyzePayloads(descriptions, result, compiler, native)
   if (result.issues.length) result.status = 'failed'
   return result
 }

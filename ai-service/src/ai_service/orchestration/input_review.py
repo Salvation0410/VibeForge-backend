@@ -44,13 +44,13 @@ class InputReviewer:
             "existingProject": metadata.get("existingProject") is True,
             "codeGenType": code_gen_type,
             "capabilities": {"staticFrontend": True, "backendGeneration": False},
-            "generationBudget": {"maxOutputTokens": self.settings.model_max_tokens,
+            "generationBudget": {"maxOutputTokens": self.settings.generation_max_tokens,
                                  "maxVueToolCalls": self.settings.vue_max_tool_calls},
         }
         # 审核只看有限历史，但生成仍需检查收到的完整上下文，不能靠截断审核历史掩盖超预算。
         check_context_budget({"prompt": prompt, "conversation": conversation or [], "metadata": metadata},
                              context_tokens=self.settings.model_context_window_tokens,
-                             output_tokens=self.settings.model_max_tokens,
+                             output_tokens=self.settings.generation_max_tokens,
                              overhead_tokens=self.settings.model_context_overhead_tokens)
         if not self.settings.input_review_enabled:
             return InputReviewResult(decision="ALLOW", reason="NONE", message="", questions=[])

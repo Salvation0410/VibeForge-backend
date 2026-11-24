@@ -32,7 +32,7 @@ class CapturingClient:
         self.messages = None
         self.response_content = response_content
 
-    async def ainvoke(self, messages):
+    async def ainvoke(self, messages, **options):
         self.messages = messages
         return SimpleNamespace(
             content=self.response_content,
@@ -156,7 +156,7 @@ async def test_vue_projection_respects_small_window_and_repair_artifact():
     from ai_service.models.input_review import InputReviewError
 
     model = model_with_response('{"content":"done","toolCalls":[]}')
-    model._settings = Settings(model_context_window_tokens=18000, model_max_tokens=2000,
+    model._settings = Settings(model_context_window_tokens=18000, model_max_tokens=2000, generation_max_tokens=2000,
                                model_context_overhead_tokens=1000)
     context = {"codeGenType": "VUE_PROJECT", "prompt": "保留功能", "toolResults": [
         {"toolCallId": str(i), "tool": "file_read", "result": {"content": "x" * 1500}}

@@ -43,7 +43,7 @@ async def test_vue_review_discards_generation_history_without_losing_edit_constr
 
 async def test_vue_review_oversized_snapshot_fails_before_provider_without_truncation():
     model = model_with_response('{"verdict":"PASS","issues":[]}')
-    model._settings = Settings(model_context_window_tokens=16000, model_max_tokens=2000,
+    model._settings = Settings(model_context_window_tokens=16000, model_max_tokens=2000, generation_max_tokens=2000,
                                model_context_overhead_tokens=1000)
     with pytest.raises(InputReviewError):
         await model.review("源码" * 10000, {"codeGenType": "VUE_PROJECT", "prompt": "检查"})
