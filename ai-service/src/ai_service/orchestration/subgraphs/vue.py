@@ -72,6 +72,7 @@ def build_vue_tool_subgraph(workflow, emitter, thread_id, terminal, *, node="vue
     for name, action in create_vue_loop_nodes(
         workflow, emitter, thread_id, node, invoke_model=invoke_model, repair_read_guard=is_repair,
         repair_write_guard=is_repair, repair_budget_guard=is_repair,
+        modify_budget_guard=node == "vue_agent" and not legacy,
     ).items():
         builder.add_node(name, action)
     builder.add_node("finish", finish)

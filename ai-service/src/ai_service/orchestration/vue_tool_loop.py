@@ -88,6 +88,7 @@ def initial_progress(context: dict[str, Any], prefix: str, started_at: str) -> V
 def create_vue_loop_nodes(
     workflow: GenerationWorkflow, emitter, thread_id: str, node: str,
     *, invoke_model=None, repair_read_guard=False, repair_write_guard=False, repair_budget_guard=False,
+    modify_budget_guard=False,
 ):
     """生成和修复仅在模型入口不同，批次规则和工具执行路径完全共用。"""
     def log_budget(state, loop, *, reason, requested_count=0):
@@ -297,6 +298,10 @@ def create_vue_loop_nodes(
     async def continue_loop(state: VueLoopState):
         workflow._raise_if_cancelled(thread_id)
         loop = {**state["vue_loop"]}
+        # 原始产物基线决定普通修改资格；首次生成的成功写入不改变此基线。
+        budget_guard = repair_budget_guard or (
+            modify_budget_guard and state["context"].get("currentArtifact", {}).get("exists") is True
+        )
         if loop["tool_cursor"] < len(loop["pending_tools"]):
             loop["next_step"] = "execute_tool"
         else:
@@ -325,7 +330,7 @@ def create_vue_loop_nodes(
                     if loop.get("visible_repeat_total", 0) - loop.get("prewrite_warning_visible_total", 0) >= 4:
                         log_budget(state, loop, reason="PREWRITE_READ_STALLED")
                         raise ValueError("VUE_REPAIR_READ_STALLED: 修复持续重复读取且尚未成功写入，本轮已停止")
-            if repair_budget_guard:
+            if budget_guard:
                 batch = loop["pending_tools"]
                 results = state["vue_tool_results"][-len(batch):] if batch else []
                 # 新路径也计入读取开销；混合批次或不完整读取重新累计，不能跨写入累加。
@@ -365,7 +370,7 @@ def create_vue_loop_nodes(
                 and repair_reads_stalled(state["vue_tool_results"], loop["call_id_prefix"])
             )
             budget_reason = None
-            if repair_budget_guard and ready and loop.get("successful_write", False):
+            if budget_guard and ready and loop.get("successful_write", False):
                 # 当前轮计数已由修复入口递增；缺失旧字段时不推断仍有下一轮修复机会。
                 has_next_repair = (
                     state.get("repair_count", workflow.settings.max_repair_attempts)
