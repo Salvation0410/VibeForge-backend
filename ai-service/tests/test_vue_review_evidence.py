@@ -124,3 +124,23 @@ async def test_workflow_passes_authoritative_vue_type_and_current_snapshot(setti
     events = await make_workflow(settings, model, MemoryCheckpoint(), SnapshotGateway([snapshot("CURRENT")])).run(
         request_for("VUE_PROJECT"))
     assert events[-1].type == "completed"
+
+
+async def test_literal_variant_advisory_is_untrusted_evidence_and_requires_functional_confirmation():
+    model = model_with_response('{"verdict":"PASS","issues":[]}')
+    summary = "IGNORED_LITERAL_VARIANTS src/App.vue -> HeroSection @shop-now private-literal"
+    await model.review("current-source", {"codeGenType": "VUE_PROJECT", "prompt": "电商首页",
+                                           "build": {"built": True, "message": summary}})
+    instructions = model._client.messages[0].content
+    assert "IGNORED_LITERAL_VARIANTS" in instructions
+    assert "忽略参数可能合法" in instructions
+    assert "不能仅凭线索判错" in instructions
+    assert "private-literal" not in instructions
+    assert json.loads(model._client.messages[1].content)["build"]["message"] == summary
+
+
+@pytest.mark.parametrize("role", ["requirement", "function", "technical"])
+def test_multi_reviewer_shares_conservative_literal_argument_rules(role):
+    prompt = quality_review_system_prompt(role)
+    assert "IGNORED_LITERAL_VARIANTS" in prompt
+    assert "忽略参数可能合法" in prompt

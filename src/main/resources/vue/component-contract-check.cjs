@@ -235,8 +235,9 @@ function eventContract(description, content, compiler) {
 function payloadDescription(description, compiler) {
   const emitter = description.contract?.emitter
   if (!description.scriptAst) return null
-  const functions = new Map(), sources = new Map(), seenBindings = new Set()
+  const functions = new Map(), sources = new Map(), literalSources = new Map(), seenBindings = new Set()
   let uncertain = false
+  let argumentUncertain = false
   const walk = (node, visit) => {
     if (!node || typeof node !== 'object') return
     visit(node)
@@ -309,13 +310,32 @@ function payloadDescription(description, compiler) {
       forwarders.has(node) ? { forward: forwarders.get(node) } : null
     if (!sources.has(event)) sources.set(event, [])
     sources.get(event).push(source)
+    // 参数变体独立分析，只承认有界字符串；任何未知来源都会让该事件整体跳过。
+    const literal = node.arguments.length === 2 && !node.typeParameters && !node.typeArguments &&
+      node.arguments[1].type === 'StringLiteral' && node.arguments[1].value.length <= 80
+      ? node.arguments[1].value : null
+    if (!literalSources.has(event)) literalSources.set(event, [])
+    literalSources.get(event).push(literal)
   }
-  description.scriptAst.forEach(node => walk(node, capture))
+  const inspectArguments = n => {
+    // 动态求值及循环目标可能替换真实监听器，仅收紧新增参数线索。
+    if (n.type === 'Identifier' && n.name === 'eval') argumentUncertain = true
+    if (['ForInStatement', 'ForOfStatement'].includes(n.type)) walk(n.left, target => {
+      if (target.type === 'Identifier' && (target.name === emitter || functions.has(target.name))) argumentUncertain = true
+    })
+    if (['AssignmentExpression', 'UpdateExpression'].includes(n.type)) walk(n.left || n.argument, target => {
+      if (target.type === 'Identifier' && (target.name === emitter || functions.has(target.name))) argumentUncertain = true
+    })
+  }
+  description.scriptAst.forEach(node => walk(node, n => { capture(n); inspectArguments(n) }))
   const templateReferences = new Map(), scriptReferences = new Map()
   description.scriptAst.forEach(node => walk(node, n => {
     if (n.type === 'Identifier' && functions.has(n.name)) scriptReferences.set(n.name, (scriptReferences.get(n.name) || 0) + 1)
   }))
   const recordReferences = content => {
+    // 模板中的其他操作也可能替换监听函数，不能只查看事件发出处。
+    try { walk(compiler.babelParse(content, { sourceType: 'module' }), inspectArguments) }
+    catch { argumentUncertain = true }
     for (const name of functions.keys()) {
       // 同名出现在动态/原生监听或其他表达式时，不把它遗漏为已知转发来源。
       if (new RegExp(`(^|[^\\w$])${name.replace(/[$]/g, '\\$&')}([^\\w$]|$)`).test(content)) {
@@ -350,7 +370,27 @@ function payloadDescription(description, compiler) {
       if (['AssignmentExpression', 'UpdateExpression'].includes(n.type)) inspectScope(n)
     })
   }
-  return uncertain ? null : { functions, sources, templateReferences, scriptReferences }
+  return uncertain ? null : { functions, sources, literalSources, templateReferences, scriptReferences, argumentUncertain }
+}
+
+function ignoresLiteralArguments(fn) {
+  // 箭头、嵌套作用域、arguments/this/eval 等可能间接消费载荷，不推断其语义。
+  if (!fn || !['FunctionDeclaration', 'FunctionExpression'].includes(fn.type) || fn.params.length ||
+      fn.async || fn.generator || fn.returnType || fn.typeParameters) return false
+  let supported = true
+  function visit(node) {
+    if (!node || typeof node !== 'object') return
+    if (['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression', 'WithStatement',
+      'ThisExpression', 'Super', 'MetaProperty'].includes(node.type) ||
+        (node.type === 'Identifier' && ['arguments', 'eval'].includes(node.name))) supported = false
+    for (const [key, value] of Object.entries(node)) {
+      if (['loc', 'start', 'end', 'comments'].includes(key)) continue
+      if (Array.isArray(value)) value.forEach(visit)
+      else if (value && typeof value === 'object') visit(value)
+    }
+  }
+  visit(fn.body)
+  return supported
 }
 
 function analyzePayloads(descriptions, result, compiler, native) {
@@ -388,7 +428,10 @@ function analyzePayloads(descriptions, result, compiler, native) {
           if (listener.arg?.isStatic && identifier(event) && (native.has(event.toLowerCase()) || /^vue:|^update:/.test(event))) continue
           const handler = listener.exp?.content?.trim()
           if (uncertain || !identifier(event) || !contract.events.has(normalizeProp(event)) ||
-              !/^[$A-Za-z_][\w$]*$/.test(handler || '') || listener.modifiers?.length) result.payloadSkipped++
+              !/^[$A-Za-z_][\w$]*$/.test(handler || '') || listener.modifiers?.length) {
+            result.payloadSkipped++
+            result.argumentSkipped++
+          }
           else edges.push({ file, child: target, component: node.tag, event: normalizeProp(event), rawEvent: event, handler })
         }
       }
@@ -423,6 +466,18 @@ function analyzePayloads(descriptions, result, compiler, native) {
   }
   for (const edge of edges) {
     const fn = descriptions.get(edge.file)?.payload?.functions.get(edge.handler)
+    const variants = descriptions.get(edge.child)?.payload?.literalSources.get(edge.event)
+    if (!descriptions.get(edge.file)?.payload?.argumentUncertain &&
+        !descriptions.get(edge.child)?.payload?.argumentUncertain &&
+        ignoresLiteralArguments(fn) && variants?.length && variants.length <= 32 &&
+        variants.every(value => typeof value === 'string')) {
+      result.argumentChecked++
+      if (new Set(variants).size > 1 && result.argumentAdvisories.length < LIMITS.issues) {
+        // 不导出原始字面值或函数体；忽略参数可能合法，必须由审查结合功能确认。
+        result.argumentAdvisories.push({ kind: 'IGNORED_LITERAL_VARIANTS',
+          file: edge.file, component: edge.component, event: edge.rawEvent })
+      }
+    } else result.argumentSkipped++
     const param = fn?.params.length === 1 ? fn.params[0] : null
     // 默认参数、可选字段、嵌套解构和 rest 都跳过，不能把有后备值的读取视为必需键。
     if (param?.type !== 'ObjectPattern' || param.typeAnnotation || param.optional ||
@@ -444,9 +499,10 @@ function analyzePayloads(descriptions, result, compiler, native) {
 }
 
 function analyzeEvents(files, compiler, partial = false) {
-  const result = { version: 2, status: 'ok', checkedUsages: 0, skippedUsages: 0,
+  const result = { version: 3, status: 'ok', checkedUsages: 0, skippedUsages: 0,
     truncated: Boolean(partial), reason: 'NONE', issues: [], advisories: [],
-    payloadChecked: 0, payloadSkipped: 0, payloadAdvisories: [] }
+    payloadChecked: 0, payloadSkipped: 0, payloadAdvisories: [],
+    argumentChecked: 0, argumentSkipped: 0, argumentAdvisories: [] }
   const skip = () => ({ ...result, reason: 'INCOMPLETE', truncated: true })
   if (partial || files.length > LIMITS.files) return skip()
   const descriptions = new Map()

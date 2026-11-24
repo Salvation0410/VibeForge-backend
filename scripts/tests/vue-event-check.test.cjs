@@ -122,7 +122,7 @@ function payloadFixture({ payload = '{id:props.product.id,size:selectedSize.valu
 
 test('字面载荷缺少接收解构键仅提示审查，不改变构建成功', () => {
   const r = payloadFixture()
-  assert.equal(r.version, 2)
+  assert.equal(r.version, 3)
   assert.equal(r.status, 'ok')
   assert.equal(r.issues.length, 0)
   assert.deepEqual(r.payloadAdvisories, [{kind: 'MISSING_DESTRUCTURED_KEYS', file: 'src/App.vue', component: 'Card', event: 'add', missingKeys: ['product']}])

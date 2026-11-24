@@ -28,7 +28,7 @@ HeroSection的两个CTA分别emit('shop-now','featured')与emit('shop-now','new'
 
 ## 推荐设计（用户已确认按此范围实施）
 
-沿可信component-contract-check.cjs --events增加独立有界参数线索，事件协议版本同步提升，Java严格白名单解析。仅支持完整静态本地组件、直接Identifier父监听、可证明的零形参顶层普通函数，及子组件同一事件包含至少两个不同的简单字面首参数。跳过rest/default/destructuring、arguments/动态作用域/展开/未知调用/类型声明/不完整扫描；不执行生成代码，不自动改产物。只报告固定类别IGNORED_LITERAL_VARIANTS和有限父文件/组件/事件位置，不输出任意表达式或字面正文，至多4条；覆盖与跳过独立计数。最终具体语法条件需在实施计划逐条固定。
+沿可信component-contract-check.cjs --events增加独立有界参数线索，事件协议版本同步提升为v3/14字段，Java严格白名单解析。仅支持完整静态本地组件、直接Identifier父监听、可证明的零形参顶层普通函数，及子组件同一事件全部来源均为有界字符串的首个载荷参数：emit恰好两个参数，每字符串最多80字符、最多32来源，至少两个不同值才给建议。跳过rest/default/destructuring、arguments/this/嵌套函数/异步/生成器/动态作用域/展开/未知来源/类型声明/不完整扫描；全script的eval、循环左侧监听器或emitter重绑定仅收紧新增参数线索，不改变旧对象载荷门禁。不执行生成代码，不自动改产物。只报告固定类别IGNORED_LITERAL_VARIANTS和有限父文件/组件/事件位置，不输出任意表达式或字面正文，至多4条；覆盖与跳过独立计数。不扩展转发链或通用数据流。
 
 零参数函数忽略载荷可能是正确设计，因此线索只进入构建摘要供Reviewer对照可见源码判断；不得直接升级硬门禁、强制所有事件消费参数，或仅凭线索REPAIR。现有对象缺键线索及事件名硬门禁独立保留。三种生成类型的公共SSE不变，多Reviewer共用证据约束。
 

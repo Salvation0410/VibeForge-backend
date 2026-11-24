@@ -24,25 +24,31 @@ final class VueEventCheck {
         try {
             if (output.length() > 8000) return unavailable();
             JsonNode result = JSON.readTree(output);
-            if (result == null || !result.isObject() || result.size() != 11
+            if (result == null || !result.isObject() || result.size() != 14
                     || !result.path("version").isIntegralNumber() || !result.path("version").canConvertToInt()
-                    || result.path("version").intValue() != 2 || !result.path("truncated").isBoolean()) return unavailable();
+                    || result.path("version").intValue() != 3 || !result.path("truncated").isBoolean()) return unavailable();
             int checked = count(result, "checkedUsages"), skipped = count(result, "skippedUsages");
             int payloadChecked = count(result, "payloadChecked"), payloadSkipped = count(result, "payloadSkipped");
+            int argumentChecked = count(result, "argumentChecked"), argumentSkipped = count(result, "argumentSkipped");
             String reason = result.path("reason").asText("");
             if (!Set.of("NONE", "INCOMPLETE").contains(reason)
                     || result.path("truncated").booleanValue() != reason.equals("INCOMPLETE")) return unavailable();
             List<String> issues = evidence(result.path("issues")), advisories = evidence(result.path("advisories"));
             List<String> payloads = payloadEvidence(result.path("payloadAdvisories"));
+            List<String> arguments = argumentEvidence(result.path("argumentAdvisories"));
             String status = result.path("status").asText("");
             if (reason.equals("INCOMPLETE") && (checked != 0 || payloadChecked != 0 || payloadSkipped != 0
-                    || !issues.isEmpty() || !advisories.isEmpty() || !payloads.isEmpty())) return unavailable();
+                    || argumentChecked != 0 || argumentSkipped != 0
+                    || !issues.isEmpty() || !advisories.isEmpty() || !payloads.isEmpty() || !arguments.isEmpty())) return unavailable();
             // 载荷可覆盖不遮蔽直接监听器的有限 v-for，与事件名硬门禁独立计数。
             if ((!issues.isEmpty() || !advisories.isEmpty()) && checked == 0) return unavailable();
             if (payloads.size() > payloadChecked) return unavailable();
+            // 字面参数线索与名称、对象载荷检查独立覆盖，不据此升级事件硬门禁。
+            if (arguments.size() > argumentChecked) return unavailable();
             if (!(status.equals("ok") && issues.isEmpty()) && !(status.equals("failed") && !issues.isEmpty())) return unavailable();
-            log.info("Vue 事件检查 status={} checkedUsages={} skippedUsages={} reason={} issues={} advisories={} payloadChecked={} payloadSkipped={} payloadAdvisories={}",
-                    status, checked, skipped, reason, issues.size(), advisories.size(), payloadChecked, payloadSkipped, payloads.size());
+            log.info("Vue 事件检查 status={} checkedUsages={} skippedUsages={} reason={} issues={} advisories={} payloadChecked={} payloadSkipped={} payloadAdvisories={} argumentChecked={} argumentSkipped={} argumentAdvisories={}",
+                    status, checked, skipped, reason, issues.size(), advisories.size(), payloadChecked, payloadSkipped, payloads.size(),
+                    argumentChecked, argumentSkipped, arguments.size());
             if (!issues.isEmpty()) return VueBuildResult.failure("VUE_EVENT_CONTRACT_FAILED",
                     "关闭属性透传的组件未声明所监听的自定义事件：" + String.join("；", issues));
             String summary = reason.equals("INCOMPLETE") ? "事件检查已跳过不完整源码"
@@ -51,6 +57,9 @@ final class VueEventCheck {
             summary += "；有限载荷检查（checked=" + payloadChecked + ", skipped=" + payloadSkipped + "）";
             if (!payloads.isEmpty()) summary += "；仅供审查的事件载荷线索：" + String.join("；", payloads)
                     + "。须结合源码确认转发、默认值及功能影响，不能仅凭线索判错";
+            summary += "；有限字面参数检查（checked=" + argumentChecked + ", skipped=" + argumentSkipped + "）";
+            if (!arguments.isEmpty()) summary += "；仅供审查的事件字面参数线索：" + String.join("；", arguments)
+                    + "。多个不同字面载荷的零形参监听可能丢失目标或状态，须结合源码确认实际消费与功能影响；合法忽略参数不能仅凭线索判错";
             return new VueBuildResult(true, "", summary + "；不代表完整事件或浏览器验收通过");
         } catch (Exception exception) {
             return unavailable();
@@ -63,6 +72,17 @@ final class VueEventCheck {
         for (JsonNode issue : values) {
             if (!issue.isObject() || issue.size() != 3) throw new IllegalArgumentException();
             details.add(location(issue));
+        }
+        return details;
+    }
+
+    /** 仅投影固定类别与白名单位置，不接收字面值、表达式或任意源码。 */
+    private static List<String> argumentEvidence(JsonNode values) {
+        if (!values.isArray() || values.size() > 4) throw new IllegalArgumentException();
+        List<String> details = new ArrayList<>();
+        for (JsonNode issue : values) {
+            if (!issue.isObject() || issue.size() != 4 || !text(issue, "kind").equals("IGNORED_LITERAL_VARIANTS")) throw new IllegalArgumentException();
+            details.add("IGNORED_LITERAL_VARIANTS " + location(issue));
         }
         return details;
     }

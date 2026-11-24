@@ -399,6 +399,8 @@ npm run build-only
 
 ## 给后续 Agent 的建议
 
+- Vue事件协议v3严格14字段，新增argumentChecked/argumentSkipped/argumentAdvisories；有限直接父子、零形参普通函数、同事件全部来源均为最多80字符字符串（emit两参数、最多32来源）可产生IGNORED_LITERAL_VARIANTS，最多四条且只输出固定类别和位置。eval、循环重绑定、arguments/this、嵌套/动态/类型/不完整等跳过；不改变原对象载荷与名称门禁。合法忽略可能正确，仅供Reviewer核对实际目标或状态，不能直接阻断。Java和可信脚本同步部署；生成/修复逐问题核对调用链，不把完成声明当成功，不擅加支付订单范围。
+
 - 先使用 `rg` 搜索实际调用链和配置，再改代码。
 - 先区分当前实现、设计目标和历史实验代码。
 - 小范围修改优先，不删除或恢复用户未明确要求的文件。
