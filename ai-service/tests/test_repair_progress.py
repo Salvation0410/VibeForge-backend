@@ -5,7 +5,7 @@ from copy import deepcopy
 
 import pytest
 
-from ai_service.models.base import ModelTurn
+from ai_service.models.base import ModelTurn, ToolCall
 from ai_service.models.single_quality_review import parse_single_review
 from ai_service.orchestration.repair_progress import vue_snapshot_fingerprint
 from ai_service.orchestration.events import EventEmitter
@@ -25,6 +25,14 @@ class SequenceModel(FakeModel):
         return ModelTurn(next(self.candidates), finish_reason="STOP")
 
     async def repair(self, artifact, context):
+        if context.get("repairWork"):
+            work = context["repairWork"]
+            if not work["activePlan"] and not work["completedIssueIndexes"]:
+                self.calls.append(("repair", {"context": deepcopy(context)}))
+                path = work["allowedFiles"][0]
+                return ModelTurn("修复当前项", repair_plan={"issueIndex": 0, "files": [path]},
+                                 tool_calls=[ToolCall("file_write", {"relativeFilePath": path, "content": next(self.candidates)})])
+            return await super().repair(artifact, context)
         self.calls.append(("repair", {"context": deepcopy(context)}))
         return ModelTurn(next(self.candidates), finish_reason="STOP")
 
@@ -37,11 +45,18 @@ def snapshot(text):
 class SnapshotGateway(FakeToolGateway):
     def __init__(self, snapshots):
         super().__init__()
-        self.snapshots = iter(snapshots)
+        self.snapshots = list(snapshots)
+        self.snapshot_cursor = 0
 
     async def invoke(self, name, arguments, **kwargs):
         result = await super().invoke(name, arguments, **kwargs)
-        return next(self.snapshots) if name == "vue_source_snapshot" else result
+        if name == "vue_source_snapshot":
+            value = deepcopy(self.snapshots[min(self.snapshot_cursor, len(self.snapshots) - 1)])
+            # 写入后取证与下一轮验证读取同份候选，只有正式验证才推进夹具轮次。
+            if ":vue-source-snapshot:" in kwargs["tool_call_id"]:
+                self.snapshot_cursor += 1
+            return value
+        return result
 
 
 @pytest.mark.parametrize("branch", ["HTML", "MULTI_FILE", "VUE_PROJECT"])

@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError
 from ai_service.config import Settings
 from ai_service.models.input_review import InputReviewError, InputReviewResult, check_context_budget
 from ai_service.models.vue_context import project_vue_context, visible_file_fingerprints
+from ai_service.models.vue_repair import valid_repair_plan
 from ai_service.models.vue_review_context import vue_review_context
 from ai_service.prompts.review import VUE_REVIEW_EVIDENCE_INSTRUCTIONS
 from ai_service.models.generation_brief import GenerationBrief
@@ -321,7 +322,7 @@ class OpenAICompatibleModel:
         """结合验证和构建上下文生成修复后的完整产物。"""
         repair_instructions = REPAIR_SYSTEM_PROMPT + frontend_instructions(context)
         if context.get("codeGenType") == "VUE_PROJECT":
-            repair_instructions = f"{repair_instructions}\n\n{generation_system_prompt('VUE_PROJECT')}\n\n{vue_tool_prompt()}"
+            repair_instructions = f"{repair_instructions}\n\n{generation_system_prompt('VUE_PROJECT')}\n\n{vue_tool_prompt(repair_work=bool(context.get('repairWork')))}"
         payload = {"artifact": artifact, **context}
         visibility = {}
         messages = self._vue_messages(repair_instructions, payload, generation=True, visibility=visibility) if context.get("codeGenType") == "VUE_PROJECT" else [
@@ -402,6 +403,11 @@ def _vue_model_turn(response: Any) -> ModelTurn:
             raise TypeError("invalid Vue response object")
         items = payload.get("toolCalls", [])
         plan = payload.get("filePlan", [])
+        repair_plan = payload.get("repairPlan")
+        completed = payload.get("completedIssueIndex")
+        if (("repairPlan" in payload and not valid_repair_plan(repair_plan))
+                or ("completedIssueIndex" in payload and (type(completed) is not int or not 0 <= completed < 12))):
+            raise TypeError("invalid Vue repair protocol")
         if not isinstance(items, list) or not isinstance(plan, list):
             raise TypeError("invalid Vue response lists")
         if len(plan) > 40 or not all(isinstance(path, str) and 0 < len(path) <= 256 for path in plan):
@@ -415,6 +421,8 @@ def _vue_model_turn(response: Any) -> ModelTurn:
         ]
         turn = _model_turn(response, payload.get("content", ""), calls)
         turn.file_plan = list(dict.fromkeys(plan))
+        turn.repair_plan = repair_plan
+        turn.completed_issue_index = completed
         return turn
     except (json.JSONDecodeError, AttributeError, KeyError, TypeError):
         turn = _model_turn(response, "")

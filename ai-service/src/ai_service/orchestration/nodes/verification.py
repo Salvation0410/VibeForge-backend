@@ -16,6 +16,7 @@ from ai_service.models.verification_diagnostics import ERROR_CODES, MAX_VERIFICA
 from ai_service.orchestration.vue_budget import budget_counts
 from ai_service.orchestration.vue_read_stall import read_repetition_stats
 from ai_service.models.input_review import InputReviewError
+from ai_service.models.vue_repair import snapshot_file_manifest
 from ai_service.orchestration.repair_progress import candidate_fingerprint, record_candidate, vue_snapshot_fingerprint
 from ai_service.orchestration.subgraphs.schemas import VerificationState
 from ai_service.orchestration.cancellation import GenerationCancelled
@@ -102,6 +103,7 @@ def create_verification_nodes(
         return _with_diagnostics(state, "artifact_validation", {
             "validation": result, "repair_feedback": "", "quality_passed": False, "review_diagnostics": {},
             "candidate_fingerprints": fingerprints,
+            "repair_issues": [], "repair_file_manifest": [],
         }, result.get("valid") is True, "ARTIFACT_VALIDATION_FAILED")
 
     async def project_build(state: WorkflowState) -> dict[str, Any]:
@@ -188,6 +190,9 @@ def create_verification_nodes(
                 "repair_feedback": result.repair_feedback,
                 "review_diagnostics": diagnostic,
                 "candidate_fingerprints": fingerprints,
+                "repair_issues": [{key: getattr(issue, key) for key in ("code", "summary", "evidence", "repair_hint")}
+                                  for issue in result.blocking_issues],
+                "repair_file_manifest": snapshot_file_manifest(snapshot) if uses_vue_snapshot else [],
             }, result.passed, "QUALITY_REVIEW_FAILED", diagnostic)
         review_context = {
             **state["context"],
@@ -234,6 +239,8 @@ def create_verification_nodes(
         return _with_diagnostics(state, "quality_review", {
             "quality_passed": passed, "repair_feedback": feedback, "review_diagnostics": diagnostic,
             "candidate_fingerprints": fingerprints,
+            "repair_issues": [issue.model_dump() for issue in result.issues] if isinstance(result, SingleReviewResult) else [],
+            "repair_file_manifest": snapshot_file_manifest(snapshot) if uses_vue_snapshot else [],
         }, passed, "QUALITY_REVIEW_FAILED", diagnostic)
 
     async def repair(state: WorkflowState) -> dict[str, Any]:

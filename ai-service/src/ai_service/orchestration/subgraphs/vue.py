@@ -9,6 +9,7 @@ from ai_service.orchestration.subgraphs.schemas import (
     GenerationInput, GenerationOutput, RepairInput, RepairOutput, RepairState,
 )
 from ai_service.orchestration.vue_tool_loop import VueLoopState, create_vue_loop_nodes, initial_progress
+from ai_service.orchestration.vue_repair_workset import initial_repair_work
 
 
 def vue_recursion_limit(settings) -> int:
@@ -27,7 +28,7 @@ def build_vue_tool_subgraph(workflow, emitter, thread_id, terminal, *, node="vue
         count = state.get("repair_count", 0) + (node == "repair" and not legacy)
         if node == "repair" and not legacy:
             # 新阶段重置了规划和重试计数，模型反馈也须同步清除；工具历史与业务约束仍完整保留。
-            for key in ("planningFeedback", "batchRetryFeedback", "vueFormatFeedback", "repairReadFeedback"):
+            for key in ("planningFeedback", "batchRetryFeedback", "vueFormatFeedback", "repairReadFeedback", "repairPlanFeedback", "repairWork"):
                 context.pop(key, None)
             context.update(codeGenType=state["code_gen_type"], repairCount=count,
                            validation=state.get("validation"), build=state.get("build"))
@@ -35,10 +36,13 @@ def build_vue_tool_subgraph(workflow, emitter, thread_id, terminal, *, node="vue
                 context["qualityReview"] = {"repairFeedback": state["repair_feedback"]}
         prefix = call_id_prefix or (f"{state['request_id']}:vue-repair:{count}" if node == "repair"
                                     else f"{state['request_id']}:vue-generate")
+        progress = initial_progress(context, prefix, datetime.now(UTC).isoformat())
+        if node == "repair" and not legacy:
+            progress["repair_work"] = initial_repair_work(state.get("repair_issues"), state.get("repair_file_manifest"))
         return {
             "context": context, "repair_count": count, "token_usage": {}, "finish_reason": None,
             "vue_tool_results": tool_results,
-            "vue_loop": initial_progress(context, prefix, datetime.now(UTC).isoformat()),
+            "vue_loop": progress,
         }
 
     async def finish(state: VueLoopState):
@@ -50,7 +54,7 @@ def build_vue_tool_subgraph(workflow, emitter, thread_id, terminal, *, node="vue
         }
         if node == "repair" and not legacy:
             update.update(context={key: value for key, value in update["context"].items()
-                                   if key not in {"qualityReview", "repairReadFeedback"}},
+                                   if key not in {"qualityReview", "repairReadFeedback", "repairPlanFeedback", "repairWork"}},
                           build={}, repair_count=state["repair_count"], repair_feedback="")
         else:
             update["artifact"] = "\n".join(state["vue_loop"]["content_parts"])

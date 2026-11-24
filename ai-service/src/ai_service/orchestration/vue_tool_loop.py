@@ -18,6 +18,9 @@ from ai_service.orchestration.vue_budget import (
 from ai_service.orchestration.subgraphs.schemas import RepairState
 from ai_service.orchestration.repair_diagnostics import save_repair_failure
 from ai_service.models.input_review import InputReviewError
+from ai_service.orchestration.vue_repair_workset import (
+    repair_work_payload, prepare_work_turn, record_work_result, finish_work_batch, require_write_after_reads,
+)
 
 if TYPE_CHECKING:
     from ai_service.orchestration.workflow import GenerationWorkflow
@@ -50,10 +53,12 @@ class VueLoopProgress(TypedDict):
     read_only_batches: int
     prewrite_warning: bool
     prewrite_warning_ordinal: int
+    prewrite_warning_visible_total: int
     visible_files: dict[str, str]
     visible_repeat_count: int
     visible_repeat_total: int
     omitted_reread_count: int
+    repair_work: dict[str, Any]
 
 
 class VueLoopState(RepairState, total=False):
@@ -74,7 +79,9 @@ def initial_progress(context: dict[str, Any], prefix: str, started_at: str) -> V
         "batch_has_successful_write": False, "write_fingerprints": [],
         "successful_write": False, "read_only_batches": 0,
         "prewrite_warning": False, "prewrite_warning_ordinal": 0,
+        "prewrite_warning_visible_total": 0,
         "visible_files": {}, "visible_repeat_count": 0, "visible_repeat_total": 0, "omitted_reread_count": 0,
+        "repair_work": {},
     }
 
 
@@ -118,6 +125,8 @@ def create_vue_loop_nodes(
                 "retryCount": loop["retry_count"],
             },
         }
+        if loop.get("repair_work"):
+            model_context["repairWork"] = repair_work_payload(loop["repair_work"])
         await emitter.emit("node_status", node, data={
             "status": "progress", "message": f"正在生成项目文件，已写入 {len(loop['written_files'])} 个文件。",
         })
@@ -154,7 +163,11 @@ def create_vue_loop_nodes(
                     _raise_for_incomplete_model_turn(turn["finish_reason"])
                 raise ValueError("VUE_TOOL_BATCH_LIMIT_EXCEEDED: Vue tool batch is too large")
             loop.update(retry_count=loop["retry_count"] + 1, batch_limit=1, next_step="model_turn", turn={})
-            context["batchRetryFeedback"] = "上一轮响应未执行。请每轮只返回一个完整文件工具调用；过大的文件先拆分组件并更新 filePlan。"
+            context["batchRetryFeedback"] = (
+                "上一轮响应未执行。每轮只返回一个完整文件工具调用；按repairWork缩小当前repairPlan，禁止改用首次filePlan。"
+                if loop.get("repair_work") else
+                "上一轮响应未执行。请每轮只返回一个完整文件工具调用；过大的文件先拆分组件并更新 filePlan。"
+            )
             return {"vue_loop": loop, **({"context": context} if context != state["context"] else {})}
         _raise_for_incomplete_model_turn(turn["finish_reason"])
         if turn.get("vue_output_invalid"):
@@ -165,11 +178,31 @@ def create_vue_loop_nodes(
             loop.update(format_retries=retries + 1, next_step="model_turn", turn={})
             context["vueFormatFeedback"] = (
                 "上一轮格式错误，未执行任何工具。只返回一个完整 JSON 对象，禁止在 JSON 前后添加说明或输出多段 JSON。"
-                "使用 content、filePlan、toolCalls 字段；按 pendingFiles 继续写入，每轮遵守 maxToolCallsPerTurn。"
+                + ("按repairWork使用content、repairPlan、toolCalls或单独completedIssueIndex；禁止首次filePlan。"
+                   if loop.get("repair_work") else
+                   "使用 content、filePlan、toolCalls 字段；按 pendingFiles 继续写入，每轮遵守 maxToolCallsPerTurn。")
             )
             logger.warning("Vue invalid model output request_id=%s node=%s retry=%d",
                            state["request_id"], node, retries + 1)
             return {"vue_loop": loop, "context": context}
+        work_action = None
+        if loop.get("repair_work"):
+            try:
+                work, work_action = prepare_work_turn(loop["repair_work"], turn)
+                require_write_after_reads(work, calls)
+            except ValueError:
+                retries = loop.get("format_retries", 0)
+                if retries >= 2:
+                    raise
+                loop.update(format_retries=retries + 1, next_step="model_turn", turn={})
+                context["repairPlanFeedback"] = (
+                    "上一轮修复计划未执行。按repairWork中第一个未完成问题返回repairPlan(issueIndex,files)，"
+                    "files仅从allowedFiles选择最多3个；整批工具只能操作活动文件，禁止目录扫描。"
+                    "已有计划直接继续必要读取及写入；连续三个完整纯读批次后必须先写入。"
+                    "成功写入后用completedIssueIndex单独声明当前项待验证，不能跳项或仅声称全部完成。"
+                )
+                return {"vue_loop": loop, "context": context}
+            loop["repair_work"] = work
         usage = dict(state.get("token_usage", {}))
         for key, value in turn["token_usage"].items():
             usage[key] = usage.get(key, 0) + value
@@ -186,7 +219,9 @@ def create_vue_loop_nodes(
                     raise ValueError("VUE_FILE_PLAN_LIMIT_EXCEEDED: too many planning-only turns")
                 planning = True
                 context["planningFeedback"] = "文件规划已收到。下一轮必须调用 file_write 写入 pendingFiles 中尚未完成的文件，不要再次仅返回文件规划；全部写入后才可结束。"
-        if planning:
+        if work_action == "continue":
+            loop["next_step"] = "model_turn"
+        elif planning:
             loop["next_step"] = "model_turn"
         elif not calls:
             if repair_read_guard and loop.get("prewrite_warning", False) and not loop.get("successful_write", False):
@@ -231,6 +266,8 @@ def create_vue_loop_nodes(
         )
         loop = record_visible_read(loop, {"tool": call["name"], "arguments": arguments, "result": result},
                                    state["vue_tool_results"])
+        if loop.get("repair_work"):
+            loop["repair_work"] = record_work_result(loop["repair_work"], {"tool": call["name"], "result": result})
         tool_results = [
             *state["vue_tool_results"],
             {"toolCallId": tool_call_id, "tool": call["name"], "result": result,
@@ -264,6 +301,9 @@ def create_vue_loop_nodes(
             loop["next_step"] = "execute_tool"
         else:
             batch = loop["pending_tools"]
+            if loop.get("repair_work"):
+                loop["repair_work"] = finish_work_batch(loop["repair_work"],
+                                                       state["vue_tool_results"][-len(batch):] if batch else [])
             # 只在完整纯读批次结束后纠偏，不丢弃已请求工具，也不将旧候选直接交回验证。
             prewrite = repair_read_guard and batch and all(call["name"] == "file_read" for call in batch)
             if prewrite and not loop.get("successful_write", False) and not phase_has_successful_write(
@@ -272,7 +312,8 @@ def create_vue_loop_nodes(
                 repeated = loop.get("visible_repeat_count", 0)
                 if repeated >= 4:
                     if not loop.get("prewrite_warning", False):
-                        loop.update(prewrite_warning=True, prewrite_warning_ordinal=loop.get("visible_repeat_total", 0))
+                        loop.update(prewrite_warning=True, prewrite_warning_ordinal=loop["ordinal"],
+                                    prewrite_warning_visible_total=loop.get("visible_repeat_total", 0))
                         log_budget(state, loop, reason="PREWRITE_READ_WARNING")
                         context = {**state["context"], "repairReadFeedback": (
                             "本阶段已连续重复读取相同完整源码。请依据当前可见的最新结果修复具体问题，"
@@ -281,7 +322,7 @@ def create_vue_loop_nodes(
                         )}
                         loop.update(pending_tools=[], tool_cursor=0, next_step="model_turn")
                         return {"vue_loop": loop, "context": context}
-                    if loop.get("visible_repeat_total", 0) - loop.get("prewrite_warning_ordinal", 0) >= 4:
+                    if loop.get("visible_repeat_total", 0) - loop.get("prewrite_warning_visible_total", 0) >= 4:
                         log_budget(state, loop, reason="PREWRITE_READ_STALLED")
                         raise ValueError("VUE_REPAIR_READ_STALLED: 修复持续重复读取且尚未成功写入，本轮已停止")
             if repair_budget_guard:

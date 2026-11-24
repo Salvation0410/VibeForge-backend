@@ -4,6 +4,7 @@ from copy import deepcopy
 from dataclasses import asdict
 
 import pytest
+import os
 
 from ai_service.models.base import ModelTurn, ToolCall
 from ai_service.models.vue_context import project_vue_context, visible_file_fingerprints
@@ -82,6 +83,28 @@ async def test_model_visibility_is_private_not_reused_in_next_payload(settings):
     update = await nodes["model_turn"](state)
     assert update["vue_loop"]["visible_files"] == {"src/App.vue": "a" * 64}
     assert "vue_visible_files" not in update["vue_loop"]["turn"]
+
+
+async def test_old_warning_ordinal_is_not_reused_as_visible_counter(settings):
+    workflow = make_workflow(settings, FakeModel(), MemoryCheckpoint(), Gateway())
+    nodes = create_vue_loop_nodes(workflow, EventEmitter("subgraph-test"), "42:subgraph-test", "repair",
+                                  repair_read_guard=True)
+    history = [record(1, "私有完整源码", path="src/App.vue")]
+    loop = initial_progress({}, "subgraph-test:vue-repair:1", "2026-11-24T00:00:00+00:00")
+    for key in ("visible_repeat_count", "visible_repeat_total", "omitted_reread_count", "prewrite_warning_visible_total"):
+        loop.pop(key)
+    loop.update(prewrite_warning=True, prewrite_warning_ordinal=31,
+                visible_files=visible_file_fingerprints({"toolResults": history}))
+    state = {**initial(), "vue_loop": loop, "vue_tool_results": history}
+    read = {"name": "file_read", "arguments": {"relativeFilePath": "src/App.vue"}}
+    for index in range(4):
+        state["vue_loop"].update(pending_tools=[read], tool_cursor=0)
+        state.update(await nodes["execute_tool"](state))
+        if index == 3:
+            with pytest.raises(ValueError, match="VUE_REPAIR_READ_STALLED"):
+                await nodes["continue_loop"](state)
+        else:
+            state.update(await nodes["continue_loop"](state))
 
 
 async def test_omitted_six_file_cycle_consumes_budget_without_false_read_stall(settings):
@@ -164,3 +187,30 @@ async def test_adapter_concurrent_visibility_matches_each_final_message():
     first, second = await asyncio.gather(run(1), run(2))
     assert set(first.vue_visible_files) == {"src/1.vue"}
     assert set(second.vue_visible_files) == {"src/2.vue"}
+
+
+@pytest.mark.skipif(os.getenv("AI_SERVICE_POSTGRES_INTEGRATION") != "true", reason="需显式开启真实PostgreSQL")
+async def test_real_postgres_repair_error_preserves_counts_and_later_absence():
+    from uuid import uuid4
+    from psycopg import AsyncConnection
+    from psycopg.types.json import Jsonb
+    from ai_service.config import Settings
+    from ai_service.infrastructure.postgres_checkpoint import STATUS_UPSERT_SQL
+    from ai_service.orchestration.workflow import GenerationWorkflow
+    thread_id = f"repair-diagnostic-integration:{uuid4().hex}"
+    record = {"round": 2, "stage": "repair", "verdict": "ERROR", "errorCode": "VUE_REPAIR_READ_STALLED",
+              "toolCount": 35, "phaseReadCount": 15, "phaseWriteCount": 0, "repeatedReadCount": 9,
+              "visibleRepeatCount": 8, "omittedRereadCount": 1, "issueCount": 0, "issueCodes": []}
+    payload = GenerationWorkflow._checkpoint_payload({**initial(), "verification_history": [record]}, "repair")
+    payload = PostgresCheckpoint._normalize_state(payload)
+    connection = await AsyncConnection.connect(Settings().checkpoint_postgres_url)
+    try:
+        for update in (payload, {"node": "failed"}):
+            await connection.execute(STATUS_UPSERT_SQL, (
+                thread_id, 42, thread_id, "VUE_PROJECT", "repair", None, 2, 35, Jsonb(update), 60,
+            ))
+            cursor = await connection.execute("SELECT status_payload FROM ai_workflow_status WHERE thread_id=%s", (thread_id,))
+            assert (await cursor.fetchone())[0]["verification_history"] == [record]
+    finally:
+        await connection.rollback()
+        await connection.close()

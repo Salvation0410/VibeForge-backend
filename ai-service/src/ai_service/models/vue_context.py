@@ -83,6 +83,18 @@ def project_vue_context(context: dict[str, Any], *, fits: Callable[[dict[str, An
     projected["toolResults"] = summaries
     if _message_bytes(summaries) > HISTORY_MESSAGE_BYTES or not fits(projected):
         raise _budget_error()
+    active = context.get("repairWork", {}).get("activePlan", {})
+    if active:
+        # 活动工作集的最新完整结果要一起可见，不能轮流省略并诱导再次补读。
+        required = set(active["files"])
+        for index, item in enumerate(history):
+            path = item.get("arguments", {}).get("relativeFilePath")
+            if index not in stale and (path in required or (
+                    index == len(history) - 1 and item.get("tool") != "file_read")):
+                summaries[index] = deepcopy(item)
+        if _message_bytes(summaries) > HISTORY_MESSAGE_BYTES or not fits(projected):
+            raise _budget_error()
+        return projected
     # 最新结果是模型下一步操作的直接依据，放不下必须失败，不能诱导反复重读同一大文件。
     for index in range(len(history) - 1, -1, -1):
         if index in stale:

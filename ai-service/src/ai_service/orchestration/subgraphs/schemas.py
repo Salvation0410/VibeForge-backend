@@ -58,6 +58,8 @@ class VerificationState(VerificationInput, VerificationOutput, total=False):
     review_diagnostics: dict[str, Any]
     # 逐轮固定字段历史仅留验证子图，避免进入修复模型或父状态。
     verification_history: list[dict[str, Any]]
+    repair_issues: list[dict[str, str]]
+    repair_file_manifest: list[str]
 
 
 class RepairInput(GenerationInput, total=False):
@@ -69,6 +71,9 @@ class RepairInput(GenerationInput, total=False):
     repair_feedback: str
     # 私有诊断仅供异常摘要续写，禁止加入模型上下文或修复输出。
     verification_history: list[dict[str, Any]]
+    # 严格Reviewer问题与当前网关快照路径，仅供修复组织，不回传父图。
+    repair_issues: list[dict[str, str]]
+    repair_file_manifest: list[str]
 
 
 class RepairOutput(GenerationOutput, total=False):

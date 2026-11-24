@@ -86,6 +86,18 @@ class FakeModel:
 
     async def repair(self, artifact: str, context: dict[str, Any]) -> ModelTurn:
         self.calls.append(("repair", {"artifact": artifact, "context": context}))
+        if context.get("repairWork"):
+            # 严格问题修复夹具也遵循真实协议；不能继续用无写入的“完成”绕过工作集。
+            work = context["repairWork"]
+            pending = next((i for i in range(len(work["issues"])) if i not in work["completedIssueIndexes"]), None)
+            if pending is None:
+                return ModelTurn(content="交回验证", finish_reason="STOP")
+            if work["activeWriteSucceeded"]:
+                return ModelTurn(content="本项待验证", completed_issue_index=pending, finish_reason="STOP")
+            path = work["allowedFiles"][0]
+            return ModelTurn(content="修复当前项", repair_plan={"issueIndex": pending, "files": [path]},
+                             tool_calls=[ToolCall("file_write", {"relativeFilePath": path, "content": artifact + "|repaired"})],
+                             finish_reason="STOP")
         return ModelTurn(content=artifact + "|repaired", finish_reason="STOP")
 
 

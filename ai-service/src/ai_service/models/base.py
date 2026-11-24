@@ -31,6 +31,8 @@ class ModelTurn:
     vue_output_invalid: bool = False
     # 适配器从最终消息提取；只返回编排私有状态，不能序列化进下一次模型载荷。
     vue_visible_files: dict[str, str] | None = None
+    repair_plan: dict[str, Any] | None = None
+    completed_issue_index: int | None = None
 
 
 TextDeltaCallback = Callable[[str], Awaitable[None]]

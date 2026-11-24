@@ -1495,6 +1495,7 @@ def test_vue_multi_agent_major_issue_repairs_with_feedback_and_reviews_fresh_sna
     snapshot_calls = [call for call in gateway.calls if call["name"] == "vue_source_snapshot"]
     assert [call["toolCallId"] for call in snapshot_calls] == [
         "req-1:vue-source-snapshot:0",
+        "req-1:vue-repair:1:source-snapshot:1",
         "req-1:vue-source-snapshot:1",
     ]
     second_round = [
@@ -1554,17 +1555,18 @@ def test_vue_multi_agent_review_context_excludes_unbounded_generation_state(
             return ModelTurn(content="generated", finish_reason="STOP")
 
         async def repair(self, artifact, context):
-            self.calls.append(("repair", {"artifact": artifact, "context": context}))
             self.repair_turn += 1
             if self.repair_turn == 1:
+                self.calls.append(("repair", {"artifact": artifact, "context": context}))
                 return ModelTurn(
                     content="repair tool request",
+                    repair_plan={"issueIndex": 0, "files": ["src/App.vue"]},
                     tool_calls=[ToolCall(
                         name="file_read",
                         arguments={"relativeFilePath": "src/App.vue"},
                     )],
                 )
-            return ModelTurn(content="repaired", finish_reason="STOP")
+            return await super().repair(artifact, context)
 
     class SensitiveGateway(ChangingSnapshotGateway):
         def __init__(self):
@@ -1643,7 +1645,7 @@ def test_vue_multi_agent_review_context_excludes_unbounded_generation_state(
         assert current_artifact_marker not in call["artifact"]
 
     repair_calls = [data for name, data in model.calls if name == "repair"]
-    assert len(repair_calls) == 2
+    assert len(repair_calls) == 4
     assert all(call["context"]["toolResults"] for call in repair_calls)
     assert tool_source_marker in json.dumps(repair_calls, ensure_ascii=False)
     assert events[-1]["type"] == "completed"
@@ -1688,11 +1690,13 @@ def test_vue_multi_agent_two_blocking_rounds_exhaust_repairs_without_leaking_rev
 
     assert events[-1]["type"] == "failed"
     repair_calls = [data for name, data in model.calls if name == "repair"]
-    assert [call["context"]["repairCount"] for call in repair_calls] == [1, 2]
+    assert [call["context"]["repairCount"] for call in repair_calls] == [1, 1, 1, 2, 2, 2]
     snapshot_calls = [call for call in gateway.calls if call["name"] == "vue_source_snapshot"]
     assert [call["toolCallId"] for call in snapshot_calls] == [
         "req-1:vue-source-snapshot:0",
+        "req-1:vue-repair:1:source-snapshot:1",
         "req-1:vue-source-snapshot:1",
+        "req-1:vue-repair:2:source-snapshot:1",
         "req-1:vue-source-snapshot:2",
     ]
     assert max(state["repairCount"] for state in checkpoint.saved["42:req-1"]) == 2
