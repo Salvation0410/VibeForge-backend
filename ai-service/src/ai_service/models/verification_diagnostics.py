@@ -3,10 +3,12 @@
 from typing import Any
 
 from ai_service.models.review_diagnostics import ISSUE_CODES
+from ai_service.models.single_quality_review import OUTPUT_FAILURE_REASONS
 
 MAX_VERIFICATION_RECORDS = 36
 ERROR_CODES = frozenset({
     "NONE", "UNCLASSIFIED", "ARTIFACT_VALIDATION_FAILED", "QUALITY_REVIEW_FAILED",
+    "QUALITY_REVIEW_INVALID_OUTPUT", "QUALITY_REVIEW_INCOMPLETE",
     "VUE_COMPONENT_CONTRACT_FAILED", "VUE_COMPONENT_CHECK_UNAVAILABLE",
     "VUE_EVENT_CONTRACT_FAILED", "VUE_EVENT_CHECK_UNAVAILABLE",
     "VUE_ANCHOR_TARGET_MISSING", "VUE_ANCHOR_CHECK_UNAVAILABLE",
@@ -24,7 +26,7 @@ def safe_verification_history(value: Any) -> list[dict[str, Any]] | None:
         return None
     result = []
     for record in value:
-        if not isinstance(record, dict) or set(record) != FIELDS:
+        if not isinstance(record, dict) or set(record) not in (FIELDS, FIELDS | {"outputReason"}):
             return None
         if any(type(record[key]) is not int or not 0 <= record[key] <= 10000 for key in COUNT_FIELDS):
             return None
@@ -32,11 +34,21 @@ def safe_verification_history(value: Any) -> list[dict[str, Any]] | None:
             return None
         if type(record["stage"]) is not str or record["stage"] not in {"artifact_validation", "project_build", "quality_review"}:
             return None
-        if type(record["verdict"]) is not str or record["verdict"] not in {"PASS", "REPAIR"}:
+        if type(record["verdict"]) is not str or record["verdict"] not in {"PASS", "REPAIR", "ERROR"}:
             return None
         if type(record["errorCode"]) is not str or record["errorCode"] not in ERROR_CODES:
             return None
         if (record["verdict"] == "PASS") != (record["errorCode"] == "NONE"):
+            return None
+        parse_codes = {"QUALITY_REVIEW_INVALID_OUTPUT", "QUALITY_REVIEW_INCOMPLETE"}
+        if record["verdict"] == "ERROR":
+            reason = record.get("outputReason")
+            if (record["stage"] != "quality_review" or record["errorCode"] not in parse_codes
+                    or type(reason) is not str or reason not in OUTPUT_FAILURE_REASONS
+                    or (reason == "INCOMPLETE") != (record["errorCode"] == "QUALITY_REVIEW_INCOMPLETE")
+                    or record["issueCount"] or record["issueCodes"]):
+                return None
+        elif "outputReason" in record or record["errorCode"] in parse_codes:
             return None
         if record["phaseReadCount"] + record["phaseWriteCount"] > record["toolCount"] or record["repeatedReadCount"] > record["phaseReadCount"]:
             return None

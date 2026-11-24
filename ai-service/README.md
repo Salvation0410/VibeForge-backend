@@ -117,6 +117,10 @@ Spring 强制构建在 npm/dist 和必填属性检查后，依次执行可信脚
 
 验证子图新增私有 `verification_history`，按轮次记录产物校验、构建和质量审查的固定判定、错误码、问题码及工具/读写/重复读取计数，最多 36 项。同轮同阶段重放替换旧项；新候选清空当前审查诊断并保留历史。两次严格白名单投影后进入 PostgreSQL `ai_workflow_status.status_payload`，后续缺少私有字段的父图节点保留已保存历史，沿用原 TTL，不新增表迁移。诊断不进入模型或公共事件，不保存源码、路径、供应商正文或 Reviewer 理由。修复内异常发生前尚未完成的验证节点可能没有新记录，现场以固定原因的预算日志补充，不能据摘要还原完整审查意见。
 
+单 Reviewer 输出解析异常额外记录固定 `outputReason`：`INCOMPLETE`、`RESPONSE_TOO_LARGE`、`DUPLICATE_KEY`、`INVALID_JSON`、`INVALID_SCHEMA`、`VERDICT_ISSUES_MISMATCH`、`FEEDBACK_TOO_LARGE` 或 `UNCLASSIFIED`。结束原因优先，其后依次检查响应大小、JSON、schema、判定组合及反馈大小；只看固定验证类型，不保存原始解析错误。正常结果日志为 `NONE`。公共错误仍为 `QUALITY_REVIEW_INVALID_OUTPUT` 或 `QUALITY_REVIEW_INCOMPLETE`，不新增自动重试或修复。
+
+解析异常节点在原样抛出前，最佳努力通过既有双白名单保存 `quality_review/ERROR` 历史，仅此类记录允许 `outputReason`，且问题数为零。普通保存或日志失败不能替换解析错误；取消继续传播。该摘要写入不意味着异常节点完成、图检查点成功或请求可恢复，数据库不可用时仍可能缺失该记录；诊断不进入父图、修复模型或公共事件。历史未知格式不能由本机制追溯还原，多 Reviewer 路径保持原行为。
+
 本轮没有提高默认两次修复、40 次共享工具额度，也没有新增 Vue 回滚或自动恢复。实现、验证与下一轮工作见 [质量优化交接](../doc/generation-quality-optimization-20261123-handoff.md)。
 
 ## 可选：知识库客服

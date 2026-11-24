@@ -17,7 +17,7 @@ from ai_service.models.vue_review_context import vue_review_context
 from ai_service.prompts.review import VUE_REVIEW_EVIDENCE_INSTRUCTIONS
 from ai_service.models.generation_brief import GenerationBrief
 from ai_service.models.preparation_diagnostics import PreparationFailure
-from ai_service.models.single_quality_review import SingleReviewResult, parse_single_review
+from ai_service.models.single_quality_review import SingleReviewOutputError, SingleReviewResult, parse_single_review
 from ai_service.prompts.preparation import REWRITE_SYSTEM_PROMPT
 from ai_service.prompts.frontend_skills import frontend_instructions
 from ai_service.prompts.input_review import INPUT_REVIEW_SYSTEM_PROMPT
@@ -264,20 +264,26 @@ class OpenAICompatibleModel:
         reason = (metadata.get("finish_reason") or metadata.get("stop_reason")) if isinstance(metadata, dict) else None
         reason = reason.upper() if isinstance(reason, str) else "UNKNOWN"
         result = None
+        output_reason = "UNCLASSIFIED"
         try:
             result = parse_single_review(raw, reason)
+            output_reason = "NONE"
             return result
+        except SingleReviewOutputError as exc:
+            output_reason = exc.output_reason
+            raise
         finally:
             # 自由文本理由只进入内部修复载荷；日志只记录可信枚举与计数。
             try:
                 import logging
 
                 logging.getLogger(__name__).info(
-                    "quality_review_result verdict=%s responseChars=%d finishReason=%s issueCount=%d issueCodes=%s",
+                    "quality_review_result verdict=%s responseChars=%d finishReason=%s issueCount=%d issueCodes=%s outputReason=%s",
                     result.verdict if result else "INVALID_OUTPUT", len(raw),
                     reason if reason in {"STOP", "LENGTH", "CONTENT_FILTER", "MAX_TOKENS", "CONTENT_FILTERED"} else "UNKNOWN",
                     len(result.issues) if result else 0,
                     ",".join(sorted({issue.code for issue in result.issues})) if result else "",
+                    output_reason,
                 )
             except Exception:
                 # 日志故障不覆盖解析异常；调用异常和取消在此边界之外传播。

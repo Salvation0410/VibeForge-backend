@@ -3,7 +3,15 @@
 import json
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator
+from pydantic_core import PydanticCustomError
+
+
+OUTPUT_FAILURE_REASONS = frozenset({
+    "INCOMPLETE", "RESPONSE_TOO_LARGE", "DUPLICATE_KEY", "INVALID_JSON",
+    "INVALID_SCHEMA", "VERDICT_ISSUES_MISMATCH", "FEEDBACK_TOO_LARGE", "UNCLASSIFIED",
+})
+_VERDICT_MISMATCH_TYPE = "single_review_verdict_issues_mismatch"
 
 
 IssueCode = Literal[
@@ -30,7 +38,7 @@ class SingleReviewResult(BaseModel):
     @model_validator(mode="after")
     def consistent_verdict(self):
         if (self.verdict == "PASS") != (len(self.issues) == 0):
-            raise ValueError("判定与问题列表不一致")
+            raise PydanticCustomError(_VERDICT_MISMATCH_TYPE, "判定与问题列表不一致")
         return self
 
     @property
@@ -44,8 +52,17 @@ class SingleReviewResult(BaseModel):
 
 
 class SingleReviewOutputError(ValueError):
-    def __init__(self, *, incomplete: bool = False):
+    def __init__(self, *, incomplete: bool = False, reason: str | None = None):
         super().__init__("QUALITY_REVIEW_INCOMPLETE" if incomplete else "QUALITY_REVIEW_INVALID_OUTPUT")
+        # 结束原因优先；不能让不可信原因伪造与公共错误码矛盾的诊断。
+        self.output_reason = "INCOMPLETE" if incomplete else (
+            reason if isinstance(reason, str) and reason in OUTPUT_FAILURE_REASONS
+            and reason != "INCOMPLETE" else "UNCLASSIFIED"
+        )
+
+
+class _DuplicateReviewKey(ValueError):
+    """仅用于解析控制流，不携带原始 JSON 键或值。"""
 
 
 def parse_single_review(raw: str, finish_reason: str | None) -> SingleReviewResult:
@@ -57,18 +74,38 @@ def parse_single_review(raw: str, finish_reason: str | None) -> SingleReviewResu
         result = {}
         for key, value in pairs:
             if key in result:
-                raise ValueError("重复 JSON 字段")
+                raise _DuplicateReviewKey()
             result[key] = value
         return result
 
     try:
         if len(raw) > 8192 or len(raw.encode("utf-8")) > 16384:
-            raise ValueError("响应超限")
+            raise SingleReviewOutputError(reason="RESPONSE_TOO_LARGE")
         payload = json.loads(raw, object_pairs_hook=unique_object)
-        result = SingleReviewResult.model_validate(payload)
-        if len(result.repair_feedback) > 4000:
-            raise ValueError("反馈超限")
-        return result
+    except SingleReviewOutputError:
+        raise
+    except _DuplicateReviewKey:
+        raise SingleReviewOutputError(reason="DUPLICATE_KEY") from None
+    except json.JSONDecodeError:
+        raise SingleReviewOutputError(reason="INVALID_JSON") from None
     except (ValueError, TypeError, RecursionError):
-        # Pydantic 异常含输入原文，不能沿公共失败帧或日志传播。
         raise SingleReviewOutputError() from None
+
+    try:
+        result = SingleReviewResult.model_validate(payload)
+    except ValidationError as exc:
+        # 只读取自有验证器的固定类型；不导出正文、输入、位置或字段名。
+        errors = exc.errors(include_url=False, include_context=False, include_input=False)
+        reason = "VERDICT_ISSUES_MISMATCH" if errors and all(
+            item["type"] == _VERDICT_MISMATCH_TYPE for item in errors
+        ) else "INVALID_SCHEMA"
+        raise SingleReviewOutputError(reason=reason) from None
+    except (ValueError, TypeError, RecursionError):
+        raise SingleReviewOutputError() from None
+    try:
+        feedback_size = len(result.repair_feedback)
+    except (ValueError, TypeError, RecursionError):
+        raise SingleReviewOutputError() from None
+    if feedback_size > 4000:
+        raise SingleReviewOutputError(reason="FEEDBACK_TOO_LARGE")
+    return result

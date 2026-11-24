@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _with_diagnostics(state, stage, update, passed, code="NONE", review=None):
+def _with_diagnostics(state, stage, update, passed, code="NONE", review=None, *, output_reason=None):
     """只将当前阶段固定统计追加到私有历史；反馈正文始终走原修复通道。"""
     count = state.get("repair_count", 0)
     prefix = (f"{state['request_id']}:vue-repair:{count}" if count else f"{state['request_id']}:vue-generate")
@@ -39,16 +39,23 @@ def _with_diagnostics(state, stage, update, passed, code="NONE", review=None):
         "phaseWriteCount": counts["phase_write_count"], "repeatedReadCount": read_repetition_stats(history, prefix)["total"],
         "issueCount": review["issueCount"] if review else 0, "issueCodes": review["issueCodes"] if review else [],
     }
+    if output_reason is not None:
+        record.update(verdict="ERROR", outputReason=output_reason)
     records = safe_verification_history(state.get("verification_history")) or []
     # 节点恢复重放同一轮时替换同阶段记录，不无限追加；不宣称业务 exactly-once。
     records = [r for r in records if (r["round"], r["stage"]) != (count, stage)]
     records = safe_verification_history([*records, record][-MAX_VERIFICATION_RECORDS:])
     if records is None:
         return update
-    logger.info("Generation verification request_id=%s round=%d stage=%s verdict=%s error_code=%s "
-                "tool_count=%d phase_read_count=%d phase_write_count=%d repeated_read_count=%d issue_count=%d",
+    try:
+        logger.info("Generation verification request_id=%s round=%d stage=%s verdict=%s error_code=%s "
+                "tool_count=%d phase_read_count=%d phase_write_count=%d repeated_read_count=%d issue_count=%d output_reason=%s",
                 state["request_id"], count, stage, record["verdict"], record["errorCode"], record["toolCount"],
-                record["phaseReadCount"], record["phaseWriteCount"], record["repeatedReadCount"], record["issueCount"])
+                record["phaseReadCount"], record["phaseWriteCount"], record["repeatedReadCount"], record["issueCount"],
+                record.get("outputReason", "NONE"))
+    except Exception:
+        # 观测失败不能覆盖原业务结果或解析异常。
+        pass
     return {**update, "verification_history": records}
 
 
@@ -190,21 +197,39 @@ def create_verification_nodes(
         }
         try:
             result = await workflow.model.review(review_artifact, review_context)
-        except (SingleReviewOutputError, InputReviewError, GenerationCancelled):
+            workflow._raise_if_cancelled(thread_id)
+            if isinstance(result, SingleReviewResult):
+                passed, feedback = result.passed, result.repair_feedback
+            elif type(result) is bool:
+                # 仅兼容旧注入模型；真实适配器仍要求严格 JSON。
+                passed, feedback = result, ""
+            else:
+                raise SingleReviewOutputError()
+        except SingleReviewOutputError as exc:
+            # 异常节点不会进入 complete_node，仅最佳努力写入既有状态摘要后原样失败。
+            update = _with_diagnostics(state, "quality_review", {
+                "quality_passed": False, "repair_feedback": "", "review_diagnostics": {},
+            }, False, str(exc), output_reason=exc.output_reason)
+            workflow._raise_if_cancelled(thread_id)
+            try:
+                await workflow.checkpoint.save(thread_id, workflow._checkpoint_payload(
+                    {**state, **update}, "quality_review"))
+            except GenerationCancelled:
+                raise
+            except Exception:
+                try:
+                    logger.warning("Review failure diagnostic save reason=CHECKPOINT_WRITE_FAILED")
+                except Exception:
+                    pass
+            workflow._raise_if_cancelled(thread_id)
+            raise
+        except (InputReviewError, GenerationCancelled):
             raise
         except Exception:
             if uses_vue_snapshot:
                 # 供应商异常可能携带快照正文，不能通过公共失败帧回显。
                 raise RuntimeError("Vue source snapshot review failed") from None
             raise
-        workflow._raise_if_cancelled(thread_id)
-        if isinstance(result, SingleReviewResult):
-            passed, feedback = result.passed, result.repair_feedback
-        elif type(result) is bool:
-            # 旧注入模型没有理由，不能伪造结构化证据；生产适配器强制严格 JSON。
-            passed, feedback = result, ""
-        else:
-            raise SingleReviewOutputError()
         diagnostic = review_diagnostics(passed, result.issues if isinstance(result, SingleReviewResult) else ())
         return _with_diagnostics(state, "quality_review", {
             "quality_passed": passed, "repair_feedback": feedback, "review_diagnostics": diagnostic,
