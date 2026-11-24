@@ -1510,6 +1510,7 @@ def test_vue_multi_agent_major_issue_repairs_with_feedback_and_reviews_fresh_sna
         "codeGenType",
         "validation",
         "build",
+        "imageUsagePolicy",
     } for call in second_round)
     assert events[-1]["type"] == "completed"
     assert events[-1]["data"]["repairCount"] == 1
@@ -1616,7 +1617,7 @@ def test_vue_multi_agent_review_context_excludes_unbounded_generation_state(
 
     role_calls = [data for name, data in model.calls if name == "review_role"]
     assert len(role_calls) == 6
-    expected_context_keys = {"prompt", "codeGenType", "validation", "build"}
+    expected_context_keys = {"prompt", "codeGenType", "validation", "build", "imageUsagePolicy"}
     forbidden_keys = {
         "conversation",
         "metadata",
@@ -3197,7 +3198,7 @@ def test_vue_image_search_results_are_used_in_written_page(app_factory, auth_hea
     assert "content" not in write_event["arguments"]
 
 
-def test_vue_automatic_images_require_successful_source_write(app_factory, auth_headers, ndjson_parser):
+def test_vue_explicit_images_require_successful_source_write(app_factory, auth_headers, ndjson_parser):
     url = "https://images.pexels.com/photos/1/love.jpg"
 
     class Images(FakeToolGateway):
@@ -3218,21 +3219,24 @@ def test_vue_automatic_images_require_successful_source_write(app_factory, auth_
 
     gateway = Images()
     events = ndjson_parser(TestClient(app_factory(model=UsesImages(), gateway=gateway)).post(
-        "/internal/v1/generations:stream", json=generation_payload("VUE_PROJECT"), headers=auth_headers,
+        "/internal/v1/generations:stream", json={**generation_payload("VUE_PROJECT"), "prompt": "请为首页添加情侣照片。"},
+        headers=auth_headers,
     ))
     assert events[-1]["type"] == "completed"
     assert [c["name"] for c in gateway.calls].count("image_search") == 1
     assert any(c["name"] == "file_write" and url in c["arguments"]["content"] for c in gateway.calls)
 
 
-def test_vue_empty_image_search_has_visible_fallback(app_factory, auth_headers, ndjson_parser):
+@pytest.mark.parametrize("prompt", ["生成后台页面。", "请为首页添加照片。"])
+def test_vue_empty_image_search_has_visible_fallback(app_factory, auth_headers, ndjson_parser, prompt):
     class EmptyImages(FakeToolGateway):
         async def invoke(self, name, arguments, **kwargs):
             result = await super().invoke(name, arguments, **kwargs)
             return {"ok": False, "images": []} if name == "image_search" else result
 
     events = ndjson_parser(TestClient(app_factory(gateway=EmptyImages())).post(
-        "/internal/v1/generations:stream", json=generation_payload("VUE_PROJECT"), headers=auth_headers,
+        "/internal/v1/generations:stream", json={**generation_payload("VUE_PROJECT"), "prompt": prompt},
+        headers=auth_headers,
     ))
     assert events[-1]["type"] == "completed"
     assert any("Pexels" in e.get("data", {}).get("message", "") for e in events)
@@ -3268,7 +3272,8 @@ def test_vue_missing_image_usage_stops_after_two_reminders(app_factory, auth_hea
 
     model = FakeModel(vue_tool_calls=0)
     events = ndjson_parser(TestClient(app_factory(model=model, gateway=Images())).post(
-        "/internal/v1/generations:stream", json=generation_payload("VUE_PROJECT"), headers=auth_headers,
+        "/internal/v1/generations:stream", json={**generation_payload("VUE_PROJECT"), "prompt": "请为首页添加照片。"},
+        headers=auth_headers,
     ))
     assert events[-1]["type"] == "failed"
     assert events[-1]["error"]["code"] == "VUE_IMAGE_USAGE_MISSING"

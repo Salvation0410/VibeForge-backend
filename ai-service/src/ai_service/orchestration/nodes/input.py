@@ -49,9 +49,10 @@ def create_input_nodes(
         if state.get("edit_intent") is not None:
             require_edit_artifact(current_artifact, state["code_gen_type"])
         image_assets = []
+        explicit_images = requests_image_assets(state["prompt"])
         needs_images = state["code_gen_type"] == "VUE_PROJECT" and (
             (not current_artifact.get("exists", False) and not declines_image_assets(state["prompt"]))
-            or requests_image_assets(state["prompt"])
+            or explicit_images
         )
         if needs_images:
             query = state["prompt"].strip()[:160]
@@ -83,6 +84,9 @@ def create_input_nodes(
                 "metadata": state.get("metadata", {}),
                 "currentArtifact": current_artifact,
                 "imageAssets": image_assets,
+                # 只有原始需求明确要求配图才强制使用；自动检索素材不能扩展用户需求。
+                **({"imageUsagePolicy": "required" if explicit_images else "optional"}
+                   if state["code_gen_type"] == "VUE_PROJECT" else {}),
                 **({"editIntent": state["edit_intent"]} if state.get("edit_intent") is not None else {}),
             }
         }

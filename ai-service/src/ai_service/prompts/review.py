@@ -18,6 +18,7 @@ summary 最多 160 字符，evidence 和 repair_hint 各最多 240 字符，三�
 
 
 VUE_REVIEW_EVIDENCE_INSTRUCTIONS = """Vue 审查以 artifact 中的本轮源码快照为实际实现，currentArtifact 仅为修改前的保留基线，历史需求不是本轮待补做清单。
+imageUsagePolicy 为 optional 时，imageAssets 是可选参考，未使用不能单独作为阻断问题；required 按用户明确配图要求核对。缺少策略字段时沿用已有图片约束，不将可选素材当成用户新增需求。
 逐项沿可见代码核对用户当前要求的交互，不以组件名称、完成声明或 build.built=true 代替核对：
 1. 对本地父子组件同时可见的调用，核对父组件提供的 props 与子组件 required props、默认值及实际读取是否一致。
 2. 核对子组件 emit 的事件与父组件监听和状态更新；默认 v-model 是 modelValue/update:modelValue，具名 v-model 使用对应名称，也可能通过 defineModel 正确实现。

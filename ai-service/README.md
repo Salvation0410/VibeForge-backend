@@ -182,6 +182,8 @@ docker run --rm --name yu-ai-service -p 8000:8000 --env-file .env yu-ai-service:
 完整路由与请求字段见 [routes.py](src/ai_service/api/routes.py) 和 [schemas.py](src/ai_service/api/schemas.py)。Python 内部 JSON 接口不使用 Spring 的 `BaseResponse` 包装。
 
 - HTML 和多文件网页通过校验后由 Spring 发布；Vue 直接修改工程文件，取消或失败不保证回滚。
+- Vue 首次生成仍默认搜索图片（明确不配图时跳过），但自动返回的 `imageAssets` 仅供参考，`context.imageUsagePolicy=optional`，未采用不会触发 `VUE_IMAGE_USAGE_MISSING`。原始需求经既有有限规则识别为明确新增、替换、搜索或修复图片时，策略为 `required`，有搜索结果却未成功写入 URL 仍在两次提醒后失败；搜索无结果继续沿原降级路径。策略由服务端依据本轮原文生成，不信任 metadata 同名字段。
+- 图片策略在生成、单/多 Reviewer 和修复中保留。旧上下文缺策略或值未知时沿原用图检查；可选素材满足的是循环放行条件，不会自动设置 `imageAssetsApplied`。成功写入 URL 也不证明图片可见、网络可达或浏览器交互通过。详见 [配图策略修复交接](../doc/vue-image-usage-policy-handoff.md)。
 - checkpoint 用于请求级状态，不是长期记忆；目前没有生产自动续跑、任务重新认领或事件断线重放。
 - 默认允许 checkpoint 不可用时降级执行，此时 `ready` 返回 503；需要严格持久化时开启 `AI_SERVICE_CHECKPOINT_REQUIRED`。
 - 自动构建与模型审查不代表页面所有交互均已验证。模型工具历史有独立大小限制，扩大上下文窗口不会自动提高该限制。

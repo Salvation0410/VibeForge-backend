@@ -75,7 +75,9 @@ def initial_progress(context: dict[str, Any], prefix: str, started_at: str) -> V
         "content_parts": [], "ordinal": 0, "retry_count": 0, "format_retries": 0, "batch_limit": 2,
         "file_plan": [], "written_files": [], "planning_turns": 0,
         "image_retries": 0,
-        "image_used": bool(context.get("imageAssetsApplied")) or not bool(context.get("imageAssets")),
+        # 仅显式可选素材豁免用图门禁；旧检查点缺字段或未知值继续执行原检查。
+        "image_used": (context.get("imageUsagePolicy") == "optional"
+                       or bool(context.get("imageAssetsApplied")) or not bool(context.get("imageAssets"))),
         "turn": {}, "pending_tools": [], "tool_cursor": 0, "next_step": "model_turn",
         "call_id_prefix": prefix, "started_at": started_at,
         "batch_has_successful_write": False, "write_fingerprints": [],

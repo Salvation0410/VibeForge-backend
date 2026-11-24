@@ -167,6 +167,9 @@ def create_verification_nodes(
                 "validation": state.get("validation"),
                 "build": state.get("build"),
             }
+            if "imageUsagePolicy" in state["context"]:
+                # 多审查与单审查使用同一请求策略，不能将默认素材升级成阻断要求。
+                review_context["imageUsagePolicy"] = state["context"]["imageUsagePolicy"]
             if "generationPreparation" in state["context"]:
                 # 关闭增强时保持原上下文契约；开启后保留准备结果与对应用户原文。
                 source = rewrite_context(state["context"], "VUE_PROJECT")
